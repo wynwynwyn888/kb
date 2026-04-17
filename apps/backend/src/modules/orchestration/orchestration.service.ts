@@ -1,6 +1,6 @@
 // Conversation Orchestration Service — orchestrates the inbound message pipeline
-// Loads tenant/runtime context, applies guards, loads memory, calls AI router,
-// produces structured result for downstream layers (formatter, outbound send, etc.)
+// Loads tenant/runtime context, applies guards, loads memory, retrieves KB context,
+// calls AI router, produces structured result for downstream layers.
 // Does NOT send outbound message — that is a later layer's responsibility.
 
 import { Injectable, Logger } from '@nestjs/common';
@@ -8,6 +8,7 @@ import { getSupabaseService } from '../../lib/supabase';
 import { OrchestrationGuards } from './orchestration-guards.service';
 import { ConversationMemoryLoader } from './conversation-memory-loader';
 import { AiRouterService } from '../ai-router/ai-router.service';
+import { KbService } from '../kb/kb.service';
 import type {
   OrchestrationInput,
   OrchestrationResult,
@@ -16,6 +17,7 @@ import type {
   MemoryEntry,
 } from './dto';
 import type { RoutingResponse } from './dto';
+import type { RetrievalChunk, RetrievalMeta } from '../kb/dto/retrieval.dto';
 import { safeLog } from '../../lib/encryption';
 
 @Injectable()
@@ -27,6 +29,7 @@ export class ConversationOrchestrationService {
     private readonly guards: OrchestrationGuards,
     private readonly memoryLoader: ConversationMemoryLoader,
     private readonly aiRouter: AiRouterService,
+    private readonly kbService: KbService,
   ) {}
 
   /**
@@ -53,7 +56,7 @@ export class ConversationOrchestrationService {
         this.logger.log(
           `Orchestration skipped: outcome=${guardOutcome.final}, reason=${skipReason}`,
         );
-        const logId = await this.persistOrchestrationLog(input, guardOutcome, null);
+        const logId = await this.persistOrchestrationLog(input, guardOutcome, null, null);
         return {
           success: false,
           outcome: guardOutcome.final,
@@ -68,15 +71,23 @@ export class ConversationOrchestrationService {
       // Step 2: Load conversation memory
       const memory = await this.memoryLoader.loadMemory(conversationId);
 
-      // Step 3: Build AI routing request
-      const systemPrompt = this.buildSystemPrompt(input);
-      const routingRequest = this.buildRoutingRequest(input, memory, systemPrompt);
+      // Step 3: Retrieve KB context for the incoming message
+      const { chunks: kbChunks, meta: retrievalMeta } = await this.retrieveKbContext(input, conversationId);
 
-      // Step 4: Call AI router placeholder
+      // Step 4: Build AI routing request (includes KB context)
+      const systemPrompt = this.buildSystemPrompt(input);
+      const routingRequest = this.buildRoutingRequest(
+        input,
+        memory,
+        systemPrompt,
+        kbChunks,
+      );
+
+      // Step 5: Call AI router placeholder
       const routing = await this.aiRouter.route(routingRequest);
 
-      // Step 5: Persist orchestration log
-      const logId = await this.persistOrchestrationLog(input, guardOutcome, routing);
+      // Step 6: Persist orchestration log
+      const logId = await this.persistOrchestrationLog(input, guardOutcome, routing, retrievalMeta);
 
       this.logger.log(
         `Orchestration completed: conversationId=${conversationId}, model=${routing.recommendedModel}, mode=${routing.responseMode}`,
@@ -96,9 +107,8 @@ export class ConversationOrchestrationService {
       this.logger.error(
         `Orchestration error: conversationId=${conversationId}, error=${message}`,
       );
-      // Attempt to log the error outcome
       try {
-        const logId = await this.persistOrchestrationLog(input, { final: 'ERROR', guards: [] }, null);
+        const logId = await this.persistOrchestrationLog(input, { final: 'ERROR', guards: [] }, null, null);
         return {
           success: false,
           outcome: 'ERROR',
@@ -123,7 +133,6 @@ export class ConversationOrchestrationService {
 
   /**
    * Load full tenant context including bot_enabled, handover_paused, GHL connection status.
-   * Called before guards run.
    */
   async loadTenantContext(tenantId: string): Promise<OrchestrationInput['tenant'] | null> {
     const { data: tenant } = await this.supabase
@@ -173,7 +182,6 @@ export class ConversationOrchestrationService {
   async loadAgencyPolicy(
     tenantId: string,
   ): Promise<OrchestrationInput['agencyPolicy']> {
-    // Get agencyId from tenant
     const { data: tenant } = await this.supabase
       .from('tenants')
       .select('agency_id')
@@ -224,8 +232,38 @@ export class ConversationOrchestrationService {
     };
   }
 
+  /**
+   * Retrieve KB context for the incoming user message.
+   * Returns { chunks, meta } — chunks may be empty even when meta is non-null.
+   */
+  private async retrieveKbContext(
+    input: OrchestrationInput,
+    conversationId: string,
+  ): Promise<{ chunks: RetrievalChunk[]; meta: RetrievalMeta | null }> {
+    try {
+      const result = await this.kbService.retrieve({
+        tenantId: input.tenantId,
+        conversationId,
+        query: input.incomingMessage.messageContent,
+        topK: 5,
+      });
+
+      const meta: RetrievalMeta = {
+        chunksReturned: result.chunks.length,
+        chunksConsidered: result.totalConsidered,
+        retrievalMode: result.retrievalMode,
+        topScore: result.chunks[0]?.relevanceScore ?? null,
+      };
+
+      return { chunks: result.chunks, meta };
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'unknown';
+      this.logger.warn(`KB retrieval failed for conversation=${conversationId}: ${msg}`);
+      return { chunks: [], meta: null };
+    }
+  }
+
   private buildSystemPrompt(input: OrchestrationInput): string {
-    // Priority: tenant prompt config > agency system policy > fallback
     const tenantPrompt = input.promptConfig?.systemPrompt;
     const agencyPrompt = input.agencyPolicy?.systemPrompt;
 
@@ -239,17 +277,16 @@ export class ConversationOrchestrationService {
     input: OrchestrationInput,
     memory: { entries: MemoryEntry[] },
     systemPrompt: string,
+    kbChunks: RetrievalChunk[],
   ): RoutingRequest {
     const incomingMessage = input.incomingMessage.messageContent;
     const incomingMessageType = input.incomingMessage.messageType;
 
-    // Simple booking intent detection heuristic
     const bookingKeywords = ['book', 'schedule', 'appointment', 'reservation', 'when', 'available'];
     const bookingIntentDetected = bookingKeywords.some(k =>
       incomingMessage.toLowerCase().includes(k),
     );
 
-    // Estimate token count (rough: ~4 chars per token)
     const estimatedInputTokens = Math.ceil(
       (incomingMessage.length + systemPrompt.length) / 4,
     );
@@ -261,6 +298,7 @@ export class ConversationOrchestrationService {
       incomingMessageType,
       systemPrompt,
       memory: memory.entries,
+      kbContext: kbChunks,
       channel: input.conversation?.channel ?? 'WHATSAPP',
       handoverRecommended: false,
       bookingIntentDetected,
@@ -272,6 +310,7 @@ export class ConversationOrchestrationService {
     input: OrchestrationInput,
     guardOutcome: GuardOutcome,
     routing: RoutingResponse | null,
+    retrievalMeta: RetrievalMeta | null,
   ): Promise<string | undefined> {
     const outcomeMap: Record<GuardOutcome['final'], string> = {
       PROCEED: 'PROCEED',
@@ -291,6 +330,14 @@ export class ConversationOrchestrationService {
       .map(g => `${g.guardName}:${g.reason}`)
       .join('; ') || null;
 
+    const metadata: Record<string, unknown> = {};
+    if (retrievalMeta) {
+      metadata['kbChunksReturned'] = retrievalMeta.chunksReturned;
+      metadata['kbChunksConsidered'] = retrievalMeta.chunksConsidered;
+      metadata['kbRetrievalMode'] = retrievalMeta.retrievalMode;
+      metadata['kbTopScore'] = retrievalMeta.topScore;
+    }
+
     const logData = {
       tenant_id: input.tenantId,
       conversation_id: input.conversationId,
@@ -302,7 +349,7 @@ export class ConversationOrchestrationService {
       draft_reply: routing?.draftReply ?? null,
       handover_recommended: routing?.handoverRecommended ?? false,
       confidence: routing?.confidence ?? null,
-      metadata: {},
+      metadata,
     };
 
     const { data, error } = await this.supabase

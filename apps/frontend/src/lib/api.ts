@@ -148,3 +148,91 @@ export async function checkGhlHealth(token: string, tenantId: string): Promise<{
 export async function deleteGhlConnection(token: string, tenantId: string): Promise<void> {
   await apiRequest<void>(`/tenants/${tenantId}/ghl/connection`, { token, method: 'DELETE' });
 }
+
+// Conversations
+export async function getConversations(
+  token: string,
+  tenantId: string,
+  opts?: { status?: string; page?: number; pageSize?: number }
+) {
+  const params = new URLSearchParams({ tenantId });
+  if (opts?.status) params.set('status', opts.status);
+  if (opts?.page) params.set('page', String(opts.page));
+  if (opts?.pageSize) params.set('pageSize', String(opts.pageSize));
+  return apiRequest<{ conversations: unknown[]; total: number }>(`/conversations?${params}`, { token });
+}
+
+export async function getConversation(token: string, conversationId: string) {
+  return apiRequest<unknown>(`/conversations/${conversationId}`, { token });
+}
+
+export async function getConversationMessages(
+  token: string,
+  conversationId: string,
+  opts?: { limit?: number; before?: string }
+) {
+  const params = new URLSearchParams();
+  if (opts?.limit) params.set('limit', String(opts.limit));
+  if (opts?.before) params.set('before', opts.before);
+  return apiRequest<unknown[]>(`/conversations/${conversationId}/messages?${params}`, { token });
+}
+
+// Handover
+export async function getActiveHandovers(token: string, tenantId: string) {
+  return apiRequest<unknown[]>(`/handover/active?tenantId=${tenantId}`, { token });
+}
+
+export async function resumeHandover(token: string, conversationId: string) {
+  return apiRequest<{ success: boolean; conversationId: string }>(
+    '/handover/resume',
+    { token, method: 'POST', body: JSON.stringify({ conversationId }) }
+  );
+}
+
+export async function getHandoverHistory(token: string, conversationId: string) {
+  return apiRequest<unknown[]>(`/handover/history/${conversationId}`, { token });
+}
+
+// Action Intents
+export interface ActionIntentsResult {
+  intents: unknown[];
+  total: number;
+}
+
+export async function getActionIntents(
+  token: string,
+  tenantId: string,
+  opts?: { conversationId?: string; status?: string; limit?: number; page?: number }
+) {
+  const params = new URLSearchParams({ tenantId });
+  if (opts?.conversationId) params.set('conversationId', opts.conversationId);
+  if (opts?.status) params.set('status', opts.status);
+  if (opts?.limit) params.set('limit', String(opts.limit));
+  if (opts?.page) params.set('page', String(opts.page));
+  return apiRequest<ActionIntentsResult>(`/action-intents?${params}`, { token });
+}
+
+// Agency AI Config
+export interface AgencyAiConfig {
+  provider: string;
+  enabled: boolean;
+  defaultModel: string;
+  maxTokens?: number;
+  temperature?: number;
+  hasApiKey: boolean;
+}
+
+export async function getAgencyAiConfig(token: string): Promise<AgencyAiConfig> {
+  return apiRequest<AgencyAiConfig>('/agency-ai-config', { token });
+}
+
+export async function saveAgencyAiConfig(
+  token: string,
+  data: { provider: string; apiKey?: string; defaultModel: string; temperature?: number; maxTokens?: number }
+): Promise<AgencyAiConfig> {
+  return apiRequest<AgencyAiConfig>('/agency-ai-config', {
+    token,
+    method: 'POST',
+    body: JSON.stringify(data),
+  });
+}

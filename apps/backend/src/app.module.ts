@@ -24,6 +24,8 @@ import { ContactsModule } from './modules/contacts/contacts.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { QueuesModule } from './queues/queues.module';
+import { ActionIntentsModule } from './modules/action-intents/action-intents.module';
+import { AgencyAiConfigModule } from './modules/agency-ai-config/agency-ai-config.module';
 
 @Module({
   imports: [
@@ -80,6 +82,8 @@ import { QueuesModule } from './queues/queues.module';
     AuditModule,
     NotificationsModule,
     QueuesModule,
+    ActionIntentsModule,
+    AgencyAiConfigModule,
   ],
   providers: [
     // Global rate limit guard

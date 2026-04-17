@@ -4,10 +4,11 @@
 import { Module } from '@nestjs/common';
 import { ConversationsController } from './conversations.controller';
 import { ConversationsService } from './conversations.service';
+import { ConversationsControllerService } from './conversations-controller.service';
 
 @Module({
   controllers: [ConversationsController],
-  providers: [ConversationsService],
+  providers: [ConversationsService, ConversationsControllerService],
   exports: [ConversationsService],
 })
 export class ConversationsModule {}

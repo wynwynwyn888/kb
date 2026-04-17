@@ -17,6 +17,9 @@ importers:
 
   apps/backend:
     dependencies:
+      '@aisbp/ai-provider-openai':
+        specifier: workspace:*
+        version: link:../../packages/ai-provider-openai
       '@aisbp/ai-router':
         specifier: workspace:*
         version: link:../../packages/ai-router
@@ -157,6 +160,25 @@ importers:
       eslint-config-next:
         specifier: ^14.2.0
         version: 14.2.35(eslint@8.57.1)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.4.0
+        version: 5.9.3
+
+  packages/ai-provider-openai:
+    dependencies:
+      '@aisbp/ai-router':
+        specifier: workspace:*
+        version: link:../ai-router
+      '@aisbp/types':
+        specifier: workspace:*
+        version: link:../types
+      axios:
+        specifier: ^1.6.0
+        version: 1.15.0
+    devDependencies:
+      '@types/node':
+        specifier: ^20.11.0
+        version: 20.19.39
       typescript:
         specifier: ^5.4.0
         version: 5.9.3

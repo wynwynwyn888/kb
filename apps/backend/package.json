@@ -29,6 +29,7 @@
     "@aisbp/db": "workspace:*",
     "@aisbp/ghl-client": "workspace:*",
     "@aisbp/ai-router": "workspace:*",
+    "@aisbp/ai-provider-openai": "workspace:*",
     "@aisbp/formatter": "workspace:*",
     "@prisma/client": "^5.14.0",
     "@supabase/supabase-js": "^2.43.0",

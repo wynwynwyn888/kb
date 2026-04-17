@@ -1,4 +1,4 @@
-// GHL API client - focused on connection verification and health check
+// GHL API client - focused on connection verification, health check, and outbound messaging
 // For Private Integration tokens (not Marketplace OAuth)
 //
 // IMPORTANT: GHL Private Integration tokens are static bearer tokens.
@@ -33,7 +33,23 @@ export interface GhlApiError {
   status: number;
 }
 
-// GHL Client class for connection verification
+// Outbound message types
+export interface GhlSendMessageRequest {
+  locationId: string;
+  conversationId: string;
+  message: string;
+  messageType?: 'text' | 'image' | 'audio' | 'video';
+  replyId?: string; // optional reply-to message ID
+}
+
+export interface GhlSendMessageResponse {
+  id: string;
+  conversationId: string;
+  status: string;
+  timestamp: string;
+}
+
+// GHL Client class for connection verification and outbound messaging
 export class GhlClient {
   private client: AxiosInstance;
   private locationId: string;
@@ -117,6 +133,65 @@ export class GhlClient {
     } catch {
       return null;
     }
+  }
+
+  /**
+   * Send an outbound message through GHL
+   *
+   * IMPORTANT - Endpoint Assumptions:
+   * This implementation assumes the endpoint is:
+   *   POST /conversations/{conversationId}/messages
+   *
+   * This assumption needs to be verified against actual GHL Private Integration API.
+   * The request body structure: { locationId, message, messageType }
+   *
+   * TODO: Verify exact endpoint with live GHL Private Integration
+   * TODO: Verify request body shape (field names for message, type, etc.)
+   * TODO: Test with actual Private Integration token (not test/sandbox)
+   * TODO: Verify whether replyId is supported and how it maps to GHL's model
+   */
+  async sendMessage(request: GhlSendMessageRequest): Promise<{ success: boolean; messageId?: string; error?: string }> {
+    try {
+      // Endpoint assumed: POST /conversations/{conversationId}/messages
+      // with body { locationId, message, messageType }
+      const response = await this.client.post<GhlSendMessageResponse>(
+        `/conversations/${request.conversationId}/messages`,
+        {
+          locationId: request.locationId,
+          message: request.message,
+          messageType: request.messageType ?? 'text',
+        },
+      );
+
+      return {
+        success: true,
+        messageId: response.data.id,
+      };
+    } catch (error) {
+      return this.handleSendError(error);
+    }
+  }
+
+  /**
+   * Normalize error for safe handling
+   */
+  private handleSendError(error: unknown): { success: boolean; error: string } {
+    if (error instanceof AxiosError) {
+      if (error.response?.status === 401) {
+        return { success: false, error: 'Invalid or expired token' };
+      }
+      if (error.response?.status === 403) {
+        return { success: false, error: 'Insufficient permissions for this location' };
+      }
+      if (error.response?.status === 404) {
+        return { success: false, error: 'Conversation or location not found' };
+      }
+      if (error.response?.status === 429) {
+        return { success: false, error: 'Rate limited by GHL API' };
+      }
+      return { success: false, error: error.message || 'Send failed' };
+    }
+    return { success: false, error: 'Unknown error during send' };
   }
 
   /**

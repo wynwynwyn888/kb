@@ -13,6 +13,7 @@ import { QuotaThresholdAlertProcessor } from './processors/quota-threshold-alert
 
 // Feature modules
 import { OrchestrationModule } from '../modules/orchestration/orchestration.module';
+import { OutboundModule } from '../modules/outbound/outbound.module';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { OrchestrationModule } from '../modules/orchestration/orchestration.modu
       })),
     ),
     OrchestrationModule,
+    OutboundModule,
   ],
   providers: [
     InboundMessageProcessor,

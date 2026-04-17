@@ -7,8 +7,8 @@
 // Does NOT send outbound message — that is a later layer's responsibility.
 
 import { Processor, WorkerHost, OnWorkerEvent } from '@nestjs/bullmq';
-import { Job } from 'bullmq';
-import { Injectable, Logger } from '@nestjs/common';
+import { Job, Queue } from 'bullmq';
+import { Injectable, Logger, Inject } from '@nestjs/common';
 import { getSupabaseService } from '../../lib/supabase';
 import { QUEUES } from '../queue.constants';
 import { ConversationOrchestrationService } from '../../modules/orchestration/orchestration.service';
@@ -32,6 +32,7 @@ export class InboundMessageProcessor extends WorkerHost {
 
   constructor(
     private readonly orchestrationService: ConversationOrchestrationService,
+    @Inject(QUEUES.SEND_BUBBLE) private readonly sendBubbleQueue: Queue,
   ) {
     super();
   }
@@ -122,7 +123,23 @@ export class InboundMessageProcessor extends WorkerHost {
       // Step 7: Run full orchestration pipeline (guards + memory + routing)
       const result = await this.orchestrationService.orchestrate(orchestrationInput);
 
-      // Step 8: Update webhook event based on orchestration outcome
+      // Step 8: Enqueue send-bubble job if orchestration produced reply bubbles
+      if (result.outcome === 'PROCEED' && result.replyPlan && result.replyPlan.bubbles.length > 0) {
+        await this.sendBubbleQueue.add('send-bubble', {
+          conversationId: conversation.id,
+          tenantId: tenant.id,
+          contactId: ghlContactId,
+          ghlLocationId: locationId,
+          replyPlanJson: JSON.stringify(result.replyPlan),
+        });
+
+        this.logger.log(
+          `Send-bubble job enqueued: conversationId=${conversation.id}, ` +
+          `bubbleCount=${result.replyPlan.bubbles.length}`,
+        );
+      }
+
+      // Step 9: Update webhook event based on orchestration outcome
       if (webhookEventId) {
         if (result.outcome === 'PROCEED') {
           await this.updateWebhookEventStatus(webhookEventId, 'COMPLETED');

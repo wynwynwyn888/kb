@@ -159,6 +159,21 @@ export default function DashboardPage() {
                   </span>
                 </dd>
               </dl>
+              <a
+                href={`/tenants/${selectedTenant.id}/settings`}
+                style={{
+                  display: 'inline-block',
+                  marginTop: '1rem',
+                  padding: '0.5rem 1rem',
+                  backgroundColor: '#0070f3',
+                  color: 'white',
+                  textDecoration: 'none',
+                  borderRadius: '4px',
+                  fontSize: '0.875rem',
+                }}
+              >
+                GHL Settings
+              </a>
             </div>
 
             {/* Prompt Config Card */}

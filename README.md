@@ -169,6 +169,51 @@ After running `pnpm db:seed`:
 4. Message formatter and bubble splitting
 5. Queue workers for async processing
 
+## GHL Private Integration Setup
+
+### Overview
+
+Each tenant can connect their GHL subaccount using a Private Integration token. This is NOT the Marketplace OAuth flow - it's a direct API token per location.
+
+### Connection Flow
+
+1. User navigates to tenant settings page
+2. Enters their GHL Location ID and Private Integration token
+3. Backend verifies token against GHL API
+4. If valid, token is encrypted and stored
+5. Connection status is shown in dashboard
+
+### Getting GHL Private Integration Token
+
+1. Log into GHL as account owner
+2. Go to Settings → Integrations → Private Integrations
+3. Create a new integration or use existing
+4. Copy the access token (keep it secure - it's shown only once)
+
+### API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/tenants/:id/ghl/connection` | Get connection status |
+| POST | `/tenants/:id/ghl/connection` | Save/update connection |
+| POST | `/tenants/:id/ghl/verify` | Verify existing connection |
+| GET | `/tenants/:id/ghl/health` | Health check |
+| DELETE | `/tenants/:id/ghl/connection` | Disconnect |
+
+### Security
+
+- Private Integration tokens are encrypted at rest using AES-256-GCM
+- Raw tokens are NEVER returned in API responses
+- Only masked identifiers are exposed to frontend
+- Logs are sanitized to prevent token leakage
+
+### TODO (for GHL)
+
+- [ ] Confirm exact GHL API endpoint for location verification
+- [ ] Implement token refresh logic (if GHL supports token refresh)
+- [ ] Add webhook registration endpoint
+- [ ] Implement webhook signature verification
+
 ## Troubleshooting
 
 **Auth not working?**

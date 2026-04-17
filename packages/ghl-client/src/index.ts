@@ -1,7 +1,7 @@
-// GHL API client placeholder
-// TODO: Full implementation when GHL API integration is built
+// GHL API client - focused on connection verification and health check
+// For Private Integration (not Marketplace OAuth)
 
-import axios, { AxiosInstance } from 'axios';
+import axios, { AxiosInstance, AxiosError } from 'axios';
 
 export interface GhlClientConfig {
   baseUrl: string;
@@ -9,37 +9,28 @@ export interface GhlClientConfig {
   locationId: string;
 }
 
-export interface GhlConversation {
-  id: string;
-  contactId: string;
-  status: string;
-  lastMessageTime: string;
-}
-
-export interface GhlContact {
+// GHL API Response types
+export interface GhlLocationInfo {
   id: string;
   name: string;
-  phone: string;
-  email?: string;
-  tags: string[];
+  accountId: string;
+  status: string;
 }
 
-export interface GhlMessage {
-  id: string;
-  conversationId: string;
-  content: string;
-  direction: 'inbound' | 'outbound';
+export interface GhlHealthResponse {
+  success: boolean;
+  locationId: string;
+  accountId?: string;
   timestamp: string;
-  attachments?: GhlAttachment[];
 }
 
-export interface GhlAttachment {
-  id: string;
-  type: string;
-  url: string;
+export interface GhlApiError {
+  code: string;
+  message: string;
+  status: number;
 }
 
-// GhlClient class - placeholder for future GHL API implementation
+// GHL Client class for connection verification
 export class GhlClient {
   private client: AxiosInstance;
   private locationId: string;
@@ -47,71 +38,119 @@ export class GhlClient {
   constructor(config: GhlClientConfig) {
     this.locationId = config.locationId;
     this.client = axios.create({
-      baseURL: config.baseUrl,
+      baseURL: config.baseUrl || 'https://services.gohighlevel.com',
       headers: {
         Authorization: `Bearer ${config.accessToken}`,
         'Content-Type': 'application/json',
+        'Version': '2021-07-28',
       },
+      timeout: 10000,
     });
   }
 
-  // TODO: Implement actual GHL API methods
-  async getConversation(conversationId: string): Promise<GhlConversation | null> {
-    // PLACEHOLDER - needs actual GHL API implementation
-    throw new Error('GHL client not yet implemented');
+  /**
+   * Verify the access token is valid for the given location
+   * This is the core verification call for Private Integration
+   *
+   * TODO: Confirm exact endpoint for location verification
+   * Common approach: GET /locations/{locationId}
+   */
+  async verifyConnection(): Promise<{ valid: boolean; location?: GhlLocationInfo; error?: string }> {
+    try {
+      // TODO: Verify exact GHL API endpoint for location verification
+      // For Private Integration, common endpoint is:
+      // GET https://services.gohighlevel.com/v1/locations/{locationId}
+      const response = await this.client.get<GhlLocationInfo>(
+        `/locations/${this.locationId}`
+      );
+
+      if (response.data && response.data.id === this.locationId) {
+        return {
+          valid: true,
+          location: response.data,
+        };
+      }
+
+      return { valid: false, error: 'Location ID mismatch' };
+    } catch (error) {
+      return this.handleError(error);
+    }
   }
 
-  async getContact(contactId: string): Promise<GhlContact | null> {
-    // PLACEHOLDER - needs actual GHL API implementation
-    throw new Error('GHL client not yet implemented');
+  /**
+   * Perform health check on the connection
+   * Returns basic status information
+   */
+  async healthCheck(): Promise<GhlHealthResponse> {
+    const result = await this.verifyConnection();
+
+    return {
+      success: result.valid,
+      locationId: this.locationId,
+      accountId: result.location?.accountId,
+      timestamp: new Date().toISOString(),
+    };
   }
 
-  async sendMessage(conversationId: string, content: string): Promise<GhlMessage | null> {
-    // PLACEHOLDER - needs actual GHL API implementation
-    throw new Error('GHL client not yet implemented');
+  /**
+   * Get location details for display purposes
+   * Safe to call - only returns non-secret metadata
+   */
+  async getLocationInfo(): Promise<GhlLocationInfo | null> {
+    try {
+      const response = await this.client.get<GhlLocationInfo>(
+        `/locations/${this.locationId}`
+      );
+      return response.data;
+    } catch {
+      return null;
+    }
   }
 
-  async addTags(contactId: string, tags: string[]): Promise<void> {
-    // PLACEHOLDER - needs actual GHL API implementation
-    throw new Error('GHL client not yet implemented');
+  /**
+   * Normalize error for safe handling
+   */
+  private handleError(error: unknown): { valid: boolean; error: string } {
+    if (error instanceof AxiosError) {
+      if (error.response?.status === 401) {
+        return { valid: false, error: 'Invalid or expired token' };
+      }
+      if (error.response?.status === 403) {
+        return { valid: false, error: 'Insufficient permissions for this location' };
+      }
+      if (error.response?.status === 404) {
+        return { valid: false, error: 'Location not found' };
+      }
+      return { valid: false, error: error.message || 'API request failed' };
+    }
+    return { valid: false, error: 'Unknown error occurred' };
   }
 
-  async removeTags(contactId: string, tags: string[]): Promise<void> {
-    // PLACEHOLDER - needs actual GHL API implementation
-    throw new Error('GHL client not yet implemented');
-  }
-
-  async getCalendarEvents(startDate: string, endDate: string): Promise<unknown[]> {
-    // PLACEHOLDER - needs actual GHL API implementation
-    throw new Error('GHL client not yet implemented');
-  }
-
-  async createCalendarEvent(event: {
-    title: string;
-    startTime: string;
-    endTime: string;
-    contactId?: string;
-    description?: string;
-  }): Promise<unknown> {
-    // PLACEHOLDER - needs actual GHL API implementation
-    throw new Error('GHL client not yet implemented');
-  }
-
-  // Webhook verification placeholder
-  static verifyWebhook(payload: unknown, signature: string): boolean {
-    // TODO: Implement webhook signature verification
-    return true;
+  /**
+   * Get masked token for logging
+   */
+  getMaskedToken(): string {
+    // Return a masked version - actual token should never be logged
+    return this.locationId.substring(0, 4) + '...' + this.locationId.substring(this.locationId.length - 4);
   }
 }
 
-// Factory function to create client from connection data
-export async function createGhlClient(
+// Factory function to create client
+export function createGhlClient(
   accessToken: string,
   locationId: string
-): Promise<GhlClient> {
+): GhlClient {
   return new GhlClient({
-    baseUrl: process.env.GHL_API_BASE_URL || 'https://api.gohighlevel.com',
+    baseUrl: process.env.GHL_API_BASE_URL || 'https://services.gohighlevel.com',
     accessToken,
     locationId,
   });
 }
+
+// Safe error factory
+export function createGhlApiError(code: string, message: string, status: number): GhlApiError {
+  return { code, message, status };
+}
+
+// Export types for use in other packages
+export type { GhlClientConfig, GhlLocationInfo, GhlHealthResponse, GhlApiError };

@@ -32,6 +32,7 @@
     "@aisbp/formatter": "workspace:*",
     "@prisma/client": "^5.14.0",
     "@supabase/supabase-js": "^2.43.0",
+    "axios": "^1.6.0",
     "bullmq": "^5.4.0",
     "ioredis": "^5.3.0",
     "passport": "^0.7.0",

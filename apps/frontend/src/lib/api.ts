@@ -109,3 +109,42 @@ export async function getTenantQuota(token: string, tenantId: string) {
     periodEnd: string;
   } | null>(`/tenants/${tenantId}/quota`, { token });
 }
+
+// GHL Connection
+export interface GhlConnectionStatus {
+  connected: boolean;
+  status: 'DISCONNECTED' | 'CONNECTED' | 'INVALID' | 'ERROR';
+  ghlLocationId: string | null;
+  verifiedAt: string | null;
+  lastHealthCheckAt: string | null;
+  lastError: string | null;
+  maskToken?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export async function getGhlConnection(token: string, tenantId: string): Promise<GhlConnectionStatus> {
+  return apiRequest<GhlConnectionStatus>(`/tenants/${tenantId}/ghl/connection`, { token });
+}
+
+export async function saveGhlConnection(
+  token: string,
+  tenantId: string,
+  data: { ghlLocationId: string; privateIntegrationToken: string }
+): Promise<{ success: boolean; connected: boolean; status: string; maskToken?: string }> {
+  return apiRequest<{ success: boolean; connected: boolean; status: string; maskToken?: string }>(
+    `/tenants/${tenantId}/ghl/connection`,
+    { token, method: 'POST', body: JSON.stringify(data) }
+  );
+}
+
+export async function verifyGhlConnection(token: string, tenantId: string): Promise<GhlConnectionStatus> {
+  return apiRequest<GhlConnectionStatus>(`/tenants/${tenantId}/ghl/verify`, { token, method: 'POST' });
+}
+
+export async function checkGhlHealth(token: string, tenantId: string): Promise<{ healthy: boolean; message: string; timestamp: string }> {
+  return apiRequest<{ healthy: boolean; message: string; timestamp: string }>(`/tenants/${tenantId}/ghl/health`, { token });
+}
+
+export async function deleteGhlConnection(token: string, tenantId: string): Promise<void> {
+  await apiRequest<void>(`/tenants/${tenantId}/ghl/connection`, { token, method: 'DELETE' });
+}

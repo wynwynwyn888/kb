@@ -114,6 +114,14 @@ enum TenantRole {
   VIEWER
 }
 
+// GHL connection status
+enum GhlConnectionStatus {
+  DISCONNECTED
+  CONNECTED
+  INVALID
+  ERROR
+}
+
 model TenantUser {
   id        String    @id @default(uuid())
   tenantId  String    @map("tenant_id")
@@ -136,15 +144,31 @@ model TenantUser {
 // ============================================================================
 
 model TenantGhlConnection {
-  id            String    @id @default(uuid())
-  tenantId      String    @unique @map("tenant_id")
-  ghlLocationId String    @map("ghl_location_id")
-  accessToken   String    @map("access_token")
-  refreshToken  String    @map("refresh_token")
-  expiresAt     DateTime  @map("expires_at")
-  status        String    @default("active") // active, expired, revoked
-  createdAt     DateTime  @default(now()) @map("created_at")
-  updatedAt     DateTime  @updatedAt @map("updated_at")
+  id                     String            @id @default(uuid())
+  tenantId               String            @unique @map("tenant_id")
+  ghlLocationId          String            @map("ghl_location_id")
+
+  // Private Integration token - stored encrypted
+  // TODO: Implement proper encryption at rest (e.g., Supabase Vault, AWS KMS, or app-level AES)
+  // For now, base64 encoding as placeholder - DO NOT use in production without real encryption
+  privateTokenEncrypted  String            @map("private_token_encrypted")
+
+  // Token metadata (non-secret, stored plaintext)
+  scopesSnapshot         String?           @map("scopes_snapshot")
+  tokenIssuedAt          DateTime?         @map("token_issued_at")
+  tokenExpiresAt         DateTime?         @map("token_expires_at")
+
+  // Connection state
+  status                 GhlConnectionStatus @default(DISCONNECTED)
+  verifiedAt             DateTime?         @map("verified_at")
+  lastHealthCheckAt      DateTime?         @map("last_health_check_at")
+  lastError              String?           @map("last_error")
+
+  // Safe metadata (non-secret)
+  metadata               Json             @default("{}")
+
+  createdAt              DateTime          @default(now()) @map("created_at")
+  updatedAt              DateTime          @updatedAt @map("updated_at")
 
   // Relations
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)

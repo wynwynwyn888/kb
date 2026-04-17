@@ -1,5 +1,4 @@
-// GHL module - handles GoHighLevel API integration
-// Manages OAuth flow, token refresh, and API calls to GHL
+// GHL module - handles GoHighLevel Private Integration connection management
 
 import { Module } from '@nestjs/common';
 import { GhlController } from './ghl.controller';

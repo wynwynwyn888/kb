@@ -1,0 +1,8 @@
+{
+  "name": "@aisbp/tsconfig",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "base.json",
+  "types": "base.json"
+}

@@ -156,11 +156,14 @@ export function createGhlClient(
   locationId: string
 ): GhlClient {
   return new GhlClient({
-    baseUrl: process.env.GHL_API_BASE_URL || 'https://services.gohighlevel.com',
+    baseUrl: process.env['GHL_API_BASE_URL'] || 'https://services.gohighlevel.com',
     accessToken,
     locationId,
   });
 }
+
+// Re-export GhlConnectionStatus from Prisma for use in backend services
+export type GhlConnectionStatus = 'DISCONNECTED' | 'CONNECTED' | 'INVALID' | 'ERROR';
 
 // Safe error factory
 export function createGhlApiError(code: string, message: string, status: number): GhlApiError {

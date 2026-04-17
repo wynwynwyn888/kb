@@ -17,6 +17,8 @@ export default function TenantSettingsPage() {
   const [success, setSuccess] = useState('');
 
   // Form state
+  // IMPORTANT: ghlLocationId is NOT a secret - it's a public identifier
+  // privateIntegrationToken IS a secret - never log or display it
   const [ghlLocationId, setGhlLocationId] = useState('');
   const [privateIntegrationToken, setPrivateIntegrationToken] = useState('');
   const [saving, setSaving] = useState(false);
@@ -40,6 +42,8 @@ export default function TenantSettingsPage() {
       if (status.ghlLocationId) {
         setGhlLocationId(status.ghlLocationId);
       }
+      // Clear token on load - never persist it
+      setPrivateIntegrationToken('');
     } catch (err) {
       setError('Failed to load connection status');
     } finally {
@@ -63,10 +67,13 @@ export default function TenantSettingsPage() {
 
       if (result.success) {
         setSuccess('Connected successfully!');
+        // Clear token from state after successful connection
         setPrivateIntegrationToken('');
         await loadConnection();
       }
     } catch (err: unknown) {
+      // Clear token on failure - never leave it in memory
+      setPrivateIntegrationToken('');
       setError(err instanceof Error ? err.message : 'Failed to connect');
     } finally {
       setSaving(false);
@@ -103,7 +110,7 @@ export default function TenantSettingsPage() {
 
   const handleDisconnect = async () => {
     if (!token) return;
-    if (!confirm('Are you sure you want to disconnect?')) return;
+    if (!confirm('Are you sure you want to disconnect? This will remove the GHL connection.')) return;
 
     try {
       await deleteGhlConnection(token, tenantId);
@@ -171,6 +178,11 @@ export default function TenantSettingsPage() {
             <p style={{ margin: '0.25rem 0' }}><strong>Location ID:</strong> {connection.ghlLocationId}</p>
             <p style={{ margin: '0.25rem 0' }}><strong>Verified:</strong> {connection.verifiedAt ? new Date(connection.verifiedAt).toLocaleString() : 'Never'}</p>
             <p style={{ margin: '0.25rem 0' }}><strong>Last Health Check:</strong> {connection.lastHealthCheckAt ? new Date(connection.lastHealthCheckAt).toLocaleString() : 'Never'}</p>
+            {connection.metadata && Object.keys(connection.metadata).length > 0 && (
+              <p style={{ margin: '0.25rem 0' }}>
+                <strong>Location Name:</strong> {connection.metadata.locationName || 'N/A'}
+              </p>
+            )}
           </div>
         )}
 
@@ -223,6 +235,9 @@ export default function TenantSettingsPage() {
               style={{ width: '100%', padding: '0.75rem', fontSize: '1rem' }}
               placeholder="Enter your GHL location ID"
             />
+            <p style={{ fontSize: '0.75rem', color: '#666', marginTop: '0.25rem' }}>
+              Get this from your GHL dashboard or the location settings page.
+            </p>
           </div>
 
           <div>
@@ -234,17 +249,19 @@ export default function TenantSettingsPage() {
               value={privateIntegrationToken}
               onChange={(e) => setPrivateIntegrationToken(e.target.value)}
               required={!connection?.connected}
+              autoComplete="off"
               style={{ width: '100%', padding: '0.75rem', fontSize: '1rem' }}
-              placeholder="Enter your GHL private integration token"
+              placeholder={connection?.connected ? 'Only enter to update connection' : 'Enter your GHL private integration token'}
             />
             <p style={{ fontSize: '0.75rem', color: '#666', marginTop: '0.25rem' }}>
-              Get this from your GHL account → Settings → Integrations → Private Integrations
+              Get this from your GHL account → Settings → Integrations → Private Integrations.
+              This token is encrypted and never stored in plaintext.
             </p>
           </div>
 
           <button
             type="submit"
-            disabled={saving || !ghlLocationId || !privateIntegrationToken}
+            disabled={saving || (!connection?.connected && !privateIntegrationToken)}
             style={{
               padding: '0.75rem',
               fontSize: '1rem',

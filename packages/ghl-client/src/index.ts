@@ -1,5 +1,8 @@
 // GHL API client - focused on connection verification and health check
-// For Private Integration (not Marketplace OAuth)
+// For Private Integration tokens (not Marketplace OAuth)
+//
+// IMPORTANT: GHL Private Integration tokens are static bearer tokens.
+// They do NOT have OAuth-style refresh. The token is used directly.
 
 import axios, { AxiosInstance, AxiosError } from 'axios';
 
@@ -50,16 +53,25 @@ export class GhlClient {
 
   /**
    * Verify the access token is valid for the given location
-   * This is the core verification call for Private Integration
    *
-   * TODO: Confirm exact endpoint for location verification
-   * Common approach: GET /locations/{locationId}
+   * IMPORTANT - Endpoint Assumptions:
+   * This implementation assumes the endpoint is:
+   *   GET /locations/{locationId}
+   *
+   * This assumption needs to be verified against actual GHL Private Integration API.
+   * Different GHL API versions or integration types may use different endpoints.
+   *
+   * TODO: Verify exact endpoint with live GHL Private Integration
+   * TODO: Test with actual Private Integration token (not test/sandbox)
+   * TODO: Determine if this endpoint requires specific OAuth scope vs PI token scope
    */
   async verifyConnection(): Promise<{ valid: boolean; location?: GhlLocationInfo; error?: string }> {
     try {
-      // TODO: Verify exact GHL API endpoint for location verification
-      // For Private Integration, common endpoint is:
-      // GET https://services.gohighlevel.com/v1/locations/{locationId}
+      // Endpoint assumed: GET /locations/{locationId}
+      // Base URL: https://services.gohighlevel.com (or configurable via GHL_API_BASE_URL)
+      //
+      // NOTE: This has NOT been tested against a real GHL Private Integration yet.
+      // The response parsing expects specific fields: id, name, accountId, status
       const response = await this.client.get<GhlLocationInfo>(
         `/locations/${this.locationId}`
       );
@@ -79,7 +91,7 @@ export class GhlClient {
 
   /**
    * Perform health check on the connection
-   * Returns basic status information
+   * Delegates to verifyConnection - may expand later
    */
   async healthCheck(): Promise<GhlHealthResponse> {
     const result = await this.verifyConnection();
@@ -128,9 +140,12 @@ export class GhlClient {
 
   /**
    * Get masked token for logging
+   * Never log actual tokens - this is for debugging/monitoring only
    */
   getMaskedToken(): string {
-    // Return a masked version - actual token should never be logged
+    if (!this.locationId || this.locationId.length <= 8) {
+      return '****';
+    }
     return this.locationId.substring(0, 4) + '...' + this.locationId.substring(this.locationId.length - 4);
   }
 }

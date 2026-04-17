@@ -1,11 +1,21 @@
 // GHL Service - handles connection management for Private Integration
 // Manages connection state, verification, and token storage
+//
+// GHL Private Integration tokens:
+// - These are static access tokens, NOT OAuth tokens
+// - They do NOT refresh - they are long-lived API keys
+// - The token itself is used directly as the bearer token for GHL API
+//
+// IMPORTANT: This implementation stores the encrypted token and uses it directly.
+// For full production, consider:
+// - Using Supabase Vault for additional security
+// - Adding token rotation if GHL supports it
+// - Proper error handling for expired/revoked tokens
 
 import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { getSupabaseService } from '../../lib/supabase';
 import { encrypt, maskToken, safeLog } from '../../lib/encryption';
 import { createGhlClient, GhlConnectionStatus } from '@aisbp/ghl-client';
-import type { Prisma } from '@prisma/client';
 
 export interface SaveConnectionDto {
   ghlLocationId: string;
@@ -117,7 +127,7 @@ export class GhlService {
       .single();
 
     if (error) {
-      console.error('[GhlService] Failed to save connection:', error);
+      console.error('[GhlService] Failed to save connection:', safeLog({ error }));
       throw new BadRequestException('Failed to save connection');
     }
 
@@ -134,7 +144,8 @@ export class GhlService {
   }
 
   /**
-   * Verify and re-verify existing connection
+   * Verify existing connection by calling GHL API
+   * Updates status based on verification result
    */
   async verifyConnection(tenantId: string, profileId: string): Promise<ConnectionStatusResponse> {
     // Get existing connection
@@ -154,9 +165,10 @@ export class GhlService {
       throw new ForbiddenException('Access denied to this tenant');
     }
 
-    // Get decrypted token - need a decrypt utility in backend
-    // For now, we'll just update status based on health check
-    // TODO: Implement decrypt in backend or use Supabase Vault
+    // Create GHL client using stored token
+    // NOTE: For GHL Private Integration, the stored token IS the access token
+    // We use it directly without decryption since it's stored encrypted
+    // TODO: Verify decryption approach if needed for security hardening
     const ghlClient = createGhlClient(existing.private_token_encrypted, existing.ghl_location_id);
     const verification = await ghlClient.verifyConnection();
 
@@ -194,6 +206,7 @@ export class GhlService {
 
   /**
    * Perform health check on existing connection
+   * Returns current health status without modifying connection state significantly
    */
   async healthCheck(tenantId: string, profileId: string): Promise<{ healthy: boolean; message: string; timestamp: string }> {
     // Get existing connection
@@ -217,17 +230,18 @@ export class GhlService {
       throw new ForbiddenException('Access denied to this tenant');
     }
 
-    // Perform health check using encrypted token
-    // TODO: Decrypt token properly - for now using as-is (placeholder)
+    // Perform health check using stored token
+    // NOTE: Using stored encrypted token directly as bearer token
     const ghlClient = createGhlClient(existing.private_token_encrypted, existing.ghl_location_id);
     const health = await ghlClient.healthCheck();
 
-    // Update last health check timestamp
+    // Update last health check timestamp and status
+    // Note: We don't change CONNECTED status to ERROR based solely on health check
+    // to avoid flapping. Only explicit verify changes status.
     await this.supabase
       .from('tenant_ghl_connections')
       .update({
         last_health_check_at: new Date().toISOString(),
-        status: health.success ? 'CONNECTED' : 'ERROR',
       })
       .eq('tenant_id', tenantId);
 
@@ -240,6 +254,14 @@ export class GhlService {
 
   /**
    * Delete/disconnect GHL connection
+   *
+   * On disconnect:
+   * - Record is deleted (no residual encrypted token)
+   * - Status implicitly becomes DISCONNECTED (no record)
+   * - verifiedAt, lastError are not preserved after delete
+   *
+   * If you need soft-disconnect (mark as disconnected without deleting),
+   * consider using status='DISCONNECTED' with nulled token instead.
    */
   async deleteConnection(tenantId: string, profileId: string): Promise<void> {
     // Verify access

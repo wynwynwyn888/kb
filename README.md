@@ -203,14 +203,15 @@ Each tenant can connect their GHL subaccount using a Private Integration token. 
 ### Security
 
 - Private Integration tokens are encrypted at rest using AES-256-GCM
+- ENCRYPTION_KEY must be exactly 32 UTF-8 characters (fails fast if missing in production)
 - Raw tokens are NEVER returned in API responses
 - Only masked identifiers are exposed to frontend
 - Logs are sanitized to prevent token leakage
+- GHL Private Integration tokens are static bearer tokens (no OAuth-style refresh)
 
 ### TODO (for GHL)
 
 - [ ] Confirm exact GHL API endpoint for location verification
-- [ ] Implement token refresh logic (if GHL supports token refresh)
 - [ ] Add webhook registration endpoint
 - [ ] Implement webhook signature verification
 

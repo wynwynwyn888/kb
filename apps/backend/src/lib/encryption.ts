@@ -1,22 +1,60 @@
 // Backend encryption utilities
 // Provides encrypt/decrypt for sensitive data storage
+// IMPORTANT: These utilities require a properly configured ENCRYPTION_KEY
 
 import { createCipheriv, createDecipheriv, randomBytes } from 'crypto';
 
 const ALGORITHM = 'aes-256-gcm';
+const REQUIRED_KEY_LENGTH = 32;
 
-// Get encryption key from environment
+// Warning flag for development mode - must be explicitly enabled
+const ALLOW_INSECURE_DEV_KEY = process.env.ALLOW_INSECURE_DEV_KEY === 'true';
+let warnedAboutInsecureKey = false;
+
+/**
+ * Get and validate encryption key from environment
+ *
+ * Security behavior:
+ * - If ENCRYPTION_KEY is missing and ALLOW_INSECURE_DEV_KEY=true, uses insecure dev fallback
+ * - If ENCRYPTION_KEY is missing and ALLOW_INSECURE_DEV_KEY=false/unset, throws error
+ * - If ENCRYPTION_KEY is set but invalid length, throws error
+ *
+ * @throws Error if key is missing or invalid (unless dev fallback explicitly allowed)
+ */
 function getEncryptionKey(): Buffer {
   const key = process.env.ENCRYPTION_KEY;
-  if (!key) {
-    // For development only - in production, key must be set
-    console.warn('[Encryption] ENCRYPTION_KEY not set, using fallback (NOT SECURE)');
-    return Buffer.from('default-32-char-key-for-dev!!');
+
+  // Case 1: Key is set - validate and use it
+  if (key && key.length > 0) {
+    if (key.length !== REQUIRED_KEY_LENGTH) {
+      throw new Error(
+        `ENCRYPTION_KEY must be exactly ${REQUIRED_KEY_LENGTH} UTF-8 characters. ` +
+        `Got ${key.length} characters. ` +
+        `Generate with: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`
+      );
+    }
+    return Buffer.from(key, 'utf8');
   }
-  if (key.length !== 32) {
-    throw new Error('ENCRYPTION_KEY must be exactly 32 characters');
+
+  // Case 2: Key is not set - check dev override flag
+  if (ALLOW_INSECURE_DEV_KEY) {
+    if (!warnedAboutInsecureKey) {
+      console.error('╔════════════════════════════════════════════════════════════════╗');
+      console.error('║  WARNING: ENCRYPTION_KEY not set - using INSECURE fallback       ║');
+      console.error('║  DO NOT USE IN PRODUCTION                                       ║');
+      console.error('║  Set ALLOW_INSECURE_DEV_KEY=false or configure ENCRYPTION_KEY   ║');
+      console.error('╚════════════════════════════════════════════════════════════════╝');
+      warnedAboutInsecureKey = true;
+    }
+    return Buffer.from('dev-fallback-key-32-chars!!!!!', 'utf8');
   }
-  return Buffer.from(key);
+
+  // Case 3: Key missing and dev override not allowed - fail fast
+  throw new Error(
+    `ENCRYPTION_KEY environment variable is required but not set. ` +
+    `Set ENCRYPTION_KEY to exactly ${REQUIRED_KEY_LENGTH} UTF-8 characters. ` +
+    `For development, you may set ALLOW_INSECURE_DEV_KEY=true to use an insecure fallback.`
+  );
 }
 
 /**
@@ -66,7 +104,7 @@ export function decrypt(ciphertext: string): string {
  * Shows first 4 and last 4 characters
  */
 export function maskToken(token: string): string {
-  if (token.length <= 8) {
+  if (!token || token.length <= 8) {
     return '****';
   }
   return token.substring(0, 4) + '...' + token.substring(token.length - 4);

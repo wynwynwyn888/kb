@@ -16,12 +16,14 @@ import { PromptsModule } from './modules/prompts/prompts.module';
 import { KbModule } from './modules/kb/kb.module';
 import { AiRouterModule } from './modules/ai-router/ai-router.module';
 import { FormatterModule } from './modules/formatter/formatter.module';
+import { OrchestrationModule } from './modules/orchestration/orchestration.module';
 import { HandoverModule } from './modules/handover/handover.module';
 import { QuotasModule } from './modules/quotas/quotas.module';
 import { CalendarsModule } from './modules/calendars/calendars.module';
 import { ContactsModule } from './modules/contacts/contacts.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
+import { QueuesModule } from './queues/queues.module';
 
 @Module({
   imports: [
@@ -70,12 +72,14 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
     KbModule,
     AiRouterModule,
     FormatterModule,
+    OrchestrationModule,
     HandoverModule,
     QuotasModule,
     CalendarsModule,
     ContactsModule,
     AuditModule,
     NotificationsModule,
+    QueuesModule,
   ],
   providers: [
     // Global rate limit guard

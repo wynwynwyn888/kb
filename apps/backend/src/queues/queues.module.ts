@@ -11,6 +11,9 @@ import { KbIngestProcessor } from './processors/kb-ingest.processor';
 import { HandoverNotifyProcessor } from './processors/handover-notify.processor';
 import { QuotaThresholdAlertProcessor } from './processors/quota-threshold-alert.processor';
 
+// Feature modules
+import { OrchestrationModule } from '../modules/orchestration/orchestration.module';
+
 @Module({
   imports: [
     BullModule.registerQueue(
@@ -19,6 +22,7 @@ import { QuotaThresholdAlertProcessor } from './processors/quota-threshold-alert
         defaultJobOptions: config.defaultJobOptions,
       })),
     ),
+    OrchestrationModule,
   ],
   providers: [
     InboundMessageProcessor,

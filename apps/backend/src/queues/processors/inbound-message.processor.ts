@@ -1,12 +1,18 @@
 // Inbound Message Processor
-// Processes incoming messages from GHL webhooks
-// This is the minimal skeleton — actual AI routing, KB retrieval, formatter, and outbound sending are TODO
+// Processes incoming messages from GHL webhooks:
+// 1. Validates and loads tenant/conversation context
+// 2. Persists inbound message to DB
+// 3. Calls ConversationOrchestrationService for guard + routing
+// 4. Updates webhook event status based on orchestration outcome
+// Does NOT send outbound message — that is a later layer's responsibility.
 
 import { Processor, WorkerHost, OnWorkerEvent } from '@nestjs/bullmq';
 import { Job } from 'bullmq';
 import { Injectable, Logger } from '@nestjs/common';
 import { getSupabaseService } from '../../lib/supabase';
 import { QUEUES } from '../queue.constants';
+import { ConversationOrchestrationService } from '../../modules/orchestration/orchestration.service';
+import type { NormalizedWebhookPayload } from '../../modules/webhooks/dto/ghl-webhook.payload';
 
 export interface InboundMessageJobData {
   locationId: string;
@@ -23,6 +29,12 @@ export interface InboundMessageJobData {
 export class InboundMessageProcessor extends WorkerHost {
   private readonly logger = new Logger(InboundMessageProcessor.name);
   private readonly supabase = getSupabaseService();
+
+  constructor(
+    private readonly orchestrationService: ConversationOrchestrationService,
+  ) {
+    super();
+  }
 
   async process(job: Job<InboundMessageJobData>): Promise<void> {
     const {
@@ -71,24 +83,61 @@ export class InboundMessageProcessor extends WorkerHost {
         },
       });
 
-      // Step 4-11: TODO — future layers handle these:
-      // - Check if conversation is in handover → skip AI
-      // - Load conversation context (last N turns)
-      // - Search KB for relevant info
-      // - Build prompt with system prompt + context + KB
-      // - Route to AI model
-      // - Format response
-      // - Enqueue send-bubble job
-      // - Deduct quota on successful send
-
       this.logger.log(
         `Message stored: conversationId=${conversation.id}, messageType=${messageType}`,
       );
 
-      // Mark webhook event as COMPLETED
+      // Step 4: Build normalized payload for orchestration
+      const normalizedPayload: NormalizedWebhookPayload = {
+        ghlLocationId: locationId,
+        ghlConversationId,
+        ghlContactId,
+        messageContent,
+        messageType,
+        timestamp,
+        externalEventId: webhookEventId ?? `local:${conversation.id}:${timestamp}`,
+        eventType: 'inbound_message',
+        dedupeKey: `proc:${conversation.id}:${timestamp}`,
+        channelRaw: null,
+      };
+
+      // Step 5: Load tenant context
+      const tenantContext = await this.orchestrationService.loadTenantContext(tenant.id);
+      const promptConfig = await this.orchestrationService.loadPromptConfig(tenant.id);
+      const agencyPolicy = await this.orchestrationService.loadAgencyPolicy(tenant.id);
+      const conversationRecord = await this.orchestrationService.loadConversation(conversation.id);
+
+      // Step 6: Build orchestration input
+      const orchestrationInput = {
+        tenantId: tenant.id,
+        conversationId: conversation.id,
+        webhookEventId,
+        incomingMessage: normalizedPayload,
+        tenant: tenantContext ?? undefined,
+        promptConfig: promptConfig ?? undefined,
+        agencyPolicy: agencyPolicy ?? undefined,
+        conversation: conversationRecord ?? undefined,
+      };
+
+      // Step 7: Run full orchestration pipeline (guards + memory + routing)
+      const result = await this.orchestrationService.orchestrate(orchestrationInput);
+
+      // Step 8: Update webhook event based on orchestration outcome
       if (webhookEventId) {
-        await this.updateWebhookEventStatus(webhookEventId, 'COMPLETED');
+        if (result.outcome === 'PROCEED') {
+          await this.updateWebhookEventStatus(webhookEventId, 'COMPLETED');
+        } else {
+          await this.updateWebhookEventStatus(
+            webhookEventId,
+            'COMPLETED', // Mark completed even when skipped (not FAILED)
+            `Orchestration outcome: ${result.outcome}; ${result.error ?? ''}`,
+          );
+        }
       }
+
+      this.logger.log(
+        `Orchestration result: conversationId=${conversation.id}, outcome=${result.outcome}, model=${result.routing?.recommendedModel ?? 'n/a'}`,
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : 'unknown';
       this.logger.error(`Failed to process inbound message: ${message}`);
@@ -128,7 +177,6 @@ export class InboundMessageProcessor extends WorkerHost {
     contactId: string,
     timestamp: string,
   ): Promise<{ id: string }> {
-    // Check if conversation already exists by ghlConversationId
     if (ghlConversationId && ghlConversationId.trim() !== '') {
       const { data: existing } = await this.supabase
         .from('conversations')
@@ -140,14 +188,13 @@ export class InboundMessageProcessor extends WorkerHost {
         return existing;
       }
 
-      // Create new conversation with stable ID
       const { data, error } = await this.supabase
         .from('conversations')
         .insert({
           tenant_id: tenantId,
           ghl_conversation_id: ghlConversationId,
           contact_id: contactId,
-          channel: 'WHATSAPP', // TODO: infer from payload when GHL sends channel info
+          channel: 'WHATSAPP',
           status: 'ACTIVE',
           last_message_at: new Date().toISOString(),
         })
@@ -163,7 +210,6 @@ export class InboundMessageProcessor extends WorkerHost {
 
     // Provisional fallback — no stable conversation ID
     const provisionalGhlConversationId = `prov:${contactId}:${timestamp}`;
-    const provisionalKey = `prov:${contactId}`;
 
     this.logger.warn(
       `Conversation created with provisional ID for tenant=${tenantId}, contactId=${contactId}`,
@@ -186,12 +232,12 @@ export class InboundMessageProcessor extends WorkerHost {
         tenant_id: tenantId,
         ghl_conversation_id: provisionalGhlConversationId,
         contact_id: contactId,
-        channel: 'WHATSAPP', // TODO: infer from payload
+        channel: 'WHATSAPP',
         status: 'ACTIVE',
         last_message_at: new Date().toISOString(),
         metadata: {
           provisional: true,
-          provisionalKey,
+          provisionalKey: `prov:${contactId}`,
           originalTimestamp: timestamp,
         },
       })

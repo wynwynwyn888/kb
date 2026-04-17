@@ -1,0 +1,122 @@
+// Conversation memory loader — loads recent message history from DB
+// for use in AI prompt context building.
+
+import { Injectable, Logger } from '@nestjs/common';
+import { getSupabaseService } from '../../lib/supabase';
+import type { ConversationMemory, MemoryEntry } from './dto';
+
+const MAX_TURNS = 10; // last 10 user turns to load
+
+@Injectable()
+export class ConversationMemoryLoader {
+  private readonly logger = new Logger(ConversationMemoryLoader.name);
+  private readonly supabase = getSupabaseService();
+
+  /**
+   * Load last MAX_TURNS user turns from the conversation, ordered oldest→newest.
+   * Returns normalized MemoryEntry[] for AI context building.
+   *
+   * TODO: 24-hour session reset — if a gap of >24h exists between messages,
+   * start a new session and do not include the older messages in the context.
+   * For now, this is TODO-only; the loader returns all available history.
+   */
+  async loadMemory(conversationId: string): Promise<ConversationMemory> {
+    // Load messages ordered oldest→newest (ascending created_at)
+    // Limit to last MAX_TURNS inbound user messages plus their AI responses
+    const { data, error } = await this.supabase
+      .from('messages')
+      .select('id, direction, sender, content, content_type, created_at')
+      .eq('conversation_id', conversationId)
+      .order('created_at', { ascending: true });
+
+    if (error || !data) {
+      this.logger.warn(
+        `Failed to load memory for conversation=${conversationId}: ${error?.message ?? 'no data'}`,
+      );
+      return {
+        conversationId,
+        entries: [],
+        turnCount: 0,
+        sessionStartedAt: null,
+      };
+    }
+
+    // Filter to last N user turns and their responses
+    const userMessages = data.filter(m => m.direction === 'INBOUND');
+    const recentUserMessages = userMessages.slice(-MAX_TURNS);
+
+    if (recentUserMessages.length === 0) {
+      return {
+        conversationId,
+        entries: [],
+        turnCount: 0,
+        sessionStartedAt: null,
+      };
+    }
+
+    // Get the index range to include responses after each user turn
+    const lastUserIndex = data.findIndex(
+      m => m.id === recentUserMessages[recentUserMessages.length - 1]!.id,
+    );
+    const slice = data.slice(
+      data.findIndex(m => m.id === recentUserMessages[0]!.id),
+      lastUserIndex + 1,
+    );
+
+    const entries: MemoryEntry[] = slice.map(m => this.normalizeMessage(m));
+
+    // TODO: Detect 24h gap for session reset here
+    // For now, sessionStartedAt is set to the oldest loaded message
+    const sessionStartedAt =
+      entries.length > 0 ? entries[0]!.timestamp : null;
+
+    // Count user turns
+    const turnCount = entries.filter(e => e.role === 'user').length;
+
+    this.logger.debug(
+      `Loaded memory: conversationId=${conversationId}, entries=${entries.length}, turns=${turnCount}`,
+    );
+
+    return {
+      conversationId,
+      entries,
+      turnCount,
+      sessionStartedAt,
+    };
+  }
+
+  private normalizeMessage(
+    msg: {
+      direction: string;
+      sender: string;
+      content: string;
+      content_type: string;
+      created_at: string;
+    },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ): MemoryEntry {
+    const roleMap: Record<string, 'user' | 'assistant' | 'system'> = {
+      INBOUND: 'user',
+      OUTBOUND: 'assistant',
+    };
+
+    const typeMap: Record<string, 'text' | 'image' | 'audio' | 'video' | 'unknown'> = {
+      text: 'text',
+      image: 'image',
+      audio: 'audio',
+      video: 'video',
+      TEXT: 'text',
+      IMAGE: 'image',
+      AUDIO: 'audio',
+      VIDEO: 'video',
+    };
+
+    return {
+      role: roleMap[msg.direction] ?? 'user',
+      content: msg.content,
+      sender: msg.sender as MemoryEntry['sender'],
+      timestamp: msg.created_at,
+      messageType: typeMap[msg.content_type] ?? 'unknown',
+    };
+  }
+}

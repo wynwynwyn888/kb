@@ -87,6 +87,8 @@ model Tenant {
   ghlLocationId String   @map("ghl_location_id")
   status        String   @default("pending") // active, suspended, pending
   settings      Json     @default("{}")
+  botEnabled    Boolean  @default(true)  @map("bot_enabled")
+  handoverPaused Boolean @default(false) @map("handover_paused")
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
 
@@ -102,6 +104,7 @@ model Tenant {
   actionLogs     ActionLog[]
   auditLogs      AuditLog[]
   webhookEvents  WebhookEvent[]
+  orchestrationLogs OrchestrationLog[]
 
   @@unique([ghlLocationId])
   @@index([agencyId])
@@ -570,6 +573,44 @@ model WebhookEvent {
   @@index([tenantId])
   @@index([processingStatus])
   @@map("webhook_events")
+}
+
+// ============================================================================
+// ORCHESTRATION LOG
+// ============================================================================
+
+enum OrchestrationOutcome {
+  PROCEED
+  SKIP_BOT_DISABLED
+  SKIP_GHL_DISCONNECTED
+  SKIP_HANDOVER_ACTIVE
+  SKIP_QUOTA_EXHAUSTED
+  SKIP_UNSUPPORTED_MESSAGE_TYPE
+  SKIP_UNSUPPORTED_CHANNEL
+  SKIP_DUPLICATE
+  ERROR
+}
+
+model OrchestrationLog {
+  id             String               @id @default(uuid())
+  tenantId       String               @map("tenant_id")
+  conversationId String               @map("conversation_id")
+  webhookEventId String?              @map("webhook_event_id")
+  outcome        OrchestrationOutcome @default(ERROR)
+  guardReason    String?              @map("guard_reason")
+  modelChosen    String?              @map("model_chosen")
+  responseMode   String?              @map("response_mode")
+  draftReply     String?              @map("draft_reply")
+  handoverRecommended Boolean          @default(false) @map("handover_recommended")
+  confidence     Float?
+  metadata       Json                 @default("{}")
+  createdAt      DateTime             @default(now()) @map("created_at")
+
+  tenant         Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([conversationId])
+  @@map("orchestration_logs")
 }
 
 model Notification {

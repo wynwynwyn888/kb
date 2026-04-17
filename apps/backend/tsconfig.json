@@ -1,0 +1,16 @@
+{
+  "extends": "@aisbp/tsconfig/base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src"
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"],
+  "references": [
+    { "path": "../../packages/types" },
+    { "path": "../../packages/db" },
+    { "path": "../../packages/ghl-client" },
+    { "path": "../../packages/ai-router" },
+    { "path": "../../packages/formatter" }
+  ]
+}

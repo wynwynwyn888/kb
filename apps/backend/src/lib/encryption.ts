@@ -8,7 +8,7 @@ const ALGORITHM = 'aes-256-gcm';
 const REQUIRED_KEY_LENGTH = 32;
 
 // Warning flag for development mode - must be explicitly enabled
-const ALLOW_INSECURE_DEV_KEY = process.env.ALLOW_INSECURE_DEV_KEY === 'true';
+const ALLOW_INSECURE_DEV_KEY = process.env['ALLOW_INSECURE_DEV_KEY'] === 'true';
 let warnedAboutInsecureKey = false;
 
 /**
@@ -22,7 +22,7 @@ let warnedAboutInsecureKey = false;
  * @throws Error if key is missing or invalid (unless dev fallback explicitly allowed)
  */
 function getEncryptionKey(): Buffer {
-  const key = process.env.ENCRYPTION_KEY;
+  const key = process.env['ENCRYPTION_KEY'];
 
   // Case 1: Key is set - validate and use it
   if (key && key.length > 0) {

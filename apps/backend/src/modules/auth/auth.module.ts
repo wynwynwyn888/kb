@@ -1,23 +1,20 @@
-// Auth module - handles user authentication
-// Uses JWT tokens and integrates with Supabase Auth
-// TODO: Implement Supabase Auth integration, JWT strategy, refresh tokens
+// Auth module - handles Supabase Auth JWT verification
+// Uses JWT from Authorization header and verifies via Supabase
 
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
-import { PassportModule } from '@nestjs/passport';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { AuthController } from './auth.controller';
 import { AuthService } from './auth.service';
-import { JwtStrategy } from './strategies/jwt.strategy';
+import { JwtAuthGuard } from './guards/jwt-auth.guard';
 
 @Module({
   imports: [
-    PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
-        secret: config.get<string>('JWT_SECRET'),
+        secret: config.get<string>('JWT_SECRET', 'supersecret-dev-key'),
         signOptions: {
           expiresIn: config.get<string>('JWT_EXPIRES_IN', '7d'),
         },
@@ -25,7 +22,7 @@ import { JwtStrategy } from './strategies/jwt.strategy';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy],
-  exports: [AuthService],
+  providers: [AuthService, JwtAuthGuard],
+  exports: [AuthService, JwtAuthGuard],
 })
 export class AuthModule {}

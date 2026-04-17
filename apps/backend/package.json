@@ -12,7 +12,8 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:studio": "prisma studio",
-    "db:push": "prisma db push"
+    "db:push": "prisma db push",
+    "db:seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
     "@nestjs/common": "^10.3.0",
@@ -23,12 +24,14 @@
     "@nestjs/passport": "^10.0.3",
     "@nestjs/bullmq": "^10.2.0",
     "@nestjs/swagger": "^7.3.0",
+    "@nestjs/throttler": "^5.1.0",
     "@aisbp/types": "workspace:*",
     "@aisbp/db": "workspace:*",
     "@aisbp/ghl-client": "workspace:*",
     "@aisbp/ai-router": "workspace:*",
     "@aisbp/formatter": "workspace:*",
     "@prisma/client": "^5.14.0",
+    "@supabase/supabase-js": "^2.43.0",
     "bullmq": "^5.4.0",
     "ioredis": "^5.3.0",
     "passport": "^0.7.0",
@@ -45,6 +48,7 @@
     "@types/node": "^20.11.0",
     "@types/passport-jwt": "^4.0.1",
     "prisma": "^5.14.0",
+    "tsx": "^4.7.0",
     "typescript": "^5.4.0",
     "eslint": "^8.57.0"
   }

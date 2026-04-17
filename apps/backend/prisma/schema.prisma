@@ -1,8 +1,9 @@
 // Prisma schema for AI SaaS Business Platform
-// TODO: Review with team before finalizing - this is initial design
+// Multi-tenant SaaS platform with Supabase Auth integration
 
 generator client {
   provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/client"
 }
 
 datasource db {
@@ -11,39 +12,67 @@ datasource db {
 }
 
 // ============================================================================
-// AGENCY & USERS
+// PROFILES (maps to Supabase auth.users)
 // ============================================================================
 
-model Agency {
-  id          String   @id @default(uuid())
-  name        String
-  ownerUserId String   @map("owner_user_id")
-  settings    Json     @default("{}")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
-
-  // Relations
-  users              AgencyUser[]
-  tenants            Tenant[]
-  modelProviders     AgencyModelProvider[]
-  systemPolicies     AgencySystemPolicy[]
-  auditLogs          AuditLog[]
-
-  @@map("agencies")
-}
-
-model AgencyUser {
-  id        String   @id @default(uuid())
-  agencyId  String   @map("agency_id")
-  userId    String   @map("user_id")
-  role      String   @default("member") // owner, admin, member
+model Profile {
+  id        String   @id @default(uuid()) // This will be set to match auth.users.id
+  email     String   @unique
+  fullName  String?  @map("full_name")
+  avatarUrl String?  @map("avatar_url")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
   // Relations
-  agency Agency @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  agencyMemberships AgencyUser[]
+  tenantMemberships TenantUser[]
 
-  @@unique([agencyId, userId])
+  @@map("profiles")
+}
+
+// ============================================================================
+// AGENCY
+// ============================================================================
+
+model Agency {
+  id        String   @id @default(uuid())
+  name      String
+  settings  Json     @default("{}")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  users          AgencyUser[]
+  tenants        Tenant[]
+  modelProviders AgencyModelProvider[]
+  systemPolicies AgencySystemPolicy[]
+  auditLogs      AuditLog[]
+
+  @@map("agencies")
+}
+
+// Agency user roles
+enum AgencyRole {
+  OWNER
+  ADMIN
+  OPERATOR
+  MEMBER
+}
+
+model AgencyUser {
+  id        String     @id @default(uuid())
+  agencyId  String     @map("agency_id")
+  profileId String     @map("profile_id")
+  role      AgencyRole @default(MEMBER)
+  createdAt DateTime   @default(now()) @map("created_at")
+  updatedAt DateTime   @updatedAt @map("updated_at")
+
+  // Relations
+  agency  Agency  @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@unique([agencyId, profileId])
+  @@index([profileId])
   @@map("agency_users")
 }
 
@@ -62,33 +91,43 @@ model Tenant {
   updatedAt     DateTime @updatedAt @map("updated_at")
 
   // Relations
-  agency          Agency              @relation(fields: [agencyId], references: [id], onDelete: Cascade)
-  users           TenantUser[]
-  ghlConnection   TenantGhlConnection?
-  promptConfigs   TenantPromptConfig[]
-  modelOverrides  TenantModelOverride[]
-  documents       KnowledgeDocument[]
-  conversations   Conversation[]
-  quotaWallet     QuotaWallet?
-  actionLogs      ActionLog[]
-  auditLogs       AuditLog[]
+  agency         Agency                @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  users          TenantUser[]
+  ghlConnection  TenantGhlConnection?
+  promptConfigs  TenantPromptConfig[]
+  modelOverrides TenantModelOverride[]
+  documents      KnowledgeDocument[]
+  conversations  Conversation[]
+  quotaWallet    QuotaWallet?
+  actionLogs     ActionLog[]
+  auditLogs      AuditLog[]
 
   @@unique([ghlLocationId])
+  @@index([agencyId])
   @@map("tenants")
 }
 
+// Tenant user roles
+enum TenantRole {
+  ADMIN
+  AGENT
+  VIEWER
+}
+
 model TenantUser {
-  id        String   @id @default(uuid())
-  tenantId  String   @map("tenant_id")
-  userId    String   @map("user_id")
-  role      String   @default("viewer") // admin, agent, viewer
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  id        String    @id @default(uuid())
+  tenantId  String    @map("tenant_id")
+  profileId String    @map("profile_id")
+  role      TenantRole @default(VIEWER)
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
 
   // Relations
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
 
-  @@unique([tenantId, userId])
+  @@unique([tenantId, profileId])
+  @@index([profileId])
   @@map("tenant_users")
 }
 
@@ -97,15 +136,15 @@ model TenantUser {
 // ============================================================================
 
 model TenantGhlConnection {
-  id            String   @id @default(uuid())
-  tenantId      String   @unique @map("tenant_id")
-  ghlLocationId String   @map("ghl_location_id")
-  accessToken   String   @map("access_token") // encrypted
-  refreshToken  String   @map("refresh_token") // encrypted
-  expiresAt     DateTime @map("expires_at")
-  status        String   @default("active") // active, expired, revoked
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt @map("updated_at")
+  id            String    @id @default(uuid())
+  tenantId      String    @unique @map("tenant_id")
+  ghlLocationId String    @map("ghl_location_id")
+  accessToken   String    @map("access_token")
+  refreshToken  String    @map("refresh_token")
+  expiresAt     DateTime  @map("expires_at")
+  status        String    @default("active") // active, expired, revoked
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
 
   // Relations
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -117,15 +156,23 @@ model TenantGhlConnection {
 // AI / MODEL PROVIDERS
 // ============================================================================
 
+enum AiProvider {
+  OPENAI
+  ANTHROPIC
+  GOOGLE
+  AZURE
+  CUSTOM
+}
+
 model AgencyModelProvider {
-  id        String   @id @default(uuid())
-  agencyId  String   @map("agency_id")
-  provider  String   // openai, anthropic, google, azure, custom
-  apiKey    String   @map("api_key") // encrypted
+  id        String     @id @default(uuid())
+  agencyId  String     @map("agency_id")
+  provider  AiProvider
+  apiKey    String     @map("api_key")
   endpoint  String?
-  settings  Json     @default("{}")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  settings  Json       @default("{}")
+  createdAt DateTime   @default(now()) @map("created_at")
+  updatedAt DateTime   @updatedAt @map("updated_at")
 
   // Relations
   agency Agency @relation(fields: [agencyId], references: [id], onDelete: Cascade)
@@ -147,6 +194,7 @@ model AgencySystemPolicy {
   // Relations
   agency Agency @relation(fields: [agencyId], references: [id], onDelete: Cascade)
 
+  @@index([agencyId])
   @@map("agency_system_policies")
 }
 
@@ -156,7 +204,7 @@ model TenantPromptConfig {
   name            String
   systemPrompt    String   @db.Text @map("system_prompt")
   temperature     Float    @default(0.7)
-  modelOverride   String? @map("model_override")
+  modelOverride   String?  @map("model_override")
   maxTokens       Int?     @map("max_tokens")
   promptVariables Json     @default("{}") @map("prompt_variables")
   isActive        Boolean  @default(true) @map("is_active")
@@ -166,18 +214,19 @@ model TenantPromptConfig {
   // Relations
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
+  @@index([tenantId])
   @@map("tenant_prompt_configs")
 }
 
 model TenantModelOverride {
-  id        String   @id @default(uuid())
-  tenantId  String   @map("tenant_id")
-  provider  String
+  id        String     @id @default(uuid())
+  tenantId  String     @map("tenant_id")
+  provider  AiProvider
   model     String
-  temperature Float? @map("temperature")
-  maxTokens Int?     @map("max_tokens")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  temperature Float?   @map("temperature")
+  maxTokens Int?       @map("max_tokens")
+  createdAt DateTime   @default(now()) @map("created_at")
+  updatedAt DateTime   @updatedAt @map("updated_at")
 
   // Relations
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -190,30 +239,39 @@ model TenantModelOverride {
 // KNOWLEDGE BASE
 // ============================================================================
 
+enum DocumentStatus {
+  PENDING
+  PROCESSING
+  READY
+  FAILED
+}
+
 model KnowledgeDocument {
-  id        String   @id @default(uuid())
-  tenantId  String   @map("tenant_id")
+  id        String         @id @default(uuid())
+  tenantId  String         @map("tenant_id")
   title     String
   source    String
-  mimeType  String   @map("mime_type")
+  mimeType  String         @map("mime_type")
   size      Int
-  status    String   @default("pending") // pending, processing, ready, failed
-  metadata  Json     @default("{}")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  status    DocumentStatus @default(PENDING)
+  metadata  Json           @default("{}")
+  createdAt DateTime       @default(now()) @map("created_at")
+  updatedAt DateTime       @updatedAt @map("updated_at")
 
   // Relations
   tenant Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   chunks KnowledgeChunk[]
 
+  @@index([tenantId])
   @@map("knowledge_documents")
 }
 
+// Note: embedding column will be added later when pgvector is enabled
+// For now, we store chunks without vectors
 model KnowledgeChunk {
   id          String   @id @default(uuid())
   documentId  String   @map("document_id")
   content     String   @db.Text
-  embedding   Unsupported("vector") // pgvector - TODO: verify syntax
   tokenCount  Int      @map("token_count")
   metadata    Json     @default("{}")
   createdAt   DateTime @default(now()) @map("created_at")
@@ -229,22 +287,36 @@ model KnowledgeChunk {
 // CONVERSATIONS & MESSAGES
 // ============================================================================
 
+enum ConversationChannel {
+  WHATSAPP
+  SMS
+  CHAT
+  EMAIL
+}
+
+enum ConversationStatus {
+  ACTIVE
+  HANDOVER
+  CLOSED
+  PENDING
+}
+
 model Conversation {
-  id              String   @id @default(uuid())
-  tenantId        String   @map("tenant_id")
-  ghlConversationId String @map("ghl_conversation_id")
-  contactId      String   @map("contact_id")
-  channel        String   // whatsapp, sms, chat, email
-  status          String   @default("active") // active, handover, closed, pending
-  lastMessageAt   DateTime @map("last_message_at")
-  metadata        Json     @default("{}")
-  createdAt       DateTime @default(now()) @map("created_at")
-  updatedAt       DateTime @updatedAt @map("updated_at")
+  id                String              @id @default(uuid())
+  tenantId          String              @map("tenant_id")
+  ghlConversationId String              @map("ghl_conversation_id")
+  contactId         String              @map("contact_id")
+  channel           ConversationChannel
+  status            ConversationStatus  @default(PENDING)
+  lastMessageAt     DateTime            @map("last_message_at")
+  metadata          Json                @default("{}")
+  createdAt         DateTime            @default(now()) @map("created_at")
+  updatedAt         DateTime            @updatedAt @map("updated_at")
 
   // Relations
-  tenant    Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  messages  Message[]
-  handovers HandoverEvent[]
+  tenant     Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  messages   Message[]
+  handovers  HandoverEvent[]
   actionLogs ActionLog[]
 
   @@unique([ghlConversationId])
@@ -252,15 +324,35 @@ model Conversation {
   @@map("conversations")
 }
 
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum MessageSender {
+  CONTACT
+  AI
+  AGENT
+  SYSTEM
+}
+
+enum ContentType {
+  TEXT
+  IMAGE
+  VIDEO
+  DOCUMENT
+  AUDIO
+}
+
 model Message {
-  id            String   @id @default(uuid())
-  conversationId String  @map("conversation_id")
-  direction     String   // inbound, outbound
-  sender        String   // contact, ai, agent, system
-  content       String   @db.Text
-  contentType   String   @default("text") // text, image, video, document, audio
-  metadata      Json     @default("{}")
-  createdAt     DateTime @default(now()) @map("created_at")
+  id             String          @id @default(uuid())
+  conversationId String          @map("conversation_id")
+  direction      MessageDirection
+  sender         MessageSender
+  content        String          @db.Text
+  contentType    ContentType     @default(TEXT)
+  metadata       Json            @default("{}")
+  createdAt      DateTime        @default(now()) @map("created_at")
 
   // Relations
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
@@ -273,16 +365,27 @@ model Message {
 // HANDOVER
 // ============================================================================
 
+enum HandoverType {
+  REQUEST
+  TRANSFER
+}
+
+enum HandoverStatus {
+  ACTIVE
+  RESUMED
+  TIMEOUT
+}
+
 model HandoverEvent {
-  id            String   @id @default(uuid())
-  conversationId String  @map("conversation_id")
-  type          String   // request, transfer
-  status        String   @default("active") // active, resumed, timeout
-  initiatedBy   String   @map("initiated_by") // contact, ai, agent
+  id            String         @id @default(uuid())
+  conversationId String        @map("conversation_id")
+  type          HandoverType
+  status        HandoverStatus @default(ACTIVE)
+  initiatedBy   String         @map("initiated_by") // contact, ai, agent
   note          String?
-  resumedAt      DateTime? @map("resumed_at")
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt @map("updated_at")
+  resumedAt      DateTime?      @map("resumed_at")
+  createdAt     DateTime       @default(now()) @map("created_at")
+  updatedAt     DateTime       @updatedAt @map("updated_at")
 
   // Relations
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
@@ -306,20 +409,25 @@ model QuotaWallet {
   updatedAt   DateTime @updatedAt @map("updated_at")
 
   // Relations
-  tenant  Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  ledger  QuotaLedger[]
+  tenant Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  ledger QuotaLedger[]
 
   @@map("quota_wallets")
 }
 
+enum QuotaTransactionType {
+  CREDIT
+  DEBIT
+}
+
 model QuotaLedger {
-  id            String   @id @default(uuid())
-  walletId      String   @map("wallet_id")
+  id            String              @id @default(uuid())
+  walletId      String              @map("wallet_id")
   amount        Int
-  type          String   // credit, debit
+  type          QuotaTransactionType
   description   String
-  conversationId String? @map("conversation_id")
-  createdAt     DateTime @default(now()) @map("created_at")
+  conversationId String?            @map("conversation_id")
+  createdAt     DateTime            @default(now()) @map("created_at")
 
   // Relations
   wallet QuotaWallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
@@ -332,18 +440,32 @@ model QuotaLedger {
 // ACTION LOGS
 // ============================================================================
 
+enum ActionType {
+  TAG_CONTACT
+  UPDATE_CALENDAR
+  SEND_REPLY
+  KB_RETRIEVE
+  AI_GENERATE
+}
+
+enum ActionStatus {
+  PENDING
+  SUCCESS
+  FAILED
+}
+
 model ActionLog {
-  id            String   @id @default(uuid())
-  tenantId      String   @map("tenant_id")
-  conversationId String? @map("conversation_id")
-  actionType    String   @map("action_type") // tag_contact, update_calendar, send_reply, kb_retrieve, ai_generate
-  status        String   @default("pending") // pending, success, failed
-  details       Json     @default("{}")
-  error         String?
-  createdAt     DateTime @default(now()) @map("created_at")
+  id             String       @id @default(uuid())
+  tenantId       String       @map("tenant_id")
+  conversationId String?      @map("conversation_id")
+  actionType     ActionType   @map("action_type")
+  status         ActionStatus @default(PENDING)
+  details        Json         @default("{}")
+  error          String?
+  createdAt      DateTime     @default(now()) @map("created_at")
 
   // Relations
-  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant      Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
 
   @@index([tenantId])
@@ -357,7 +479,7 @@ model ActionLog {
 model AuditLog {
   id          String   @id @default(uuid())
   agencyId    String   @map("agency_id")
-  userId      String   @map("user_id")
+  profileId   String   @map("profile_id")
   tenantId    String?  @map("tenant_id")
   action      String
   resource    String
@@ -371,38 +493,31 @@ model AuditLog {
   tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
 
   @@index([agencyId])
-  @@index([userId])
+  @@index([profileId])
   @@map("audit_logs")
 }
 
 // ============================================================================
-// NOTIFICATIONS (stored in Postgres instead of external service)
+// NOTIFICATIONS
 // ============================================================================
 
-model Notification {
-  id        String   @id @default(uuid())
-  userId    String   @map("user_id")
-  type      String   // handover, quota_warning, kb_ingest_complete, error
-  title     String
-  message   String
-  read      Boolean  @default(false)
-  data      Json     @default("{}")
-  createdAt DateTime @default(now()) @map("created_at")
-
-  @@index([userId])
-  @@map("notifications")
+enum NotificationType {
+  HANDOVER
+  QUOTA_WARNING
+  KB_INGEST_COMPLETE
+  ERROR
 }
 
-// ============================================================================
-// AUTH / USER (placeholder - to be connected to Supabase Auth)
-// ============================================================================
+model Notification {
+  id        String           @id @default(uuid())
+  profileId String           @map("profile_id")
+  type      NotificationType
+  title     String
+  message   String
+  read      Boolean          @default(false)
+  data      Json             @default("{}")
+  createdAt DateTime         @default(now()) @map("created_at")
 
-model User {
-  id        String   @id @default(uuid())
-  email     String   @unique
-  name      String?
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-
-  @@map("users")
+  @@index([profileId])
+  @@map("notifications")
 }

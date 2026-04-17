@@ -1,5 +1,6 @@
-// Next.js app layout - root layout
+// Root layout with Auth provider
 import type { Metadata } from 'next';
+import { AuthProvider } from '../contexts/AuthContext';
 
 export const metadata: Metadata = {
   title: 'AI SaaS Business Platform',
@@ -13,7 +14,9 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <AuthProvider>{children}</AuthProvider>
+      </body>
     </html>
   );
 }

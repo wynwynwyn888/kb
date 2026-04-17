@@ -1,44 +1,45 @@
 // Auth controller - handles authentication endpoints
-// POST /auth/register, POST /auth/login, POST /auth/refresh
+// GET /auth/me - returns current user info
 
-import { Controller, Post, Body, HttpCode, HttpStatus } from '@nestjs/common';
-import { ApiTags, ApiOperation } from '@nestjs/swagger';
+import { Controller, Get, Req, UseGuards, HttpCode, HttpStatus } from '@nestjs/common';
+import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
+import { Request } from 'express';
 import { AuthService } from './auth.service';
-import { LoginDto, RegisterDto } from '@aisbp/types';
+import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { CurrentUser } from './decorators/current-user.decorator';
+import type { SessionUser } from '../../lib/supabase';
 
 @ApiTags('auth')
 @Controller('auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
-  @Post('register')
-  @ApiOperation({ summary: 'Register new user and agency' })
-  async register(@Body() dto: RegisterDto) {
-    // TODO: Implement registration
-    throw new Error('Not implemented');
+  @Get('me')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get current authenticated user' })
+  async getMe(@CurrentUser() user: SessionUser) {
+    return {
+      id: user.id,
+      email: user.email,
+      profile: user.profile,
+      agencyRole: user.agencyRole,
+      tenantRole: user.tenantRole,
+      agencyId: user.agencyId,
+      tenantId: user.tenantId,
+    };
   }
 
-  @Post('login')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Login with email and password' })
-  async login(@Body() dto: LoginDto) {
-    // TODO: Implement login
-    throw new Error('Not implemented');
-  }
-
-  @Post('refresh')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Refresh access token' })
-  async refresh(@Body() { refreshToken }: { refreshToken: string }) {
-    // TODO: Implement token refresh
-    throw new Error('Not implemented');
-  }
-
-  @Post('logout')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Logout and invalidate token' })
-  async logout() {
-    // TODO: Implement logout
-    throw new Error('Not implemented');
+  @Get('agencies')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get agencies for current user' })
+  async getAgencies(@CurrentUser() user: SessionUser) {
+    // Return user's agency memberships
+    const agencyMembership = await this.authService.getAgencyMembership(user.id);
+    if (!agencyMembership) {
+      return [];
+    }
+    return [{ agencyId: agencyMembership.agencyId, role: agencyMembership.role }];
   }
 }

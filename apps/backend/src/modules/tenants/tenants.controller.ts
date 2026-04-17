@@ -1,43 +1,61 @@
 // Tenants controller
 
-import { Controller, Get, Post, Patch, Delete, Body, Param } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
+import { Controller, Get, Post, Patch, Body, Param, UseGuards, Query } from '@nestjs/common';
+import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { TenantsService } from './tenants.service';
-import { CreateTenantDto, UpdateTenantDto } from '@aisbp/types';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import type { SessionUser } from '../../../lib/supabase';
 
 @ApiTags('tenants')
 @ApiBearerAuth()
+@UseGuards(JwtAuthGuard)
 @Controller('tenants')
 export class TenantsController {
   constructor(private readonly tenantsService: TenantsService) {}
 
-  @Post()
-  async create(@Body() dto: CreateTenantDto) {
-    // TODO: Implement
-    throw new Error('Not implemented');
+  @Get('me')
+  @ApiOperation({ summary: 'Get tenants for current user' })
+  async getMyTenants(@CurrentUser() user: SessionUser) {
+    return this.tenantsService.getTenantsForUser(user.id);
   }
 
-  @Get()
-  async findAll(@Body() { agencyId }: { agencyId: string }) {
-    // TODO: Implement
-    throw new Error('Not implemented');
+  @Get('agency/:agencyId')
+  @ApiOperation({ summary: 'Get all tenants for an agency' })
+  async getAgencyTenants(
+    @Param('agencyId') agencyId: string,
+    @CurrentUser() user: SessionUser
+  ) {
+    return this.tenantsService.getTenantsByAgency(agencyId, user.id);
   }
 
   @Get(':id')
-  async findOne(@Param('id') id: string) {
-    // TODO: Implement
-    throw new Error('Not implemented');
+  @ApiOperation({ summary: 'Get tenant by ID with prompt and quota info' })
+  async findOne(@Param('id') id: string, @CurrentUser() user: SessionUser) {
+    const tenant = await this.tenantsService.getTenantById(id, user.id);
+    if (!tenant) {
+      return null;
+    }
+    return tenant;
   }
 
-  @Patch(':id')
-  async update(@Param('id') id: string, @Body() dto: UpdateTenantDto) {
-    // TODO: Implement
-    throw new Error('Not implemented');
+  @Get(':id/prompt')
+  @ApiOperation({ summary: 'Get active prompt config for tenant' })
+  async getTenantPrompt(@Param('id') id: string, @CurrentUser() user: SessionUser) {
+    const tenant = await this.tenantsService.getTenantById(id, user.id);
+    return tenant?.promptConfig || null;
   }
 
-  @Delete(':id')
-  async remove(@Param('id') id: string) {
-    // TODO: Implement
-    throw new Error('Not implemented');
+  @Get(':id/quota')
+  @ApiOperation({ summary: 'Get quota status for tenant' })
+  async getTenantQuota(@Param('id') id: string, @CurrentUser() user: SessionUser) {
+    const tenant = await this.tenantsService.getTenantById(id, user.id);
+    return tenant?.quota || null;
+  }
+
+  @Get(':id/summary')
+  @ApiOperation({ summary: 'Get tenant summary with all details' })
+  async getTenantSummary(@Param('id') id: string, @CurrentUser() user: SessionUser) {
+    return this.tenantsService.getTenantById(id, user.id);
   }
 }

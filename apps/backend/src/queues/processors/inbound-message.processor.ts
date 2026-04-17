@@ -5,7 +5,7 @@
 import { Processor, WorkerHost, OnWorkerEvent } from '@nestjs/bullmq';
 import { Job } from 'bullmq';
 import { Injectable, Logger } from '@nestjs/common';
-import { getSupabaseService } from '../../../lib/supabase';
+import { getSupabaseService } from '../../lib/supabase';
 import { QUEUES } from '../queue.constants';
 
 export interface InboundMessageJobData {
@@ -240,7 +240,7 @@ export class InboundMessageProcessor extends WorkerHost {
     };
 
     if (errorMessage) {
-      updateData.processing_error = errorMessage;
+      updateData['processing_error'] = errorMessage;
     }
 
     await this.supabase

@@ -5,7 +5,7 @@ import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { AgenciesService } from './agencies.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import type { SessionUser } from '../../../lib/supabase';
+import type { SessionUser } from '../../lib/supabase';
 
 @ApiTags('agencies')
 @ApiBearerAuth()

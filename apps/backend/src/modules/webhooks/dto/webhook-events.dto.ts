@@ -1,4 +1,4 @@
-import { WebhookProcessingStatus } from '@prisma/client';
+import { WebhookProcessingStatus } from '../../../lib/enums';
 
 export interface CreateWebhookEventDto {
   tenantId: string;

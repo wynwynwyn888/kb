@@ -4,7 +4,7 @@
 import { Injectable } from '@nestjs/common';
 import { getSupabaseService } from '../../lib/supabase';
 import type { SessionUser } from '../../lib/supabase';
-import type { AgencyRole, TenantRole } from '@prisma/client';
+import type { AgencyRole, TenantRole } from '../../lib/enums';
 
 @Injectable()
 export class AuthService {
@@ -40,7 +40,7 @@ export class AuthService {
 
       if (tenantMemberships.length > 0) {
         // User has tenant access - use highest tenant role
-        const primaryTenant = tenantMemberships[0];
+        const primaryTenant = tenantMemberships[0]!;
         tenantRole = primaryTenant.role;
         tenantId = primaryTenant.tenantId;
         agencyId = primaryTenant.agencyId;

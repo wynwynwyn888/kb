@@ -1,8 +1,8 @@
 // Agencies service - handles agency operations
 
 import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
-import { getSupabaseService } from '../../../lib/supabase';
-import type { AgencyRole } from '@prisma/client';
+import { getSupabaseService } from '../../lib/supabase';
+import type { AgencyRole } from '../../lib/enums';
 
 export interface AgencyWithRole {
   id: string;
@@ -70,14 +70,17 @@ export class AgenciesService {
 
     return data
       .filter(d => d.agencies)
-      .map(d => ({
-        id: d.agencies.id,
-        name: d.agencies.name,
-        settings: d.agencies.settings,
-        role: d.role as AgencyRole,
-        createdAt: new Date(d.agencies.created_at),
-        updatedAt: new Date(d.agencies.updated_at),
-      }));
+      .map(d => {
+        const agency = d.agencies as unknown as { id: string; name: string; settings: Record<string, unknown>; created_at: string; updated_at: string };
+        return {
+          id: agency.id,
+          name: agency.name,
+          settings: agency.settings,
+          role: d.role as AgencyRole,
+          createdAt: new Date(agency.created_at),
+          updatedAt: new Date(agency.updated_at),
+        };
+      });
   }
 
   /**

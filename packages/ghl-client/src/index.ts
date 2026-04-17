@@ -171,4 +171,4 @@ export function createGhlApiError(code: string, message: string, status: number)
 }
 
 // Export types for use in other packages
-export type { GhlClientConfig, GhlLocationInfo, GhlHealthResponse, GhlApiError };
+// (Types are already exported via their inline interface declarations above)

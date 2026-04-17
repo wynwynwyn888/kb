@@ -12,7 +12,7 @@ export class AiRouterService {
   // - Fallback handling
   // - Call actual AI provider
 
-  private router: ModelRouter;
+  private router!: ModelRouter;
 
   async route(context: RouteContext): Promise<RoutingDecision> {
     throw new Error('Not implemented');

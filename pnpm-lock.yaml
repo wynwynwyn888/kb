@@ -93,6 +93,9 @@ importers:
         specifier: ^7.8.1
         version: 7.8.2
     devDependencies:
+      '@aisbp/tsconfig':
+        specifier: workspace:*
+        version: link:../../packages/tsconfig
       '@nestjs/cli':
         specifier: ^10.3.0
         version: 10.4.9
@@ -198,6 +201,8 @@ importers:
       typescript:
         specifier: ^5.4.0
         version: 5.9.3
+
+  packages/tsconfig: {}
 
   packages/types:
     devDependencies:

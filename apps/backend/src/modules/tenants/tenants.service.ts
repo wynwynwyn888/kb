@@ -1,8 +1,8 @@
 // Tenants service - handles tenant operations with multi-tenant isolation
 
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { getSupabaseService } from '../../../lib/supabase';
-import type { TenantRole } from '@prisma/client';
+import { getSupabaseService } from '../../lib/supabase';
+import type { TenantRole } from '../../lib/enums';
 
 export interface TenantSummary {
   id: string;
@@ -168,16 +168,19 @@ export class TenantsService {
 
     return data
       .filter(d => d.tenants)
-      .map(d => ({
-        id: d.tenants.id,
-        agencyId: d.tenants.agency_id,
-        name: d.tenants.name,
-        ghlLocationId: d.tenants.ghl_location_id,
-        status: d.tenants.status,
-        settings: d.tenants.settings,
-        createdAt: new Date(d.tenants.created_at),
-        updatedAt: new Date(d.tenants.updated_at),
-      }));
+      .map(d => {
+        const tenant = d.tenants as unknown as { id: string; agency_id: string; name: string; ghl_location_id: string; status: string; settings: Record<string, unknown>; created_at: string; updated_at: string };
+        return {
+          id: tenant.id,
+          agencyId: tenant.agency_id,
+          name: tenant.name,
+          ghlLocationId: tenant.ghl_location_id,
+          status: tenant.status,
+          settings: tenant.settings,
+          createdAt: new Date(tenant.created_at),
+          updatedAt: new Date(tenant.updated_at),
+        };
+      });
   }
 
   /**

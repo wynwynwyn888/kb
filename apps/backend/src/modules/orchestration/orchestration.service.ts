@@ -9,6 +9,7 @@ import { OrchestrationGuards } from './orchestration-guards.service';
 import { ConversationMemoryLoader } from './conversation-memory-loader';
 import { AiRouterService } from '../ai-router/ai-router.service';
 import { KbService } from '../kb/kb.service';
+import { ReplyPlannerService } from '../reply-planning/reply-planner.service';
 import type {
   OrchestrationInput,
   OrchestrationResult,
@@ -30,6 +31,7 @@ export class ConversationOrchestrationService {
     private readonly memoryLoader: ConversationMemoryLoader,
     private readonly aiRouter: AiRouterService,
     private readonly kbService: KbService,
+    private readonly replyPlanner: ReplyPlannerService,
   ) {}
 
   /**
@@ -56,7 +58,7 @@ export class ConversationOrchestrationService {
         this.logger.log(
           `Orchestration skipped: outcome=${guardOutcome.final}, reason=${skipReason}`,
         );
-        const logId = await this.persistOrchestrationLog(input, guardOutcome, null, null);
+        const logId = await this.persistOrchestrationLog(input, guardOutcome, null, null, null);
         return {
           success: false,
           outcome: guardOutcome.final,
@@ -86,11 +88,29 @@ export class ConversationOrchestrationService {
       // Step 5: Call AI router placeholder
       const routing = await this.aiRouter.route(routingRequest);
 
-      // Step 6: Persist orchestration log
-      const logId = await this.persistOrchestrationLog(input, guardOutcome, routing, retrievalMeta);
+      // Step 6: Build structured reply plan
+      const replyPlan = await this.replyPlanner.planReply({
+        routing,
+        kbChunks,
+        memory: memory.entries,
+        systemPrompt,
+        conversationId,
+        channel: input.conversation?.channel ?? 'WHATSAPP',
+      });
 
       this.logger.log(
-        `Orchestration completed: conversationId=${conversationId}, model=${routing.recommendedModel}, mode=${routing.responseMode}`,
+        `Orchestration completed: conversationId=${conversationId}, model=${routing.recommendedModel}, ` +
+        `mode=${routing.responseMode}, bubbles=${replyPlan.bubbles.length}, ` +
+        `handover=${replyPlan.handoverRecommended}`,
+      );
+
+      // Step 7: Persist orchestration log
+      const logId = await this.persistOrchestrationLog(
+        input,
+        guardOutcome,
+        routing,
+        retrievalMeta,
+        replyPlan,
       );
 
       return {
@@ -100,6 +120,7 @@ export class ConversationOrchestrationService {
         webhookEventId,
         guards: guardOutcome,
         routing,
+        replyPlan,
         logId,
       };
     } catch (error) {
@@ -108,7 +129,7 @@ export class ConversationOrchestrationService {
         `Orchestration error: conversationId=${conversationId}, error=${message}`,
       );
       try {
-        const logId = await this.persistOrchestrationLog(input, { final: 'ERROR', guards: [] }, null, null);
+        const logId = await this.persistOrchestrationLog(input, { final: 'ERROR', guards: [] }, null, null, null);
         return {
           success: false,
           outcome: 'ERROR',
@@ -311,6 +332,7 @@ export class ConversationOrchestrationService {
     guardOutcome: GuardOutcome,
     routing: RoutingResponse | null,
     retrievalMeta: RetrievalMeta | null,
+    replyPlan: { planStatus: string; bubbles: unknown[]; responseMode: string; handoverRecommended: boolean; confidence: number; rationale: string; suggestedActions: Array<{ type: string; params: Record<string, unknown>; reason: string }> } | null,
   ): Promise<string | undefined> {
     const outcomeMap: Record<GuardOutcome['final'], string> = {
       PROCEED: 'PROCEED',
@@ -336,6 +358,14 @@ export class ConversationOrchestrationService {
       metadata['kbChunksConsidered'] = retrievalMeta.chunksConsidered;
       metadata['kbRetrievalMode'] = retrievalMeta.retrievalMode;
       metadata['kbTopScore'] = retrievalMeta.topScore;
+    }
+    if (replyPlan) {
+      metadata['replyPlanStatus'] = replyPlan.planStatus;
+      metadata['replyBubbleCount'] = replyPlan.bubbles.length;
+      metadata['replyResponseMode'] = replyPlan.responseMode;
+      metadata['replyHandoverRecommended'] = replyPlan.handoverRecommended;
+      metadata['replyConfidence'] = replyPlan.confidence;
+      metadata['replyRationale'] = replyPlan.rationale;
     }
 
     const logData = {

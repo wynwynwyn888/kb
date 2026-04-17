@@ -3,6 +3,7 @@
 
 import type { GuardOutcome } from './guard-result';
 import type { RoutingResponse } from './routing-response';
+import type { ReplyDecision } from '../../reply-planning/dto';
 
 // These match the Prisma OrchestrationOutcome enum
 export type OrchestrationOutcome =
@@ -23,6 +24,7 @@ export interface OrchestrationResult {
   webhookEventId?: string;
   guards: GuardOutcome;
   routing?: RoutingResponse;
+  replyPlan?: ReplyDecision;
   logId?: string;
   error?: string;
 }

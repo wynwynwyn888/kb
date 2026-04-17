@@ -199,6 +199,7 @@ Each tenant can connect their GHL subaccount using a Private Integration token. 
 | POST | `/tenants/:id/ghl/verify` | Verify existing connection |
 | GET | `/tenants/:id/ghl/health` | Health check |
 | DELETE | `/tenants/:id/ghl/connection` | Disconnect |
+| POST | `/webhooks/ghl` | Receive inbound GHL webhook events |
 
 ### Security
 
@@ -208,6 +209,63 @@ Each tenant can connect their GHL subaccount using a Private Integration token. 
 - Only masked identifiers are exposed to frontend
 - Logs are sanitized to prevent token leakage
 - GHL Private Integration tokens are static bearer tokens (no OAuth-style refresh)
+
+### Webhook Setup
+
+**Endpoint**: `POST https://kb.aisalesbot.pro/api/v1/webhooks/ghl`
+
+GHL delivers inbound message events to this endpoint. No authentication is used — identity is established via the `locationId` field in the payload, matched against registered tenant connections.
+
+**Expected Payload Shape**:
+```json
+{
+  "locationId": "abc123",
+  "event": "inbound_message",
+  "data": {
+    "conversationId": "conv-456",
+    "contactId": "contact-789",
+    "message": "Hello",
+    "messageType": "text",
+    "id": "msg-001"
+  },
+  "timestamp": "2026-04-18T10:00:00Z"
+}
+```
+
+**Dedupe Strategy**:
+- Tier 1: Use `data.id` if present (GHL's message ID)
+- Tier 2: Derive `GHL|{locationId}|{conversationId}|{event}|{timestamp}`
+- Tier 3: SHA-256 hash of sparse payload fields (last resort)
+
+**Channel Handling**: Channel is stored raw from GHL payload if present, otherwise NULL (inference deferred to future layer).
+
+**Testing Locally**:
+```bash
+# With backend running on localhost:3001
+curl -X POST http://localhost:3001/api/v1/webhooks/ghl \
+  -H "Content-Type: application/json" \
+  -d '{
+    "locationId": "test-location-123",
+    "event": "inbound_message",
+    "data": {
+      "conversationId": "conv-001",
+      "contactId": "contact-001",
+      "message": "Hello world",
+      "messageType": "text",
+      "id": "test-msg-001"
+    },
+    "timestamp": "2026-04-18T10:00:00Z"
+  }'
+```
+
+**What Happens**:
+1. Webhook acknowledged (200 OK) immediately
+2. Event persisted to `webhook_events` table with status `RECEIVED`
+3. Job enqueued to `inbound-message-processor` queue
+4. Worker picks up job: finds tenant by `locationId`, upserts conversation, stores message
+5. `webhook_events.processing_status` updated to `COMPLETED` or `FAILED`
+
+**Signature Verification**: Currently a placeholder — always returns `valid: true`. The TODO is logged for later implementation when key management is in place.
 
 ### TODO (for GHL)
 

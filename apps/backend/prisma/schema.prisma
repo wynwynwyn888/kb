@@ -101,6 +101,7 @@ model Tenant {
   quotaWallet    QuotaWallet?
   actionLogs     ActionLog[]
   auditLogs      AuditLog[]
+  webhookEvents  WebhookEvent[]
 
   @@unique([ghlLocationId])
   @@index([agencyId])
@@ -530,6 +531,45 @@ enum NotificationType {
   QUOTA_WARNING
   KB_INGEST_COMPLETE
   ERROR
+}
+
+// ============================================================================
+// WEBHOOK EVENTS
+// ============================================================================
+
+enum WebhookProvider {
+  GHL
+}
+
+enum WebhookProcessingStatus {
+  RECEIVED
+  PROCESSING
+  COMPLETED
+  FAILED
+  DUPLICATE
+}
+
+model WebhookEvent {
+  id                    String                   @id @default(uuid())
+  tenantId              String                   @map("tenant_id")
+  externalEventId       String                   @map("external_event_id")
+  dedupeKey             String                   @map("dedupe_key")
+  provider              WebhookProvider         @default(GHL)
+  eventType             String                   @map("event_type")
+  rawPayloadJson        Json                     @map("raw_payload_json")
+  normalizedPayloadJson Json?                    @map("normalized_payload_json")
+  processingStatus      WebhookProcessingStatus @default(RECEIVED) @map("processing_status")
+  processingError       String?                  @map("processing_error")
+  receivedAt            DateTime                 @default(now()) @map("received_at")
+  processedAt           DateTime?                @map("processed_at")
+  createdAt             DateTime                 @default(now()) @map("created_at")
+
+  tenant                Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, externalEventId])
+  @@index([tenantId])
+  @@index([processingStatus])
+  @@map("webhook_events")
 }
 
 model Notification {

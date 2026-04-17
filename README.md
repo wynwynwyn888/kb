@@ -4,6 +4,8 @@
 
 Multi-tenant white-label SaaS platform that sits between GoHighLevel (GHL) and AI models. Acts as an AI conversation middleware for agency use.
 
+**Production Domain**: `https://kb.aisalesbot.pro`
+
 ## Tech Stack
 
 - **Frontend**: Next.js 14+ (App Router)
@@ -54,9 +56,6 @@ docker run -d --name supabase-studio \
   -e SUPABASE_KEY=your-anon-key \
   -p 3001:3000 \
   supabase/studio:latest
-
-# Get anon key from local config
-docker exec supabase-db psql -U postgres -c "SELECT anon_key FROM auth.users LIMIT 1" 2>/dev/null || echo "Configure Supabase properly"
 ```
 
 **Option B: Remote Supabase**
@@ -109,6 +108,31 @@ pnpm dev
 - Frontend: http://localhost:3000
 - Backend API: http://localhost:3001/api/v1
 - Swagger Docs: http://localhost:3001/docs (when backend running)
+
+## Production Deployment
+
+### Domain Configuration
+
+- **App URL**: `https://kb.aisalesbot.pro`
+- **Backend API**: `https://kb.aisalesbot.pro/api/v1`
+- **Supabase**: Use your Supabase project URL (configured in dashboard)
+
+### Environment Variables for Production
+
+**Backend (.env)**
+```
+NODE_ENV=production
+CORS_ORIGIN=https://kb.aisalesbot.pro
+SUPABASE_URL=https://your-project.supabase.co
+GHL_REDIRECT_URI=https://kb.aisalesbot.pro/api/v1/ghl/oauth/callback
+```
+
+**Frontend (.env.local)**
+```
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_API_URL=https://kb.aisalesbot.pro/api/v1
+NEXT_PUBLIC_APP_URL=https://kb.aisalesbot.pro
+```
 
 ## Demo Credentials
 

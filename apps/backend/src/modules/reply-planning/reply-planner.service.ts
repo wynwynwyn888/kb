@@ -1,8 +1,8 @@
-// Reply Planner Service — produces structured ReplyDecision from orchestration context
-// Deterministic placeholder: combines prompt + KB context + memory into structured bubbles.
-// Live LLM integration slots in via the AI provider interface in the future.
+// Reply Planner Service — produces structured ReplyDecision from orchestration context.
+// Uses live LLM generation when a provider is configured; falls back to deterministic drafting.
 
 import { Injectable, Logger } from '@nestjs/common';
+import { GenerationService } from '../generation/generation.service';
 import type {
   ReplyDecision,
   ReplyPlanStatus,
@@ -19,19 +19,18 @@ const MAX_BUBBLE_CHARS = 320; // WhatsApp soft limit per bubble
 export class ReplyPlannerService {
   private readonly logger = new Logger(ReplyPlannerService.name);
 
+  constructor(private readonly generationService: GenerationService) {}
+
   /**
    * Build a ReplyDecision from orchestration context.
    *
    * Strategy:
-   * - If routing says handoverRecommended=true → HANDOVER plan, no bubbles
-   * - If routing responseMode=handover → HANDOVER plan
-   * - Otherwise build a deterministic placeholder reply (KB+prompt+memory based)
-   *   and format it into bubbles.
-   *
-   * TODO: When live LLM is wired, replace the placeholder generation block
-   * with a call to AI provider generate(), passing full context + system prompt.
+   * - If handover → HANDOVER plan, no bubbles
+   * - Otherwise attempt live generation via GenerationService
+   * - Fall back to deterministic drafting if generation is unavailable or fails
    */
   async planReply(params: {
+    tenantId: string;
     routing: RoutingResponse;
     kbChunks: RetrievalChunk[];
     memory: MemoryEntry[];
@@ -39,7 +38,7 @@ export class ReplyPlannerService {
     conversationId: string;
     channel: string;
   }): Promise<ReplyDecision> {
-    const { routing, kbChunks, memory, systemPrompt, conversationId, channel } = params;
+    const { tenantId, routing, kbChunks, memory, systemPrompt, conversationId } = params;
 
     this.logger.debug(
       `Reply planning started: conversation=${conversationId}, mode=${routing.responseMode}`,
@@ -54,13 +53,8 @@ export class ReplyPlannerService {
       return plan;
     }
 
-    // ---------- Build placeholder draft ----------
-    const draftText = this.buildPlaceholderDraft(
-      routing,
-      kbChunks,
-      memory,
-      systemPrompt,
-    );
+    // ---------- Live generation or fallback ----------
+    const draftText = await this.buildDraft(tenantId, routing, kbChunks, memory, systemPrompt);
 
     // ---------- Format into bubbles ----------
     const bubbles = this.formatIntoBubbles(draftText);
@@ -108,27 +102,46 @@ export class ReplyPlannerService {
   }
 
   /**
-   * Deterministic placeholder draft builder.
-   * Constructs a structured reply from KB chunks + memory + system prompt direction.
-   * Replace this block with a real LLM call in the future:
-   *   const llmReply = await aiProvider.generate({ messages: [...], systemPrompt });
+   * Build a draft: try live generation first, fall back to deterministic placeholder.
+   */
+  private async buildDraft(
+    tenantId: string,
+    routing: RoutingResponse,
+    kbChunks: RetrievalChunk[],
+    memory: MemoryEntry[],
+    systemPrompt: string,
+  ): Promise<string> {
+    // Try live generation
+    const liveDraft = await this.generationService.generateDraft({
+      tenantId,
+      incomingMessage: '', // not needed — memory + kb already in context
+      systemPrompt,
+      memory,
+      kbContext: kbChunks,
+      model: routing.recommendedModel,
+    });
+
+    if (liveDraft && liveDraft.trim()) {
+      this.logger.log(`Live draft generated: ${liveDraft.length} chars`);
+      return liveDraft;
+    }
+
+    // Deterministic fallback
+    return this.buildPlaceholderDraft(routing, kbChunks, memory);
+  }
+
+  /**
+   * Deterministic fallback: KB-first, then mode-based ack, then memory, then generic.
    */
   private buildPlaceholderDraft(
     routing: RoutingResponse,
     kbChunks: RetrievalChunk[],
     memory: MemoryEntry[],
-    systemPrompt: string,
   ): string {
-    // If routing already has a draftReply, use it as-is
-    if (routing.draftReply && routing.draftReply.trim()) {
-      return routing.draftReply;
-    }
-
     // Build from KB context
     if (kbChunks.length > 0) {
       const top = kbChunks[0]!;
       const sourceLabel = top.title || top.source || 'Knowledge base';
-      // Deterministic: grab first chunk content, clamp to ~240 chars
       const snippet = top.content.slice(0, 240).trim();
       return `${snippet}${snippet.length === top.content.length ? '' : '...'}\n\n(Source: ${sourceLabel})`;
     }

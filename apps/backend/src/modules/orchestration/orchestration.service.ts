@@ -90,6 +90,7 @@ export class ConversationOrchestrationService {
 
       // Step 6: Build structured reply plan
       const replyPlan = await this.replyPlanner.planReply({
+        tenantId: input.tenantId,
         routing,
         kbChunks,
         memory: memory.entries,

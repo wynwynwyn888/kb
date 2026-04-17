@@ -102,6 +102,7 @@ model Tenant {
   conversations  Conversation[]
   quotaWallet    QuotaWallet?
   actionLogs     ActionLog[]
+  actionIntents  ActionIntent[]
   auditLogs      AuditLog[]
   webhookEvents  WebhookEvent[]
   orchestrationLogs OrchestrationLog[]
@@ -346,6 +347,7 @@ model Conversation {
   messages   Message[]
   handovers  HandoverEvent[]
   actionLogs ActionLog[]
+  actionIntents ActionIntent[]
 
   @@unique([ghlConversationId])
   @@index([tenantId])
@@ -482,6 +484,15 @@ enum ActionStatus {
   FAILED
 }
 
+enum ActionIntentStatus {
+  SUGGESTED
+  ALLOWED
+  DEFERRED
+  BLOCKED
+  EXECUTED
+  FAILED
+}
+
 model ActionLog {
   id             String       @id @default(uuid())
   tenantId       String       @map("tenant_id")
@@ -498,6 +509,28 @@ model ActionLog {
 
   @@index([tenantId])
   @@map("action_logs")
+}
+
+model ActionIntent {
+  id             String             @id @default(uuid())
+  tenantId       String             @map("tenant_id")
+  conversationId String?            @map("conversation_id")
+  actionType     ActionType         @map("action_type")
+  source         String             @default("AI")       @map("source")
+  status         ActionIntentStatus @default(SUGGESTED) @map("status")
+  params         Json               @default("{}")
+  reason         String?
+  gatingNote     String?            @map("gating_note")
+  executedAt     DateTime?          @map("executed_at")
+  createdAt      DateTime           @default(now()) @map("created_at")
+
+  tenant      Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([conversationId])
+  @@index([status])
+  @@map("action_intents")
 }
 
 // ============================================================================

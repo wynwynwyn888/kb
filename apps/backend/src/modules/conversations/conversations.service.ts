@@ -1,42 +1,116 @@
 // Conversations service - manages conversation state and messages
 
-import { Injectable } from '@nestjs/common';
-import { InjectQueue } from '@nestjs/bullmq';
-import { Queue } from 'bullmq';
+import { Injectable, Logger } from '@nestjs/common';
+import { getSupabaseService } from '../../lib/supabase';
 
 @Injectable()
 export class ConversationsService {
-  constructor(
-    @InjectQueue('send-bubble') private readonly sendQueue: Queue,
-  ) {}
+  private readonly logger = new Logger(ConversationsService.name);
+  private readonly supabase = getSupabaseService();
 
-  // TODO: Implement conversation management
-  // - Create/get conversation by GHL conversation ID
-  // - Store messages with sender, direction, metadata
-  // - Maintain conversation memory (last 10 turns)
-  // - Session reset after 24 hours of inactivity
-  // - Enqueue send-bubble job on outbound
+  /**
+   * Pause a conversation for human handover.
+   * Creates a HandoverEvent (status=ACTIVE) and updates Conversation.status = HANDOVER.
+   */
+  async pauseForHandover(
+    conversationId: string,
+    type: 'REQUEST' | 'TRANSFER',
+    initiatedBy: string,
+    note?: string,
+  ): Promise<string> {
+    // Insert handover event
+    const { data: event, error: eventError } = await this.supabase
+      .from('handover_events')
+      .insert({
+        conversation_id: conversationId,
+        type,
+        status: 'ACTIVE',
+        initiated_by: initiatedBy,
+        note: note ?? null,
+      })
+      .select('id')
+      .single();
 
-  async getOrCreateConversation(tenantId: string, ghlConversationId: string) {
-    throw new Error('Not implemented');
+    if (eventError || !event) {
+      throw new Error(`Failed to create handover event: ${eventError?.message}`);
+    }
+
+    // Update conversation status
+    await this.updateConversationStatus(conversationId, 'HANDOVER');
+
+    this.logger.log(
+      `Handover created: handoverEventId=${event.id}, conversationId=${conversationId}, ` +
+      `type=${type}, initiatedBy=${initiatedBy}`,
+    );
+
+    return event.id;
   }
 
-  async addMessage(conversationId: string, message: {
-    direction: string;
-    sender: string;
-    content: string;
-    contentType?: string;
-    metadata?: Record<string, unknown>;
-  }) {
-    throw new Error('Not implemented');
+  /**
+   * Resume a conversation from handover.
+   * Updates HandoverEvent to RESUMED + sets resumedAt; restores Conversation.status = ACTIVE.
+   */
+  async resumeFromHandover(conversationId: string): Promise<void> {
+    // Find active handover event
+    const { data: active, error: findError } = await this.supabase
+      .from('handover_events')
+      .select('id')
+      .eq('conversation_id', conversationId)
+      .eq('status', 'ACTIVE')
+      .single();
+
+    if (findError && findError.code !== 'PGRST116') {
+      throw new Error(`Failed to find active handover: ${findError.message}`);
+    }
+
+    if (active) {
+      const { error: updateError } = await this.supabase
+        .from('handover_events')
+        .update({ status: 'RESUMED', resumed_at: new Date().toISOString() })
+        .eq('id', active.id);
+
+      if (updateError) {
+        throw new Error(`Failed to resume handover: ${updateError.message}`);
+      }
+    }
+
+    await this.updateConversationStatus(conversationId, 'ACTIVE');
+
+    this.logger.log(`Handover resumed: conversationId=${conversationId}`);
   }
 
-  async getRecentMessages(conversationId: string, limit: number = 10) {
-    throw new Error('Not implemented');
+  /**
+   * Get the active handover event for a conversation, if any.
+   */
+  async getActiveHandover(conversationId: string): Promise<{ id: string } | null> {
+    const { data, error } = await this.supabase
+      .from('handover_events')
+      .select('id')
+      .eq('conversation_id', conversationId)
+      .eq('status', 'ACTIVE')
+      .single();
+
+    if (error && error.code !== 'PGRST116') {
+      throw new Error(`Failed to query active handover: ${error.message}`);
+    }
+
+    return data ?? null;
   }
 
-  async shouldResetSession(conversationId: string): Promise<boolean> {
-    // Check if last message was > 24 hours ago
-    throw new Error('Not implemented');
+  /**
+   * Update a conversation's status.
+   */
+  async updateConversationStatus(
+    conversationId: string,
+    status: 'ACTIVE' | 'HANDOVER' | 'CLOSED' | 'PENDING',
+  ): Promise<void> {
+    const { error } = await this.supabase
+      .from('conversations')
+      .update({ status })
+      .eq('id', conversationId);
+
+    if (error) {
+      throw new Error(`Failed to update conversation status: ${error.message}`);
+    }
   }
 }

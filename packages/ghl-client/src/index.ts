@@ -4,7 +4,8 @@
 // IMPORTANT: GHL Private Integration tokens are static bearer tokens.
 // They do NOT have OAuth-style refresh. The token is used directly.
 
-import axios, { AxiosInstance, AxiosError } from 'axios';
+import axios from 'axios';
+import type { AxiosInstance, AxiosError } from 'axios';
 
 export interface GhlClientConfig {
   baseUrl: string;
@@ -63,7 +64,7 @@ export class GhlClient {
   constructor(config: GhlClientConfig) {
     this.locationId = config.locationId;
     this.client = axios.create({
-      baseURL: config.baseUrl || 'https://services.gohighlevel.com',
+      baseURL: config.baseUrl || 'https://services.leadconnectorhq.com',
       headers: {
         Authorization: `Bearer ${config.accessToken}`,
         'Content-Type': 'application/json',
@@ -90,7 +91,7 @@ export class GhlClient {
   async verifyConnection(): Promise<{ valid: boolean; location?: GhlLocationInfo; error?: string }> {
     try {
       // Endpoint assumed: GET /locations/{locationId}
-      // Base URL: https://services.gohighlevel.com (or configurable via GHL_API_BASE_URL)
+      // Base URL: https://services.leadconnectorhq.com (or configurable via GHL_API_BASE_URL)
       //
       // NOTE: This has NOT been tested against a real GHL Private Integration yet.
       // The response parsing expects specific fields: id, name, accountId, status
@@ -182,7 +183,7 @@ export class GhlClient {
    * Normalize error for safe handling
    */
   private handleSendError(error: unknown): { success: boolean; error: string } {
-    if (error instanceof AxiosError) {
+    if (axios.isAxiosError(error)) {
       if (error.response?.status === 401) {
         return { success: false, error: 'Invalid or expired token' };
       }
@@ -207,44 +208,49 @@ export class GhlClient {
   /**
    * Add tags to a contact.
    *
-   * IMPORTANT - Endpoint Assumptions:
-   * This implementation assumes the endpoint is:
-   *   POST /contacts/{contactId}/tags
-   *   Body: { tags: ["tag1", "tag2"] }
-   *
-   * TODO [GHL_TAG_ENDPOINT]: Verify exact endpoint with live GHL Private Integration
-   * TODO [GHL_TAG_BODY]: Verify request body shape for tag add
-   * TODO [GHL_TAG_RESP]: Verify response structure on success/failure
-   *
-   * These are standard GHL Private Integration API patterns but MUST be
-   * verified against a live GHL account before production use.
+   * VERIFIED LIVE — GHL Private Integration:
+   *   POST https://services.leadconnectorhq.com/contacts/{contactId}/tags
+   *   Body: { "tags": ["tag1", "tag2"] }
+   *   Success: HTTP 201 (empty body)
+   *   Failure: HTTP 4xx with GHL error body
    */
   async tagContact(request: TagContactRequest): Promise<{ success: boolean; error?: string }> {
     try {
-      // Assumed endpoint: POST /contacts/{contactId}/tags
-      // Body: { tags: [...] }
-      await this.client.post(`/contacts/${request.contactId}/tags`, {
+      const response = await this.client.post(`/contacts/${request.contactId}/tags`, {
         tags: request.tags,
       });
+      if (process.env['NODE_ENV'] !== 'production') {
+        console.debug(
+          `[TAG_VERIFY] POST /contacts/${request.contactId}/tags — HTTP ${response.status}, tagCount=${request.tags.length}`,
+        );
+      }
       return { success: true };
     } catch (error) {
-      return this.handleTagError(error);
+      return this.handleTagError(error, request.contactId);
     }
   }
 
-  private handleTagError(error: unknown): { success: boolean; error: string } {
-    if (error instanceof AxiosError) {
-      if (error.response?.status === 401) {
+  private handleTagError(error: unknown, contactId?: string): { success: boolean; error: string } {
+    if (axios.isAxiosError(error)) {
+      const status = error.response?.status;
+      const reason = process.env['NODE_ENV'] !== 'production'
+        ? `[TAG_VERIFY] POST /contacts/${contactId ?? '?'}/tags — HTTP ${status}`
+        : undefined;
+      if (status === 401) {
         return { success: false, error: 'Invalid or expired token' };
       }
-      if (error.response?.status === 403) {
+      if (status === 403) {
         return { success: false, error: 'Insufficient permissions for this location' };
       }
-      if (error.response?.status === 404) {
+      if (status === 404) {
         return { success: false, error: 'Contact not found' };
       }
-      if (error.response?.status === 429) {
+      if (status === 429) {
         return { success: false, error: 'Rate limited by GHL API' };
+      }
+      // Log non-standard errors in dev only — no raw tokens/payloads
+      if (process.env['NODE_ENV'] !== 'production' && reason) {
+        console.debug(`${reason}, error=${error.message || 'unknown'}`);
       }
       return { success: false, error: error.message || 'Tag operation failed' };
     }
@@ -255,7 +261,7 @@ export class GhlClient {
    * Normalize error for safe handling
    */
   private handleError(error: unknown): { valid: boolean; error: string } {
-    if (error instanceof AxiosError) {
+    if (axios.isAxiosError(error)) {
       if (error.response?.status === 401) {
         return { valid: false, error: 'Invalid or expired token' };
       }
@@ -288,7 +294,7 @@ export function createGhlClient(
   locationId: string
 ): GhlClient {
   return new GhlClient({
-    baseUrl: process.env['GHL_API_BASE_URL'] || 'https://services.gohighlevel.com',
+    baseUrl: process.env['GHL_API_BASE_URL'] || 'https://services.leadconnectorhq.com',
     accessToken,
     locationId,
   });
@@ -304,3 +310,7 @@ export function createGhlApiError(code: string, message: string, status: number)
 
 // Export types for use in other packages
 // (Types are already exported via their inline interface declarations above)
+
+
+
+

@@ -84,6 +84,9 @@ export class ActionIntentExecutorService {
       const tags = params.tags ?? [];
 
       // Execute GHL tag call
+      if (process.env['NODE_ENV'] !== 'production') {
+        this.logger.debug(`[TAG_VERIFY] Calling: intentId=${intent.id}, contactId=${contactId}, tagCount=${tags.length}, endpoint=/contacts/${contactId}/tags`);
+      }
       const ghlClient = createGhlClient(credentials.token, ghlLocationId);
       const ghlResult = await ghlClient.tagContact({ contactId, tags });
 
@@ -100,7 +103,6 @@ export class ActionIntentExecutorService {
       } else {
         await this.updateIntentStatus(intent.id, 'FAILED', ghlResult.error);
         results.push({ id: intent.id, status: 'FAILED', errorNote: ghlResult.error });
-        // Log without raw tokens — error message is safe
         this.logger.warn(`Tag intent ${intent.id} FAILED: ${ghlResult.error}`);
       }
     }

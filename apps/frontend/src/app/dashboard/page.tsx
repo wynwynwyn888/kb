@@ -63,7 +63,7 @@ export default function DashboardPage() {
       setLoading(true);
       const data = await api.getTenantsByAgency(token, user.agencyId);
       setTenants(data);
-      if (data.length > 0) {
+      if (data.length > 0 && data[0]) {
         loadTenantDetail(data[0].id);
       }
     } catch (err) {

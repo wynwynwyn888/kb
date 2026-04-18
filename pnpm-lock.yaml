@@ -129,6 +129,9 @@ importers:
 
   apps/frontend:
     dependencies:
+      '@aisbp/tsconfig':
+        specifier: workspace:*
+        version: link:../../packages/tsconfig
       '@aisbp/types':
         specifier: workspace:*
         version: link:../../packages/types

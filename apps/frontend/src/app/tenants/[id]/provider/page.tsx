@@ -15,7 +15,7 @@ interface AgencyAiConfig {
 
 export default function TenantProviderPage() {
   const params = useParams();
-  const tenantId = params.id as string;
+  const tenantId = params['id'] as string;
   const { token, loading: authLoading, user } = useAuth();
   const router = useRouter();
 

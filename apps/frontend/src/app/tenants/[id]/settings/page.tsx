@@ -7,7 +7,7 @@ import { getGhlConnection, saveGhlConnection, verifyGhlConnection, checkGhlHealt
 
 export default function TenantSettingsPage() {
   const params = useParams();
-  const tenantId = params.id as string;
+  const tenantId = params['id'] as string;
   const { token, loading: authLoading } = useAuth();
   const router = useRouter();
 
@@ -180,7 +180,7 @@ export default function TenantSettingsPage() {
             <p style={{ margin: '0.25rem 0' }}><strong>Last Health Check:</strong> {connection.lastHealthCheckAt ? new Date(connection.lastHealthCheckAt).toLocaleString() : 'Never'}</p>
             {connection.metadata && Object.keys(connection.metadata).length > 0 && (
               <p style={{ margin: '0.25rem 0' }}>
-                <strong>Location Name:</strong> {connection.metadata.locationName || 'N/A'}
+                <strong>Location Name:</strong> {(connection.metadata?.['locationName'] as string) || 'N/A'}
               </p>
             )}
           </div>

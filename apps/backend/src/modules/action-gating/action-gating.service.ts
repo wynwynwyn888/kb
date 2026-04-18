@@ -12,6 +12,20 @@ export interface GatingResult {
   note: string;
 }
 
+export interface ActionIntentRow {
+  id: string;
+  tenantId: string;
+  conversationId: string | null;
+  actionType: string;
+  source: string;
+  status: ActionIntentStatus;
+  params: Record<string, unknown>;
+  reason: string | null;
+  gatingNote: string | null;
+  executedAt: string | null;
+  createdAt: string;
+}
+
 @Injectable()
 export class ActionGatingService {
   private readonly logger = new Logger(ActionGatingService.name);
@@ -27,11 +41,18 @@ export class ActionGatingService {
     tenantId: string,
     conversationId: string,
     source: string = 'AI',
+    contactId?: string,
   ): Promise<GatingResult[]> {
     const results: GatingResult[] = [];
 
     for (const action of suggestedActions) {
       const result = this.gateAction(action);
+
+      // Store contactId in params if provided (used by tag executor)
+      const params: Record<string, unknown> = { ...action.params };
+      if (contactId) {
+        params['contactId'] = contactId;
+      }
 
       await this.persistIntent({
         tenantId,
@@ -39,7 +60,7 @@ export class ActionGatingService {
         actionType: action.type,
         source,
         status: result.status,
-        params: action.params,
+        params,
         reason: action.reason,
         gatingNote: result.note,
       });
@@ -105,5 +126,96 @@ export class ActionGatingService {
         `actionType=${params.actionType}, error=${error.message}`,
       );
     }
+  }
+
+  /**
+   * Load DEFERRED intents for a conversation, optionally filtered by actionType.
+   */
+  async loadDeferredIntents(
+    conversationId: string,
+    actionType?: string,
+  ): Promise<ActionIntentRow[]> {
+    let query = this.supabase
+      .from('action_intents')
+      .select('id, tenant_id, conversation_id, action_type, source, status, params, reason, gating_note, executed_at, created_at')
+      .eq('conversation_id', conversationId)
+      .eq('status', 'DEFERRED');
+
+    if (actionType) {
+      query = query.eq('action_type', actionType);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      this.logger.error(`Failed to load deferred intents: ${error.message}`);
+      return [];
+    }
+
+    return (data ?? []).map(row => ({
+      id: row.id,
+      tenantId: row.tenant_id,
+      conversationId: row.conversation_id,
+      actionType: row.action_type,
+      source: row.source,
+      status: row.status as ActionIntentStatus,
+      params: (row.params as Record<string, unknown>) ?? {},
+      reason: row.reason ?? null,
+      gatingNote: row.gating_note ?? null,
+      executedAt: row.executed_at ?? null,
+      createdAt: row.created_at,
+    }));
+  }
+
+  /**
+   * Update intent status and metadata.
+   */
+  async updateIntentStatus(
+    id: string,
+    status: ActionIntentStatus,
+    errorNote?: string,
+  ): Promise<void> {
+    const update: Record<string, unknown> = { status };
+    if (status === 'EXECUTED') {
+      update['executed_at'] = new Date().toISOString();
+    }
+    if (errorNote) {
+      update['reason'] = errorNote;
+    }
+    await this.supabase.from('action_intents').update(update).eq('id', id);
+  }
+
+  /**
+   * Get all intent history for a conversation (for ops visibility).
+   */
+  async getActionIntentHistory(
+    tenantId: string,
+    conversationId: string,
+  ): Promise<ActionIntentRow[]> {
+    const { data, error } = await this.supabase
+      .from('action_intents')
+      .select('id, tenant_id, conversation_id, action_type, source, status, params, reason, gating_note, executed_at, created_at')
+      .eq('tenant_id', tenantId)
+      .eq('conversation_id', conversationId)
+      .order('created_at', { ascending: true });
+
+    if (error) {
+      this.logger.error(`Failed to load action intent history: ${error.message}`);
+      return [];
+    }
+
+    return (data ?? []).map(row => ({
+      id: row.id,
+      tenantId: row.tenant_id,
+      conversationId: row.conversation_id,
+      actionType: row.action_type,
+      source: row.source,
+      status: row.status as ActionIntentStatus,
+      params: (row.params as Record<string, unknown>) ?? {},
+      reason: row.reason ?? null,
+      gatingNote: row.gating_note ?? null,
+      executedAt: row.executed_at ?? null,
+      createdAt: row.created_at,
+    }));
   }
 }

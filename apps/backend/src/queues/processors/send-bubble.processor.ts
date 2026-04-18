@@ -8,6 +8,7 @@ import { QUEUES } from '../queue.constants';
 import { OutboundSendService, SendSummary } from '../../modules/outbound/outbound-send.service';
 import { ConversationsService } from '../../modules/conversations/conversations.service';
 import { ActionGatingService } from '../../modules/action-gating/action-gating.service';
+import { ActionIntentExecutorService } from '../../modules/action-execution/action-intent-executor.service';
 
 export interface SendBubbleJobData {
   conversationId: string;
@@ -26,6 +27,7 @@ export class SendBubbleProcessor extends WorkerHost {
     private readonly outboundSend: OutboundSendService,
     private readonly conversationsService: ConversationsService,
     private readonly actionGatingService: ActionGatingService,
+    private readonly actionExecutor: ActionIntentExecutorService,
   ) {
     super();
   }
@@ -79,12 +81,30 @@ export class SendBubbleProcessor extends WorkerHost {
         replyPlan.suggestedActions,
         tenantId,
         conversationId,
+        undefined, // contactId — stored in job data, passed to executor below
       );
       for (const r of gatingResults) {
         this.logger.log(
           `Action gated: type=${r.actionType}, status=${r.status}, note=${r.note}`,
         );
       }
+    }
+
+    // Step 4: Execute deferred TAG_CONTACT intents only on successful outbound send
+    if (this.actionExecutor.shouldExecute({ succeeded: summary.succeeded, planStatus: replyPlan.planStatus }, contactId)) {
+      const tagResults = await this.actionExecutor.executeDeferredTagActions(
+        tenantId,
+        conversationId,
+        contactId,
+        ghlLocationId,
+      );
+      for (const r of tagResults) {
+        this.logger.log(`Tag intent executed: id=${r.id}, status=${r.status}`);
+      }
+    } else {
+      this.logger.debug(
+        `Tag execution skipped: planStatus=${replyPlan.planStatus}, succeeded=${summary.succeeded}, contactId=${contactId ?? 'missing'}`,
+      );
     }
 
     this.logger.log(

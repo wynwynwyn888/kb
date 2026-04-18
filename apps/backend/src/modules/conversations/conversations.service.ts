@@ -106,6 +106,22 @@ export class ConversationsService {
   }
 
   /**
+   * Get the contactId for a conversation.
+   */
+  async getContactId(conversationId: string): Promise<string | null> {
+    const { data, error } = await this.supabase
+      .from('conversations')
+      .select('contact_id')
+      .eq('id', conversationId)
+      .single();
+
+    if (error || !data) {
+      return null;
+    }
+    return data['contact_id'] ?? null;
+  }
+
+  /**
    * Update a conversation's status.
    */
   async updateConversationStatus(

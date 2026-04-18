@@ -4,6 +4,7 @@ import { OutboundSendService } from '../modules/outbound/outbound-send.service';
 import { SendBubbleProcessor } from '../queues/processors/send-bubble.processor';
 import { ConversationsService } from '../modules/conversations/conversations.service';
 import { ActionGatingService } from '../modules/action-gating/action-gating.service';
+import { ActionIntentExecutorService } from '../modules/action-execution/action-intent-executor.service';
 import { createMockSupabase } from '../test/mock-supabase';
 
 const mockSupabase = createMockSupabase();
@@ -39,6 +40,7 @@ describe('Handover Active → No Outbound Reply', () => {
   let outboundService: OutboundSendService;
   let conversationsService: ConversationsService;
   let actionGatingService: ActionGatingService;
+  let actionExecutor: ActionIntentExecutorService;
   let sendBubbleProcessor: SendBubbleProcessor;
 
   beforeEach(() => {
@@ -46,10 +48,12 @@ describe('Handover Active → No Outbound Reply', () => {
     outboundService = new OutboundSendService();
     conversationsService = new ConversationsService();
     actionGatingService = new ActionGatingService();
+    actionExecutor = new ActionIntentExecutorService();
     sendBubbleProcessor = new SendBubbleProcessor(
       outboundService,
       conversationsService,
       actionGatingService,
+      actionExecutor,
     );
   });
 

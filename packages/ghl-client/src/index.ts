@@ -49,6 +49,12 @@ export interface GhlSendMessageResponse {
   timestamp: string;
 }
 
+// Contact tagging types
+export interface TagContactRequest {
+  contactId: string;
+  tags: string[];
+}
+
 // GHL Client class for connection verification and outbound messaging
 export class GhlClient {
   private client: AxiosInstance;
@@ -192,6 +198,57 @@ export class GhlClient {
       return { success: false, error: error.message || 'Send failed' };
     }
     return { success: false, error: 'Unknown error during send' };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Contact tagging
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Add tags to a contact.
+   *
+   * IMPORTANT - Endpoint Assumptions:
+   * This implementation assumes the endpoint is:
+   *   POST /contacts/{contactId}/tags
+   *   Body: { tags: ["tag1", "tag2"] }
+   *
+   * TODO [GHL_TAG_ENDPOINT]: Verify exact endpoint with live GHL Private Integration
+   * TODO [GHL_TAG_BODY]: Verify request body shape for tag add
+   * TODO [GHL_TAG_RESP]: Verify response structure on success/failure
+   *
+   * These are standard GHL Private Integration API patterns but MUST be
+   * verified against a live GHL account before production use.
+   */
+  async tagContact(request: TagContactRequest): Promise<{ success: boolean; error?: string }> {
+    try {
+      // Assumed endpoint: POST /contacts/{contactId}/tags
+      // Body: { tags: [...] }
+      await this.client.post(`/contacts/${request.contactId}/tags`, {
+        tags: request.tags,
+      });
+      return { success: true };
+    } catch (error) {
+      return this.handleTagError(error);
+    }
+  }
+
+  private handleTagError(error: unknown): { success: boolean; error: string } {
+    if (error instanceof AxiosError) {
+      if (error.response?.status === 401) {
+        return { success: false, error: 'Invalid or expired token' };
+      }
+      if (error.response?.status === 403) {
+        return { success: false, error: 'Insufficient permissions for this location' };
+      }
+      if (error.response?.status === 404) {
+        return { success: false, error: 'Contact not found' };
+      }
+      if (error.response?.status === 429) {
+        return { success: false, error: 'Rate limited by GHL API' };
+      }
+      return { success: false, error: error.message || 'Tag operation failed' };
+    }
+    return { success: false, error: 'Unknown error during tag operation' };
   }
 
   /**

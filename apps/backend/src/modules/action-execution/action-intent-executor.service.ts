@@ -171,6 +171,9 @@ export class ActionIntentExecutorService {
       const effectiveContactId = params.contactId ?? contactId;
 
       // Execute GHL booking call
+      if (process.env['NODE_ENV'] !== 'production') {
+        this.logger.debug(`[BOOK_VERIFY] Calling: intentId=${intent.id}, calendarId=${params.calendarId}, contactId=${effectiveContactId}, slot=${params.startTime} -> ${params.endTime}`);
+      }
       const ghlClient = createGhlClient(credentials.token, ghlLocationId);
       const ghlResult = await ghlClient.bookSlot({
         calendarId: params.calendarId,
@@ -186,6 +189,9 @@ export class ActionIntentExecutorService {
         const updated = await this.updateIntentStatusAtomic(intent.id, 'EXECUTED');
         if (updated) {
           results.push({ id: intent.id, status: 'EXECUTED', executedAt: new Date().toISOString() });
+          if (process.env['NODE_ENV'] !== 'production') {
+            this.logger.debug(`[BOOK_VERIFY] EXECUTED: intentId=${intent.id}, appointmentId=${ghlResult.appointmentId}`);
+          }
           this.logger.log(`Book intent ${intent.id} EXECUTED: appointmentId=${ghlResult.appointmentId}`);
         } else {
           this.logger.debug(`Book intent ${intent.id} already handled by concurrent retry — skipping`);
@@ -193,6 +199,9 @@ export class ActionIntentExecutorService {
       } else {
         await this.updateIntentStatus(intent.id, 'FAILED', ghlResult.error);
         results.push({ id: intent.id, status: 'FAILED', errorNote: ghlResult.error });
+        if (process.env['NODE_ENV'] !== 'production') {
+          this.logger.debug(`[BOOK_VERIFY] FAILED: intentId=${intent.id}, error=${ghlResult.error}`);
+        }
         this.logger.warn(`Book intent ${intent.id} FAILED: ${ghlResult.error}`);
       }
     }

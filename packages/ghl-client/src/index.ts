@@ -275,15 +275,19 @@ export class GhlClient {
   /**
    * Book an appointment slot on a GHL calendar.
    *
-   * ASSUMED (not confirmed) — needs live verification:
+   * PARTIALLY CONFIRMED — reached live GHL booking endpoint:
    *   POST https://services.leadconnectorhq.com/appointments
-   *   Body: { calendarId, contactId, startTime, endTime, title?, timezone?, appointmentStatus? }
-   *   Success: HTTP 201 with appointment JSON { id, ... }
-   *   Failure: HTTP 4xx with GHL error body
+   *   Received HTTP 400 "Contact, calendar, or location not found" — host/path correct.
+   *   Full confirmation blocked by resource ID context mismatch (contact/calendar/location
+   *   must belong to the same GHL sub-account/location).
    *
-   * TODO [GHL_BOOK_ENDPOINT]: Verify exact endpoint
-   * TODO [GHL_BOOK_BODY]: Verify request body shape
-   * TODO [GHL_BOOK_RESP]: Verify response structure
+   * ASSUMED body: { calendarId, contactId, startTime, endTime, title?, timezone?, appointmentStatus? }
+   * ASSUMED success: HTTP 2xx with appointment JSON { id, ... }
+   * ASSUMED failure: HTTP 4xx with GHL error body
+   *
+   * TODO [GHL_BOOK_ENDPOINT]: PARTIALLY CONFIRMED — endpoint path correct, full confirmation pending resource context fix
+   * TODO [GHL_BOOK_BODY]: Verify request body shape (resource ID context must be consistent)
+   * TODO [GHL_BOOK_RESP]: Verify response structure on success
    */
   async bookSlot(request: BookSlotRequest): Promise<{ success: boolean; appointmentId?: string; error?: string }> {
     try {
@@ -296,6 +300,11 @@ export class GhlClient {
         timezone: request.timezone,
         appointmentStatus: request.appointmentStatus,
       });
+      if (process.env['NODE_ENV'] !== 'production') {
+        console.debug(
+          `[BOOK_VERIFY] POST /appointments — HTTP ${response.status}, appointmentId=${response.data?.id ?? 'unknown'}`,
+        );
+      }
       return { success: true, appointmentId: response.data?.id };
     } catch (error) {
       return this.handleBookingError(error);
@@ -305,6 +314,9 @@ export class GhlClient {
   private handleBookingError(error: unknown): { success: boolean; appointmentId?: undefined; error: string } {
     if (axios.isAxiosError(error)) {
       const status = error.response?.status;
+      if (process.env['NODE_ENV'] !== 'production') {
+        console.debug(`[BOOK_VERIFY] POST /appointments — HTTP ${status ?? 'unknown'}`);
+      }
       if (status === 401) return { success: false, error: 'Invalid or expired token' };
       if (status === 403) return { success: false, error: 'Insufficient permissions for this location' };
       if (status === 404) return { success: false, error: 'Contact, calendar, or location not found' };

@@ -527,6 +527,7 @@ model ActionIntent {
   tenant      Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
 
+  @@unique([tenantId, conversationId, actionType, source])
   @@index([tenantId])
   @@index([conversationId])
   @@index([status])

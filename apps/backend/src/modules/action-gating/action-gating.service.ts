@@ -92,6 +92,14 @@ export class ActionGatingService {
     });
 
     if (error) {
+      // Unique constraint violation means this intent was already recorded (e.g. job retry)
+      if (error.code === '23505') {
+        this.logger.debug(
+          `Action intent already exists: tenantId=${params.tenantId}, ` +
+          `conversationId=${params.conversationId}, actionType=${params.actionType}`,
+        );
+        return;
+      }
       this.logger.error(
         `Failed to persist action intent: tenantId=${params.tenantId}, ` +
         `actionType=${params.actionType}, error=${error.message}`,

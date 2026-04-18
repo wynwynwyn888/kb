@@ -40,8 +40,13 @@ export class SendBubbleProcessor extends WorkerHost {
     let replyPlan: ReturnType<typeof JSON.parse> | null = null;
     try {
       replyPlan = JSON.parse(replyPlanJson);
-    } catch {
-      throw new Error('Failed to parse reply plan JSON');
+    } catch (err) {
+      const excerpt = replyPlanJson.slice(0, 100);
+      const message = err instanceof Error ? err.message : 'unknown parse error';
+      this.logger.error(
+        `Failed to parse reply plan JSON: jobId=${job.id}, excerpt="${excerpt}", error=${message}`,
+      );
+      throw new Error(`Failed to parse reply plan JSON: ${message}`);
     }
 
     const summary = await this.outboundSend.sendReply({

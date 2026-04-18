@@ -98,6 +98,14 @@ export class ConversationsService {
   }
 
   /**
+   * Returns true if the conversation has an active handover.
+   */
+  async isInHandover(conversationId: string): Promise<boolean> {
+    const active = await this.getActiveHandover(conversationId);
+    return active !== null;
+  }
+
+  /**
    * Update a conversation's status.
    */
   async updateConversationStatus(

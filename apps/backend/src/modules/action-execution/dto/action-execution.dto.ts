@@ -17,3 +17,15 @@ export interface ExecutionConditions {
   succeeded: number;
   planStatus: string;
 }
+
+// BookSlot required and optional params
+// Required fields must be present for execution to proceed
+export interface BookSlotParams {
+  calendarId: string;
+  startTime: string;
+  endTime: string;
+  title?: string;
+  contactId?: string;
+  timezone?: string;
+  appointmentStatus?: string;
+}

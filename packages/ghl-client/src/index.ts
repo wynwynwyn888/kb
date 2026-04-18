@@ -56,6 +56,17 @@ export interface TagContactRequest {
   tags: string[];
 }
 
+// Booking / appointment types
+export interface BookSlotRequest {
+  calendarId: string;
+  contactId: string;
+  startTime: string;
+  endTime: string;
+  title?: string;
+  timezone?: string;
+  appointmentStatus?: string;
+}
+
 // GHL Client class for connection verification and outbound messaging
 export class GhlClient {
   private client: AxiosInstance;
@@ -255,6 +266,52 @@ export class GhlClient {
       return { success: false, error: error.message || 'Tag operation failed' };
     }
     return { success: false, error: 'Unknown error during tag operation' };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Booking / Calendar
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Book an appointment slot on a GHL calendar.
+   *
+   * ASSUMED (not confirmed) — needs live verification:
+   *   POST https://services.leadconnectorhq.com/appointments
+   *   Body: { calendarId, contactId, startTime, endTime, title?, timezone?, appointmentStatus? }
+   *   Success: HTTP 201 with appointment JSON { id, ... }
+   *   Failure: HTTP 4xx with GHL error body
+   *
+   * TODO [GHL_BOOK_ENDPOINT]: Verify exact endpoint
+   * TODO [GHL_BOOK_BODY]: Verify request body shape
+   * TODO [GHL_BOOK_RESP]: Verify response structure
+   */
+  async bookSlot(request: BookSlotRequest): Promise<{ success: boolean; appointmentId?: string; error?: string }> {
+    try {
+      const response = await this.client.post('/appointments', {
+        calendarId: request.calendarId,
+        contactId: request.contactId,
+        startTime: request.startTime,
+        endTime: request.endTime,
+        title: request.title,
+        timezone: request.timezone,
+        appointmentStatus: request.appointmentStatus,
+      });
+      return { success: true, appointmentId: response.data?.id };
+    } catch (error) {
+      return this.handleBookingError(error);
+    }
+  }
+
+  private handleBookingError(error: unknown): { success: boolean; appointmentId?: undefined; error: string } {
+    if (axios.isAxiosError(error)) {
+      const status = error.response?.status;
+      if (status === 401) return { success: false, error: 'Invalid or expired token' };
+      if (status === 403) return { success: false, error: 'Insufficient permissions for this location' };
+      if (status === 404) return { success: false, error: 'Contact, calendar, or location not found' };
+      if (status === 429) return { success: false, error: 'Rate limited by GHL API' };
+      return { success: false, error: error.message || 'Booking failed' };
+    }
+    return { success: false, error: 'Unknown error during booking' };
   }
 
   /**

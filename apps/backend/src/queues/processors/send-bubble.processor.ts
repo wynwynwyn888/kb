@@ -107,6 +107,19 @@ export class SendBubbleProcessor extends WorkerHost {
       );
     }
 
+    // Step 4b: Execute deferred BOOK_SLOT intents only on successful outbound send
+    if (this.actionExecutor.shouldExecute({ succeeded: summary.succeeded, planStatus: replyPlan.planStatus }, contactId)) {
+      const bookResults = await this.actionExecutor.executeDeferredBookSlotActions(
+        tenantId,
+        conversationId,
+        contactId,
+        ghlLocationId,
+      );
+      for (const r of bookResults) {
+        this.logger.log(`Book intent ${r.id} ${r.status}: ${r.errorNote ?? 'ok'}`);
+      }
+    }
+
     this.logger.log(
       `Send-bubble job completed: conversationId=${conversationId}, ` +
       `total=${summary.totalBubbles}, succeeded=${summary.succeeded}, failed=${summary.failed}`,

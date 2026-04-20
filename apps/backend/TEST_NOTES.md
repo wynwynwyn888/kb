@@ -1,5 +1,30 @@
 # Backend auth & protected-route smoke tests (local)
 
+## One-command smoke (recommended)
+
+With the API already running, from **`apps/backend`**:
+
+```bash
+npm run smoke:auth
+```
+
+This script:
+
+1. Loads **`apps/backend/.env`** (same search order as the app: cwd, parent, `apps/backend/.env`).
+2. Signs in to Supabase using **`SUPABASE_URL`** + **`SUPABASE_ANON_KEY`** and **`SMOKE_AUTH_EMAIL`** / **`SMOKE_AUTH_PASSWORD`** (dev-only test user).
+3. Calls protected routes with **`Authorization: Bearer <access_token>`** (token is **not** printed).
+4. Prints one line per route with HTTP status (`200 OK` when healthy).
+
+**Required env (local `.env`, not committed):** `SMOKE_AUTH_EMAIL`, `SMOKE_AUTH_PASSWORD`, plus existing `SUPABASE_URL` and `SUPABASE_ANON_KEY`.
+
+**Optional:** `SMOKE_API_BASE_URL` if the API is not at `http://127.0.0.1:<PORT>/<API_PREFIX>`.
+
+From repo root: `npm run smoke:auth --prefix apps/backend`
+
+---
+
+## Manual checks (curl / PowerShell)
+
 **Start the API (pick one, not both):**
 
 - From repo root: `npm run start --prefix apps/backend`

@@ -5,8 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "nest start --watch",
-    "build": "nest build",
-    "start": "nest start",
+    "build": "nest build && node patch-dist.mjs",
+    "start": "node dist/main.js",
+    "smoke:auth": "node scripts/smoke-auth.mjs",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "jest",

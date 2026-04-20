@@ -1,10 +1,23 @@
 // Auth service - handles Supabase Auth integration and user resolution
 // Maps Supabase auth user -> profile -> agency/tenant access
 
-import { Injectable } from '@nestjs/common';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { getSupabaseService } from '../../lib/supabase';
 import type { SessionUser } from '../../lib/supabase';
 import type { AgencyRole, TenantRole } from '../../lib/enums';
+
+/** PostgREST may return embedded FK as object or single-element array */
+function tenantEmbedAgencyId(tenants: unknown): string | undefined {
+  if (tenants && typeof tenants === 'object' && !Array.isArray(tenants) && 'agency_id' in tenants) {
+    const id = (tenants as { agency_id: unknown }).agency_id;
+    return typeof id === 'string' ? id : undefined;
+  }
+  if (Array.isArray(tenants) && tenants[0] && typeof tenants[0] === 'object' && tenants[0] !== null && 'agency_id' in tenants[0]) {
+    const id = (tenants[0] as { agency_id: unknown }).agency_id;
+    return typeof id === 'string' ? id : undefined;
+  }
+  return undefined;
+}
 
 @Injectable()
 export class AuthService {
@@ -15,31 +28,44 @@ export class AuthService {
     try {
       const supabase = getSupabaseService();
 
-      // Verify the JWT using Supabase service
       const { data: { user }, error } = await supabase.auth.getUser(token);
 
       if (error || !user) {
+        if (process.env['AUTH_DEBUG'] === '1') {
+          throw new UnauthorizedException(
+            `getUser failed: ${error?.message ?? 'no user'}`,
+          );
+        }
         return null;
       }
 
-      // Get user profile
       const profile = await this.getProfile(user.id);
-      if (!profile) {
+
+      // Strict mode: set AUTH_REQUIRE_PROFILE=1 to reject sessions without a profiles row.
+      if (process.env['AUTH_REQUIRE_PROFILE'] === '1' && !profile) {
+        if (process.env['AUTH_DEBUG'] === '1') {
+          const sb = getSupabaseService();
+          const { error: pe } = await sb
+            .from('profiles')
+            .select('id')
+            .eq('id', user.id)
+            .maybeSingle();
+          throw new UnauthorizedException(
+            `profile missing: ${pe?.message ?? 'no row'} (${pe?.code ?? 'no code'})`,
+          );
+        }
         return null;
       }
 
-      // Get agency and tenant memberships
       const agencyMembership = await this.getAgencyMembership(user.id);
       const tenantMemberships = await this.getTenantMemberships(user.id);
 
-      // Determine access level - prefer tenant access if present
       let agencyRole: AgencyRole | undefined;
       let tenantRole: TenantRole | undefined;
       let agencyId: string | undefined;
       let tenantId: string | undefined;
 
       if (tenantMemberships.length > 0) {
-        // User has tenant access - use highest tenant role
         const primaryTenant = tenantMemberships[0]!;
         tenantRole = primaryTenant.role;
         tenantId = primaryTenant.tenantId;
@@ -54,13 +80,16 @@ export class AuthService {
       return {
         id: user.id,
         email: user.email || '',
-        profile,
+        profile: profile ?? undefined,
         agencyRole,
         tenantRole,
         agencyId,
         tenantId,
       };
-    } catch {
+    } catch (err) {
+      if (err instanceof UnauthorizedException) {
+        throw err;
+      }
       return null;
     }
   }
@@ -74,7 +103,7 @@ export class AuthService {
       .from('profiles')
       .select('id, full_name, avatar_url')
       .eq('id', profileId)
-      .single();
+      .maybeSingle();
 
     if (error || !data) {
       return null;
@@ -122,11 +151,19 @@ export class AuthService {
       return [];
     }
 
-    return data.map(d => ({
-      tenantId: d.tenant_id,
-      agencyId: (d.tenants as unknown as { agency_id: string }).agency_id,
-      role: d.role as TenantRole,
-    }));
+    const out: Array<{ tenantId: string; agencyId: string; role: TenantRole }> = [];
+    for (const d of data) {
+      const agencyId = tenantEmbedAgencyId(d.tenants);
+      if (!agencyId) {
+        continue;
+      }
+      out.push({
+        tenantId: d.tenant_id,
+        agencyId,
+        role: d.role as TenantRole,
+      });
+    }
+    return out;
   }
 
   /**

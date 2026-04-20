@@ -1,4 +1,5 @@
 // Root application module
+import { resolve } from 'node:path';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { BullModule } from '@nestjs/bullmq';
@@ -32,7 +33,12 @@ import { AgencyAiConfigModule } from './modules/agency-ai-config/agency-ai-confi
     // Configuration
     ConfigModule.forRoot({
       isGlobal: true,
-      envFilePath: '.env',
+      // Support starting the API from repo root (`pnpm --filter ...`) or from `apps/backend`
+      envFilePath: [
+        resolve(process.cwd(), '.env'),
+        resolve(process.cwd(), '..', '.env'),
+        resolve(process.cwd(), 'apps', 'backend', '.env'),
+      ],
     }),
 
     // Rate limiting
@@ -57,6 +63,7 @@ import { AgencyAiConfigModule } from './modules/agency-ai-config/agency-ai-confi
         connection: {
           host: config.get<string>('REDIS_HOST', 'localhost'),
           port: config.get<number>('REDIS_PORT', 6379),
+          lazyConnect: true,
         },
       }),
     }),

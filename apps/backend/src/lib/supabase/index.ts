@@ -1,40 +1,67 @@
 // Supabase client configuration
 // Uses Supabase for auth and database access
+//
+// Read process.env inside factories (not at module top level). Otherwise the first
+// import of this module can run before Nest ConfigModule loads `.env`, and clients
+// would keep wrong URL/keys for the whole process.
 
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env['SUPABASE_URL'] || 'http://localhost:54321';
-const supabaseServiceKey = process.env['SUPABASE_SERVICE_ROLE_KEY'] || 'your-service-role-key';
-const supabaseAnonKey = process.env['SUPABASE_ANON_KEY'] || 'your-anon-key';
+const serviceAuth = {
+  auth: {
+    autoRefreshToken: false,
+    persistSession: false,
+  },
+} as const;
+
+const clientAuthPersist = {
+  auth: {
+    autoRefreshToken: true,
+    persistSession: true,
+  },
+} as const;
+
+let memoService: { client: SupabaseClient; sig: string } | undefined;
+let memoAnonServer: { client: SupabaseClient; sig: string } | undefined;
+let memoAnonClient: { client: SupabaseClient; sig: string } | undefined;
+
+function envUrl(): string {
+  return process.env['SUPABASE_URL'] ?? 'http://localhost:54321';
+}
+
+function envServiceKey(): string {
+  return process.env['SUPABASE_SERVICE_ROLE_KEY'] ?? 'your-service-role-key';
+}
+
+function envAnonKey(): string {
+  return process.env['SUPABASE_ANON_KEY'] ?? 'your-anon-key';
+}
 
 // Client for server-side operations with service role (bypasses RLS)
 export function getSupabaseService(): SupabaseClient {
-  return createClient(supabaseUrl, supabaseServiceKey, {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-    },
-  });
+  const sig = `${envUrl()}\0${envServiceKey()}`;
+  if (!memoService || memoService.sig !== sig) {
+    memoService = { client: createClient(envUrl(), envServiceKey(), serviceAuth), sig };
+  }
+  return memoService.client;
 }
 
 // Client for client-side operations (respects RLS)
 export function getSupabaseClient(): SupabaseClient {
-  return createClient(supabaseUrl, supabaseAnonKey, {
-    auth: {
-      autoRefreshToken: true,
-      persistSession: true,
-    },
-  });
+  const sig = `${envUrl()}\0${envAnonKey()}`;
+  if (!memoAnonClient || memoAnonClient.sig !== sig) {
+    memoAnonClient = { client: createClient(envUrl(), envAnonKey(), clientAuthPersist), sig };
+  }
+  return memoAnonClient.client;
 }
 
 // Client for server-side API operations (uses anon key, respects RLS)
 export function getSupabaseServer(): SupabaseClient {
-  return createClient(supabaseUrl, supabaseAnonKey, {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-    },
-  });
+  const sig = `${envUrl()}\0${envAnonKey()}`;
+  if (!memoAnonServer || memoAnonServer.sig !== sig) {
+    memoAnonServer = { client: createClient(envUrl(), envAnonKey(), serviceAuth), sig };
+  }
+  return memoAnonServer.client;
 }
 
 export interface AuthUser {

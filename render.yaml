@@ -1,0 +1,64 @@
+# Render Blueprint — https://render.com/docs/blueprint-spec
+# After pushing to GitHub: Dashboard → New → Blueprint → connect repo → apply.
+# You will be prompted for every env var with sync: false.
+
+services:
+  - type: web
+    name: aisbp-api
+    runtime: node
+    region: singapore
+    plan: free
+    branch: main
+    buildCommand: corepack enable && corepack prepare pnpm@9.0.0 --activate && pnpm install --frozen-lockfile && pnpm --filter @aisbp/backend run build
+    startCommand: corepack enable && corepack prepare pnpm@9.0.0 --activate && pnpm --filter @aisbp/backend run start
+    healthCheckPath: /docs
+    envVars:
+      - key: NODE_VERSION
+        value: "20.18.0"
+      - key: NODE_ENV
+        value: production
+      - key: API_PREFIX
+        value: api/v1
+      - key: DATABASE_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: REDIS_HOST
+        sync: false
+      - key: REDIS_PORT
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: ENCRYPTION_KEY
+        sync: false
+      # After first deploy, set this to your aisbp-web URL (same value as RENDER_EXTERNAL_URL on the web service).
+      - key: CORS_ORIGIN
+        sync: false
+
+  - type: web
+    name: aisbp-web
+    runtime: node
+    region: singapore
+    plan: free
+    branch: main
+    buildCommand: corepack enable && corepack prepare pnpm@9.0.0 --activate && pnpm install --frozen-lockfile && pnpm --filter @aisbp/frontend run build
+    startCommand: corepack enable && corepack prepare pnpm@9.0.0 --activate && pnpm --filter @aisbp/frontend run start
+    healthCheckPath: /
+    envVars:
+      - key: NODE_VERSION
+        value: "20.18.0"
+      - key: NODE_ENV
+        value: production
+      - key: BACKEND_URL
+        fromService:
+          type: web
+          name: aisbp-api
+          envVarKey: RENDER_EXTERNAL_URL
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        sync: false
+      - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
+        sync: false

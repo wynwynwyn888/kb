@@ -62,13 +62,22 @@ import { AgencyAiConfigModule } from './modules/agency-ai-config/agency-ai-confi
     BullModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
-        connection: {
-          host: config.get<string>('REDIS_HOST', 'localhost'),
-          port: config.get<number>('REDIS_PORT', 6379),
-          lazyConnect: true,
-        },
-      }),
+      useFactory: (config: ConfigService) => {
+        const tlsRaw = (config.get<string>('REDIS_TLS') ?? '').trim().toLowerCase();
+        const useTls = ['1', 'true', 'yes'].includes(tlsRaw);
+        const password = config.get<string>('REDIS_PASSWORD')?.trim();
+        const username = config.get<string>('REDIS_USER')?.trim();
+        return {
+          connection: {
+            host: config.get<string>('REDIS_HOST', 'localhost'),
+            port: config.get<number>('REDIS_PORT', 6379),
+            ...(username ? { username } : {}),
+            ...(password ? { password } : {}),
+            ...(useTls ? { tls: {} } : {}),
+            lazyConnect: true,
+          },
+        };
+      },
     }),
 
     // Feature modules

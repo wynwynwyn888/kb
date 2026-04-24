@@ -1,14 +1,24 @@
 // Tenants service - handles tenant operations with multi-tenant isolation
 
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { getSupabaseService } from '../../lib/supabase';
 import type { TenantRole } from '../../lib/enums';
+
+/** When the DB enforces NOT NULL on `ghl_location_id`, store a sentinel until a real GHL id is set in Integrations. */
+const PENDING_GHL_PREFIX = 'pending:';
+
+function toPublicGhlLocationId(stored: string | null | undefined): string | null {
+  if (stored == null || stored === '') return null;
+  if (stored.startsWith(PENDING_GHL_PREFIX)) return null;
+  return stored;
+}
 
 export interface TenantSummary {
   id: string;
   agencyId: string;
   name: string;
-  ghlLocationId: string;
+  ghlLocationId: string | null;
   status: string;
   settings: Record<string, unknown>;
   createdAt: Date;
@@ -67,7 +77,7 @@ export class TenantsService {
       id: t.id,
       agencyId: t.agency_id,
       name: t.name,
-      ghlLocationId: t.ghl_location_id,
+      ghlLocationId: toPublicGhlLocationId(t.ghl_location_id),
       status: t.status,
       settings: t.settings,
       createdAt: new Date(t.created_at),
@@ -117,7 +127,7 @@ export class TenantsService {
       id: tenant.id,
       agencyId: tenant.agency_id,
       name: tenant.name,
-      ghlLocationId: tenant.ghl_location_id,
+      ghlLocationId: toPublicGhlLocationId(tenant.ghl_location_id),
       status: tenant.status,
       settings: tenant.settings,
       createdAt: new Date(tenant.created_at),
@@ -174,7 +184,7 @@ export class TenantsService {
           id: tenant.id,
           agencyId: tenant.agency_id,
           name: tenant.name,
-          ghlLocationId: tenant.ghl_location_id,
+          ghlLocationId: toPublicGhlLocationId(tenant.ghl_location_id),
           status: tenant.status,
           settings: tenant.settings,
           createdAt: new Date(tenant.created_at),
@@ -239,5 +249,193 @@ export class TenantsService {
     }
 
     return data.role as TenantRole;
+  }
+
+  /**
+   * Create a subaccount under an agency (agency staff only). GHL location optional until Integrations.
+   */
+  async createTenant(
+    agencyId: string,
+    profileId: string,
+    input: { name: string; ghlLocationId?: string | null },
+  ): Promise<TenantSummary> {
+    const supabase = getSupabaseService();
+    const ok = await this.assertAgencyStaff(agencyId, profileId);
+    if (!ok) throw new ForbiddenException('Agency access required');
+
+    const name = input.name?.trim();
+    if (!name) throw new BadRequestException('name is required');
+
+    const { data: agency } = await supabase
+      .from('agencies')
+      .select('default_subaccount_quota')
+      .eq('id', agencyId)
+      .single();
+    const defaultQuota = (agency as { default_subaccount_quota?: number } | null)?.default_subaccount_quota ?? 10_000;
+
+    const id = randomUUID();
+    const ghl = input.ghlLocationId?.trim() || `${PENDING_GHL_PREFIX}${id}`;
+    const nowIso = new Date().toISOString();
+
+    const { data: row, error } = await supabase
+      .from('tenants')
+      .insert({
+        id,
+        agency_id: agencyId,
+        name,
+        ghl_location_id: ghl,
+        status: 'pending',
+        settings: {},
+        created_at: nowIso,
+        updated_at: nowIso,
+      })
+      .select('*')
+      .single();
+
+    if (error || !row) {
+      throw new BadRequestException(error?.message ?? 'Failed to create subaccount');
+    }
+
+    const now = new Date();
+    const periodStart = new Date(now.getFullYear(), now.getMonth(), 1);
+    const periodEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+
+    await supabase.from('quota_wallets').insert({
+      id: randomUUID(),
+      tenant_id: id,
+      total_quota: defaultQuota,
+      used_quota: 0,
+      period_start: periodStart.toISOString(),
+      period_end: periodEnd.toISOString(),
+    });
+
+    await supabase.from('quota_audit_logs').insert({
+      id: randomUUID(),
+      agency_id: agencyId,
+      profile_id: profileId,
+      tenant_id: id,
+      action: 'subaccount.create',
+      delta: defaultQuota,
+      previous_total: 0,
+      new_total: defaultQuota,
+      metadata: { name, defaultQuota },
+    });
+
+    return {
+      id: row.id,
+      agencyId: row.agency_id,
+      name: row.name,
+      ghlLocationId: toPublicGhlLocationId(row.ghl_location_id),
+      status: row.status,
+      settings: row.settings as Record<string, unknown>,
+      createdAt: new Date(row.created_at),
+      updatedAt: new Date(row.updated_at),
+    };
+  }
+
+  async updateTenantName(
+    tenantId: string,
+    profileId: string,
+    name: string,
+  ): Promise<TenantSummary> {
+    const supabase = getSupabaseService();
+    const { data: tenant, error: tErr } = await supabase
+      .from('tenants')
+      .select('agency_id, name')
+      .eq('id', tenantId)
+      .single();
+    if (tErr || !tenant) throw new NotFoundException('Subaccount not found');
+
+    const ok = await this.assertAgencyStaff(tenant.agency_id, profileId);
+    if (!ok) throw new ForbiddenException('Agency access required to rename');
+
+    const n = name?.trim();
+    if (!n) throw new BadRequestException('name is required');
+    const previousName = (tenant as { name?: string }).name ?? '';
+
+    const { data: row, error } = await supabase
+      .from('tenants')
+      .update({ name: n, updated_at: new Date().toISOString() })
+      .eq('id', tenantId)
+      .select('*')
+      .single();
+
+    if (error || !row) {
+      throw new BadRequestException(error?.message ?? 'Update failed');
+    }
+
+    if (n !== previousName) {
+      await supabase.from('quota_audit_logs').insert({
+        id: randomUUID(),
+        agency_id: row.agency_id,
+        profile_id: profileId,
+        tenant_id: tenantId,
+        action: 'subaccount.renamed',
+        delta: 0,
+        previous_total: null,
+        new_total: null,
+        metadata: { previousName, newName: n },
+      });
+    }
+
+    return {
+      id: row.id,
+      agencyId: row.agency_id,
+      name: row.name,
+      ghlLocationId: toPublicGhlLocationId(row.ghl_location_id),
+      status: row.status,
+      settings: row.settings as Record<string, unknown>,
+      createdAt: new Date(row.created_at),
+      updatedAt: new Date(row.updated_at),
+    };
+  }
+
+  /**
+   * Permanently remove a subaccount and dependent rows (DB cascades). Agency staff only.
+   */
+  async deleteTenant(tenantId: string, profileId: string): Promise<void> {
+    const supabase = getSupabaseService();
+    const { data: row, error: fErr } = await supabase
+      .from('tenants')
+      .select('id, agency_id, name')
+      .eq('id', tenantId)
+      .single();
+    if (fErr || !row) {
+      throw new NotFoundException('Subaccount not found');
+    }
+    const ok = await this.assertAgencyStaff(row.agency_id, profileId);
+    if (!ok) {
+      throw new ForbiddenException('Agency access required');
+    }
+    const agencyId = row.agency_id as string;
+    const subName = (row as { name?: string }).name ?? '';
+
+    await supabase.from('quota_audit_logs').insert({
+      id: randomUUID(),
+      agency_id: agencyId,
+      profile_id: profileId,
+      tenant_id: tenantId,
+      action: 'subaccount.deleted',
+      delta: 0,
+      previous_total: null,
+      new_total: null,
+      metadata: { name: subName },
+    });
+
+    const { error } = await supabase.from('tenants').delete().eq('id', tenantId);
+    if (error) {
+      throw new BadRequestException(error.message ?? 'Failed to delete subaccount');
+    }
+  }
+
+  private async assertAgencyStaff(agencyId: string, profileId: string): Promise<boolean> {
+    const supabase = getSupabaseService();
+    const { data } = await supabase
+      .from('agency_users')
+      .select('id')
+      .eq('agency_id', agencyId)
+      .eq('profile_id', profileId)
+      .maybeSingle();
+    return !!data;
   }
 }

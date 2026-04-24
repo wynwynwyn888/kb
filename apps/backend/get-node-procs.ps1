@@ -1,0 +1,1 @@
+Get-Process | Where-Object { $_.Path -like '*node*' } | Format-Table Id,Path -AutoSize

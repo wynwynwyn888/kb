@@ -101,7 +101,7 @@ export default function ActionIntentsPage() {
       <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
         <input
           type="text"
-          placeholder="Tenant ID"
+          placeholder="Subaccount ID"
           value={tenantId}
           onChange={e => setTenantId(e.target.value)}
           style={{ padding: '0.5rem', fontSize: '0.875rem', width: '240px' }}
@@ -134,7 +134,7 @@ export default function ActionIntentsPage() {
       )}
 
       <div style={{ marginBottom: '0.5rem', fontSize: '0.875rem', color: '#666' }}>
-        {tenantId ? `${total} total intent${total !== 1 ? 's' : ''}` : 'Enter a Tenant ID to load action intents'}
+        {tenantId ? `${total} total intent${total !== 1 ? 's' : ''}` : 'Enter a subaccount ID to load action intents'}
       </div>
 
       {intents.length > 0 && (

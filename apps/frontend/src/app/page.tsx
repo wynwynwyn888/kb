@@ -11,7 +11,7 @@ export default function HomePage() {
   useEffect(() => {
     if (!loading) {
       if (user) {
-        router.replace('/dashboard');
+        router.replace('/app');
       } else {
         router.replace('/login');
       }
@@ -20,7 +20,7 @@ export default function HomePage() {
 
   return (
     <div style={{ padding: '2rem', textAlign: 'center' }}>
-      <p>Loading...</p>
+      <p>Redirecting…</p>
     </div>
   );
 }

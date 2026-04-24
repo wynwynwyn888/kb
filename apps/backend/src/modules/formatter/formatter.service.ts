@@ -1,5 +1,10 @@
-// Formatter service — formats ReplyBubbleDraft[] for channel delivery
-// Does NOT send messages. Prepares and validates bubble sequences.
+// Formatter service — optional formatting/tooling path for ReplyBubbleDraft[].
+// Does NOT send messages. NOT used by send-bubble queue or OutboundSendService; live outbound
+// text shape comes from ReplyPlannerService.formatIntoBubbles instead.
+//
+// TODO (future consolidation): This path uses @aisbp/formatter defaults + 1024 max + aggressive
+// whitespace collapse; planner uses 320 max + different stripMarkdown — merge intentionally if
+// product requires one pipeline.
 
 import { Injectable, Logger } from '@nestjs/common';
 import { DefaultMessageFormatter } from '@aisbp/formatter';
@@ -18,12 +23,10 @@ export class FormatterService {
   private readonly inner = new DefaultMessageFormatter();
 
   /**
-   * Format a ReplyDecision into channel-ready FormatterOutput.
-   * Applies:
-   * - Markdown stripping
-   * - Paragraph splitting into bubble-friendly chunks
-   * - Whitespace normalization
-   * - Channel-specific length enforcement
+   * Optional re-format of an existing `ReplyDecision` (e.g. HTTP `/formatter/format`).
+   * Drift vs live outbound (ReplyPlannerService): max length 1024 here vs 320 there;
+   * markdown strip via `DefaultMessageFormatter.stripMarkdown` vs planner regex; this path
+   * also collapses runs of whitespace to a single space per bubble. `channel` is for logging only.
    */
   async formatReplyDecision(input: FormatterInput): Promise<FormatterOutput> {
     const { replyPlan, conversationId, channel } = input;

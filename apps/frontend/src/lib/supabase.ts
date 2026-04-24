@@ -37,6 +37,9 @@ export interface AuthUser {
   agencyId?: string;
   tenantId?: string;
   fullName?: string;
+  /** From GET /auth/me — used for client-side UI gating; server still enforces. */
+  agencyRole?: string;
+  tenantRole?: string;
 }
 
 export interface Tenant {

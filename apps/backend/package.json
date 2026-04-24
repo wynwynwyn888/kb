@@ -4,9 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "nest start --watch",
+    "dev": "node scripts/dev-esm.mjs",
     "build": "nest build && node patch-dist.mjs",
-    "start": "node dist/main.js",
+    "start": "node scripts/start.mjs",
     "smoke:auth": "node scripts/smoke-auth.mjs",
     "smoke:auth:write": "node scripts/smoke-auth.mjs --write",
     "lint": "eslint .",
@@ -18,7 +18,8 @@
     "db:migrate": "prisma migrate dev",
     "db:studio": "prisma studio",
     "db:push": "prisma db push",
-    "db:seed": "tsx prisma/seed.ts"
+    "db:seed": "tsx prisma/seed.ts",
+    "smoke:orchestration-e2e": "npm run build && node dist/scripts/orchestration-local-e2e.js"
   },
   "dependencies": {
     "@aisbp/ai-provider-openai": "workspace:*",

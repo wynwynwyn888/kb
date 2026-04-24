@@ -1,8 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '../../contexts/AuthContext';
+import { LoginSessionAlert } from '../../components/app/LoginSessionAlert';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -19,7 +20,7 @@ export default function LoginPage() {
 
     try {
       await login(email, password);
-      router.push('/dashboard');
+      router.replace('/app');
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Login failed');
     } finally {
@@ -29,38 +30,53 @@ export default function LoginPage() {
 
   return (
     <div style={{ maxWidth: '400px', margin: '100px auto', padding: '2rem' }}>
-      <h1>Sign In</h1>
-      <p style={{ color: '#666', marginBottom: '2rem' }}>
-        Login with your demo credentials
+      <h1 style={{ marginBottom: '0.35rem' }}>Sign in</h1>
+      <p style={{ color: '#666', marginBottom: '1rem', fontSize: '0.95rem' }}>
+        Staff access to the control panel. Use your org account (local demo list below if available).
       </p>
 
-      <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+      <Suspense fallback={null}>
+        <LoginSessionAlert />
+      </Suspense>
+
+      <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '1rem' }}>
         <div>
-          <label htmlFor="email" style={{ display: 'block', marginBottom: '0.5rem' }}>Email</label>
+          <label htmlFor="email" style={{ display: 'block', marginBottom: '0.5rem' }}>
+            Email
+          </label>
           <input
             id="email"
             type="email"
             value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            onChange={e => setEmail(e.target.value)}
             required
-            style={{ width: '100%', padding: '0.75rem', fontSize: '1rem' }}
+            autoComplete="username"
+            disabled={loading}
+            style={{ width: '100%', padding: '0.75rem', fontSize: '1rem', boxSizing: 'border-box' }}
           />
         </div>
 
         <div>
-          <label htmlFor="password" style={{ display: 'block', marginBottom: '0.5rem' }}>Password</label>
+          <label htmlFor="password" style={{ display: 'block', marginBottom: '0.5rem' }}>
+            Password
+          </label>
           <input
             id="password"
             type="password"
             value={password}
-            onChange={(e) => setPassword(e.target.value)}
+            onChange={e => setPassword(e.target.value)}
             required
-            style={{ width: '100%', padding: '0.75rem', fontSize: '1rem' }}
+            autoComplete="current-password"
+            disabled={loading}
+            style={{ width: '100%', padding: '0.75rem', fontSize: '1rem', boxSizing: 'border-box' }}
           />
         </div>
 
         {error && (
-          <div style={{ color: 'red', padding: '0.75rem', backgroundColor: '#fee' }}>
+          <div
+            role="alert"
+            style={{ color: '#8b1d1d', padding: '0.75rem', backgroundColor: '#fde8e8', borderRadius: '6px', border: '1px solid #f5c2c7' }}
+          >
             {error}
           </div>
         )}
@@ -75,18 +91,34 @@ export default function LoginPage() {
             color: 'white',
             border: 'none',
             cursor: loading ? 'not-allowed' : 'pointer',
+            borderRadius: '6px',
           }}
         >
-          {loading ? 'Signing in...' : 'Sign In'}
+          {loading ? 'Signing in…' : 'Sign in'}
         </button>
       </form>
 
-      <div style={{ marginTop: '2rem', padding: '1rem', backgroundColor: '#f5f5f5', fontSize: '0.875rem' }}>
-        <strong>Demo Credentials:</strong>
+      <p style={{ fontSize: '0.8rem', color: '#666', marginTop: '1.25rem', lineHeight: 1.45 }}>
+        Sign-in goes through <strong>Supabase Auth</strong>, not this screen directly. If you see a network error, ensure
+        Supabase is running locally (CLI) or your <code style={{ fontSize: '0.75rem' }}>.env.local</code> points at the
+        project where these users exist.
+      </p>
+
+      <div style={{ marginTop: '1rem', padding: '1rem', backgroundColor: '#f5f5f5', fontSize: '0.875rem', borderRadius: '8px' }}>
+        <strong>Demo accounts (when seeded)</strong>
         <ul style={{ margin: '0.5rem 0', paddingLeft: '1.5rem' }}>
           <li>agency-admin@demo.aisbp.com / Demo123!</li>
           <li>tenant-a-admin@demo.aisbp.com / Demo123!</li>
         </ul>
+        <p style={{ margin: '0.75rem 0 0', fontSize: '0.78rem', color: '#555', lineHeight: 1.45 }}>
+          If login says <strong>invalid credentials</strong> (and the network tab shows a 400 on Supabase token), those
+          users are not in Auth yet. This repo does not use <code style={{ fontSize: '0.72rem' }}>prisma db seed</code>{' '}
+          — run from the repo root:{' '}
+          <code style={{ fontSize: '0.72rem' }}>npx pnpm --filter @aisbp/backend run db:seed</code> with{' '}
+          <code style={{ fontSize: '0.72rem' }}>DATABASE_URL</code>, <code style={{ fontSize: '0.72rem' }}>SUPABASE_URL</code>, and{' '}
+          <code style={{ fontSize: '0.72rem' }}>SUPABASE_SERVICE_ROLE_KEY</code> set for the same project as{' '}
+          <code style={{ fontSize: '0.72rem' }}>.env.local</code>.
+        </p>
       </div>
     </div>
   );

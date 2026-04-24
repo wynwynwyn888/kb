@@ -6,9 +6,9 @@
 // 4. Updates webhook event status based on orchestration outcome
 // Does NOT send outbound message — that is a later layer's responsibility.
 
-import { Processor, WorkerHost, OnWorkerEvent } from '@nestjs/bullmq';
-import { Job, Queue } from 'bullmq';
-import { Injectable, Logger, Inject } from '@nestjs/common';
+import { Processor, WorkerHost, OnWorkerEvent, InjectQueue } from '@nestjs/bullmq';
+import { Job } from 'bullmq';
+import { Injectable, Logger } from '@nestjs/common';
 import { getSupabaseService } from '../../lib/supabase';
 import { QUEUES } from '../queue.constants';
 import { ConversationOrchestrationService } from '../../modules/orchestration/orchestration.service';
@@ -32,7 +32,7 @@ export class InboundMessageProcessor extends WorkerHost {
 
   constructor(
     private readonly orchestrationService: ConversationOrchestrationService,
-    @Inject(QUEUES.SEND_BUBBLE) private readonly sendBubbleQueue: Queue,
+    @InjectQueue(QUEUES.SEND_BUBBLE) private readonly sendBubbleQueue: any,
   ) {
     super();
   }

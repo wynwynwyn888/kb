@@ -131,6 +131,11 @@ export class GhlService {
       throw new BadRequestException('Failed to save connection');
     }
 
+    await this.supabase
+      .from('tenants')
+      .update({ ghl_location_id: dto.ghlLocationId, updated_at: new Date().toISOString() })
+      .eq('id', tenantId);
+
     return {
       status: data.status as GhlConnectionStatus,
       ghlLocationId: data.ghl_location_id,

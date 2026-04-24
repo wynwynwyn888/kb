@@ -31,7 +31,7 @@ async function main() {
   console.debug(`[BOOK_VERIFY] slot=${startTime} -> ${endTime}`);
 
   const client = createGhlClient(token, locationId);
-  const result = await client.bookSlot({ calendarId, contactId, startTime, endTime });
+  const result = await client.bookSlot({ locationId, calendarId, contactId, startTime, endTime });
 
   if (result.success) {
     console.log('[BOOK_VERIFY] SUCCESS: bookSlot returned { success: true, appointmentId=' + result.appointmentId + ' }');

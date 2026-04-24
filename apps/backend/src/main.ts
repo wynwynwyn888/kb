@@ -20,12 +20,22 @@ async function bootstrap() {
       whitelist: true,
       forbidNonWhitelisted: true,
       transform: true,
+      transformOptions: { enableImplicitConversion: true },
     }),
   );
 
-  // CORS
+  // CORS — comma-separated `CORS_ORIGIN` or a single URL. Default includes `127.0.0.1` so dev tools
+  // / Playwright using that host still match the Next app origin rules.
+  const corsRaw = configService.get<string>(
+    'CORS_ORIGIN',
+    'http://localhost:3000,http://127.0.0.1:3000',
+  );
+  const corsOrigins = corsRaw
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
   app.enableCors({
-    origin: configService.get<string>('CORS_ORIGIN', 'http://localhost:3000'),
+    origin: corsOrigins.length <= 1 ? corsOrigins[0] ?? 'http://localhost:3000' : corsOrigins,
     credentials: true,
   });
 

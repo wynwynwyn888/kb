@@ -38,6 +38,9 @@ import { AgencyAiConfigModule } from './modules/agency-ai-config/agency-ai-confi
         resolve(process.cwd(), '.env'),
         resolve(process.cwd(), '..', '.env'),
         resolve(process.cwd(), 'apps', 'backend', '.env'),
+        resolve(process.cwd(), '.env.local'),
+        resolve(process.cwd(), '..', '.env.local'),
+        resolve(process.cwd(), 'apps', 'backend', '.env.local'),
       ],
     }),
 

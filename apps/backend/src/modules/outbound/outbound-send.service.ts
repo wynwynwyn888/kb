@@ -1,5 +1,9 @@
-// Outbound Send Service — sends reply bubbles through GHL and tracks results
+// Outbound Send Service — sends reply bubbles through GHL and tracks results.
 // Does NOT make routing/AI decisions — only executes the send plan.
+// Expects `ReplyDecision.bubbles` as produced by orchestration (ReplyPlannerService formatting
+// is already applied). Outbound channel is fixed to SMS in sendSingleBubble until GHL mapping
+// for other channels is verified (see @aisbp/ghl-client CHANNEL_MAP) — not derived from
+// conversation context in this service.
 
 import { Injectable, Logger } from '@nestjs/common';
 import { getSupabaseService } from '../../lib/supabase';
@@ -120,7 +124,7 @@ export class OutboundSendService {
     for (const bubble of replyPlan.bubbles) {
       const result = await this.sendSingleBubble(ghlClient, {
         locationId: ghlLocationId,
-        conversationId,
+        contactId,
         bubble,
       });
 
@@ -168,17 +172,18 @@ export class OutboundSendService {
     ghlClient: ReturnType<typeof createGhlClient>,
     params: {
       locationId: string;
-      conversationId: string;
+      contactId: string;
       bubble: ReplyBubbleDraft;
     },
   ): Promise<BubbleSendResult> {
-    const { locationId, conversationId, bubble } = params;
+    const { locationId, contactId, bubble } = params;
 
+    // SMS is the only verified outbound channel in ghl-client today; do not switch here until verified.
     const response = await ghlClient.sendMessage({
       locationId,
-      conversationId,
+      contactId,
       message: bubble.text,
-      messageType: 'text',
+      channel: 'SMS',
     });
 
     if (response.success && response.messageId) {

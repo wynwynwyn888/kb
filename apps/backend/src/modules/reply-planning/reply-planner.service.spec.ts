@@ -6,7 +6,10 @@ import { GenerationService } from '../generation/generation.service';
 // Mock GenerationService to always return null → forces deterministic fallback
 jestGlobal.mock('../generation/generation.service', () => ({
   GenerationService: jestGlobal.fn().mockImplementation(() => ({
-    generateDraft: jestGlobal.fn(async () => null),
+    generateDraft: jestGlobal.fn(async () => ({
+      content: null,
+      skipReason: 'no_provider' as const,
+    })),
   })),
 }));
 
@@ -18,7 +21,10 @@ describe('ReplyPlannerService', () => {
   beforeEach(() => {
     jestGlobal.clearAllMocks();
     mockGen = {
-      generateDraft: jestGlobal.fn(async () => null),
+      generateDraft: jestGlobal.fn(async () => ({
+        content: null,
+        skipReason: 'no_provider' as const,
+      })),
     };
     service = new ReplyPlannerService(mockGen);
   });
@@ -161,6 +167,32 @@ describe('ReplyPlannerService', () => {
       });
       expect(result.planStatus).toBe('PLANNED');
       expect(result.bubbles.length).toBeGreaterThan(0);
+      expect(result.draftProvenance).toBe('placeholder_fallback');
+      expect(result.draftFallbackReason).toBe('no_provider');
+    });
+
+    it('marks live_generation when generateDraft returns usable content', async () => {
+      mockGen.generateDraft.mockResolvedValueOnce({ content: 'Hello from the model.' });
+      const result = await service.planReply({
+        tenantId: 't1',
+        conversationId: 'c1',
+        routing: {
+          recommendedModel: 'gpt-4o',
+          responseMode: 'standard',
+          handoverRecommended: false,
+          confidence: 0.8,
+          reasoning: 'test',
+          draftReply: null,
+          tagsSuggested: [],
+          bookingIntentDetected: false,
+        },
+        kbChunks: [],
+        memory: [],
+        systemPrompt: 'You are a helpful assistant.',
+        channel: 'WHATSAPP',
+      });
+      expect(result.draftProvenance).toBe('live_generation');
+      expect(result.draftFallbackReason).toBeUndefined();
     });
   });
 

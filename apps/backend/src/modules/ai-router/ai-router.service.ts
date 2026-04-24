@@ -67,6 +67,12 @@ export class AiRouterService {
       reasoning = 'short simple message — fast route';
     }
 
+    const tenantOverride = request.tenantModelOverride?.trim();
+    if (tenantOverride) {
+      recommendedModel = tenantOverride;
+      reasoning = `tenant model override from prompt config (${reasoning})`;
+    }
+
     const tagsSuggested: string[] = [];
 
     this.logger.log(

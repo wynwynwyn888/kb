@@ -176,6 +176,7 @@ export class ActionIntentExecutorService {
       }
       const ghlClient = createGhlClient(credentials.token, ghlLocationId);
       const ghlResult = await ghlClient.bookSlot({
+        locationId: ghlLocationId,
         calendarId: params.calendarId,
         contactId: effectiveContactId,
         startTime: params.startTime,

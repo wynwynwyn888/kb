@@ -1,8 +1,8 @@
 'use client';
 
-// Auth context - manages authentication state
+// Auth context — manages authentication state and coordinates with API user profile
 
-import { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
 import { getSupabaseClient, AuthUser } from '../lib/supabase';
 import * as api from '../lib/api';
 
@@ -26,14 +26,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [token, setToken] = useState<string | null>(null);
   const supabase = getSupabaseClient();
 
-  const refreshUser = async () => {
-    if (!token) {
-      setState({ user: null, loading: false, error: null });
-      return;
-    }
-
-    try {
+  const applyUserFromToken = useCallback(async (accessToken: string) => {
+    const apply = async (token: string) => {
       const userData = await api.getCurrentUser(token);
+      setToken(token);
       setState({
         user: {
           id: userData.id,
@@ -42,34 +38,74 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           agencyId: userData.agencyId,
           tenantId: userData.tenantId,
           fullName: userData.profile?.fullName,
+          agencyRole: userData.agencyRole,
+          tenantRole: userData.tenantRole,
         },
         loading: false,
         error: null,
       });
-    } catch (err) {
+    };
+    try {
+      await apply(accessToken);
+    } catch (e) {
+      if (api.isApiHttpError(e) && e.status === 401) {
+        const { data } = await supabase.auth.refreshSession();
+        const t2 = data.session?.access_token;
+        if (t2) {
+          await apply(t2);
+          return;
+        }
+      }
+      throw e;
+    }
+  }, [supabase]);
+
+  const refreshUser = useCallback(async () => {
+    if (!token) {
+      setState({ user: null, loading: false, error: null });
+      return;
+    }
+    try {
+      await applyUserFromToken(token);
+    } catch {
       setState({ user: null, loading: false, error: 'Failed to get user' });
       setToken(null);
     }
-  };
+  }, [token, applyUserFromToken]);
 
   useEffect(() => {
-    // Check for existing session
     const initAuth = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session) {
-        setToken(session.access_token);
-        await refreshUser();
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (session?.access_token) {
+        const t = session.access_token;
+        setToken(t);
+        try {
+          await applyUserFromToken(t);
+        } catch {
+          setState({ user: null, loading: false, error: null });
+          setToken(null);
+        }
       } else {
         setState({ user: null, loading: false, error: null });
       }
     };
 
-    initAuth();
+    void initAuth();
 
-    // Listen for auth changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (session) {
-        setToken(session.access_token);
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (session?.access_token) {
+        const t = session.access_token;
+        setToken(t);
+        try {
+          await applyUserFromToken(t);
+        } catch {
+          setState({ user: null, loading: false, error: null });
+          setToken(null);
+        }
       } else {
         setToken(null);
         setState({ user: null, loading: false, error: null });
@@ -79,36 +115,44 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       subscription.unsubscribe();
     };
-  }, []);
+  }, [supabase, applyUserFromToken]);
 
-  const login = async (email: string, password: string) => {
-    setState(s => ({ ...s, loading: true, error: null }));
-    try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
+  const login = useCallback(
+    async (email: string, password: string) => {
+      setState(s => ({ ...s, loading: true, error: null }));
+      try {
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
 
-      if (error) {
-        throw error;
+        if (error) {
+          throw error;
+        }
+
+        if (data.session?.access_token) {
+          const t = data.session.access_token;
+          setToken(t);
+          await applyUserFromToken(t);
+        }
+      } catch (err: unknown) {
+        let message = err instanceof Error ? err.message : 'Login failed';
+        if (message === 'Failed to fetch' || message === 'Load failed') {
+          message =
+            'Cannot reach Supabase (auth). For local dev: run `supabase start` or set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in .env.local to your Supabase project — demo users exist in that project.';
+        }
+        setState({ user: null, loading: false, error: message });
+        throw err;
       }
+    },
+    [supabase, applyUserFromToken],
+  );
 
-      if (data.session) {
-        setToken(data.session.access_token);
-        await refreshUser();
-      }
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Login failed';
-      setState({ user: null, loading: false, error: message });
-      throw err;
-    }
-  };
-
-  const logout = async () => {
+  const logout = useCallback(async () => {
     await supabase.auth.signOut();
     setToken(null);
     setState({ user: null, loading: false, error: null });
-  };
+  }, [supabase]);
 
   return (
     <AuthContext.Provider value={{ ...state, login, logout, refreshUser, token }}>

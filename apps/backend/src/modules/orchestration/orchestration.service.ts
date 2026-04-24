@@ -18,6 +18,7 @@ import type {
   MemoryEntry,
 } from './dto';
 import type { RoutingResponse } from './dto';
+import type { ReplyDecision } from '../reply-planning/dto';
 import type { RetrievalChunk, RetrievalMeta } from '../kb/dto/retrieval.dto';
 import { safeLog } from '../../lib/encryption';
 
@@ -97,12 +98,18 @@ export class ConversationOrchestrationService {
         systemPrompt,
         conversationId,
         channel: input.conversation?.channel ?? 'WHATSAPP',
+        temperature: input.promptConfig?.temperature,
+        maxTokens: input.promptConfig?.maxTokens,
       });
 
       this.logger.log(
         `Orchestration completed: conversationId=${conversationId}, model=${routing.recommendedModel}, ` +
         `mode=${routing.responseMode}, bubbles=${replyPlan.bubbles.length}, ` +
-        `handover=${replyPlan.handoverRecommended}`,
+        `handover=${replyPlan.handoverRecommended}, ` +
+        `draftProvenance=${replyPlan.draftProvenance ?? 'none'}` +
+        (replyPlan.draftFallbackReason
+          ? `, draftFallbackReason=${replyPlan.draftFallbackReason}`
+          : ''),
       );
 
       // Step 7: Persist orchestration log
@@ -176,17 +183,24 @@ export class ConversationOrchestrationService {
 
   /**
    * Load active prompt config for a tenant.
+   * If multiple rows are active, picks the most recently updated (same ordering as prompts UI upserts).
    */
   async loadPromptConfig(
     tenantId: string,
   ): Promise<OrchestrationInput['promptConfig']> {
-    const { data: config } = await this.supabase
+    const { data: rows, error } = await this.supabase
       .from('tenant_prompt_configs')
-      .select('id, system_prompt, temperature, model_override, is_active')
+      .select('id, system_prompt, temperature, model_override, max_tokens, is_active')
       .eq('tenant_id', tenantId)
       .eq('is_active', true)
-      .single();
+      .order('updated_at', { ascending: false })
+      .limit(1);
 
+    if (error) {
+      this.logger.warn(`loadPromptConfig: ${error.message}`);
+      return null;
+    }
+    const config = rows?.[0];
     if (!config) return null;
 
     return {
@@ -194,12 +208,14 @@ export class ConversationOrchestrationService {
       systemPrompt: config.system_prompt,
       temperature: config.temperature,
       modelOverride: config.model_override || undefined,
+      maxTokens: (config as { max_tokens?: number | null }).max_tokens ?? null,
       isActive: config.is_active,
     };
   }
 
   /**
    * Load agency-level system policy (if any) for a tenant.
+   * Uses `agency_system_policies`: `content` is the policy body; highest `priority` wins, then newest.
    */
   async loadAgencyPolicy(
     tenantId: string,
@@ -212,21 +228,24 @@ export class ConversationOrchestrationService {
 
     if (!tenant) return null;
 
-    const { data: policies } = await this.supabase
+    const { data: rows, error } = await this.supabase
       .from('agency_system_policies')
-      .select('id, system_prompt, default_model, fallback_model')
+      .select('id, name, content, priority, is_default')
       .eq('agency_id', tenant.agency_id)
+      .order('priority', { ascending: false })
       .order('created_at', { ascending: false })
       .limit(1);
 
-    if (!policies || policies.length === 0) return null;
+    if (error) {
+      this.logger.warn(`loadAgencyPolicy: ${error.message}`);
+      return null;
+    }
+    const policy = rows?.[0];
+    if (!policy) return null;
 
-    const policy = policies[0]!;
     return {
       id: policy.id,
-      systemPrompt: policy.system_prompt,
-      defaultModel: policy.default_model || undefined,
-      fallbackModel: policy.fallback_model || undefined,
+      systemPrompt: policy.content,
     };
   }
 
@@ -286,9 +305,12 @@ export class ConversationOrchestrationService {
   }
 
   private buildSystemPrompt(input: OrchestrationInput): string {
-    const tenantPrompt = input.promptConfig?.systemPrompt;
-    const agencyPrompt = input.agencyPolicy?.systemPrompt;
+    const tenantPrompt = input.promptConfig?.systemPrompt?.trim();
+    const agencyPrompt = input.agencyPolicy?.systemPrompt?.trim();
 
+    if (tenantPrompt && agencyPrompt) {
+      return `${agencyPrompt}\n\n---\n\nSubaccount bot instructions:\n${tenantPrompt}`;
+    }
     if (tenantPrompt) return tenantPrompt;
     if (agencyPrompt) return agencyPrompt;
 
@@ -313,6 +335,8 @@ export class ConversationOrchestrationService {
       (incomingMessage.length + systemPrompt.length) / 4,
     );
 
+    const tenantModelOverride = input.promptConfig?.modelOverride?.trim();
+
     return {
       tenantId: input.tenantId,
       conversationId: input.conversationId,
@@ -325,6 +349,7 @@ export class ConversationOrchestrationService {
       handoverRecommended: false,
       bookingIntentDetected,
       estimatedInputTokens,
+      ...(tenantModelOverride ? { tenantModelOverride } : {}),
     };
   }
 
@@ -333,7 +358,7 @@ export class ConversationOrchestrationService {
     guardOutcome: GuardOutcome,
     routing: RoutingResponse | null,
     retrievalMeta: RetrievalMeta | null,
-    replyPlan: { planStatus: string; bubbles: unknown[]; responseMode: string; handoverRecommended: boolean; confidence: number; rationale: string; suggestedActions: Array<{ type: string; params: Record<string, unknown>; reason: string }> } | null,
+    replyPlan: ReplyDecision | null,
   ): Promise<string | undefined> {
     const outcomeMap: Record<GuardOutcome['final'], string> = {
       PROCEED: 'PROCEED',
@@ -367,6 +392,9 @@ export class ConversationOrchestrationService {
       metadata['replyHandoverRecommended'] = replyPlan.handoverRecommended;
       metadata['replyConfidence'] = replyPlan.confidence;
       metadata['replyRationale'] = replyPlan.rationale;
+      // Bubble text source: placeholder_fallback is deterministic/KB/memory — not model output.
+      metadata['replyDraftProvenance'] = replyPlan.draftProvenance ?? null;
+      metadata['replyDraftFallbackReason'] = replyPlan.draftFallbackReason ?? null;
     }
 
     const logData = {

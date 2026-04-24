@@ -69,7 +69,8 @@ export class AuthService {
         const primaryTenant = tenantMemberships[0]!;
         tenantRole = primaryTenant.role;
         tenantId = primaryTenant.tenantId;
-        agencyId = primaryTenant.agencyId;
+        // Do not set `agencyId` from the tenant's owning agency — that is not agency *membership*.
+        // Frontend and agency APIs use `agencyId` + `agencyRole` only for `agency_users` access.
       }
 
       if (agencyMembership) {
@@ -121,11 +122,14 @@ export class AuthService {
    */
   async getAgencyMembership(profileId: string): Promise<{ agencyId: string; role: AgencyRole } | null> {
     const supabase = getSupabaseService();
+    // Deterministic when multiple agency_users rows exist (use oldest membership).
     const { data, error } = await supabase
       .from('agency_users')
       .select('agency_id, role')
       .eq('profile_id', profileId)
-      .single();
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .maybeSingle();
 
     if (error || !data) {
       return null;

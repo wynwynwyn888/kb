@@ -1,7 +1,8 @@
 // OpenAI provider adapter for @aisbp/ai-router
 // Implements AiProviderAdapter using the Chat Completions API.
 
-import axios, { AxiosInstance, AxiosError } from 'axios';
+import axios from 'axios';
+import type { AxiosInstance } from 'axios';
 import type {
   AiProviderAdapter,
   ProviderConfig,

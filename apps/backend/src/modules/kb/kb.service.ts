@@ -2,6 +2,7 @@
 // Two-stage retrieval: keyword fallback now, vector-ready interface for pgvector later.
 // All operations are tenant-scoped.
 
+import { randomUUID } from 'node:crypto';
 import { Injectable, Logger } from '@nestjs/common';
 import { getSupabaseService } from '../../lib/supabase';
 import type {
@@ -13,6 +14,21 @@ import type {
 
 const DEFAULT_TOP_K = 5;
 const KEYWORD_WINDOW = 3; // n-gram window for keyword matching
+
+function inferDocumentKind(
+  source: string,
+  metadata: unknown,
+): string {
+  const m = metadata as Record<string, unknown> | null | undefined;
+  if (m && typeof m['documentKind'] === 'string' && m['documentKind'].trim() !== '') {
+    return m['documentKind']!.trim();
+  }
+  const s = (source || '').toLowerCase();
+  if (s === 'faq') return 'faq';
+  if (s === 'rich_text' || s === 'rich') return 'rich_text';
+  if (s.includes('pdf') || s.includes('word') || s === 'file') return 'file';
+  return 'manual';
+}
 
 @Injectable()
 export class KbService {
@@ -76,20 +92,28 @@ export class KbService {
   /**
    * List all READY documents for a tenant.
    */
-  async listDocuments(tenantId: string): Promise<Array<{
+  async listDocuments(
+    tenantId: string,
+    opts?: { includeAllStatuses?: boolean },
+  ): Promise<Array<{
     id: string;
     title: string;
     source: string;
     status: string;
+    documentKind: string;
     chunkCount: number;
     createdAt: string;
   }>> {
-    const { data, error } = await this.supabase
+    // Omit `document_kind` from the select list so PostgREST works even if its schema cache
+    // lags after migrations; we infer kind from `source` + `metadata.documentKind`.
+    let q = this.supabase
       .from('knowledge_documents')
-      .select('id, title, source, status, created_at')
-      .eq('tenant_id', tenantId)
-      .eq('status', 'READY')
-      .order('created_at', { ascending: false });
+      .select('id, title, source, status, created_at, metadata')
+      .eq('tenant_id', tenantId);
+    if (!opts?.includeAllStatuses) {
+      q = q.eq('status', 'READY');
+    }
+    const { data, error } = await q.order('created_at', { ascending: false });
 
     if (error || !data) return [];
 
@@ -110,9 +134,145 @@ export class KbService {
       title: d.title,
       source: d.source,
       status: d.status,
+      documentKind: inferDocumentKind(d.source, (d as { metadata?: unknown }).metadata),
       chunkCount: countMap[d.id] ?? 0,
       createdAt: d.created_at,
     }));
+  }
+
+  async createFaq(tenantId: string, question: string, answer: string): Promise<{ id: string }> {
+    const q = question.trim();
+    const a = answer.trim();
+    if (!q || !a) throw new Error('question and answer required');
+    const title = `FAQ: ${q.slice(0, 200)}`;
+    const docId = randomUUID();
+    const now = new Date().toISOString();
+    const { data: doc, error: de } = await this.supabase
+      .from('knowledge_documents')
+      .insert({
+        id: docId,
+        tenant_id: tenantId,
+        title,
+        source: 'faq',
+        mime_type: 'text/plain',
+        size: a.length,
+        status: 'READY',
+        metadata: { question: q, documentKind: 'faq' },
+        created_at: now,
+        updated_at: now,
+      })
+      .select('id')
+      .single();
+    if (de || !doc) throw new Error(`FAQ doc: ${de?.message}`);
+    const chunkId = randomUUID();
+    const { error: ce } = await this.supabase.from('knowledge_chunks').insert({
+      id: chunkId,
+      document_id: doc.id,
+      content: a,
+      token_count: Math.ceil(a.length / 4),
+      metadata: { kind: 'faq' },
+    });
+    if (ce) throw new Error(`FAQ chunk: ${ce.message}`);
+    return { id: doc.id };
+  }
+
+  async createRichText(tenantId: string, title: string, content: string): Promise<{ id: string }> {
+    const t = title.trim();
+    const c = content.trim();
+    if (!t || !c) throw new Error('title and content required');
+    const docId = randomUUID();
+    const now = new Date().toISOString();
+    const { data: doc, error: de } = await this.supabase
+      .from('knowledge_documents')
+      .insert({
+        id: docId,
+        tenant_id: tenantId,
+        title: t,
+        source: 'rich_text',
+        mime_type: 'text/plain',
+        size: c.length,
+        status: 'READY',
+        metadata: { documentKind: 'rich_text' },
+        created_at: now,
+        updated_at: now,
+      })
+      .select('id')
+      .single();
+    if (de || !doc) throw new Error(`Rich doc: ${de?.message}`);
+    const chunkId = randomUUID();
+    const { error: ce } = await this.supabase.from('knowledge_chunks').insert({
+      id: chunkId,
+      document_id: doc.id,
+      content: c,
+      token_count: Math.ceil(c.length / 4),
+      metadata: { kind: 'rich_text' },
+    });
+    if (ce) throw new Error(`Rich chunk: ${ce.message}`);
+    return { id: doc.id };
+  }
+
+  async createFileFromBuffer(
+    tenantId: string,
+    fileName: string,
+    buffer: Buffer,
+    mime: string,
+  ): Promise<{ id: string; status: string }> {
+    const m = (mime || '').toLowerCase();
+    let text = '';
+    if (m === 'text/plain' || m === 'text/markdown' || m.startsWith('text/')) {
+      text = buffer.toString('utf8');
+    } else if (m === 'application/pdf') {
+      throw new Error('PDF extraction is not enabled on this server; use .txt or contact ops to add a worker');
+    } else if (
+      m === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+      m === 'application/msword'
+    ) {
+      throw new Error('Word extraction is not enabled; use .txt for now');
+    } else {
+      text = buffer.toString('utf8');
+    }
+    if (!text.trim()) throw new Error('Empty or unsupported file content');
+    const docId = randomUUID();
+    const now = new Date().toISOString();
+    const { data: doc, error: de } = await this.supabase
+      .from('knowledge_documents')
+      .insert({
+        id: docId,
+        tenant_id: tenantId,
+        title: fileName,
+        source: m || 'file',
+        mime_type: mime || 'application/octet-stream',
+        size: buffer.length,
+        status: 'READY',
+        metadata: { fileName, mime, documentKind: 'file' },
+        created_at: now,
+        updated_at: now,
+      })
+      .select('id')
+      .single();
+    if (de || !doc) throw new Error(`File doc: ${de?.message}`);
+    const chunkId = randomUUID();
+    const { error: ce } = await this.supabase.from('knowledge_chunks').insert({
+      id: chunkId,
+      document_id: doc.id,
+      content: text,
+      token_count: Math.ceil(text.length / 4),
+      metadata: { kind: 'file' },
+    });
+    if (ce) throw new Error(`File chunk: ${ce.message}`);
+    return { id: doc.id, status: 'READY' };
+  }
+
+  async deleteDocument(tenantId: string, documentId: string): Promise<void> {
+    const { data: doc } = await this.supabase
+      .from('knowledge_documents')
+      .select('id')
+      .eq('id', documentId)
+      .eq('tenant_id', tenantId)
+      .maybeSingle();
+    if (!doc) throw new Error('Document not found');
+    const { error } = await this.supabase.from('knowledge_documents').delete().eq('id', documentId);
+    if (error) throw new Error(error.message);
   }
 
   /**
@@ -137,6 +297,33 @@ export class KbService {
       tokenCount: c.token_count,
       metadata: (c.metadata as Record<string, unknown>) ?? {},
     }));
+  }
+
+  /**
+   * Same as {@link getChunks}, but only if the document exists under the given tenant.
+   * Used by HTTP to avoid leaking chunks across tenants when addressing by document id alone.
+   */
+  async getChunksForTenant(
+    documentId: string,
+    tenantId: string,
+  ): Promise<Array<{
+    id: string;
+    content: string;
+    tokenCount: number;
+    metadata: Record<string, unknown>;
+  }> | null> {
+    const { data: doc, error } = await this.supabase
+      .from('knowledge_documents')
+      .select('id')
+      .eq('id', documentId)
+      .eq('tenant_id', tenantId)
+      .maybeSingle();
+
+    if (error || !doc) {
+      return null;
+    }
+
+    return this.getChunks(documentId);
   }
 
   /**
@@ -236,37 +423,60 @@ export class KbService {
       metadata: Record<string, unknown>;
     }>
   > {
-    const { data, error } = await this.supabase
+    // Two-step load: PostgREST embed filters on aliased `document.*` are unreliable in some clients;
+    // we filter READY + tenant on `knowledge_documents` first, then load chunks.
+    const { data: docs, error: dErr } = await this.supabase
+      .from('knowledge_documents')
+      .select('id, title, source')
+      .eq('tenant_id', tenantId)
+      .eq('status', 'READY');
+
+    if (dErr) {
+      this.logger.warn(`loadTenantChunks: documents failed: ${dErr.message}`);
+      return [];
+    }
+    if (!docs?.length) return [];
+
+    const docById: Record<string, { id: string; title: string; source: string }> = {};
+    for (const d of docs) {
+      docById[d.id] = { id: d.id, title: d.title, source: d.source };
+    }
+    const docIds = docs.map(d => d.id);
+
+    const { data: rows, error: cErr } = await this.supabase
       .from('knowledge_chunks')
-      .select(`
-        id,
-        document_id,
-        content,
-        metadata,
-        document:knowledge_documents!inner(
-          id,
-          title,
-          source,
-          status
-        )
-      `)
-      .eq('document.status', 'READY')
-      .eq('document.tenant_id', tenantId);
+      .select('id, document_id, content, metadata')
+      .in('document_id', docIds);
 
-    if (error || !data) return [];
+    if (cErr) {
+      this.logger.warn(`loadTenantChunks: chunks failed: ${cErr.message}`);
+      return [];
+    }
+    if (!rows) return [];
 
-    return data.map(row => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const doc = row.document as any;
-      return {
-        id: row.id,
-        documentId: row.document_id,
-        title: doc.title as string,
-        source: doc.source as string,
-        content: row.content,
-        metadata: (row.metadata as Record<string, unknown>) ?? {},
-      };
-    });
+    return rows
+      .map(row => {
+        const doc = docById[row.document_id as string];
+        if (!doc) return null;
+        return {
+          id: row.id,
+          documentId: row.document_id,
+          title: doc.title,
+          source: doc.source,
+          content: row.content,
+          metadata: (row.metadata as Record<string, unknown>) ?? {},
+        };
+      })
+      .filter(
+        (x): x is {
+          id: string;
+          documentId: string;
+          title: string;
+          source: string;
+          content: string;
+          metadata: Record<string, unknown>;
+        } => x != null,
+      );
   }
 
   /**

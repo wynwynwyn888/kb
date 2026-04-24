@@ -3,7 +3,6 @@
 
 generator client {
   provider = "prisma-client-js"
-  output   = "../node_modules/.prisma/client"
 }
 
 datasource db {
@@ -38,6 +37,10 @@ model Agency {
   id        String   @id @default(uuid())
   name      String
   settings  Json     @default("{}")
+  /// Which provider row in agency_model_providers is used for generation (OPENAI, MINIMAX, …).
+  activeAiProvider AiProvider @default(OPENAI) @map("active_ai_provider")
+  /// Credits applied to new subaccount wallets when created (period total baseline).
+  defaultSubaccountQuota Int @default(10000) @map("default_subaccount_quota")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -47,6 +50,7 @@ model Agency {
   modelProviders AgencyModelProvider[]
   systemPolicies AgencySystemPolicy[]
   auditLogs      AuditLog[]
+  quotaAuditLogs QuotaAuditLog[]
 
   @@map("agencies")
 }
@@ -84,7 +88,7 @@ model Tenant {
   id            String   @id @default(uuid())
   agencyId      String   @map("agency_id")
   name          String
-  ghlLocationId String   @map("ghl_location_id")
+  ghlLocationId String?  @map("ghl_location_id")
   status        String   @default("pending") // active, suspended, pending
   settings      Json     @default("{}")
   botEnabled    Boolean  @default(true)  @map("bot_enabled")
@@ -106,6 +110,7 @@ model Tenant {
   auditLogs      AuditLog[]
   webhookEvents  WebhookEvent[]
   orchestrationLogs OrchestrationLog[]
+  quotaAuditLogs    QuotaAuditLog[]
 
   @@unique([ghlLocationId])
   @@index([agencyId])
@@ -191,6 +196,7 @@ enum AiProvider {
   GOOGLE
   AZURE
   CUSTOM
+  MINIMAX
 }
 
 model AgencyModelProvider {
@@ -275,6 +281,7 @@ enum DocumentStatus {
   FAILED
 }
 
+/// Explicit KB entry kind for APIs (faq | rich_text | file | manual | …).
 model KnowledgeDocument {
   id        String         @id @default(uuid())
   tenantId  String         @map("tenant_id")
@@ -282,6 +289,8 @@ model KnowledgeDocument {
   source    String
   mimeType  String         @map("mime_type")
   size      Int
+  /// faq | rich_text | file | manual | …
+  documentKind String      @default("manual") @map("document_kind")
   status    DocumentStatus @default(PENDING)
   metadata  Json           @default("{}")
   createdAt DateTime       @default(now()) @map("created_at")
@@ -328,6 +337,7 @@ enum ConversationStatus {
   HANDOVER
   CLOSED
   PENDING
+  PAUSED
 }
 
 model Conversation {
@@ -348,6 +358,7 @@ model Conversation {
   handovers  HandoverEvent[]
   actionLogs ActionLog[]
   actionIntents ActionIntent[]
+  automationEvents ConversationAutomationEvent[]
 
   @@unique([ghlConversationId])
   @@index([tenantId])
@@ -425,6 +436,26 @@ model HandoverEvent {
 }
 
 // ============================================================================
+// AUTOMATION CONTROL
+// ============================================================================
+
+model ConversationAutomationEvent {
+  id             String    @id @default(uuid())
+  conversationId String    @map("conversation_id")
+  previousState  String?   @map("previous_state")
+  newState       String    @map("new_state")
+  actorId        String?   @map("actor_id")
+  actorEmail     String?   @map("actor_email")
+  reason         String?
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+  @@map("conversation_automation_events")
+}
+
+// ============================================================================
 // QUOTA
 // ============================================================================
 
@@ -464,6 +495,29 @@ model QuotaLedger {
 
   @@index([walletId])
   @@map("quota_ledgers")
+}
+
+/// Agency-scoped record of manual quota default changes and per-subaccount top-ups.
+model QuotaAuditLog {
+  id            String   @id @default(uuid())
+  agencyId      String   @map("agency_id")
+  profileId     String   @map("profile_id")
+  tenantId      String?  @map("tenant_id")
+  action        String
+  /// Credits delta for top-up; 0 for default-only events.
+  delta         Int      @default(0)
+  previousTotal Int?     @map("previous_total")
+  newTotal      Int?     @map("new_total")
+  metadata      Json     @default("{}")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  agency Agency  @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+
+  @@index([agencyId])
+  @@index([tenantId])
+  @@index([createdAt])
+  @@map("quota_audit_logs")
 }
 
 // ============================================================================

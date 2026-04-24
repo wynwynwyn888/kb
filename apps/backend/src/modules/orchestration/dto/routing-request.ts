@@ -17,4 +17,6 @@ export interface RoutingRequest {
   handoverRecommended: boolean;
   bookingIntentDetected: boolean;
   estimatedInputTokens: number;
+  /** From `OrchestrationInput.promptConfig.modelOverride` when set; router uses for `recommendedModel`. */
+  tenantModelOverride?: string;
 }

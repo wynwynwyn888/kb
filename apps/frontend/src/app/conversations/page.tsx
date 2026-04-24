@@ -128,7 +128,7 @@ export default function ConversationLogsPage() {
         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
           <input
             type="text"
-            placeholder="Tenant ID"
+            placeholder="Subaccount ID"
             value={tenantId}
             onChange={e => setTenantId(e.target.value)}
             style={{ padding: '0.5rem', fontSize: '0.875rem', width: '240px' }}
@@ -177,7 +177,7 @@ export default function ConversationLogsPage() {
               {conversations.length === 0 && !loading && (
                 <tr>
                   <td colSpan={5} style={{ padding: '2rem', textAlign: 'center', color: '#666' }}>
-                    {tenantId ? 'No conversations found' : 'Enter a Tenant ID to load conversations'}
+                    {tenantId ? 'No conversations found' : 'Enter a subaccount ID to load conversations'}
                   </td>
                 </tr>
               )}

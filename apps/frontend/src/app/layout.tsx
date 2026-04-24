@@ -1,10 +1,11 @@
 // Root layout with Auth provider
 import type { Metadata } from 'next';
 import { AuthProvider } from '../contexts/AuthContext';
+import { UnauthorizedSessionHandler } from '../components/app/UnauthorizedSessionHandler';
 
 export const metadata: Metadata = {
   title: 'AI SaaS Business Platform',
-  description: 'Multi-tenant AI conversation middleware for GoHighLevel',
+  description: 'Agency and subaccount AI conversation layer for GoHighLevel',
 };
 
 export default function RootLayout({
@@ -15,7 +16,10 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
-        <AuthProvider>{children}</AuthProvider>
+        <AuthProvider>
+          <UnauthorizedSessionHandler />
+          {children}
+        </AuthProvider>
       </body>
     </html>
   );

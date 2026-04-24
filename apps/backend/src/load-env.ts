@@ -31,7 +31,11 @@ function applyEnvFile(path: string, override: boolean): void {
 }
 
 const cwd = process.cwd();
-// Order: local cwd first, then monorepo root when cwd is apps/backend, then explicit apps/backend path when cwd is repo root.
+// Order: `.env` first, then `.env.local` overrides (Next/Vite-style local overrides).
+// Supports cwd = repo root or `apps/backend`.
 applyEnvFile(resolve(cwd, '.env'), false);
 applyEnvFile(resolve(cwd, '..', '.env'), false);
 applyEnvFile(resolve(cwd, 'apps', 'backend', '.env'), true);
+applyEnvFile(resolve(cwd, '.env.local'), true);
+applyEnvFile(resolve(cwd, '..', '.env.local'), true);
+applyEnvFile(resolve(cwd, 'apps', 'backend', '.env.local'), true);

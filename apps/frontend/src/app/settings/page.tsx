@@ -25,7 +25,7 @@ export default function SettingsPage() {
       </section>
       <section>
         <h2>Team Members</h2>
-        <p>TODO: Manage agency and tenant users</p>
+        <p>TODO: Manage agency and subaccount access</p>
       </section>
     </main>
   );

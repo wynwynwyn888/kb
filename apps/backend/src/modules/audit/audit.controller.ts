@@ -1,16 +1,23 @@
 // Audit controller
 
 import { Controller, Get, Post, Body, Param, Query } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { AuditService } from './audit.service';
 
+const STUB_DESC =
+  'Not implemented: handler throws. This controller has no JwtAuthGuard — endpoints are not Bearer-protected.';
+
 @ApiTags('audit')
-@ApiBearerAuth()
 @Controller('audit')
 export class AuditController {
   constructor(private readonly auditService: AuditService) {}
 
   @Get()
+  @ApiOperation({
+    summary: '[Stub] Query audit log',
+    deprecated: true,
+    description: STUB_DESC,
+  })
   async findAll(
     @Query('agencyId') agencyId: string,
     @Query('tenantId') tenantId?: string,
@@ -25,12 +32,22 @@ export class AuditController {
   }
 
   @Get(':id')
+  @ApiOperation({
+    summary: '[Stub] Get audit entry',
+    deprecated: true,
+    description: STUB_DESC,
+  })
   async findOne(@Param('id') id: string) {
     // TODO: Implement
     throw new Error('Not implemented');
   }
 
   @Post('log')
+  @ApiOperation({
+    summary: '[Stub] Create audit log',
+    deprecated: true,
+    description: STUB_DESC,
+  })
   async createLog(@Body() dto: {
     agencyId: string;
     userId: string;

@@ -1,5 +1,10 @@
 // Reply Planner Service — produces structured ReplyDecision from orchestration context.
 // Uses live LLM generation when a provider is configured; falls back to deterministic drafting.
+//
+// FORMATTING OWNERSHIP (live outbound): `formatIntoBubbles` below is the canonical formatter
+// for text shape on the real queue → GHL send path (orchestration enqueues `ReplyDecision`
+// produced here). `FormatterService` (HTTP `/formatter`) is a separate optional/tooling path —
+// not invoked during send-bubble execution. Do not assume parity; see drift note on FormatterService.
 
 import { Injectable, Logger } from '@nestjs/common';
 import { GenerationService } from '../generation/generation.service';
@@ -37,6 +42,9 @@ export class ReplyPlannerService {
     systemPrompt: string;
     conversationId: string;
     channel: string;
+    /** From subaccount `tenant_prompt_configs` when set. */
+    temperature?: number;
+    maxTokens?: number | null;
   }): Promise<ReplyDecision> {
     const { tenantId, routing, kbChunks, memory, systemPrompt, conversationId } = params;
 
@@ -54,10 +62,18 @@ export class ReplyPlannerService {
     }
 
     // ---------- Live generation or fallback ----------
-    const draftText = await this.buildDraft(tenantId, routing, kbChunks, memory, systemPrompt);
+    const draft = await this.buildDraft(
+      tenantId,
+      routing,
+      kbChunks,
+      memory,
+      systemPrompt,
+      params.temperature,
+      params.maxTokens,
+    );
 
     // ---------- Format into bubbles ----------
-    const bubbles = this.formatIntoBubbles(draftText);
+    const bubbles = this.formatIntoBubbles(draft.text);
 
     // ---------- Suggest actions ----------
     const suggestedActions = this.suggestActions(routing, kbChunks);
@@ -70,10 +86,16 @@ export class ReplyPlannerService {
       rationale: routing.reasoning,
       bubbles,
       suggestedActions,
+      draftProvenance: draft.provenance,
+      ...(draft.provenance === 'placeholder_fallback' && draft.fallbackReason
+        ? { draftFallbackReason: draft.fallbackReason }
+        : {}),
     };
 
     this.logger.log(
-      `Reply planning completed: conversation=${conversationId}, bubbles=${bubbles.length}, mode=${routing.responseMode}`,
+      `Reply planning completed: conversation=${conversationId}, bubbles=${bubbles.length}, ` +
+        `mode=${routing.responseMode}, draftProvenance=${draft.provenance}` +
+        (draft.fallbackReason ? `, draftFallbackReason=${draft.fallbackReason}` : ''),
     );
 
     return decision;
@@ -110,24 +132,47 @@ export class ReplyPlannerService {
     kbChunks: RetrievalChunk[],
     memory: MemoryEntry[],
     systemPrompt: string,
-  ): Promise<string> {
-    // Try live generation
+    subaccountTemperature?: number,
+    subaccountMaxTokens?: number | null,
+  ): Promise<{
+    text: string;
+    provenance: 'live_generation' | 'placeholder_fallback';
+    fallbackReason?: 'no_agency' | 'no_provider' | 'generation_failed';
+  }> {
+    const lastUser = [...memory].reverse().find(m => m.role === 'user');
+    const incomingMessage = lastUser?.content?.trim() ?? '';
+
     const liveDraft = await this.generationService.generateDraft({
       tenantId,
-      incomingMessage: '', // not needed — memory + kb already in context
+      incomingMessage,
       systemPrompt,
       memory,
       kbContext: kbChunks,
       model: routing.recommendedModel,
+      ...(subaccountTemperature != null && Number.isFinite(subaccountTemperature)
+        ? { temperature: subaccountTemperature }
+        : {}),
+      ...(subaccountMaxTokens != null && subaccountMaxTokens > 0
+        ? { maxTokens: subaccountMaxTokens }
+        : {}),
     });
 
-    if (liveDraft && liveDraft.trim()) {
-      this.logger.log(`Live draft generated: ${liveDraft.length} chars`);
-      return liveDraft;
+    const trimmed = liveDraft.content?.trim() ?? '';
+    if (trimmed.length > 0) {
+      this.logger.log(`Live draft generated: ${trimmed.length} chars`);
+      return { text: trimmed, provenance: 'live_generation' };
     }
 
-    // Deterministic fallback
-    return this.buildPlaceholderDraft(routing, kbChunks, memory);
+    const fallbackReason =
+      liveDraft.skipReason ??
+      (liveDraft.content !== null && trimmed.length === 0 ? 'generation_failed' : undefined);
+
+    const text = this.buildPlaceholderDraft(routing, kbChunks, memory);
+    return {
+      text,
+      provenance: 'placeholder_fallback',
+      fallbackReason,
+    };
   }
 
   /**
@@ -161,13 +206,13 @@ export class ReplyPlannerService {
   }
 
   /**
-   * Format a draft string into WhatsApp-friendly bubble segments.
+   * Canonical outbound bubble shaping for live sends: this is what enqueue → GHL uses.
    * Rules:
-   * - Strip markdown
-   * - Split at paragraph boundaries or on blank lines
-   * - Each bubble ≤ MAX_BUBBLE_CHARS
-   * - Preserve short paragraphs as single bubbles
-   * - Long paragraphs split on sentence/near-boundary
+   * - Local `stripMarkdown` (regex-based)
+   * - Split at paragraph boundaries (`\n\s*\n`)
+   * - Each bubble ≤ MAX_BUBBLE_CHARS (320)
+   * - Long paragraphs split on sentence / char boundaries
+   * Not the same as `FormatterService` / `@aisbp/formatter` (see FormatterService drift doc).
    */
   private formatIntoBubbles(text: string): ReplyBubbleDraft[] {
     const stripped = this.stripMarkdown(text);

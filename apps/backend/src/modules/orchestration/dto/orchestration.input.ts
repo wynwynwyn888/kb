@@ -16,18 +16,19 @@ export interface OrchestrationInput {
     handoverPaused: boolean;
     ghlLocationId: string;
   };
+  /** From `tenant_prompt_configs` (same fields as saved via prompts API). */
   promptConfig?: {
     id: string;
     systemPrompt: string;
     temperature: number;
     modelOverride?: string;
+    maxTokens: number | null;
     isActive: boolean;
   } | null;
+  /** From `agency_system_policies`; `systemPrompt` is the `content` column. */
   agencyPolicy?: {
     id: string;
     systemPrompt: string;
-    defaultModel?: string;
-    fallbackModel?: string;
   } | null;
   conversation?: {
     id: string;

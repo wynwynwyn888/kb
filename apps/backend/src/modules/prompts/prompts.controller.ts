@@ -1,57 +1,131 @@
-// Prompts controller
+// Prompts controller — tenant prompt configs & agency policies (JWT, scoped)
 
-import { Controller, Get, Post, Patch, Delete, Body, Param } from '@nestjs/common';
-import { ApiTags, ApiBearerAuth } from '@nestjs/swagger';
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Get,
+  Param,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
+import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { PromptsService } from './prompts.service';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import type { SessionUser } from '../../lib/supabase';
 
 @ApiTags('prompts')
 @ApiBearerAuth()
+@UseGuards(JwtAuthGuard)
 @Controller('prompts')
 export class PromptsController {
   constructor(private readonly promptsService: PromptsService) {}
 
-  // Tenant prompt configs
-  @Post('tenant')
-  async createTenantPrompt(@Body() dto: {
-    tenantId: string;
-    name: string;
-    systemPrompt: string;
-    temperature?: number;
-    modelOverride?: string;
-    maxTokens?: number;
-  }) {
-    // TODO: Implement
-    throw new Error('Not implemented');
-  }
-
   @Get('tenant/:tenantId')
-  async getTenantPrompts(@Param('tenantId') tenantId: string) {
-    // TODO: Implement
-    throw new Error('Not implemented');
+  @ApiOperation({
+    summary: 'List tenant prompt configs',
+    description:
+      'Requires membership on the tenant (or agency membership for that tenant\'s agency).',
+  })
+  async getTenantPrompts(
+    @Param('tenantId') tenantId: string,
+    @CurrentUser() user: SessionUser,
+  ) {
+    if (!tenantId?.trim()) {
+      throw new BadRequestException('tenantId is required');
+    }
+    return this.promptsService.listTenantPrompts(tenantId.trim(), user.id);
   }
 
-  @Patch(':id')
-  async updatePrompt(@Param('id') id: string, @Body() dto: Record<string, unknown>) {
-    // TODO: Implement
-    throw new Error('Not implemented');
-  }
-
-  // Agency system policies
-  @Post('policy')
-  async createPolicy(@Body() dto: {
-    agencyId: string;
-    name: string;
-    content: string;
-    priority?: number;
-    isDefault?: boolean;
-  }) {
-    // TODO: Implement
-    throw new Error('Not implemented');
+  @Post('tenant')
+  @ApiOperation({
+    summary: 'Create or update tenant prompt config',
+    description:
+      'Upserts by `(tenantId, name)`. Requires tenant ADMIN or agency OWNER/ADMIN for the tenant\'s agency.',
+  })
+  async upsertTenantPrompt(
+    @Body()
+    dto: {
+      tenantId: string;
+      name: string;
+      systemPrompt: string;
+      temperature?: number;
+      modelOverride?: string;
+      maxTokens?: number;
+      promptVariables?: Record<string, unknown>;
+      isActive?: boolean;
+    },
+    @CurrentUser() user: SessionUser,
+  ) {
+    if (!dto.tenantId?.trim()) {
+      throw new BadRequestException('tenantId is required');
+    }
+    if (!dto.name?.trim()) {
+      throw new BadRequestException('name is required');
+    }
+    if (dto.systemPrompt === undefined || dto.systemPrompt === null) {
+      throw new BadRequestException('systemPrompt is required');
+    }
+    return this.promptsService.upsertTenantPrompt(user.id, {
+      tenantId: dto.tenantId.trim(),
+      name: dto.name.trim(),
+      systemPrompt: dto.systemPrompt,
+      temperature: dto.temperature,
+      modelOverride: dto.modelOverride,
+      maxTokens: dto.maxTokens,
+      promptVariables: dto.promptVariables,
+      isActive: dto.isActive,
+    });
   }
 
   @Get('policy/:agencyId')
-  async getPolicies(@Param('agencyId') agencyId: string) {
-    // TODO: Implement
-    throw new Error('Not implemented');
+  @ApiOperation({
+    summary: 'List agency system policies',
+    description: 'Requires agency membership.',
+  })
+  async getPolicies(
+    @Param('agencyId') agencyId: string,
+    @CurrentUser() user: SessionUser,
+  ) {
+    if (!agencyId?.trim()) {
+      throw new BadRequestException('agencyId is required');
+    }
+    return this.promptsService.listAgencyPolicies(agencyId.trim(), user.id);
+  }
+
+  @Post('policy')
+  @ApiOperation({
+    summary: 'Create or update agency policy',
+    description:
+      'Upserts by `(agencyId, name)`. Requires agency OWNER or ADMIN.',
+  })
+  async upsertPolicy(
+    @Body()
+    dto: {
+      agencyId: string;
+      name: string;
+      content: string;
+      priority?: number;
+      isDefault?: boolean;
+    },
+    @CurrentUser() user: SessionUser,
+  ) {
+    if (!dto.agencyId?.trim()) {
+      throw new BadRequestException('agencyId is required');
+    }
+    if (!dto.name?.trim()) {
+      throw new BadRequestException('name is required');
+    }
+    if (dto.content === undefined || dto.content === null) {
+      throw new BadRequestException('content is required');
+    }
+    return this.promptsService.upsertAgencyPolicy(user.id, {
+      agencyId: dto.agencyId.trim(),
+      name: dto.name.trim(),
+      content: dto.content,
+      priority: dto.priority,
+      isDefault: dto.isDefault,
+    });
   }
 }

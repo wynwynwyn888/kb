@@ -13,13 +13,23 @@ This script:
 1. Loads **`apps/backend/.env`** (same search order as the app: cwd, parent, `apps/backend/.env`).
 2. Signs in to Supabase using **`SUPABASE_URL`** + **`SUPABASE_ANON_KEY`** and **`SMOKE_AUTH_EMAIL`** / **`SMOKE_AUTH_PASSWORD`** (dev-only test user).
 3. Calls protected routes with **`Authorization: Bearer <access_token>`** (token is **not** printed).
-4. Prints one line per route with HTTP status (`200 OK` when healthy).
+4. Prints one line per route with HTTP status (`2xx OK` when healthy).
 
 **Required env (local `.env`, not committed):** `SMOKE_AUTH_EMAIL`, `SMOKE_AUTH_PASSWORD`, plus existing `SUPABASE_URL` and `SUPABASE_ANON_KEY`.
 
 **Optional:** `SMOKE_API_BASE_URL` if the API is not at `http://127.0.0.1:<PORT>/<API_PREFIX>`.
 
 From repo root: `npm run smoke:auth --prefix apps/backend`
+
+### Write smoke (dev only, optional)
+
+Same sign-in and env as above, plus **`POST /api/v1/agency-ai-config`** with a **dummy** API key (not printed; stored only in your local DB). Exits non-zero if **any** response is not **2xx** (including sign-in failure).
+
+```bash
+npm run smoke:auth:write
+```
+
+Requires **`agencyId`** on the session (see checklist below). Typical success: **`201`** on the POST; **`404`** on that route if agency context is missing.
 
 ---
 

@@ -8,6 +8,7 @@
     "build": "nest build && node patch-dist.mjs",
     "start": "node dist/main.js",
     "smoke:auth": "node scripts/smoke-auth.mjs",
+    "smoke:auth:write": "node scripts/smoke-auth.mjs --write",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "jest",

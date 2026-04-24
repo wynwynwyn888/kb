@@ -3,7 +3,9 @@
  * DEV ONLY: Sign in with Supabase (anon key) and hit protected API routes.
  * Does not print tokens. Requires backend running separately.
  *
- * Usage (from apps/backend): npm run smoke:auth
+ * Usage (from apps/backend):
+ *   npm run smoke:auth
+ *   npm run smoke:auth:write   # same + POST /agency-ai-config (dummy key; still no token printed)
  */
 
 import { createClient } from '@supabase/supabase-js';
@@ -64,6 +66,13 @@ const paths = [
   '/agencies',
 ];
 
+const includeWriteSmoke = process.argv.includes('--write');
+
+/** Treat 200–299 as success; anything else fails the smoke. */
+function is2xx(status) {
+  return status >= 200 && status < 300;
+}
+
 async function main() {
   if (!supabaseUrl || !anonKey) {
     console.error('Missing SUPABASE_URL or SUPABASE_ANON_KEY (check apps/backend/.env).');
@@ -95,17 +104,42 @@ async function main() {
     const res = await fetch(url, {
       headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
     });
-    const ok = res.status === 200;
+    const ok = is2xx(res.status);
     if (!ok) failed += 1;
     console.log(`${res.status} ${p}${ok ? ' OK' : ' FAIL'}`);
   }
 
+  if (includeWriteSmoke) {
+    const writeUrl = `${apiBase}/agency-ai-config`;
+    const writeBody = {
+      provider: 'OPENAI',
+      apiKey: 'sk-local-dummy-not-production',
+      defaultModel: 'gpt-4o-mini',
+    };
+    const writeRes = await fetch(writeUrl, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify(writeBody),
+    });
+    const writeOk = is2xx(writeRes.status);
+    if (!writeOk) failed += 1;
+    console.log(
+      `${writeRes.status} POST /agency-ai-config${writeOk ? ' OK' : ' FAIL'}`,
+    );
+  }
+
   console.log('---');
   if (failed > 0) {
-    console.error(`Done: ${failed} request(s) not OK (is the API running? correct port?).`);
+    console.error(
+      `Done: ${failed} request(s) returned non-2xx (is the API running? agencyId on session for POST?).`,
+    );
     process.exit(4);
   }
-  console.log('All smoke requests returned success status.');
+  console.log('All smoke requests returned 2xx.');
   process.exit(0);
 }
 

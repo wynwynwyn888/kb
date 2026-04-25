@@ -1,19 +1,4 @@
-// Shared types package - exports all shared types for monorepo
+// Shared types package — enums first (entities/dto depend on them), then no duplicate names.
+export * from './types/enums.js';
 export * from './types/entities.js';
 export * from './types/dto.js';
-export * from './types/enums.js';
-
-// Re-export commonly used types
-export type {
-  Agency,
-  Tenant,
-  Conversation,
-  Message,
-  QuotaWallet,
-  AuditLog,
-} from './types/entities.js';
-
-export type {
-  PaginatedResult,
-  QueryOptions,
-} from './types/dto.js';

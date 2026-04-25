@@ -1,5 +1,25 @@
 // Core entity types for multi-tenant SaaS platform
 
+import type {
+  ActionStatus,
+  ActionType,
+  AgencyUserRole,
+  AiProvider,
+  ConnectionStatus,
+  ContentType,
+  ConversationChannel,
+  ConversationStatus,
+  DocumentStatus,
+  HandoverStatus,
+  HandoverType,
+  MessageDirection,
+  MessageSender,
+  NotificationType,
+  QuotaTransactionType,
+  TenantStatus,
+  TenantUserRole,
+} from './enums.js';
+
 export interface BaseEntity {
   id: string; // UUID
   createdAt: Date;
@@ -25,8 +45,6 @@ export interface AgencyUser extends BaseEntity {
   role: AgencyUserRole;
 }
 
-export type AgencyUserRole = 'owner' | 'admin' | 'member';
-
 export interface Tenant extends BaseEntity {
   agencyId: string;
   name: string;
@@ -34,8 +52,6 @@ export interface Tenant extends BaseEntity {
   status: TenantStatus;
   settings: TenantSettings;
 }
-
-export type TenantStatus = 'active' | 'suspended' | 'pending';
 
 export interface TenantSettings {
   timezone: string;
@@ -49,8 +65,6 @@ export interface TenantUser extends BaseEntity {
   role: TenantUserRole;
 }
 
-export type TenantUserRole = 'admin' | 'agent' | 'viewer';
-
 // GHL Integration
 export interface GhlConnection {
   id: string;
@@ -62,8 +76,6 @@ export interface GhlConnection {
   status: ConnectionStatus;
 }
 
-export type ConnectionStatus = 'active' | 'expired' | 'revoked';
-
 // AI/Model
 export interface AgencyModelProvider {
   id: string;
@@ -73,8 +85,6 @@ export interface AgencyModelProvider {
   endpoint?: string;
   settings: ProviderSettings;
 }
-
-export type AiProvider = 'openai' | 'anthropic' | 'google' | 'azure' | 'custom';
 
 export interface ProviderSettings {
   defaultModel: string;
@@ -123,8 +133,6 @@ export interface KnowledgeDocument extends BaseEntity {
   metadata: Record<string, string>;
 }
 
-export type DocumentStatus = 'pending' | 'processing' | 'ready' | 'failed';
-
 export interface KnowledgeChunk extends BaseEntity {
   documentId: string;
   content: string;
@@ -150,9 +158,6 @@ export interface Conversation extends BaseEntity {
   metadata: ConversationMetadata;
 }
 
-export type ConversationChannel = 'whatsapp' | 'sms' | 'chat' | 'email';
-export type ConversationStatus = 'active' | 'handover' | 'closed' | 'pending';
-
 export interface ConversationMetadata {
   ghlContactName?: string;
   ghlContactPhone?: string;
@@ -168,10 +173,6 @@ export interface Message extends BaseEntity {
   contentType: ContentType;
   metadata: MessageMetadata;
 }
-
-export type MessageDirection = 'inbound' | 'outbound';
-export type MessageSender = 'contact' | 'ai' | 'agent' | 'system';
-export type ContentType = 'text' | 'image' | 'video' | 'document' | 'audio';
 
 export interface MessageMetadata {
   ghlMessageId?: string;
@@ -192,9 +193,6 @@ export interface HandoverEvent extends BaseEntity {
   resumedAt?: Date;
 }
 
-export type HandoverType = 'request' | 'transfer';
-export type HandoverStatus = 'active' | 'resumed' | 'timeout';
-
 // Quota
 export interface QuotaWallet extends BaseEntity {
   tenantId: string;
@@ -212,8 +210,6 @@ export interface QuotaLedger extends BaseEntity {
   conversationId?: string;
 }
 
-export type QuotaTransactionType = 'credit' | 'debit';
-
 // Actions
 export interface ActionLog extends BaseEntity {
   tenantId: string;
@@ -223,9 +219,6 @@ export interface ActionLog extends BaseEntity {
   details: Record<string, unknown>;
   error?: string;
 }
-
-export type ActionType = 'tag_contact' | 'update_calendar' | 'send_reply' | 'kb_retrieve' | 'ai_generate';
-export type ActionStatus = 'pending' | 'success' | 'failed';
 
 // Audit
 export interface AuditLog extends BaseEntity {
@@ -248,5 +241,3 @@ export interface Notification extends BaseEntity {
   read: boolean;
   data?: Record<string, unknown>;
 }
-
-export type NotificationType = 'handover' | 'quota_warning' | 'kb_ingest_complete' | 'error';

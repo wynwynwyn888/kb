@@ -2,16 +2,13 @@
 
 import type {
   AiProvider,
+  ContentType,
   ConversationChannel,
-  TenantStatus,
   HandoverType,
   MessageDirection,
   MessageSender,
-  ContentType,
-  NotificationType,
-  TenantUserRole,
-  AgencyUserRole,
-} from './entities.js';
+  TenantStatus,
+} from './enums.js';
 
 // Auth
 export interface LoginDto {

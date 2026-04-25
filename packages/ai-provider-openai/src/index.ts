@@ -9,12 +9,12 @@ import type {
   GenerateOptions,
   AiResponse,
 } from '@aisbp/ai-router';
-import type { AiProvider } from '@aisbp/types';
+import { AiProvider } from '@aisbp/types';
 
 const OPENAI_BASE_URL = 'https://api.openai.com/v1';
 
 export class OpenAiProviderAdapter implements AiProviderAdapter {
-  readonly provider: AiProvider = 'openai';
+  readonly provider: AiProvider = AiProvider.OpenAI;
   readonly supportedModels = [
     'gpt-4o',
     'gpt-4o-mini',

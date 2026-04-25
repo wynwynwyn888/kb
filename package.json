@@ -5,6 +5,7 @@
   "packageManager": "pnpm@9.0.0",
   "scripts": {
     "build": "turbo build",
+    "build:libs": "pnpm --filter @aisbp/types exec tsc -b && pnpm --filter @aisbp/db exec tsc -b && pnpm --filter @aisbp/formatter exec tsc -b && pnpm --filter @aisbp/ghl-client exec tsc -b && pnpm --filter @aisbp/ai-router exec tsc -b && pnpm --filter @aisbp/ai-provider-openai exec tsc -b",
     "dev": "turbo dev",
     "lint": "turbo lint",
     "test": "turbo test",

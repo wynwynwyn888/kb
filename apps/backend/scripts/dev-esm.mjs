@@ -31,6 +31,8 @@ function patch() {
 }
 
 /** One full compile + patch before watch so the first node run sees patched imports. */
+execSync('pnpm exec prisma generate', { cwd: root, stdio: 'inherit', shell: true, env: childEnv });
+execSync('pnpm -w run build:libs', { cwd: root, stdio: 'inherit', shell: true, env: childEnv });
 execSync('npx nest build', { cwd: root, stdio: 'inherit', shell: true, env: childEnv });
 patch();
 

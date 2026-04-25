@@ -14,17 +14,7 @@ COPY turbo.json ./
 COPY apps ./apps
 COPY packages ./packages
 RUN pnpm install --frozen-lockfile
-# @prisma/client must exist before tsc can compile @aisbp/db (backend tsconfig references it).
-RUN pnpm --filter @aisbp/backend exec prisma generate
-# Nest uses TS project references (apps/backend/tsconfig.json → packages/*). Those packages
-# have no "build" script, so `pnpm --filter @aisbp/backend... run build` would skip them and
-# TS6305 fails. Emit their dist/ first, then the backend.
-RUN pnpm --filter @aisbp/types exec tsc -b \
-  && pnpm --filter @aisbp/db exec tsc -b \
-  && pnpm --filter @aisbp/formatter exec tsc -b \
-  && pnpm --filter @aisbp/ghl-client exec tsc -b \
-  && pnpm --filter @aisbp/ai-router exec tsc -b \
-  && pnpm --filter @aisbp/ai-provider-openai exec tsc -b
+# prisma generate + workspace lib emit + nest build live in apps/backend "build" script.
 RUN pnpm --filter @aisbp/backend run build
 
 FROM base AS runner

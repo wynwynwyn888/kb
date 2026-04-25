@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "node scripts/dev-esm.mjs",
-    "build": "prisma generate && nest build && node patch-dist.mjs",
+    "build": "prisma generate && pnpm -w run build:libs && nest build && node patch-dist.mjs",
     "start": "node scripts/start.mjs",
     "smoke:auth": "node scripts/smoke-auth.mjs",
     "smoke:auth:write": "node scripts/smoke-auth.mjs --write",

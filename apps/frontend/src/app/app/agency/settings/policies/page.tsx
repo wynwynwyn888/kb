@@ -2,7 +2,12 @@
 
 import { FormEvent, useEffect, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { listAgencyPolicies, upsertAgencyPolicy, type AgencyPolicyRow } from '@/lib/api';
+import {
+  deleteAgencyPolicy,
+  listAgencyPolicies,
+  upsertAgencyPolicy,
+  type AgencyPolicyRow,
+} from '@/lib/api';
 import {
   EmptyState,
   ErrorBanner,
@@ -11,6 +16,7 @@ import {
   SectionCard,
   StatusPill,
   SuccessBanner,
+  mvpButtonStyle,
   mvpFieldHint,
   mvpInputStyle,
   mvpLabelStyle,
@@ -23,6 +29,8 @@ export default function AgencyPoliciesPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [name, setName] = useState('default');
   const [content, setContent] = useState('');
+  const [priority, setPriority] = useState(0);
+  const [isDefault, setIsDefault] = useState(true);
   const [loadKey, setLoadKey] = useState(0);
   const [bootstrapErr, setBootstrapErr] = useState('');
   const [err, setErr] = useState('');
@@ -41,6 +49,8 @@ export default function AgencyPoliciesPage() {
       setSelectedId(pick.id);
       setName(pick.name);
       setContent(pick.content);
+      setPriority(pick.priority ?? 0);
+      setIsDefault(!!pick.isDefault);
     } else {
       setSelectedId(null);
     }
@@ -69,8 +79,28 @@ export default function AgencyPoliciesPage() {
     setSelectedId(r.id);
     setName(r.name);
     setContent(r.content);
+    setPriority(r.priority ?? 0);
+    setIsDefault(!!r.isDefault);
     setOk('');
     setErr('');
+  };
+
+  const onDeletePolicy = async () => {
+    if (!token || !user?.agencyId || !selectedId) return;
+    if (!window.confirm('Delete this policy? Subaccounts will no longer receive these instructions.')) return;
+    setErr('');
+    setOk('');
+    setSaving(true);
+    try {
+      await deleteAgencyPolicy(token, user.agencyId, selectedId);
+      setOk('Policy deleted');
+      setSelectedId(null);
+      await load();
+    } catch (er) {
+      setErr(er instanceof Error ? er.message : 'Delete failed');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const onSubmit = async (e: FormEvent) => {
@@ -84,7 +114,8 @@ export default function AgencyPoliciesPage() {
         agencyId: user.agencyId,
         name: name.trim() || 'default',
         content,
-        isDefault: true,
+        priority: Number.isFinite(priority) ? Math.trunc(priority) : 0,
+        isDefault,
       });
       setOk('Saved');
       await load(name.trim() || 'default');
@@ -183,6 +214,48 @@ export default function AgencyPoliciesPage() {
                 <p style={mvpFieldHint}>Identifier for this policy record.</p>
               </div>
 
+              <div
+                style={{
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  gap: '1.25rem',
+                  alignItems: 'flex-end',
+                }}
+              >
+                <label style={mvpLabelStyle}>
+                  Priority
+                  <input
+                    type="number"
+                    value={Number.isFinite(priority) ? priority : 0}
+                    onChange={e => setPriority(parseInt(e.target.value, 10) || 0)}
+                    min={0}
+                    step={1}
+                    style={{ ...mvpInputStyle, maxWidth: '8rem' }}
+                  />
+                </label>
+                <label
+                  style={{
+                    ...mvpLabelStyle,
+                    display: 'flex',
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    cursor: 'pointer',
+                    marginBottom: '0.35rem',
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={isDefault}
+                    onChange={e => setIsDefault(e.target.checked)}
+                  />
+                  <span>Mark as default policy</span>
+                </label>
+                <p style={{ ...mvpFieldHint, flex: '1 1 100%', margin: 0 }}>
+                  Higher priority wins when multiple policies exist; the active layer uses the top policy only.
+                </p>
+              </div>
+
               <div>
                 <label style={mvpLabelStyle}>
                   Master Prompt
@@ -205,13 +278,32 @@ export default function AgencyPoliciesPage() {
                 </p>
               </div>
 
-              <button
-                type="submit"
-                disabled={saving}
-                style={{ ...mvpPrimaryButtonStyle, width: 'fit-content', opacity: saving ? 0.8 : 1 }}
-              >
-                {saving ? 'Saving…' : 'Save'}
-              </button>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'center' }}>
+                <button
+                  type="submit"
+                  disabled={saving}
+                  style={{ ...mvpPrimaryButtonStyle, width: 'fit-content', opacity: saving ? 0.8 : 1 }}
+                >
+                  {saving ? 'Saving…' : 'Save'}
+                </button>
+                {selectedId ? (
+                  <button
+                    type="button"
+                    disabled={saving}
+                    onClick={onDeletePolicy}
+                    style={{
+                      ...mvpButtonStyle,
+                      borderColor: '#fecaca',
+                      color: '#b91c1c',
+                      background: '#fef2f2',
+                      cursor: saving ? 'not-allowed' : 'pointer',
+                      opacity: saving ? 0.7 : 1,
+                    }}
+                  >
+                    Delete policy
+                  </button>
+                ) : null}
+              </div>
             </form>
           </SectionCard>
         </>

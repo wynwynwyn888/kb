@@ -66,7 +66,7 @@ export class GhlService {
       lastHealthCheckAt: data.last_health_check_at ? new Date(data.last_health_check_at) : null,
       lastError: data.last_error || null,
       isConnected: data.status === 'CONNECTED',
-      maskToken: data.ghl_location_id ? maskToken(data.ghl_location_id) : undefined,
+      maskToken: data.ghl_location_id ? maskToken(String(data.ghl_location_id)) : undefined,
       metadata: data.metadata || {},
     };
   }
@@ -82,12 +82,17 @@ export class GhlService {
       throw new ForbiddenException('Access denied to this tenant');
     }
 
+    const ghlLocationId = dto.ghlLocationId.trim();
+    if (!ghlLocationId) {
+      throw new BadRequestException('GHL location ID is required');
+    }
+
     // Verify token is valid before storing
-    const ghlClient = createGhlClient(dto.privateIntegrationToken, dto.ghlLocationId);
+    const ghlClient = createGhlClient(dto.privateIntegrationToken.trim(), ghlLocationId);
     const verification = await ghlClient.verifyConnection();
 
     console.log('[GhlService] Token verification:', safeLog({
-      locationId: dto.ghlLocationId,
+      locationId: ghlLocationId,
       valid: verification.valid,
       error: verification.error,
     }));
@@ -105,7 +110,7 @@ export class GhlService {
     // Upsert connection record
     const connectionData = {
       tenant_id: tenantId,
-      ghl_location_id: dto.ghlLocationId,
+      ghl_location_id: ghlLocationId,
       private_token_encrypted: encryptedToken,
       status: 'CONNECTED' as const,
       verified_at: new Date().toISOString(),
@@ -133,7 +138,7 @@ export class GhlService {
 
     await this.supabase
       .from('tenants')
-      .update({ ghl_location_id: dto.ghlLocationId, updated_at: new Date().toISOString() })
+      .update({ ghl_location_id: ghlLocationId, updated_at: new Date().toISOString() })
       .eq('id', tenantId);
 
     return {
@@ -143,7 +148,7 @@ export class GhlService {
       lastHealthCheckAt: data.last_health_check_at ? new Date(data.last_health_check_at) : null,
       lastError: data.last_error || null,
       isConnected: data.status === 'CONNECTED',
-      maskToken: maskToken(dto.ghlLocationId),
+      maskToken: maskToken(ghlLocationId),
       metadata: data.metadata || {},
     };
   }

@@ -4,7 +4,9 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
+  HttpCode,
   Param,
   Post,
   UseGuards,
@@ -127,5 +129,22 @@ export class PromptsController {
       priority: dto.priority,
       isDefault: dto.isDefault,
     });
+  }
+
+  @Delete('policy/:agencyId/:policyId')
+  @HttpCode(204)
+  @ApiOperation({
+    summary: 'Delete agency system policy',
+    description: 'Removes one policy row. Requires agency OWNER or ADMIN.',
+  })
+  async deletePolicy(
+    @Param('agencyId') agencyId: string,
+    @Param('policyId') policyId: string,
+    @CurrentUser() user: SessionUser,
+  ): Promise<void> {
+    if (!agencyId?.trim() || !policyId?.trim()) {
+      throw new BadRequestException('agencyId and policyId are required');
+    }
+    await this.promptsService.deleteAgencyPolicy(user.id, agencyId.trim(), policyId.trim());
   }
 }

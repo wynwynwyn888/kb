@@ -643,6 +643,17 @@ export async function upsertAgencyPolicy(
   });
 }
 
+export async function deleteAgencyPolicy(
+  token: string,
+  agencyId: string,
+  policyId: string,
+): Promise<void> {
+  await apiRequestNoContent(
+    `/prompts/policy/${encodeURIComponent(agencyId)}/${encodeURIComponent(policyId)}`,
+    { token, method: 'DELETE' },
+  );
+}
+
 // Agency / tenant membership
 export interface RosterMember {
   id: string;

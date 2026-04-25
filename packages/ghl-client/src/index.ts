@@ -21,6 +21,52 @@ export interface GhlLocationInfo {
   status: string;
 }
 
+function isRecord(x: unknown): x is Record<string, unknown> {
+  return typeof x === 'object' && x !== null;
+}
+
+/** Trimmed non-empty string id, or null. */
+export function normalizeGhlLocationId(value: unknown): string | null {
+  if (value === undefined || value === null) return null;
+  const s = String(value).trim();
+  return s.length > 0 ? s : null;
+}
+
+/**
+ * GHL GET /locations/:locationId may return a flat location object, or wrap it
+ * (e.g. `{ location: { ... } }`). The sub-account id is often `locationId`, while
+ * `id` may be a different internal id — comparing only `response.data.id` caused false
+ * "Location ID mismatch" for valid connections.
+ */
+export function extractGhlLocationPayload(data: unknown): Record<string, unknown> | null {
+  if (!isRecord(data)) return null;
+  const unwrapKeys = ['location', 'Location', 'data'];
+  for (const key of unwrapKeys) {
+    const inner = data[key];
+    if (
+      isRecord(inner) &&
+      (inner['locationId'] !== undefined ||
+        inner['id'] !== undefined ||
+        inner['name'] !== undefined)
+    ) {
+      return inner;
+    }
+  }
+  return data;
+}
+
+/** All string ids on a location payload that might equal the requested sub-account id. */
+export function collectGhlSubAccountIds(payload: Record<string, unknown>): string[] {
+  const out: string[] = [];
+  const add = (v: unknown) => {
+    const n = normalizeGhlLocationId(v);
+    if (n && !out.includes(n)) out.push(n);
+  };
+  add(payload['locationId']);
+  add(payload['id']);
+  return out;
+}
+
 export interface GhlHealthResponse {
   success: boolean;
   locationId: string;
@@ -161,23 +207,42 @@ export class GhlClient {
    */
   async verifyConnection(): Promise<{ valid: boolean; location?: GhlLocationInfo; error?: string }> {
     try {
-      // Endpoint assumed: GET /locations/{locationId}
-      // Base URL: https://services.leadconnectorhq.com (or configurable via GHL_API_BASE_URL)
-      //
-      // NOTE: This has NOT been tested against a real GHL Private Integration yet.
-      // The response parsing expects specific fields: id, name, accountId, status
-      const response = await this.client.get<GhlLocationInfo>(
-        `/locations/${this.locationId}`
-      );
+      // Endpoint: GET /locations/{locationId} — see extractGhlLocationPayload for response shapes.
+      const response = await this.client.get<unknown>(`/locations/${this.locationId}`);
 
-      if (response.data && response.data.id === this.locationId) {
-        return {
-          valid: true,
-          location: response.data,
-        };
+      const requested = normalizeGhlLocationId(this.locationId);
+      if (!requested) {
+        return { valid: false, error: 'Location ID is required' };
       }
 
-      return { valid: false, error: 'Location ID mismatch' };
+      const payload = extractGhlLocationPayload(response.data);
+      if (!payload) {
+        return { valid: false, error: 'Location ID mismatch' };
+      }
+
+      const idsOnPayload = collectGhlSubAccountIds(payload);
+      if (!idsOnPayload.includes(requested)) {
+        return { valid: false, error: 'Location ID mismatch' };
+      }
+
+      const name = typeof payload['name'] === 'string' ? payload['name'] : '';
+      const accountId =
+        typeof payload['accountId'] === 'string'
+          ? payload['accountId']
+          : typeof payload['companyId'] === 'string'
+            ? payload['companyId']
+            : '';
+      const status = typeof payload['status'] === 'string' ? payload['status'] : '';
+
+      return {
+        valid: true,
+        location: {
+          id: requested,
+          name,
+          accountId,
+          status,
+        },
+      };
     } catch (error) {
       return this.handleError(error);
     }
@@ -204,10 +269,21 @@ export class GhlClient {
    */
   async getLocationInfo(): Promise<GhlLocationInfo | null> {
     try {
-      const response = await this.client.get<GhlLocationInfo>(
-        `/locations/${this.locationId}`
-      );
-      return response.data;
+      const response = await this.client.get<unknown>(`/locations/${this.locationId}`);
+      const requested = normalizeGhlLocationId(this.locationId);
+      const payload = extractGhlLocationPayload(response.data);
+      if (!requested || !payload || !collectGhlSubAccountIds(payload).includes(requested)) {
+        return null;
+      }
+      const name = typeof payload['name'] === 'string' ? payload['name'] : '';
+      const accountId =
+        typeof payload['accountId'] === 'string'
+          ? payload['accountId']
+          : typeof payload['companyId'] === 'string'
+            ? payload['companyId']
+            : '';
+      const status = typeof payload['status'] === 'string' ? payload['status'] : '';
+      return { id: requested, name, accountId, status };
     } catch {
       return null;
     }

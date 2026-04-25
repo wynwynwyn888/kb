@@ -288,6 +288,38 @@ export class PromptsService {
     return this.mapPolicyRow(inserted);
   }
 
+  async deleteAgencyPolicy(
+    profileId: string,
+    agencyId: string,
+    policyId: string,
+  ): Promise<void> {
+    const can = await this.auth.isAgencyAdmin(profileId, agencyId);
+    if (!can) {
+      throw new ForbiddenException('Insufficient permissions to manage agency policies');
+    }
+
+    const supabase = getSupabaseService();
+    const { data: row, error: fe } = await supabase
+      .from('agency_system_policies')
+      .select('id')
+      .eq('id', policyId)
+      .eq('agency_id', agencyId)
+      .maybeSingle();
+
+    if (fe) {
+      throw new BadRequestException(`Failed to resolve policy: ${fe.message}`);
+    }
+    if (!row?.id) {
+      throw new NotFoundException('Policy not found');
+    }
+
+    const { error: de } = await supabase.from('agency_system_policies').delete().eq('id', policyId);
+
+    if (de) {
+      throw new BadRequestException(`Failed to delete policy: ${de.message}`);
+    }
+  }
+
   private mapTenantRow(row: Record<string, unknown>): TenantPromptDto {
     return {
       id: row['id'] as string,

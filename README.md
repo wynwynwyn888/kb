@@ -31,83 +31,68 @@ aisbp/
 └── turbo.json
 ```
 
-## Quick Start
+## Quick Start (localhost)
+
+Use this flow while you iterate locally; VPS or cloud deploy can come later.
 
 ### Prerequisites
 
 - Node.js 20+
-- pnpm 9+
-- Docker (for local Supabase)
+- pnpm 9 (`corepack enable && corepack prepare pnpm@9.0.0 --activate`)
+- Docker (recommended for **Redis**; optional for full local Supabase via the [Supabase CLI](https://supabase.com/docs/guides/cli/getting-started))
 
-### 1. Setup Supabase
-
-**Option A: Local Supabase (recommended for development)**
+### 1. Redis (required for queues)
 
 ```bash
-# Start local Supabase
-docker run -d --name supabase-db \
-  -e POSTGRES_PASSWORD=postgres \
-  -p 54322:5432 \
-  postgres:15
-
-# Start Supabase Studio (optional)
-docker run -d --name supabase-studio \
-  -e SUPABASE_URL=http://localhost:54322 \
-  -e SUPABASE_KEY=your-anon-key \
-  -p 3001:3000 \
-  supabase/studio:latest
+docker run -d --name aisbp-redis -p 6379:6379 redis:7-alpine
 ```
 
-**Option B: Remote Supabase**
-1. Create project at https://supabase.com
-2. Get `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` from dashboard
+Backend defaults: `REDIS_HOST=localhost`, `REDIS_PORT=6379` (see `apps/backend/.env.example`).
 
-### 2. Configure Environment
+### 2. Supabase (Auth + Postgres)
 
-```bash
-# Backend
-cd apps/backend
-cp .env.example .env
-# Edit .env with your Supabase values
+Pick one:
 
-# Frontend
-cd apps/frontend
-cp .env.example .env.local
-# Edit .env.local with your Supabase values
-```
+- **Hosted (simplest):** create a project at [supabase.com](https://supabase.com/dashboard), then copy `SUPABASE_URL`, anon key, service role key, and the **Database** connection string for `DATABASE_URL`.
+- **Local stack:** install the Supabase CLI and run `supabase start` in a directory where you keep your local project (or link this repo after `supabase init`). Use the CLI-printed URL and keys in `.env` / `.env.local`. Default API URL is often `http://127.0.0.1:54321`.
 
-### 3. Generate Prisma Client & Push Schema
+### 3. Configure environment
 
 ```bash
-cd apps/backend
 pnpm install
-pnpm db:generate
-pnpm db:push
+
+cp apps/backend/.env.example apps/backend/.env
+# Edit apps/backend/.env — DATABASE_URL, SUPABASE_*, JWT_SECRET, ENCRYPTION_KEY, Redis if non-default
+
+cp apps/frontend/.env.example apps/frontend/.env.local
+# Edit apps/frontend/.env.local — NEXT_PUBLIC_SUPABASE_* (same project as backend)
 ```
 
-### 4. Seed Demo Data
+The browser talks to the Next app on **:3000**; `/api/v1/*` is proxied to Nest on **:3001** (see `apps/frontend/src/lib/server/proxy-to-nest.ts`). You usually do **not** need a separate public API URL in the frontend env.
+
+### 4. Database schema and demo data
 
 ```bash
-cd apps/backend
-pnpm db:seed
+pnpm --filter @aisbp/backend exec prisma generate
+pnpm --filter @aisbp/backend exec prisma migrate dev
+# or, for a quick throwaway DB without migration history: pnpm --filter @aisbp/backend run db:push
+
+pnpm --filter @aisbp/backend run db:seed
 ```
 
-This creates:
-- 1 demo agency
-- 2 demo tenants
-- 4 demo users with login credentials
+The seed creates a demo agency, two tenants, and four users (see **Demo Credentials** below).
 
-### 5. Run Development Servers
+### 5. Run dev servers
+
+From the **repository root**:
 
 ```bash
-# From root directory
-pnpm install
 pnpm dev
 ```
 
-- Frontend: http://localhost:3000
-- Backend API: http://localhost:3001/api/v1
-- Swagger Docs: http://localhost:3001/docs (when backend running)
+- App (Next): [http://localhost:3000](http://localhost:3000)
+- Nest (direct): [http://localhost:3001/api/v1](http://localhost:3001/api/v1)
+- Swagger: [http://localhost:3001/docs](http://localhost:3001/docs) — also proxied at [http://localhost:3000/docs](http://localhost:3000/docs) when both are running
 
 ## Production Deployment
 
@@ -130,9 +115,10 @@ GHL_REDIRECT_URI=https://kb.aisalesbot.pro/api/v1/ghl/oauth/callback
 **Frontend (.env.local)**
 ```
 NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
-NEXT_PUBLIC_API_URL=https://kb.aisalesbot.pro/api/v1
+NEXT_PUBLIC_SUPABASE_ANON_KEY=...
 NEXT_PUBLIC_APP_URL=https://kb.aisalesbot.pro
 ```
+API calls from the browser use same-origin `/api/v1` (Next BFF → Nest); set `BACKEND_URL` / `BACKEND_DEV_URL` only when deploying or customizing the server-side proxy.
 
 ## Demo Credentials
 

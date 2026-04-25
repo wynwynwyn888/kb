@@ -1,0 +1,6 @@
+# Terminate TLS on the VPS; Next serves the app and BFF `/api/v1` → Nest.
+# Replace app.example.com. Port must match FRONTEND_PUBLISH_PORT (default 3000).
+
+app.example.com {
+  reverse_proxy 127.0.0.1:3000
+}

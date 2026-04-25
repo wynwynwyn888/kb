@@ -1,0 +1,16 @@
+**/node_modules
+**/.next
+**/dist
+.git
+.turbo
+**/*.tsbuildinfo
+# Ignore real env files only; keep **/.env.example for reference inside the image (optional).
+.env
+**/.env
+!**/.env.example
+coverage
+*.log
+.cursor
+**/__tests__
+**/*.spec.ts
+**/.playwright

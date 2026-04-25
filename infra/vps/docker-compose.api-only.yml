@@ -1,0 +1,18 @@
+# Nest API container only (no Next, no Redis in Compose). Use when the UI is hosted
+# elsewhere and Redis/DB are external. Set REDIS_HOST, DATABASE_URL, SUPABASE_* in .env.
+#
+# docker compose -f infra/vps/docker-compose.api-only.yml up -d --build
+
+services:
+  backend:
+    build:
+      context: ../..
+      dockerfile: infra/vps/Dockerfile
+    restart: unless-stopped
+    ports:
+      - '${BACKEND_PUBLISH_PORT:-3001}:3001'
+    environment:
+      NODE_ENV: production
+      PORT: '3001'
+    env_file:
+      - .env

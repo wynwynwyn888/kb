@@ -1,0 +1,62 @@
+# Hostinger VPS Docker deploy + manual VPS from repo root.
+# Build context is the monorepo root (`.`). Used by GitHub Action hostinger/deploy-on-vps.
+#
+#   docker compose -f docker-compose.hostinger.yml --env-file .env.production up -d --build
+#
+# Required env (file or shell): DATABASE_URL, SUPABASE_*, JWT_SECRET, ENCRYPTION_KEY,
+# CORS_ORIGIN, NEXT_PUBLIC_SUPABASE_* (build args for the frontend image).
+
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ['redis-server', '--appendonly', 'yes']
+    volumes:
+      - aisbp_redisdata:/data
+
+  backend:
+    build:
+      context: .
+      dockerfile: infra/vps/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_started
+    expose:
+      - '3001'
+    environment:
+      NODE_ENV: production
+      PORT: '3001'
+      REDIS_HOST: redis
+      REDIS_PORT: '6379'
+      DATABASE_URL: ${DATABASE_URL}
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+      JWT_SECRET: ${JWT_SECRET}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      CORS_ORIGIN: ${CORS_ORIGIN}
+      API_PREFIX: ${API_PREFIX:-api/v1}
+      QUEUE_PREFIX: ${QUEUE_PREFIX:-aisbp}
+      ALLOW_INSECURE_DEV_KEY: ${ALLOW_INSECURE_DEV_KEY:-false}
+
+  frontend:
+    build:
+      context: .
+      dockerfile: infra/vps/Dockerfile.frontend
+      args:
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+        BACKEND_DEV_URL: http://backend:3001
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - '${FRONTEND_PUBLISH_PORT:-3000}:3000'
+    environment:
+      NODE_ENV: production
+      PORT: '3000'
+      BACKEND_URL: http://backend:3001
+
+volumes:
+  aisbp_redisdata:

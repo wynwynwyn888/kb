@@ -1,0 +1,37 @@
+# Next.js app — build from repo root (same as infra/vps/Dockerfile).
+# syntax=docker/dockerfile:1
+
+FROM node:20-bookworm-slim AS base
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+RUN corepack enable && corepack prepare pnpm@9.0.0 --activate
+
+FROM base AS build
+WORKDIR /app
+
+# Baked into next.config rewrites (/docs → Nest). Use Docker service hostname.
+ARG BACKEND_DEV_URL=http://backend:3001
+ENV BACKEND_DEV_URL=${BACKEND_DEV_URL}
+
+ARG NEXT_PUBLIC_SUPABASE_URL=
+ARG NEXT_PUBLIC_SUPABASE_ANON_KEY=
+ENV NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
+ENV NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY turbo.json ./
+COPY apps ./apps
+COPY packages ./packages
+RUN pnpm install --frozen-lockfile
+RUN pnpm --filter @aisbp/frontend run build
+
+FROM base AS runner
+WORKDIR /app
+ENV NODE_ENV=production
+ENV PORT=3000
+# Server-side BFF proxy (see apps/frontend/src/lib/server/proxy-to-nest.ts)
+ENV BACKEND_URL=http://backend:3001
+COPY --from=build /app /app
+EXPOSE 3000
+CMD ["pnpm", "--filter", "@aisbp/frontend", "exec", "next", "start", "-H", "0.0.0.0", "-p", "3000"]

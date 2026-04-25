@@ -11,6 +11,8 @@ out/
 .env
 .env.local
 .env.*.local
+.env.production
+infra/vps/.github-secrets.local.env
 
 # IDE
 .idea/

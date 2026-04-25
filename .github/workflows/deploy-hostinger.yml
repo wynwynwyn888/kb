@@ -1,0 +1,35 @@
+# Deploy Redis + Nest + Next to Hostinger KVM (Docker) via Hostinger API.
+# Prerequisites: VPS with Docker; hPanel API token; VM ID; GitHub secrets (see infra/vps/HOSTINGER.md).
+#
+# Do not commit API tokens. Rotate any token that was ever pasted into chat or logs.
+
+name: Deploy Hostinger VPS
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy to Hostinger VPS
+        uses: hostinger/deploy-on-vps@v2
+        with:
+          api-key: ${{ secrets.HOSTINGER_API_KEY }}
+          virtual-machine: ${{ vars.HOSTINGER_VM_ID }}
+          project-name: aisbp
+          docker-compose-path: docker-compose.hostinger.yml
+          environment-variables: |
+            DATABASE_URL=${{ secrets.DATABASE_URL }}
+            SUPABASE_URL=${{ secrets.SUPABASE_URL }}
+            SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY }}
+            SUPABASE_SERVICE_ROLE_KEY=${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+            JWT_SECRET=${{ secrets.JWT_SECRET }}
+            ENCRYPTION_KEY=${{ secrets.ENCRYPTION_KEY }}
+            CORS_ORIGIN=${{ secrets.CORS_ORIGIN }}
+            NEXT_PUBLIC_SUPABASE_URL=${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+            NEXT_PUBLIC_SUPABASE_ANON_KEY=${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}

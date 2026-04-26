@@ -7,6 +7,7 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { randomUUID } from 'crypto';
+import { formatPostgrestError } from '../../lib/format-postgrest-error';
 import { getSupabaseService } from '../../lib/supabase';
 import { createGhlClient } from '@aisbp/ghl-client';
 import { decrypt, safeLog } from '../../lib/encryption';
@@ -275,23 +276,34 @@ export class OutboundSendService {
     contentType: string;
     ghlMessageId?: string;
   }): Promise<void> {
-    await this.supabase.from('messages').insert({
+    const now = new Date().toISOString();
+    const { error: insErr } = await this.supabase.from('messages').insert({
       id: randomUUID(),
       conversation_id: params.conversationId,
       direction: 'OUTBOUND',
       sender: 'AI',
       content: params.content,
-      content_type: params.contentType,
+      contentType: params.contentType,
       metadata: {
         ghlMessageId: params.ghlMessageId,
-        sentAt: new Date().toISOString(),
+        sentAt: now,
       },
     });
+    if (insErr) {
+      this.logger.error(
+        `Failed to persist outbound message: ${formatPostgrestError(insErr)}`,
+      );
+      throw new Error(`Failed to persist outbound message: ${formatPostgrestError(insErr)}`);
+    }
 
-    // Update conversation lastMessageAt
-    await this.supabase
+    const { error: convErr } = await this.supabase
       .from('conversations')
-      .update({ last_message_at: new Date().toISOString() })
+      .update({ last_message_at: now, updated_at: now })
       .eq('id', params.conversationId);
+    if (convErr) {
+      this.logger.warn(
+        `Outbound message saved but conversation touch failed: ${formatPostgrestError(convErr)}`,
+      );
+    }
   }
 }

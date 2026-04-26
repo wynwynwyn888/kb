@@ -1,6 +1,7 @@
 // Conversations controller service - thin service for list/detail/message queries
 
 import { Injectable, Logger } from '@nestjs/common';
+import { formatPostgrestError } from '../../lib/format-postgrest-error';
 import { getSupabaseService } from '../../lib/supabase';
 
 @Injectable()
@@ -81,7 +82,7 @@ export class ConversationsControllerService {
   ): Promise<unknown[]> {
     let query = this.supabase
       .from('messages')
-      .select('id, direction, sender, content, content_type, metadata, created_at')
+      .select('id, direction, sender, content, contentType, metadata, created_at')
       .eq('conversation_id', conversationId)
       .order('created_at', { ascending: false })
       .limit(limit);
@@ -93,7 +94,7 @@ export class ConversationsControllerService {
     const { data, error } = await query;
 
     if (error) {
-      this.logger.error(`Failed to get messages: ${error.message}`);
+      this.logger.error(`Failed to get messages: ${formatPostgrestError(error)}`);
       return [];
     }
 

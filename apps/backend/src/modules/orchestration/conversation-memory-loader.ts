@@ -2,6 +2,7 @@
 // for use in AI prompt context building.
 
 import { Injectable, Logger } from '@nestjs/common';
+import { formatPostgrestError } from '../../lib/format-postgrest-error';
 import { getSupabaseService } from '../../lib/supabase';
 import type { ConversationMemory, MemoryEntry } from './dto';
 
@@ -25,13 +26,13 @@ export class ConversationMemoryLoader {
     // Limit to last MAX_TURNS inbound user messages plus their AI responses
     const { data, error } = await this.supabase
       .from('messages')
-      .select('id, direction, sender, content, content_type, created_at')
+      .select('id, direction, sender, content, contentType, created_at')
       .eq('conversation_id', conversationId)
       .order('created_at', { ascending: true });
 
     if (error || !data) {
       this.logger.warn(
-        `Failed to load memory for conversation=${conversationId}: ${error?.message ?? 'no data'}`,
+        `Failed to load memory for conversation=${conversationId}: ${formatPostgrestError(error ?? 'no data')}`,
       );
       return {
         conversationId,
@@ -90,7 +91,8 @@ export class ConversationMemoryLoader {
       direction: string;
       sender: string;
       content: string;
-      content_type: string;
+      contentType?: string;
+      content_type?: string;
       created_at: string;
     },
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -105,18 +107,21 @@ export class ConversationMemoryLoader {
       image: 'image',
       audio: 'audio',
       video: 'video',
+      document: 'unknown',
       TEXT: 'text',
       IMAGE: 'image',
       AUDIO: 'audio',
       VIDEO: 'video',
+      DOCUMENT: 'unknown',
     };
 
+    const ct = msg.contentType ?? msg.content_type ?? 'TEXT';
     return {
       role: roleMap[msg.direction] ?? 'user',
       content: msg.content,
       sender: msg.sender as MemoryEntry['sender'],
       timestamp: msg.created_at,
-      messageType: typeMap[msg.content_type] ?? 'unknown',
+      messageType: typeMap[ct] ?? 'unknown',
     };
   }
 }

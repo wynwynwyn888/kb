@@ -287,6 +287,30 @@ export class InboundMessageProcessor extends WorkerHost {
     return data;
   }
 
+  /**
+   * Maps GHL/normalized message type labels to Postgres `ContentType` enum (Prisma `Message.contentType` → DB column `"contentType"`).
+   */
+  private mapToDbContentType(
+    label: InboundMessageJobData['messageType'] | string,
+  ): 'TEXT' | 'IMAGE' | 'VIDEO' | 'DOCUMENT' | 'AUDIO' {
+    const upper = String(label).toUpperCase();
+    if (
+      upper === 'TEXT' ||
+      upper === 'IMAGE' ||
+      upper === 'VIDEO' ||
+      upper === 'DOCUMENT' ||
+      upper === 'AUDIO'
+    ) {
+      return upper as 'TEXT' | 'IMAGE' | 'VIDEO' | 'DOCUMENT' | 'AUDIO';
+    }
+    const u = String(label).toLowerCase();
+    if (u === 'image') return 'IMAGE';
+    if (u === 'audio') return 'AUDIO';
+    if (u === 'video') return 'VIDEO';
+    if (u === 'document') return 'DOCUMENT';
+    return 'TEXT';
+  }
+
   private async addMessage(
     conversationId: string,
     message: {
@@ -303,7 +327,7 @@ export class InboundMessageProcessor extends WorkerHost {
       direction: message.direction,
       sender: message.sender,
       content: message.content,
-      content_type: message.contentType,
+      contentType: this.mapToDbContentType(message.contentType),
       metadata: message.metadata,
     });
 
@@ -312,8 +336,9 @@ export class InboundMessageProcessor extends WorkerHost {
     }
   }
 
+  /** `webhookEventRowId` is `webhook_events.id` (UUID), not `external_event_id`. */
   private async updateWebhookEventStatus(
-    eventId: string,
+    webhookEventRowId: string,
     status: string,
     errorMessage?: string,
   ): Promise<void> {
@@ -326,10 +351,16 @@ export class InboundMessageProcessor extends WorkerHost {
       updateData['processing_error'] = errorMessage;
     }
 
-    await this.supabase
+    const { error } = await this.supabase
       .from('webhook_events')
       .update(updateData)
-      .eq('external_event_id', eventId);
+      .eq('id', webhookEventRowId);
+
+    if (error) {
+      this.logger.warn(
+        `Webhook event status update failed (id=${webhookEventRowId}): ${formatPostgrestError(error)}`,
+      );
+    }
   }
 
   @OnWorkerEvent('completed')
@@ -340,7 +371,7 @@ export class InboundMessageProcessor extends WorkerHost {
   @OnWorkerEvent('failed')
   onFailed(job: Job, error: Error) {
     this.logger.error(
-      `Inbound message job ${job.id} failed: ${error.message}`,
+      `Inbound message job ${job.id} failed: ${formatPostgrestError(error)}`,
     );
   }
 }

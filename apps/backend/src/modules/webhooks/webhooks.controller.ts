@@ -10,7 +10,7 @@ import {
   Logger,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
-import { WebhooksService } from './webhooks.service';
+import { WebhooksService, formatPostgrestError } from './webhooks.service';
 import { WebhookVerificationService } from './webhook-verification.service';
 import { GhlWebhookPayload } from './dto/ghl-webhook.payload';
 
@@ -67,10 +67,8 @@ export class WebhooksController {
         message: 'Webhook received',
       };
     } catch (error) {
-      // Log error safely but still acknowledge GHL
-      this.logger.error(
-        `Webhook processing error: ${error instanceof Error ? error.message : 'unknown'}`,
-      );
+      // Log error safely but still acknowledge GHL (PostgREST errors are not always Error instances)
+      this.logger.error(`Webhook processing error: ${formatPostgrestError(error)}`);
       return {
         success: true,
         message: 'Webhook received (processing deferred)',

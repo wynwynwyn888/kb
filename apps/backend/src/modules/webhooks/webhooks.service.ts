@@ -7,15 +7,39 @@ import {
 } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
-import { createHash } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { getSupabaseService } from '../../lib/supabase';
-import { safeLog } from '../../lib/encryption';
 import { QUEUES } from '../../queues/queue.constants';
 import { InboundMessageJobData } from '../../queues/processors/inbound-message.processor';
 import {
   GhlWebhookPayload,
   NormalizedWebhookPayload,
 } from './dto/ghl-webhook.payload';
+
+/** Supabase/PostgREST errors are plain objects; stringify for logs (avoid `[object Object]`). */
+export function formatPostgrestError(err: unknown): string {
+  if (err == null) return 'null';
+  if (typeof err === 'object' && err !== null) {
+    const o = err as Record<string, unknown>;
+    const msg = typeof o.message === 'string' ? o.message : '';
+    const code = typeof o.code === 'string' ? o.code : '';
+    const details = typeof o.details === 'string' ? o.details : '';
+    const hint = typeof o.hint === 'string' ? o.hint : '';
+    const parts = [
+      msg,
+      code ? `code=${code}` : '',
+      details ? `details=${details}` : '',
+      hint ? `hint=${hint}` : '',
+    ].filter(Boolean);
+    if (parts.length) return parts.join(' | ');
+  }
+  if (err instanceof Error) return err.message;
+  try {
+    return JSON.stringify(err);
+  } catch {
+    return String(err);
+  }
+}
 
 @Injectable()
 export class WebhooksService {
@@ -287,6 +311,8 @@ export class WebhooksService {
     const { data: result, error } = await this.supabase
       .from('webhook_events')
       .insert({
+        // Prisma schema uses @default(uuid()) at ORM layer; DB migration has no DEFAULT on id — must set for raw Supabase inserts.
+        id: randomUUID(),
         tenant_id: tenantId,
         external_event_id: data.externalEventId,
         dedupe_key: data.dedupeKey,
@@ -301,9 +327,7 @@ export class WebhooksService {
       .single();
 
     if (error) {
-      this.logger.error(
-        `Failed to persist webhook event: ${safeLog({ error: error.message })}`,
-      );
+      this.logger.error(`Failed to persist webhook event: ${formatPostgrestError(error)}`);
       throw error;
     }
 

@@ -49,6 +49,14 @@ export interface ReplyDecision {
   suggestedActions: SuggestedAction[];
   draftProvenance?: 'live_generation' | 'placeholder_fallback';
   draftFallbackReason?: 'no_agency' | 'no_provider' | 'generation_failed';
+  /** `agencies.active_ai_provider` when live generation ran (non-HANDOVER). */
+  agencyActiveProvider?: string;
+  /** HTTP provider that produced live draft text (not the router heuristic). */
+  generationProvider?: 'MINIMAX' | 'OPENAI';
+  /** Model id sent to that provider for the live draft. */
+  generationModel?: string;
+  /** True when live text came from OpenAI after primary non-OPENAI failed. */
+  usedOpenAiFallback?: boolean;
 }
 
 /**

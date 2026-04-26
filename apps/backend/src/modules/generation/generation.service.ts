@@ -27,6 +27,14 @@ export interface GenerateDraftResult {
   skipReason?: 'no_agency' | 'no_provider' | 'generation_failed';
   /** When MiniMax (or other primary) failed but OpenAI returned text. */
   usedFallbackProvider?: 'OPENAI';
+  /** `agencies.active_ai_provider` at call time (when resolved). */
+  agencyActiveProvider?: string;
+  /** Provider whose HTTP API produced `content` (live path only). */
+  generationProvider?: 'MINIMAX' | 'OPENAI';
+  /** Model id sent to that provider (not the router heuristic id). */
+  generationModel?: string;
+  /** True when `content` came from OpenAI after a non-OPENAI primary failed. */
+  usedOpenAiFallback?: boolean;
 }
 
 type ProviderRow = {
@@ -87,42 +95,60 @@ export class GenerationService {
 
       if (!primary?.api_key && !openaiFallbackOk) {
         this.logger.debug('No API keys for active or OpenAI — skipping');
-        return { content: null, skipReason: 'no_provider' };
+        return { content: null, skipReason: 'no_provider', agencyActiveProvider: active };
       }
 
       const tryPrimary = primary && primary.api_key;
       if (tryPrimary) {
         const r = await this.runProvider(params, primary, active);
         const cleaned = this.sanitizeCustomerFacing(r.content);
-        if (cleaned) {
-          return r.usedFallback
-            ? { content: cleaned, usedFallbackProvider: 'OPENAI' }
-            : { content: cleaned };
+        if (cleaned && r.generationProvider && r.generationModel) {
+          return {
+            content: cleaned,
+            agencyActiveProvider: active,
+            generationProvider: r.generationProvider,
+            generationModel: r.generationModel,
+            usedOpenAiFallback: false,
+          };
         }
         if (active !== 'OPENAI' && openaiFallbackOk && openaiFallback) {
           this.logger.warn(`Primary provider ${active} failed or empty; trying OpenAI fallback`);
           const r2 = await this.runProvider(params, openaiFallback, 'OPENAI');
           const cleaned2 = this.sanitizeCustomerFacing(r2.content);
-          if (cleaned2) {
-            return { content: cleaned2, usedFallbackProvider: 'OPENAI' };
+          if (cleaned2 && r2.generationProvider && r2.generationModel) {
+            return {
+              content: cleaned2,
+              usedFallbackProvider: 'OPENAI',
+              agencyActiveProvider: active,
+              generationProvider: r2.generationProvider,
+              generationModel: r2.generationModel,
+              usedOpenAiFallback: true,
+            };
           }
         } else if (active !== 'OPENAI' && openaiFallback?.api_key && !openaiFallbackOk) {
           this.logger.warn(
             `Primary provider ${active} failed; OpenAI fallback skipped (no usable OpenAI API key configured)`,
           );
         }
-        return { content: null, skipReason: 'generation_failed' };
+        return { content: null, skipReason: 'generation_failed', agencyActiveProvider: active };
       }
 
       // No primary key — use OpenAI only
       if (openaiFallbackOk && openaiFallback) {
         const r2 = await this.runProvider(params, openaiFallback, 'OPENAI');
         const cleaned2 = this.sanitizeCustomerFacing(r2.content);
-        if (cleaned2) {
-          return { content: cleaned2, usedFallbackProvider: 'OPENAI' };
+        if (cleaned2 && r2.generationProvider && r2.generationModel) {
+          return {
+            content: cleaned2,
+            usedFallbackProvider: 'OPENAI',
+            agencyActiveProvider: active,
+            generationProvider: r2.generationProvider,
+            generationModel: r2.generationModel,
+            usedOpenAiFallback: false,
+          };
         }
       }
-      return { content: null, skipReason: 'no_provider' };
+      return { content: null, skipReason: 'no_provider', agencyActiveProvider: active };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'unknown';
       this.logger.warn(`Live generation failed: ${message}`);
@@ -141,10 +167,14 @@ export class GenerationService {
     params: GenerateDraftParams,
     row: ProviderRow,
     providerName: string,
-  ): Promise<{ content: string | null; usedFallback: boolean }> {
+  ): Promise<{
+    content: string | null;
+    generationProvider?: 'MINIMAX' | 'OPENAI';
+    generationModel?: string;
+  }> {
     if (providerName !== 'MINIMAX' && providerName !== 'OPENAI') {
       this.logger.debug(`No live adapter for provider ${providerName}; skipping primary call`);
-      return { content: null, usedFallback: false };
+      return { content: null };
     }
 
     const settings = row.settings ?? {};
@@ -193,15 +223,21 @@ export class GenerationService {
           temperature: temp,
           maxTokens: maxT,
         });
-        this.logger.log(`MiniMax ok: model=${out.model} tokens~=${out.totalTokens}`);
-        return { content: out.content || null, usedFallback: false };
+        this.logger.log(
+          `Live generation ok: provider=MINIMAX generationModel=${out.model} tokens~=${out.totalTokens}`,
+        );
+        return {
+          content: out.content || null,
+          generationProvider: 'MINIMAX',
+          generationModel: (out.model && String(out.model).trim()) || model,
+        };
       } catch (e) {
         this.logger.warn(
           `MiniMax error: ${e instanceof Error ? e.message : e} — ` +
             `check Agency AI: MiniMax default model, API base (must be https://api.minimax.io/v1), ` +
             `and minimaxGroupId if your account requires it.`,
         );
-        return { content: null, usedFallback: false };
+        return { content: null, generationProvider: 'MINIMAX', generationModel: model };
       }
     }
 
@@ -220,15 +256,21 @@ export class GenerationService {
         temperature: temp,
         maxTokens: maxT,
       });
-      this.logger.log(`OpenAI ok: model=${result.model} tokens=${result.usage.totalTokens}`);
-      return { content: result.content || null, usedFallback: false };
+      this.logger.log(
+        `Live generation ok: provider=OPENAI generationModel=${result.model} tokens=${result.usage.totalTokens}`,
+      );
+      return {
+        content: result.content || null,
+        generationProvider: 'OPENAI',
+        generationModel: result.model?.trim() || model,
+      };
     } catch (e) {
       const detail = summarizeAxiosErrorForLogs(e, 'OpenAI chat/completions');
       this.logger.warn(
         `${detail} — verify OPENAI provider API key and endpoint in Agency Settings → AI; ` +
           `401 usually means missing/invalid/revoked key.`,
       );
-      return { content: null, usedFallback: false };
+      return { content: null, generationProvider: 'OPENAI', generationModel: model };
     }
   }
 

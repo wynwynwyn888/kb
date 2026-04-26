@@ -106,13 +106,18 @@ export class ConversationOrchestrationService {
       });
 
       this.logger.log(
-        `Orchestration completed: conversationId=${conversationId}, model=${routing.recommendedModel}, ` +
-        `mode=${routing.responseMode}, bubbles=${replyPlan.bubbles.length}, ` +
-        `handover=${replyPlan.handoverRecommended}, ` +
-        `draftProvenance=${replyPlan.draftProvenance ?? 'none'}` +
-        (replyPlan.draftFallbackReason
-          ? `, draftFallbackReason=${replyPlan.draftFallbackReason}`
-          : ''),
+        `Orchestration completed: conversationId=${conversationId}, ` +
+          `agencyActiveProvider=${replyPlan.agencyActiveProvider ?? 'n/a'}, ` +
+          `generationProvider=${replyPlan.generationProvider ?? 'n/a'}, ` +
+          `generationModel=${replyPlan.generationModel ?? 'n/a'}, ` +
+          `routingRecommendedModel=${routing.recommendedModel}, ` +
+          `mode=${routing.responseMode}, bubbles=${replyPlan.bubbles.length}, ` +
+          `handover=${replyPlan.handoverRecommended}, ` +
+          `draftProvenance=${replyPlan.draftProvenance ?? 'none'}` +
+          (replyPlan.usedOpenAiFallback ? ', usedOpenAiFallback=true' : '') +
+          (replyPlan.draftFallbackReason
+            ? `, draftFallbackReason=${replyPlan.draftFallbackReason}`
+            : ''),
       );
 
       // Step 7: Persist orchestration log
@@ -405,8 +410,15 @@ export class ConversationOrchestrationService {
       // Bubble text source: placeholder_fallback is deterministic/KB/memory — not model output.
       metadata['replyDraftProvenance'] = replyPlan.draftProvenance ?? null;
       metadata['replyDraftFallbackReason'] = replyPlan.draftFallbackReason ?? null;
+      metadata['routingRecommendedModel'] = routing?.recommendedModel ?? null;
+      metadata['agencyActiveProvider'] = replyPlan.agencyActiveProvider ?? null;
+      metadata['generationProviderUsed'] = replyPlan.generationProvider ?? null;
+      metadata['generationModelUsed'] = replyPlan.generationModel ?? null;
+      metadata['usedOpenAiFallback'] = replyPlan.usedOpenAiFallback ?? false;
     }
 
+    // `model_chosen` column stores the router heuristic / tenant override (not necessarily the live LLM model).
+    // See metadata.generationModelUsed + metadata.routingRecommendedModel for disambiguation.
     const logData = {
       id: randomUUID(),
       tenant_id: input.tenantId,

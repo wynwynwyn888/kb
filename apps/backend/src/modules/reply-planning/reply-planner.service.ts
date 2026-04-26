@@ -91,11 +91,21 @@ export class ReplyPlannerService {
       ...(draft.provenance === 'placeholder_fallback' && draft.fallbackReason
         ? { draftFallbackReason: draft.fallbackReason }
         : {}),
+      ...(draft.agencyActiveProvider ? { agencyActiveProvider: draft.agencyActiveProvider } : {}),
+      ...(draft.generationProvider ? { generationProvider: draft.generationProvider } : {}),
+      ...(draft.generationModel ? { generationModel: draft.generationModel } : {}),
+      ...(draft.usedOpenAiFallback ? { usedOpenAiFallback: draft.usedOpenAiFallback } : {}),
     };
 
+    const genMeta =
+      draft.generationProvider && draft.generationModel
+        ? `, agencyActiveProvider=${draft.agencyActiveProvider ?? 'n/a'}, generationProvider=${draft.generationProvider}, generationModel=${draft.generationModel}` +
+          (draft.usedOpenAiFallback ? ', usedOpenAiFallback=true' : '')
+        : '';
     this.logger.log(
-      `Reply planning completed: conversation=${conversationId}, bubbles=${bubbles.length}, ` +
-        `mode=${routing.responseMode}, draftProvenance=${draft.provenance}` +
+      `Reply planning completed: conversation=${conversationId}, routingRecommendedModel=${routing.recommendedModel}, ` +
+        `bubbles=${bubbles.length}, mode=${routing.responseMode}, draftProvenance=${draft.provenance}` +
+        genMeta +
         (draft.fallbackReason ? `, draftFallbackReason=${draft.fallbackReason}` : ''),
     );
 
@@ -139,6 +149,10 @@ export class ReplyPlannerService {
     text: string;
     provenance: 'live_generation' | 'placeholder_fallback';
     fallbackReason?: 'no_agency' | 'no_provider' | 'generation_failed';
+    agencyActiveProvider?: string;
+    generationProvider?: 'MINIMAX' | 'OPENAI';
+    generationModel?: string;
+    usedOpenAiFallback?: boolean;
   }> {
     const lastUser = [...memory].reverse().find(m => m.role === 'user');
     const incomingMessage = lastUser?.content?.trim() ?? '';
@@ -160,8 +174,17 @@ export class ReplyPlannerService {
 
     const trimmed = stripModelThinking(liveDraft.content ?? '').trim();
     if (trimmed.length > 0) {
-      this.logger.log(`Live draft generated: ${trimmed.length} chars`);
-      return { text: trimmed, provenance: 'live_generation' };
+      this.logger.log(
+        `Live draft generated: ${trimmed.length} chars (generationModel=${liveDraft.generationModel ?? 'n/a'})`,
+      );
+      return {
+        text: trimmed,
+        provenance: 'live_generation',
+        agencyActiveProvider: liveDraft.agencyActiveProvider,
+        generationProvider: liveDraft.generationProvider,
+        generationModel: liveDraft.generationModel,
+        usedOpenAiFallback: liveDraft.usedOpenAiFallback,
+      };
     }
 
     const fallbackReason =
@@ -173,6 +196,7 @@ export class ReplyPlannerService {
       text,
       provenance: 'placeholder_fallback',
       fallbackReason,
+      agencyActiveProvider: liveDraft.agencyActiveProvider,
     };
   }
 

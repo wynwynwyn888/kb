@@ -76,8 +76,8 @@ export class AiRouterService {
     const tagsSuggested: string[] = [];
 
     this.logger.log(
-      `Routing: model=${recommendedModel}, mode=${responseMode}, ` +
-      `confidence=${confidence}, reasoning=${reasoning}`,
+      `Routing: routingRecommendedModel=${recommendedModel}, mode=${responseMode}, ` +
+        `confidence=${confidence}, reasoning=${reasoning}`,
     );
 
     return {

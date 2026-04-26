@@ -25,6 +25,7 @@ COPY turbo.json ./
 COPY apps ./apps
 COPY packages ./packages
 RUN pnpm install --frozen-lockfile
+# `@aisbp/frontend` `prebuild` emits `packages/types` + `packages/formatter` `dist/` (workspace `main` points there; Next cannot resolve until built).
 RUN pnpm --filter @aisbp/frontend run build
 
 FROM base AS runner

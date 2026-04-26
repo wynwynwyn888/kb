@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "node scripts/next-dev.mjs",
     "dev:clean": "node -e \"try { require('fs').rmSync('.next', { recursive: true, force: true }); } catch (_) {}\" && node scripts/next-dev.mjs",
+    "prebuild": "pnpm --filter @aisbp/types run build && pnpm --filter @aisbp/formatter run build",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",

@@ -66,3 +66,12 @@ If `prisma migrate deploy` fails through the pooler, use Supabase’s **direct**
 ## API-only variant
 
 To run **only the Nest container** (Next hosted elsewhere; Redis not in this compose file), use `docker-compose.api-only.yml` and set `REDIS_HOST`, `DATABASE_URL`, and Supabase vars in `.env`.
+
+## GHL production smoke test (manual)
+
+To POST a realistic **inbound webhook** and validate the **SMS outbound** path (no app deploy required), use:
+
+- `infra/vps/scripts/smoke-ghl-webhook.ps1`
+- `infra/vps/scripts/smoke-ghl-webhook.sh` (requires `jq`)
+
+Full steps, log sequence, and failure table: **[docs/AISBP_PRODUCTION_SMOKE_TEST.md](../docs/AISBP_PRODUCTION_SMOKE_TEST.md)**.

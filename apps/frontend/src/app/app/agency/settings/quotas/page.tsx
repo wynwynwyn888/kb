@@ -284,7 +284,7 @@ export default function AgencyQuotasPage() {
                     <td style={{ padding: '0.45rem', borderBottom: '1px solid #f1f5f9', fontSize: '0.8rem' }}>
                       {row.actorEmail ?? row.profile_id}
                     </td>
-                    <td style={{ padding: '0.45rem', borderBottom: '1px solid #f1f5f9', fontFamily: 'ui-monospace, monospace', fontSize: '0.72rem' }}>
+                    <td style={{ padding: '0.45rem', borderBottom: '1px solid #f1f5f9', fontFamily: 'inherit', fontSize: '0.72rem' }}>
                       {row.tenant_id ?? '—'}
                     </td>
                     <td style={{ padding: '0.45rem', borderBottom: '1px solid #f1f5f9' }}>

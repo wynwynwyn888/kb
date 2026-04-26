@@ -1,13 +1,17 @@
 'use client';
 
+import { createPortal } from 'react-dom';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { getAgencyById, getMyTenants, getTenantById, getTenantsByAgency } from '@/lib/api';
 import { getSubaccountSwitchHref } from '@/components/app/tenant-workspace/path';
+import { TENANT_WORKSPACE_META_CHANGED, type TenantWorkspaceMetaDetail } from '@/lib/workspace-events';
 
 type SubaccountRow = { id: string; name: string; ghlLocationId?: string | null; status?: string };
+
+const PANEL_WIDTH = 320;
 
 const triggerBtn: CSSProperties = {
   width: '100%',
@@ -27,23 +31,21 @@ const triggerBtn: CSSProperties = {
   boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
 };
 
-const panelStyle: CSSProperties = {
-  position: 'absolute',
-  left: '100%',
-  top: 0,
-  marginLeft: 8,
-  minWidth: 300,
-  maxWidth: 340,
-  maxHeight: 'min(420px, 75vh)',
+const panelBoxStyle = (top: number, left: number): CSSProperties => ({
+  position: 'fixed',
+  top,
+  left,
+  width: PANEL_WIDTH,
+  maxHeight: 'min(420px, calc(100dvh - 16px))',
   display: 'flex',
   flexDirection: 'column',
   background: '#fff',
   border: '1px solid #e2e8f0',
   borderRadius: '10px',
   boxShadow: '0 12px 32px rgba(15, 23, 42, 0.12), 0 4px 8px rgba(15, 23, 42, 0.06)',
-  zIndex: 200,
+  zIndex: 9999,
   overflow: 'hidden',
-};
+});
 
 const agencyViewBtn: CSSProperties = {
   display: 'block',
@@ -86,7 +88,10 @@ export function WorkspaceSwitcher() {
 
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
+  const [panelPos, setPanelPos] = useState<{ top: number; left: number } | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
 
   const [subTitleName, setSubTitleName] = useState<string | null>(null);
   const [agencyName, setAgencyName] = useState<string | null>(null);
@@ -145,6 +150,18 @@ export function WorkspaceSwitcher() {
     if (token && user) void loadList();
   }, [token, user, loadList]);
 
+  useEffect(() => {
+    const onWorkspaceMeta = (ev: Event) => {
+      const ce = ev as CustomEvent<TenantWorkspaceMetaDetail>;
+      const tid = ce.detail?.tenantId?.trim();
+      if (!tid) return;
+      void loadList();
+      if (tid === activeSubaccountId) void loadSubName();
+    };
+    window.addEventListener(TENANT_WORKSPACE_META_CHANGED, onWorkspaceMeta);
+    return () => window.removeEventListener(TENANT_WORKSPACE_META_CHANGED, onWorkspaceMeta);
+  }, [activeSubaccountId, loadList, loadSubName]);
+
   const selectedGhlName = useMemo(() => {
     if (!isGhlSettings || !ghlSubParam) return null;
     return subaccounts.find(s => s.id === ghlSubParam)?.name ?? null;
@@ -159,7 +176,7 @@ export function WorkspaceSwitcher() {
         return selectedGhlName ? `GHL · ${selectedGhlName}` : 'GHL · subaccount';
       }
       if (isAgencyRoute) {
-        return `Agency account · ${agencyName ?? '—'}`;
+        return agencyName ?? 'Agency account';
       }
     }
     if (isSubaccountRoute) {
@@ -180,6 +197,16 @@ export function WorkspaceSwitcher() {
     selectedGhlName,
   ]);
 
+  const triggerTitle = useMemo(() => {
+    if (user?.agencyRole && isAgencyRoute && !isSubaccountRoute && !(isGhlSettings && ghlSubParam)) {
+      return `Agency account · ${agencyName ?? '—'}`;
+    }
+    return triggerLabel;
+  }, [user?.agencyRole, isAgencyRoute, isSubaccountRoute, isGhlSettings, ghlSubParam, agencyName, triggerLabel]);
+
+  const showAgencyTwoLine =
+    Boolean(user?.agencyRole) && isAgencyRoute && !isSubaccountRoute && !(isGhlSettings && ghlSubParam);
+
   const showSwitcher = Boolean(user?.agencyRole) || subaccounts.length > 0;
 
   const onPickSub = (id: string) => {
@@ -194,12 +221,38 @@ export function WorkspaceSwitcher() {
     setOpen(false);
   };
 
+  const placePanel = useCallback(() => {
+    const btn = buttonRef.current;
+    if (!btn) return;
+    const r = btn.getBoundingClientRect();
+    let left = r.right + 8;
+    if (left + PANEL_WIDTH > window.innerWidth - 12) {
+      left = Math.max(12, r.left - PANEL_WIDTH - 8);
+    }
+    const top = Math.max(8, Math.min(r.top, window.innerHeight - 120));
+    setPanelPos({ top, left });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setPanelPos(null);
+      return;
+    }
+    placePanel();
+    window.addEventListener('resize', placePanel);
+    window.addEventListener('scroll', placePanel, true);
+    return () => {
+      window.removeEventListener('resize', placePanel);
+      window.removeEventListener('scroll', placePanel, true);
+    };
+  }, [open, placePanel]);
+
   useEffect(() => {
     if (!open) return;
     const onDown = (e: MouseEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
+      const t = e.target as Node;
+      if (rootRef.current?.contains(t) || panelRef.current?.contains(t)) return;
+      setOpen(false);
     };
     document.addEventListener('mousedown', onDown);
     return () => document.removeEventListener('mousedown', onDown);
@@ -208,9 +261,7 @@ export function WorkspaceSwitcher() {
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
     if (!s) return subaccounts;
-    return subaccounts.filter(
-      t => t.name.toLowerCase().includes(s) || t.id.toLowerCase().includes(s)
-    );
+    return subaccounts.filter(t => t.name.toLowerCase().includes(s) || t.id.toLowerCase().includes(s));
   }, [subaccounts, q]);
 
   if (!user) return null;
@@ -218,86 +269,137 @@ export function WorkspaceSwitcher() {
 
   const canShowAgencySwitch = Boolean(user.agencyRole);
   const inSubContext = Boolean(
-    (isSubaccountRoute && activeSubaccountId) || (isGhlSettings && ghlSubParam)
+    (isSubaccountRoute && activeSubaccountId) || (isGhlSettings && ghlSubParam),
   );
 
-  const listSelectedId = isSubaccountRoute
-    ? activeSubaccountId
-    : isGhlSettings
-      ? ghlSubParam
-      : null;
+  const listSelectedId = isSubaccountRoute ? activeSubaccountId : isGhlSettings ? ghlSubParam : null;
+
+  const panelContent = open && panelPos && (
+    <div id="ws-panel" ref={panelRef} style={panelBoxStyle(panelPos.top, panelPos.left)} role="dialog" aria-label="Switch workspace">
+      {canShowAgencySwitch && inSubContext ? (
+        <button type="button" style={agencyViewBtn} onClick={goAgency}>
+          Back to agency account
+        </button>
+      ) : null}
+      {canShowAgencySwitch && !inSubContext && isAgencyRoute ? (
+        <p
+          style={{
+            fontSize: '0.7rem',
+            fontWeight: 700,
+            color: '#94a3b8',
+            textTransform: 'uppercase' as const,
+            letterSpacing: '0.08em',
+            margin: '0.4rem 0.75rem 0',
+          }}
+        >
+          Subaccounts
+        </p>
+      ) : null}
+      {listErr ? <p style={{ fontSize: '0.75rem', color: '#b91c1c', margin: '0.35rem 0.75rem' }}>{listErr}</p> : null}
+      <input
+        type="search"
+        value={q}
+        onChange={e => setQ(e.target.value)}
+        placeholder="Search subaccounts"
+        style={searchInp}
+        aria-label="Filter subaccounts"
+        autoFocus
+      />
+      <ul
+        style={{
+          listStyle: 'none',
+          margin: 0,
+          padding: '0.25rem 0.4rem 0.5rem',
+          overflowY: 'auto' as const,
+          flex: 1,
+        }}
+      >
+        {filtered.length === 0 ? (
+          <li style={{ fontSize: '0.8rem', color: '#94a3b8', padding: '0.5rem 0.4rem' }}>No matches</li>
+        ) : (
+          filtered.map(s => {
+            const isSel = listSelectedId === s.id;
+            return (
+              <li key={s.id}>
+                <button
+                  type="button"
+                  onClick={() => onPickSub(s.id)}
+                  style={{
+                    width: '100%',
+                    textAlign: 'left',
+                    padding: '0.5rem 0.55rem',
+                    border: '1px solid',
+                    borderColor: isSel ? '#0f62fe' : 'transparent',
+                    background: isSel ? 'rgba(15, 98, 254, 0.08)' : 'transparent',
+                    color: '#0f172a',
+                    borderRadius: '6px',
+                    fontSize: '0.8rem',
+                    fontWeight: isSel ? 700 : 500,
+                    cursor: 'pointer',
+                    marginBottom: 2,
+                  }}
+                >
+                  {s.name}
+                </button>
+              </li>
+            );
+          })
+        )}
+      </ul>
+    </div>
+  );
 
   return (
     <div ref={rootRef} style={{ position: 'relative', marginBottom: '0.85rem', zIndex: 5 }}>
       <p style={{ fontSize: '0.62rem', textTransform: 'uppercase' as const, letterSpacing: '0.1em', color: '#94a3b8', fontWeight: 800, margin: '0 0 0.35rem' }}>Workspace</p>
-      <button type="button" style={triggerBtn} onClick={() => setOpen(o => !o)} aria-expanded={open} aria-controls="ws-panel">
-        <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>{triggerLabel}</span>
-        <span style={{ color: '#64748b', fontSize: '0.7rem' }} aria-hidden>▾</span>
+      <button
+        ref={buttonRef}
+        type="button"
+        style={triggerBtn}
+        onClick={() => setOpen(o => !o)}
+        aria-expanded={open}
+        aria-controls="ws-panel"
+        title={triggerTitle}
+      >
+        {showAgencyTwoLine ? (
+          <span style={{ flex: 1, minWidth: 0, textAlign: 'left' as const }}>
+            <span
+              style={{
+                display: 'block',
+                fontSize: '0.62rem',
+                fontWeight: 700,
+                color: '#64748b',
+                letterSpacing: '0.04em',
+                textTransform: 'uppercase' as const,
+                lineHeight: 1.2,
+              }}
+            >
+              Agency account
+            </span>
+            <span
+              style={{
+                display: 'block',
+                marginTop: 2,
+                fontSize: '0.84rem',
+                fontWeight: 700,
+                color: '#0f172a',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap' as const,
+              }}
+            >
+              {agencyName ?? '—'}
+            </span>
+          </span>
+        ) : (
+          <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>{triggerLabel}</span>
+        )}
+        <span style={{ color: '#64748b', fontSize: '0.7rem', flexShrink: 0 }} aria-hidden>
+          ▾
+        </span>
       </button>
 
-      {open ? (
-        <div id="ws-panel" style={panelStyle} role="dialog" aria-label="Switch workspace">
-          {canShowAgencySwitch && inSubContext ? (
-            <button type="button" style={agencyViewBtn} onClick={goAgency}>
-              Back to agency account
-            </button>
-          ) : null}
-          {canShowAgencySwitch && !inSubContext && isAgencyRoute ? (
-            <p style={{ fontSize: '0.7rem', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase' as const, letterSpacing: '0.08em', margin: '0.4rem 0.75rem 0' }}>Subaccounts</p>
-          ) : null}
-          {listErr ? <p style={{ fontSize: '0.75rem', color: '#b91c1c', margin: '0.35rem 0.75rem' }}>{listErr}</p> : null}
-          <input
-            type="search"
-            value={q}
-            onChange={e => setQ(e.target.value)}
-            placeholder="Search subaccounts"
-            style={searchInp}
-            aria-label="Filter subaccounts"
-            autoFocus
-          />
-          <ul
-            style={{
-              listStyle: 'none',
-              margin: 0,
-              padding: '0.25rem 0.4rem 0.5rem',
-              overflowY: 'auto' as const,
-              flex: 1,
-            }}
-          >
-            {filtered.length === 0 ? (
-              <li style={{ fontSize: '0.8rem', color: '#94a3b8', padding: '0.5rem 0.4rem' }}>No matches</li>
-            ) : (
-              filtered.map(s => {
-                const isSel = listSelectedId === s.id;
-                return (
-                  <li key={s.id}>
-                    <button
-                      type="button"
-                      onClick={() => onPickSub(s.id)}
-                      style={{
-                        width: '100%',
-                        textAlign: 'left',
-                        padding: '0.5rem 0.55rem',
-                        border: '1px solid',
-                        borderColor: isSel ? '#1d4ed8' : 'transparent',
-                        background: isSel ? '#eff6ff' : 'transparent',
-                        color: '#0f172a',
-                        borderRadius: '6px',
-                        fontSize: '0.8rem',
-                        fontWeight: isSel ? 700 : 500,
-                        cursor: 'pointer',
-                        marginBottom: 2,
-                      }}
-                    >
-                      {s.name}
-                    </button>
-                  </li>
-                );
-              })
-            )}
-          </ul>
-        </div>
-      ) : null}
+      {typeof document !== 'undefined' && panelContent ? createPortal(panelContent, document.body) : null}
     </div>
   );
 }

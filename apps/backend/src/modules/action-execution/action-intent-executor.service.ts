@@ -3,6 +3,7 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { getSupabaseService } from '../../lib/supabase';
+import { decrypt } from '../../lib/encryption';
 import { createGhlClient } from '@aisbp/ghl-client';
 import type { ExecutionResult, ExecutionConditions, TagContactParams, BookSlotParams } from './dto/action-execution.dto';
 
@@ -378,6 +379,13 @@ export class ActionIntentExecutorService {
       .single();
 
     if (!data) return null;
-    return { token: data.private_token_encrypted };
+    try {
+      return { token: decrypt(String(data.private_token_encrypted)) };
+    } catch (e) {
+      this.logger.warn(
+        `GHL token decrypt failed tenant=${tenantId}: ${e instanceof Error ? e.message : String(e)}`,
+      );
+      return null;
+    }
   }
 }

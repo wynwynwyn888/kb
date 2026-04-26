@@ -2,6 +2,7 @@
 // Respects agency `active_ai_provider` with OpenAI fallback when active provider is missing or fails.
 
 import { Injectable, Logger } from '@nestjs/common';
+import { stripModelThinking } from '@aisbp/formatter';
 import { getSupabaseService } from '../../lib/supabase';
 import { OpenAiProviderAdapter } from '@aisbp/ai-provider-openai';
 import { minimaxChatCompletion } from './minimax.generate';
@@ -59,16 +60,18 @@ export class GenerationService {
       const tryPrimary = primary && primary.api_key;
       if (tryPrimary) {
         const r = await this.runProvider(params, primary, active);
-        if (r.content && r.content.length > 0) {
+        const cleaned = this.sanitizeCustomerFacing(r.content);
+        if (cleaned) {
           return r.usedFallback
-            ? { content: r.content, usedFallbackProvider: 'OPENAI' }
-            : { content: r.content };
+            ? { content: cleaned, usedFallbackProvider: 'OPENAI' }
+            : { content: cleaned };
         }
         if (active !== 'OPENAI' && openaiFallback?.api_key) {
           this.logger.warn(`Primary provider ${active} failed or empty; trying OpenAI fallback`);
           const r2 = await this.runProvider(params, openaiFallback, 'OPENAI');
-          if (r2.content && r2.content.length > 0) {
-            return { content: r2.content, usedFallbackProvider: 'OPENAI' };
+          const cleaned2 = this.sanitizeCustomerFacing(r2.content);
+          if (cleaned2) {
+            return { content: cleaned2, usedFallbackProvider: 'OPENAI' };
           }
         }
         return { content: null, skipReason: 'generation_failed' };
@@ -77,8 +80,9 @@ export class GenerationService {
       // No primary key — use OpenAI only
       if (openaiFallback?.api_key) {
         const r2 = await this.runProvider(params, openaiFallback, 'OPENAI');
-        if (r2.content && r2.content.length > 0) {
-          return { content: r2.content, usedFallbackProvider: 'OPENAI' };
+        const cleaned2 = this.sanitizeCustomerFacing(r2.content);
+        if (cleaned2) {
+          return { content: cleaned2, usedFallbackProvider: 'OPENAI' };
         }
       }
       return { content: null, skipReason: 'no_provider' };
@@ -87,6 +91,13 @@ export class GenerationService {
       this.logger.warn(`Live generation failed: ${message}`);
       return { content: null, skipReason: 'generation_failed' };
     }
+  }
+
+  /** Strip internal reasoning; empty after strip is treated as no content. */
+  private sanitizeCustomerFacing(content: string | null): string | null {
+    if (content == null) return null;
+    const t = stripModelThinking(content).trim();
+    return t.length > 0 ? t : null;
   }
 
   private async runProvider(
@@ -173,7 +184,8 @@ export class GenerationService {
     for (const entry of memForHistory) {
       messages.push({
         role: entry.role === 'user' ? 'user' : 'assistant',
-        content: entry.content,
+        content:
+          entry.role === 'assistant' ? stripModelThinking(entry.content ?? '') : (entry.content ?? ''),
       });
     }
 

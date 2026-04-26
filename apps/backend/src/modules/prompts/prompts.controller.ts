@@ -110,6 +110,8 @@ export class PromptsController {
       content: string;
       priority?: number;
       isDefault?: boolean;
+      /** Update this policy row in place (including renames). Omit to upsert by `(agencyId, name)`. */
+      policyId?: string | null;
     },
     @CurrentUser() user: SessionUser,
   ) {
@@ -128,6 +130,7 @@ export class PromptsController {
       content: dto.content,
       priority: dto.priority,
       isDefault: dto.isDefault,
+      policyId: dto.policyId,
     });
   }
 

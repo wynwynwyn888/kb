@@ -1,6 +1,6 @@
 // Subaccount bot test — real generation path with agency policy + subaccount prompt + KB (not live GHL chat).
 
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { getSupabaseService } from '../../lib/supabase';
 import { GenerationService } from '../generation/generation.service';
 import { KbService } from '../kb/kb.service';
@@ -23,8 +23,11 @@ function buildStackedSystemPrompt(
   return 'You are a helpful AI assistant.';
 }
 
+const BOT_TEST_MAX_HISTORY_MESSAGES = 12;
+
 @Injectable()
 export class BotTestService {
+  private readonly logger = new Logger(BotTestService.name);
   private readonly supabase = getSupabaseService();
 
   constructor(
@@ -45,6 +48,8 @@ export class BotTestService {
     activeProvider: string;
     modelUsed: string;
     kbChunksUsed: number;
+    /** Non–customer-facing hint for support / Response details (no raw provider payloads). */
+    supportDetail?: string;
   }> {
     const ok = await this.tenantsService.checkTenantAccess(tenantId, profileId);
     if (!ok) throw new NotFoundException('Not found');
@@ -85,9 +90,16 @@ export class BotTestService {
 
     const systemPrompt = buildStackedSystemPrompt(agencyPrompt, tenantPrompt);
 
-    const hist: MemoryEntry[] = (body.history ?? []).map(h => ({
+    const normalizedHistory = (body.history ?? [])
+      .filter(
+        (h): h is { role: 'user' | 'assistant'; content: string } =>
+          (h.role === 'user' || h.role === 'assistant') && typeof h.content === 'string' && h.content.trim().length > 0,
+      )
+      .slice(-BOT_TEST_MAX_HISTORY_MESSAGES);
+
+    const hist: MemoryEntry[] = normalizedHistory.map(h => ({
       role: h.role,
-      content: h.content,
+      content: h.content.trim(),
       sender: h.role === 'user' ? 'CONTACT' : 'AI',
       timestamp: new Date().toISOString(),
       messageType: 'text' as const,
@@ -105,7 +117,7 @@ export class BotTestService {
     const activeProvider = cfg?.activeProvider ?? 'OPENAI';
     const modelUsed = modelOverride || cfg?.activeModel || cfg?.defaultModel || 'gpt-4o-mini';
 
-    const gen = await this.generationService.generateDraft({
+    const draftParams = {
       tenantId,
       incomingMessage: msg,
       systemPrompt,
@@ -114,7 +126,50 @@ export class BotTestService {
       model: modelUsed,
       ...(Number.isFinite(subTemp) ? { temperature: subTemp } : {}),
       ...(subMax != null && subMax > 0 ? { maxTokens: subMax } : {}),
-    });
+    };
+
+    let gen = await this.generationService.generateDraft(draftParams);
+    let supportDetail: string | undefined;
+
+    const shouldRetry =
+      !gen.content &&
+      (gen.skipReason === 'generation_failed' || gen.skipReason === undefined) &&
+      hist.length > 0;
+
+    if (shouldRetry) {
+      const firstSkip = gen.skipReason ?? 'n/a';
+      this.logger.warn(
+        `Bot test empty reply for tenant=${tenantId} skip=${firstSkip} historyTurns=${hist.length}; retrying without prior turns`,
+      );
+      await new Promise<void>(resolve => {
+        setTimeout(resolve, 120);
+      });
+      const genNoHist = await this.generationService.generateDraft({
+        ...draftParams,
+        memory: [],
+      });
+      if (genNoHist.content) {
+        gen = genNoHist;
+        supportDetail = 'retried_without_prior_turns';
+      } else {
+        const shortMem = hist.length > 4 ? hist.slice(-4) : hist.slice(-2);
+        const genShort = await this.generationService.generateDraft({
+          ...draftParams,
+          memory: shortMem,
+        });
+        if (genShort.content) {
+          gen = genShort;
+          supportDetail = 'retried_with_short_history';
+        } else {
+          gen = genShort;
+          supportDetail = [
+            `first_skip=${firstSkip}`,
+            `retry_empty_skip=${genNoHist.skipReason ?? 'n/a'}`,
+            `short_hist_skip=${genShort.skipReason ?? 'n/a'}`,
+          ].join('; ');
+        }
+      }
+    }
 
     return {
       reply: gen.content,
@@ -123,6 +178,7 @@ export class BotTestService {
       activeProvider,
       modelUsed,
       kbChunksUsed: kbChunks.length,
+      ...(supportDetail ? { supportDetail } : {}),
     };
   }
 }

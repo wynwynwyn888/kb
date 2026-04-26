@@ -19,6 +19,7 @@ import {
   PageHeader,
   SectionCard,
   StatusPill,
+  appFloatingSecondaryButtonStyle,
 } from '@/components/app/mvp-ui';
 
 function fmtCompact(n: number) {
@@ -37,36 +38,36 @@ function formatAuditDescription(
   const m = (row.metadata ?? null) as Record<string, unknown> | null;
   const a = row.action;
   if (a === 'subaccount.create' && m?.['name']) {
-    return `Subaccount created: ${String(m['name'])}`;
+    return `Workspace created: ${String(m['name'])}`;
   }
   if (a === 'subaccount.renamed' && m?.['previousName'] && m?.['newName']) {
-    return `Subaccount renamed: ${String(m['previousName'])} → ${String(m['newName'])}`;
+    return `Workspace renamed: ${String(m['previousName'])} → ${String(m['newName'])}`;
   }
   if (a === 'subaccount.deleted' && m?.['name']) {
-    return `Subaccount removed: ${String(m['name'])}`;
+    return `Workspace removed: ${String(m['name'])}`;
   }
   if (a === 'agency.ai_settings' && m) {
     const p = m['provider'];
     const k = m['keyRotated'];
     const sa = m['setAsActive'];
     const am = m['defaultModel'];
-    return `AI settings: provider ${p ?? '—'}${am ? `, model ${am}` : ''}${
+    return `AI provider updated: ${p ?? '—'}${am ? `, model ${am}` : ''}${
       sa ? ', set as live provider' : ''
     }${k ? ', API key updated' : ''}`;
   }
   if (a === 'agency.active_provider' && m?.['newActiveProvider']) {
-    return `Active provider: ${String(m['previousActiveProvider'] ?? '—')} → ${String(m['newActiveProvider'])}`;
+    return `Live AI provider changed: ${String(m['previousActiveProvider'] ?? '—')} → ${String(m['newActiveProvider'])}`;
   }
   if (a === 'agency.reply_policy') {
-    return 'Subaccount reply policy (governance) updated';
+    return 'Workspace reply limits updated';
   }
   if (a === 'agency.default_quota') {
-    return `Default quota: ${row.previous_total ?? '—'} → ${row.new_total ?? '—'}`;
+    return `Default credits: ${row.previous_total ?? '—'} → ${row.new_total ?? '—'}`;
   }
   if (a === 'subaccount.topup') {
-    return `Subaccount quota top-up (${row.previous_total ?? '—'} → ${row.new_total ?? '—'})`;
+    return `Workspace credits topped up (${row.previous_total ?? '—'} → ${row.new_total ?? '—'})`;
   }
-  return a;
+  return 'Activity recorded';
 }
 
 type GhlBreakdown = {
@@ -187,10 +188,10 @@ export default function AgencyHomePage() {
             totalSum,
             periodNote:
               periods.size > 1
-                ? 'Billing windows differ by subaccount—treat the sum as indicative.'
+                ? 'Billing windows differ by workspace; treat this total as a guide.'
                 : ok.length
                   ? null
-                  : 'No quota rows returned for these subaccounts.',
+                  : 'No credit records were found for these workspaces.',
           });
           const low: Array<{ id: string; name: string; remaining: number; total: number }> = [];
           tlist.forEach((row, i) => {
@@ -228,10 +229,10 @@ export default function AgencyHomePage() {
   const operationalFlags = useMemo(() => {
     const flags: { text: string; tone: 'warn' | 'ok' }[] = [];
     if (aiSnap && !aiSnap.hasKey)
-      flags.push({ text: 'No API key for the active AI provider — live generation will fail until credentials are saved.', tone: 'warn' });
+      flags.push({ text: 'AI provider needs setup before live replies can be generated.', tone: 'warn' });
     if (lowQuota.length > 0)
       flags.push({
-        text: `${lowQuota.length} subaccount(s) are below 15% remaining quota: ${lowQuota
+        text: `${lowQuota.length} workspace(s) are below 15% remaining credits: ${lowQuota
           .slice(0, 3)
           .map(l => l.name)
           .join(', ')}${lowQuota.length > 3 ? '…' : ''}.`,
@@ -239,18 +240,18 @@ export default function AgencyHomePage() {
       });
     if (ghlBreakdown) {
       if (ghlBreakdown.invalid > 0)
-        flags.push({ text: `${ghlBreakdown.invalid} GHL row(s) report INVALID — re-auth or fix tokens per subaccount.`, tone: 'warn' });
-      if (ghlBreakdown.error > 0) flags.push({ text: `${ghlBreakdown.error} GHL row(s) in ERROR — check connection health.`, tone: 'warn' });
+        flags.push({ text: `${ghlBreakdown.invalid} HighLevel connection(s) need a new token or location check.`, tone: 'warn' });
+      if (ghlBreakdown.error > 0) flags.push({ text: `${ghlBreakdown.error} HighLevel connection(s) need review.`, tone: 'warn' });
       if (ghlBreakdown.fetchFailed > 0)
-        flags.push({ text: `${ghlBreakdown.fetchFailed} GHL status fetch(es) failed — some rows unknown.`, tone: 'warn' });
+        flags.push({ text: `${ghlBreakdown.fetchFailed} HighLevel status check(s) could not be loaded.`, tone: 'warn' });
     }
     if (withoutLocationId != null && withoutLocationId > 0)
       flags.push({
-        text: `${withoutLocationId} subaccount(s) have no GHL location id on file — set location in GHL setup before expecting routing.`,
+        text: `${withoutLocationId} workspace(s) need a HighLevel location ID before routing can work.`,
         tone: 'warn',
       });
     if (flags.length === 0 && !snapshotLoading && !err) {
-      return [{ text: 'No issues flagged from the loaded metrics.', tone: 'ok' as const }];
+      return [{ text: 'Everything important looks ready from the latest snapshot.', tone: 'ok' as const }];
     }
     return flags;
   }, [aiSnap, ghlBreakdown, withoutLocationId, snapshotLoading, err, lowQuota]);
@@ -261,10 +262,13 @@ export default function AgencyHomePage() {
 
   return (
     <div>
-      <PageHeader title="Control room" eyebrow="Agency account" />
+      <PageHeader title="Control Center" eyebrow="Agency account" />
       {agencyName ? (
         <p style={{ fontSize: '0.9rem', fontWeight: 700, color: '#0f172a', margin: '0 0 0.6rem' }}>{agencyName}</p>
       ) : null}
+      <p style={{ fontSize: '0.9rem', color: '#64748b', margin: '0 0 1.1rem', lineHeight: 1.5, maxWidth: '42rem' }}>
+        Monitor client workspaces, HighLevel connections, AI provider status, credits, and recent activity.
+      </p>
       {err && (
         <div style={{ marginBottom: '1rem' }}>
           <ErrorBanner message={err} />
@@ -297,19 +301,19 @@ export default function AgencyHomePage() {
           marginBottom: '1.15rem',
         }}
       >
-        <SectionCard title="Subaccounts & GHL location" subtitle="Count and GHL location id coverage.">
+        <SectionCard title="Workspaces" subtitle="Client workspaces connected to this agency.">
           {snapshotLoading && tenantCount === null ? (
             <LoadingBlock message="Loading…" />
           ) : (
             <KeyValueRows
               rows={[
-                { label: 'Subaccounts in agency', value: String(tenantCount ?? '—') },
-                { label: 'GHL location id on file', value: `${withGhlLocationId ?? '—'} / ${tenantCount ?? '—'}` },
+                { label: 'Total workspaces', value: String(tenantCount ?? '—') },
+                { label: 'HighLevel IDs saved', value: `${withGhlLocationId ?? '—'} / ${tenantCount ?? '—'}` },
                 {
-                  label: 'Missing location id',
+                  label: 'Needs setup',
                   value:
                     withoutLocationId != null && withoutLocationId > 0 ? (
-                      <StatusPill label={`${withoutLocationId} subaccount(s)`} tone="warn" />
+                      <StatusPill label={`${withoutLocationId} workspace(s)`} tone="warn" />
                     ) : (
                       <StatusPill label="None" tone="ok" />
                     ),
@@ -319,33 +323,33 @@ export default function AgencyHomePage() {
           )}
         </SectionCard>
 
-        <SectionCard title="GHL" subtitle="Per-subaccount /connection read.">
+        <SectionCard title="HighLevel Connections" subtitle="Connection health across client workspaces.">
           {snapshotLoading && ghlBreakdown === null ? (
-            <LoadingBlock message="Loading GHL…" />
+            <LoadingBlock message="Loading HighLevel…" />
           ) : ghlBreakdown && tenantCount != null && tenantCount > 0 ? (
             <KeyValueRows
               rows={[
-                { label: 'CONNECTED', value: <StatusPill label={String(ghlBreakdown.connected)} tone="ok" /> },
-                { label: 'INVALID', value: <StatusPill label={String(ghlBreakdown.invalid)} tone={ghlBreakdown.invalid ? 'warn' : 'ok'} /> },
-                { label: 'ERROR', value: <StatusPill label={String(ghlBreakdown.error)} tone={ghlBreakdown.error ? 'warn' : 'ok'} /> },
-                { label: 'DISCONNECTED', value: String(ghlBreakdown.disconnected) },
-                { label: 'Could not read row', value: <StatusPill label={String(ghlBreakdown.fetchFailed)} tone={ghlBreakdown.fetchFailed ? 'warn' : 'ok'} /> },
+                { label: 'Connected', value: <StatusPill label={String(ghlBreakdown.connected)} tone="ok" /> },
+                { label: 'Needs token check', value: <StatusPill label={String(ghlBreakdown.invalid)} tone={ghlBreakdown.invalid ? 'warn' : 'ok'} /> },
+                { label: 'Needs review', value: <StatusPill label={String(ghlBreakdown.error)} tone={ghlBreakdown.error ? 'warn' : 'ok'} /> },
+                { label: 'Needs setup', value: String(ghlBreakdown.disconnected) },
+                { label: 'Status unavailable', value: <StatusPill label={String(ghlBreakdown.fetchFailed)} tone={ghlBreakdown.fetchFailed ? 'warn' : 'ok'} /> },
                 {
-                  label: 'Drift',
+                  label: 'Coverage',
                   value: ghlDrift ? (
-                    <StatusPill label="Connected < subaccounts" tone="warn" />
+                    <StatusPill label="Some workspaces need setup" tone="warn" />
                   ) : (
-                    <StatusPill label="Connected covers fleet" tone="ok" />
+                    <StatusPill label="All set" tone="ok" />
                   ),
                 },
               ]}
             />
           ) : (
-            <p style={{ fontSize: '0.85rem', color: '#64748b', margin: 0 }}>No subaccounts to evaluate.</p>
+            <p style={{ fontSize: '0.85rem', color: '#64748b', margin: 0 }}>No workspaces to evaluate yet.</p>
           )}
         </SectionCard>
 
-        <SectionCard title="Live AI" subtitle="Active provider and model for generation.">
+        <SectionCard title="Live AI" subtitle="Provider and model used for generated replies.">
           {snapshotLoading && aiSnap === null && !err ? (
             <LoadingBlock message="Loading…" />
           ) : aiSnap ? (
@@ -355,26 +359,26 @@ export default function AgencyHomePage() {
                   label: 'Keys',
                   value: <StatusPill label={aiSnap.hasKey ? 'Saved' : 'Not set'} tone={aiSnap.hasKey ? 'ok' : 'warn'} />,
                 },
-                { label: 'Active provider', value: aiSnap.provider, mono: true },
-                { label: 'Active model', value: aiSnap.model, mono: true },
+                { label: 'Provider', value: aiSnap.provider, mono: true },
+                { label: 'Model', value: aiSnap.model, mono: true },
               ]}
             />
           ) : (
-            <p style={{ fontSize: '0.85rem', color: '#666', margin: 0 }}>AI summary not loaded.</p>
+            <p style={{ fontSize: '0.85rem', color: '#64748b', margin: 0 }}>AI provider summary is not loaded.</p>
           )}
-          <p style={{ margin: '0.6rem 0 0' }}>
-            <Link href="/app/agency/settings/ai" style={{ color: '#2563eb', fontWeight: 600, textDecoration: 'none' }}>
-              Open AI &amp; models →
+          <div style={{ margin: '0.75rem 0 0' }}>
+            <Link href="/app/agency/settings/ai" style={appFloatingSecondaryButtonStyle}>
+              Manage AI provider
             </Link>
-          </p>
+          </div>
         </SectionCard>
 
-        <SectionCard title="Usage / quota" subtitle="Credits summed across the same /quota calls as the Usage tab.">
+        <SectionCard title="Credits" subtitle="Credit usage across client workspaces.">
           {snapshotLoading && !usageAgg && !err ? (
-            <LoadingBlock message="Loading quotas…" />
+            <LoadingBlock message="Loading credits…" />
           ) : usageAgg ? (
             <>
-              <p style={{ fontSize: '0.8rem', color: '#64748b', margin: 0 }}>Subaccounts with quota: {usageAgg.subaccountsWithQuota}</p>
+              <p style={{ fontSize: '0.8rem', color: '#64748b', margin: 0 }}>Workspaces with credits: {usageAgg.subaccountsWithQuota}</p>
               <p style={{ fontWeight: 800, fontSize: '1.4rem', margin: '0.4rem 0 0.15rem', color: '#0f172a' }}>
                 {fmtCompact(usageAgg.usedSum)} <span style={{ color: '#94a3b8', fontWeight: 600, fontSize: '1.05rem' }}>/</span>{' '}
                 {fmtCompact(usageAgg.totalSum)}
@@ -398,7 +402,7 @@ export default function AgencyHomePage() {
                       }}
                     />
                   </div>
-                  <p style={{ fontSize: '0.8rem', color: '#475569', margin: '0.3rem 0 0' }}>≈ {usagePct}% of combined cap</p>
+                  <p style={{ fontSize: '0.8rem', color: '#475569', margin: '0.3rem 0 0' }}>≈ {usagePct}% used</p>
                 </div>
               ) : null}
               {usageAgg.periodNote ? (
@@ -410,11 +414,11 @@ export default function AgencyHomePage() {
       </div>
 
       {lowQuota.length > 0 ? (
-        <SectionCard title="Low quota" subtitle="Subaccounts under 15% of period cap.">
+        <SectionCard title="Low credits" subtitle="Workspaces under 15% remaining credits.">
           <ul style={{ margin: 0, paddingLeft: '1.1rem', fontSize: '0.86rem', lineHeight: 1.6 }}>
             {lowQuota.map(l => (
               <li key={l.id} style={{ marginBottom: '0.35rem' }}>
-                <Link href={`/app/tenant/${l.id}/usage`} style={{ fontWeight: 600, color: '#1d4ed8' }}>
+                <Link href={`/app/tenant/${l.id}/usage`} style={appFloatingSecondaryButtonStyle}>
                   {l.name}
                 </Link>
                 {` — ${l.remaining.toLocaleString()} / ${l.total.toLocaleString()} left`}
@@ -424,12 +428,9 @@ export default function AgencyHomePage() {
         </SectionCard>
       ) : null}
 
-      <SectionCard
-        title="Recent changes"
-        subtitle="Stored in the database audit log (see coverage note below). Not all agency actions are logged yet."
-      >
+      <SectionCard title="Recent activity" subtitle="Recent setup and credit changes for this agency.">
         {recentAudit.length === 0 ? (
-          <p style={{ fontSize: '0.85rem', color: '#64748b', margin: 0 }}>No events yet.</p>
+          <p style={{ fontSize: '0.85rem', color: '#64748b', margin: 0 }}>No activity yet.</p>
         ) : (
           <ul style={{ margin: 0, paddingLeft: '1rem', fontSize: '0.82rem', lineHeight: 1.55, color: '#334155' }}>
             {recentAudit.map(row => (
@@ -440,26 +441,27 @@ export default function AgencyHomePage() {
                 {` — ${formatAuditDescription(row)}`}
                 {row.actorEmail ? <span style={{ color: '#64748b' }}> — {row.actorEmail}</span> : null}
                 {row.action === 'subaccount.topup' && row.tenant_id ? (
-                  <span style={{ color: '#94a3b8' }}> (subaccount event)</span>
+                  <span style={{ color: '#94a3b8' }}> (workspace event)</span>
                 ) : null}
               </li>
             ))}
           </ul>
         )}
-        <p style={{ fontSize: '0.75rem', color: '#94a3b8', lineHeight: 1.5, margin: '0.65rem 0 0' }}>
-          <strong style={{ color: '#64748b' }}>Logged here:</strong> subaccount create / rename / remove, default quota, quota
-          top-ups, agency AI settings (including key rotation flags), live provider changes via “active provider”, and
-          subaccount governance (reply policy limits). <strong style={{ color: '#64748b' }}>Not logged yet:</strong> GHL token
-          or connection changes, and master prompt edits (no dedicated audit event).
-        </p>
-        <p style={{ margin: '0.6rem 0 0' }}>
-          <Link href="/app/agency/settings/quotas" style={{ color: '#2563eb', fontWeight: 600, textDecoration: 'none' }}>
-            Full audit →
+        <details style={{ marginTop: '0.7rem' }}>
+          <summary style={{ cursor: 'pointer', fontSize: '0.78rem', color: '#64748b', fontWeight: 600 }}>Support details</summary>
+          <p style={{ fontSize: '0.75rem', color: '#94a3b8', lineHeight: 1.5, margin: '0.5rem 0 0' }}>
+            This activity list currently includes workspace create / rename / remove, default credits, credit top-ups, AI provider
+            settings, live provider changes, and workspace reply limits.
+          </p>
+        </details>
+        <div style={{ margin: '0.75rem 0 0' }}>
+          <Link href="/app/agency/settings/quotas" style={appFloatingSecondaryButtonStyle}>
+            View credits activity
           </Link>
-        </p>
+        </div>
       </SectionCard>
 
-      <SectionCard title="Attention" subtitle="Heuristics on current snapshot.">
+      <SectionCard title="Needs attention" subtitle="Recommended next steps from the latest snapshot.">
         <ul style={{ margin: 0, paddingLeft: '1.1rem', fontSize: '0.86rem', lineHeight: 1.6, color: '#334155' }}>
           {operationalFlags.map((f, i) => (
             <li key={i} style={{ marginBottom: i < operationalFlags.length - 1 ? '0.45rem' : 0 }}>
@@ -471,37 +473,37 @@ export default function AgencyHomePage() {
       </SectionCard>
 
       <div style={{ marginTop: '1.1rem', display: 'grid', gap: '1rem' }}>
-        <SectionCard title="Shortcuts" subtitle="After reviewing metrics above.">
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.65rem 1rem', fontSize: '0.82rem', fontWeight: 600 }}>
-            <Link href="/app/agency/tenants" style={{ color: '#1d4ed8', textDecoration: 'none' }}>
-              Subaccounts
+        <SectionCard title="Quick actions" subtitle="Common setup tasks.">
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+            <Link href="/app/agency/tenants" style={appFloatingSecondaryButtonStyle}>
+              Client Workspaces
             </Link>
-            <Link href="/app/agency/settings/ai" style={{ color: '#1d4ed8', textDecoration: 'none' }}>
-              AI &amp; models
+            <Link href="/app/agency/settings/ai" style={appFloatingSecondaryButtonStyle}>
+              AI Provider
             </Link>
-            <Link href="/app/agency/settings/quotas" style={{ color: '#1d4ed8', textDecoration: 'none' }}>
-              Quotas
+            <Link href="/app/agency/settings/quotas" style={appFloatingSecondaryButtonStyle}>
+              Credits
             </Link>
-            <Link href="/app/agency/settings/ghl" style={{ color: '#1d4ed8', textDecoration: 'none' }}>
-              GHL
+            <Link href="/app/agency/settings/ghl" style={appFloatingSecondaryButtonStyle}>
+              HighLevel
             </Link>
-            <Link href="/app/agency/settings/policies" style={{ color: '#1d4ed8', textDecoration: 'none' }}>
-              Master Prompt
+            <Link href="/app/agency/settings/policies" style={appFloatingSecondaryButtonStyle}>
+              Global Prompt
             </Link>
-            <Link href="/app/agency/team" style={{ color: '#1d4ed8', textDecoration: 'none' }}>
-              Agency team
+            <Link href="/app/agency/team" style={appFloatingSecondaryButtonStyle}>
+              Team
             </Link>
             {firstTenantId ? (
-              <Link href={`/app/tenant/${firstTenantId}/usage`} style={{ color: '#1d4ed8', textDecoration: 'none' }}>
-                Open usage (subaccount)
+              <Link href={`/app/tenant/${firstTenantId}/usage`} style={appFloatingSecondaryButtonStyle}>
+                Open workspace usage
               </Link>
             ) : null}
           </div>
         </SectionCard>
-        <SectionCard title="Session" subtitle="Signed in user.">
+        <SectionCard title="Account" subtitle="Signed-in user.">
           <KeyValueRows
             rows={[
-              { label: 'Agency account', value: agencyName ?? (snapshotLoading ? '…' : '—') },
+              { label: 'Agency', value: agencyName ?? (snapshotLoading ? '…' : '—') },
               { label: 'Signed in as', value: user?.email ?? '—' },
               { label: 'Role', value: <StatusPill label={role ?? '—'} tone="neutral" /> },
             ]}

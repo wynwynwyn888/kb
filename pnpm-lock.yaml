@@ -144,6 +144,9 @@ importers:
 
   apps/frontend:
     dependencies:
+      '@aisbp/formatter':
+        specifier: workspace:*
+        version: link:../../packages/formatter
       '@aisbp/tsconfig':
         specifier: workspace:*
         version: link:../../packages/tsconfig

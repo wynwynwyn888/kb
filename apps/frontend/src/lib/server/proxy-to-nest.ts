@@ -32,18 +32,40 @@ export async function proxyToNest(
     if (buf.byteLength > 0) init.body = buf;
   }
 
-  const res = await fetch(target, init);
+  let res: Response;
+  try {
+    res = await fetch(target, init);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'fetch failed';
+    const dev = process.env.NODE_ENV === 'development';
+    return NextResponse.json(
+      {
+        message: dev
+          ? 'Could not reach the application server from this web app. Start the API (and Redis if your team uses queues), then refresh.'
+          : 'The application is temporarily unavailable. Please try again in a moment.',
+        statusCode: 502,
+        hint: dev
+          ? 'Tip: from the project root, run the full dev command your team uses so the API is listening where the web app expects it.'
+          : '',
+        cause: message,
+        upstream: dev ? target : undefined,
+      },
+      { status: 502 },
+    );
+  }
 
   if (res.status === 404) {
     const text = await res.text();
     if (/Cannot (POST|GET|PUT|PATCH|DELETE) /i.test(text)) {
+      const dev = process.env.NODE_ENV === 'development';
       return NextResponse.json(
         {
-          message:
-            'The API process does not have this route—usually a stale or wrong server build on the backend port. Rebuild and restart the API.',
+          message: dev
+            ? 'This screen called an API route that is not available on the running server. Restart or redeploy the API so it matches this app version.'
+            : 'Something is out of date on the server. Please try again later or contact support.',
           statusCode: 502,
-          hint: 'In apps/backend: npx nest build, then node patch-dist.mjs, then start the process on the port in BACKEND_URL (default 127.0.0.1:3001).',
-          upstream: target,
+          hint: dev ? 'If you develop locally, rebuild and restart the API process, then hard-refresh the browser.' : '',
+          upstream: dev ? target : undefined,
         },
         { status: 502 },
       );

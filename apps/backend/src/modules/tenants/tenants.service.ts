@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { getSupabaseService } from '../../lib/supabase';
 import type { TenantRole } from '../../lib/enums';
+import { resolveBotMode, type BotOperatingMode, isBotModeString } from '../../lib/bot-mode';
 
 /** When the DB enforces NOT NULL on `ghl_location_id`, store a sentinel until a real GHL id is set in Integrations. */
 const PENDING_GHL_PREFIX = 'pending:';
@@ -26,6 +27,10 @@ export interface TenantSummary {
 }
 
 export interface TenantDetail extends TenantSummary {
+  /** AI reply mode for this workspace; drives `bot_enabled` on write. */
+  botMode: BotOperatingMode;
+  /** Column mirror; `false` only when mode is `off`. */
+  botEnabled: boolean;
   promptConfig?: {
     id: string;
     name: string;
@@ -123,6 +128,12 @@ export class TenantsService {
       .eq('tenant_id', tenantId)
       .single();
 
+    const settingsObj =
+      tenant.settings && typeof tenant.settings === 'object' && tenant.settings !== null
+        ? (tenant.settings as Record<string, unknown>)
+        : {};
+    const botEnabled = Boolean((tenant as { bot_enabled?: boolean }).bot_enabled);
+
     return {
       id: tenant.id,
       agencyId: tenant.agency_id,
@@ -130,6 +141,8 @@ export class TenantsService {
       ghlLocationId: toPublicGhlLocationId(tenant.ghl_location_id),
       status: tenant.status,
       settings: tenant.settings,
+      botMode: resolveBotMode(settingsObj, botEnabled),
+      botEnabled,
       createdAt: new Date(tenant.created_at),
       updatedAt: new Date(tenant.updated_at),
       promptConfig: prompt ? {
@@ -333,29 +346,69 @@ export class TenantsService {
     };
   }
 
-  async updateTenantName(
+  /**
+   * Partial update: rename (agency staff only) and/or set AI operating mode (anyone with tenant access).
+   */
+  async updateTenant(
     tenantId: string,
     profileId: string,
-    name: string,
-  ): Promise<TenantSummary> {
+    input: { name?: string; botMode?: BotOperatingMode },
+  ): Promise<TenantDetail> {
+    if (input.name === undefined && input.botMode === undefined) {
+      throw new BadRequestException('Provide at least one of: name, botMode');
+    }
+
     const supabase = getSupabaseService();
     const { data: tenant, error: tErr } = await supabase
       .from('tenants')
-      .select('agency_id, name')
+      .select('agency_id, name, settings, bot_enabled')
       .eq('id', tenantId)
       .single();
     if (tErr || !tenant) throw new NotFoundException('Subaccount not found');
 
-    const ok = await this.assertAgencyStaff(tenant.agency_id, profileId);
-    if (!ok) throw new ForbiddenException('Agency access required to rename');
+    const hasAccess = await this.checkTenantAccess(tenantId, profileId);
+    if (!hasAccess) {
+      throw new ForbiddenException('Access denied');
+    }
 
-    const n = name?.trim();
-    if (!n) throw new BadRequestException('name is required');
+    if (input.name !== undefined) {
+      const canRename = await this.assertAgencyStaff(
+        (tenant as { agency_id: string }).agency_id,
+        profileId,
+      );
+      if (!canRename) {
+        throw new ForbiddenException('Agency access required to rename a workspace');
+      }
+    }
+
+    if (input.botMode !== undefined && !isBotModeString(input.botMode)) {
+      throw new BadRequestException('botMode must be off, suggestive, or autopilot');
+    }
+
+    const n = input.name !== undefined ? input.name.trim() : null;
+    if (input.name !== undefined && !n) {
+      throw new BadRequestException('name is required when provided');
+    }
     const previousName = (tenant as { name?: string }).name ?? '';
+    const prevSettings =
+      tenant.settings && typeof tenant.settings === 'object' && tenant.settings !== null
+        ? { ...(tenant.settings as Record<string, unknown>) }
+        : {};
+    const nextSettings =
+      input.botMode !== undefined ? { ...prevSettings, botMode: input.botMode } : prevSettings;
+    const nextBotEnabled = input.botMode !== undefined ? input.botMode !== 'off' : undefined;
+
+    const nowIso = new Date().toISOString();
+    const updatePayload: Record<string, unknown> = { updated_at: nowIso };
+    if (n != null) updatePayload['name'] = n;
+    if (input.botMode !== undefined) {
+      updatePayload['settings'] = nextSettings;
+      updatePayload['bot_enabled'] = nextBotEnabled;
+    }
 
     const { data: row, error } = await supabase
       .from('tenants')
-      .update({ name: n, updated_at: new Date().toISOString() })
+      .update(updatePayload)
       .eq('id', tenantId)
       .select('*')
       .single();
@@ -364,7 +417,12 @@ export class TenantsService {
       throw new BadRequestException(error?.message ?? 'Update failed');
     }
 
-    if (n !== previousName) {
+    const full = await this.getTenantById(tenantId, profileId);
+    if (!full) {
+      throw new BadRequestException('Failed to load workspace after update');
+    }
+
+    if (n != null && n !== previousName) {
       await supabase.from('quota_audit_logs').insert({
         id: randomUUID(),
         agency_id: row.agency_id,
@@ -378,16 +436,21 @@ export class TenantsService {
       });
     }
 
-    return {
-      id: row.id,
-      agencyId: row.agency_id,
-      name: row.name,
-      ghlLocationId: toPublicGhlLocationId(row.ghl_location_id),
-      status: row.status,
-      settings: row.settings as Record<string, unknown>,
-      createdAt: new Date(row.created_at),
-      updatedAt: new Date(row.updated_at),
-    };
+    if (input.botMode !== undefined) {
+      await supabase.from('quota_audit_logs').insert({
+        id: randomUUID(),
+        agency_id: row.agency_id,
+        profile_id: profileId,
+        tenant_id: tenantId,
+        action: 'subaccount.bot_mode',
+        delta: 0,
+        previous_total: null,
+        new_total: null,
+        metadata: { botMode: input.botMode },
+      });
+    }
+
+    return full;
   }
 
   /**

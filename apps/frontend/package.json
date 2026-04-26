@@ -3,8 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "dev:clean": "node -e \"try { require('fs').rmSync('.next', { recursive: true, force: true }); } catch (_) {}\" && next dev",
+    "dev": "node scripts/next-dev.mjs",
+    "dev:clean": "node -e \"try { require('fs').rmSync('.next', { recursive: true, force: true }); } catch (_) {}\" && node scripts/next-dev.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
@@ -17,6 +17,7 @@
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
     "@supabase/supabase-js": "^2.43.0",
+    "@aisbp/formatter": "workspace:*",
     "@aisbp/types": "workspace:*",
     "@aisbp/tsconfig": "workspace:*"
   },

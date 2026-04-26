@@ -154,7 +154,7 @@ export default function ActionIntentsPage() {
             <tbody>
               {intents.map(intent => (
                 <tr key={intent.id} style={{ borderBottom: '1px solid #eee' }}>
-                  <td style={{ padding: '0.5rem', fontFamily: 'monospace', fontSize: '0.8rem' }}>
+                  <td style={{ padding: '0.5rem', fontFamily: 'inherit', fontSize: '0.8rem' }}>
                     {intent.action_type}
                   </td>
                   <td style={{ padding: '0.5rem' }}>{getStatusBadge(intent.status)}</td>
@@ -165,7 +165,7 @@ export default function ActionIntentsPage() {
                   <td style={{ padding: '0.5rem', maxWidth: '180px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {intent.gating_note || '—'}
                   </td>
-                  <td style={{ padding: '0.5rem', fontFamily: 'monospace', fontSize: '0.75rem' }}>
+                  <td style={{ padding: '0.5rem', fontFamily: 'inherit', fontSize: '0.75rem' }}>
                     {intent.conversation_id ? `${intent.conversation_id.slice(0, 8)}...` : '—'}
                   </td>
                   <td style={{ padding: '0.5rem', whiteSpace: 'nowrap' }}>{formatTime(intent.created_at)}</td>

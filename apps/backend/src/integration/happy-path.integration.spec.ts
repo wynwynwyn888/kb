@@ -30,7 +30,14 @@ const mockOrchestrate = jestGlobal.fn();
 jestGlobal.mock('../modules/orchestration/orchestration.service', () => ({
   ConversationOrchestrationService: jestGlobal.fn().mockImplementation(() => ({
     orchestrate: mockOrchestrate,
-    loadTenantContext: jestGlobal.fn(async () => ({ id: 't1', botEnabled: true })),
+    loadTenantContext: jestGlobal.fn(async () => ({
+      id: 't1',
+      name: 'T',
+      botEnabled: true,
+      botMode: 'autopilot' as const,
+      handoverPaused: false,
+      ghlLocationId: 'loc_1',
+    })),
     loadPromptConfig: jestGlobal.fn(async () => null),
     loadAgencyPolicy: jestGlobal.fn(async () => null),
     loadConversation: jestGlobal.fn(async () => ({ id: 'c1', channel: 'WHATSAPP', status: 'ACTIVE' })),

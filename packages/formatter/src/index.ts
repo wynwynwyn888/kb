@@ -1,5 +1,7 @@
 // Message formatter - interfaces for cleaning and bubble splitting
 
+export { stripModelThinking } from './strip-model-thinking.js';
+
 export interface FormatOptions {
   format: OutputFormat;
   maxBubbleLength?: number;

@@ -4,6 +4,7 @@ import { useParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
+import { stripModelThinking } from '@aisbp/formatter';
 import {
   getActionIntents,
   getActiveHandovers,
@@ -34,6 +35,12 @@ type ActiveHandoverRow = {
 };
 
 type IntentRow = Record<string, unknown>;
+
+function previewDraftReply(value: unknown): string {
+  if (value === null || value === undefined) return 'None (normal for this probe)';
+  if (typeof value === 'object') return JSON.stringify(value);
+  return stripModelThinking(String(value));
+}
 
 function intentField(row: IntentRow, ...keys: string[]): unknown {
   for (const k of keys) {
@@ -164,7 +171,7 @@ export default function TenantDiagnosticsPage() {
     <div>
       <PageHeader title="Diagnostics" eyebrow="Advanced" />
       <p style={{ fontSize: '0.88rem', color: '#64748b', margin: '0 0 1rem', lineHeight: 1.5, maxWidth: '680px' }}>
-        Internal tools for staff—not an inbox. Routing checks are dry runs: nothing is sent to customers and they do
+        Support tools for troubleshooting. Routing checks are dry runs: nothing is sent to customers and they do
         not prove your full production reply path.
       </p>
 
@@ -175,7 +182,7 @@ export default function TenantDiagnosticsPage() {
       >
         <p style={{ fontSize: '0.8rem', color: '#555', marginTop: 0, marginBottom: '0.75rem' }}>
           Use a real conversation ID if you want to mirror production context, or keep the generated ID for a quick
-          read. Both subaccount and conversation ids are required.
+          read. Workspace and conversation IDs are required for a full support check.
         </p>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', marginBottom: '0.75rem' }}>
           <label style={{ fontSize: '0.82rem', fontWeight: 500 }}>
@@ -190,7 +197,7 @@ export default function TenantDiagnosticsPage() {
                 marginTop: '0.25rem',
                 padding: '0.45rem 0.5rem',
                 fontSize: '0.82rem',
-                fontFamily: 'ui-monospace, monospace',
+                fontFamily: 'inherit',
                 border: '1px solid #ddd',
                 borderRadius: '6px',
               }}
@@ -290,12 +297,7 @@ export default function TenantDiagnosticsPage() {
                 },
                 {
                   label: 'Draft reply (if any)',
-                  value:
-                    probeResult.draftReply === null || probeResult.draftReply === undefined
-                      ? 'None (normal for this probe)'
-                      : typeof probeResult.draftReply === 'object'
-                        ? JSON.stringify(probeResult.draftReply)
-                        : String(probeResult.draftReply),
+                  value: previewDraftReply(probeResult.draftReply),
                 },
               ]}
             />
@@ -305,7 +307,7 @@ export default function TenantDiagnosticsPage() {
 
       <SectionCard
         title="Active handovers"
-        subtitle="Conversations where a human has been handed the thread for this subaccount."
+        subtitle="Conversations where a human has been handed the thread for this workspace."
       >
         {hLoading ? <LoadingBlock message="Loading handovers…" /> : null}
         {hErr ? <ErrorBanner message={hErr} /> : null}
@@ -342,7 +344,7 @@ export default function TenantDiagnosticsPage() {
                       ),
                     },
                     { label: 'Conversation ID', value: h.conversationId, mono: true },
-                    { label: 'GHL conversation ID', value: h.ghlConversationId, mono: true },
+                    { label: 'HighLevel conversation ID', value: h.ghlConversationId, mono: true },
                     { label: 'Contact', value: h.contactId, mono: true },
                     { label: 'Initiated by', value: h.initiatedBy, mono: true },
                     { label: 'Started', value: formatDateTime(h.createdAt) },
@@ -359,13 +361,13 @@ export default function TenantDiagnosticsPage() {
       </SectionCard>
 
       <SectionCard
-        title="Recent action intents"
+        title="Recent action checks"
         subtitle="Automated actions the system considered or ran (read-only audit trail)."
       >
         {iLoading ? <LoadingBlock message="Loading intents…" /> : null}
         {iErr ? <ErrorBanner message={iErr} /> : null}
         {!iLoading && !iErr && intents && intents.items.length === 0 ? (
-          <EmptyState title="No action intents yet" detail="When the system logs intents for this subaccount, they will show here." />
+          <EmptyState title="No action checks yet" detail="When the system logs possible actions for this workspace, they will show here." />
         ) : null}
         {!iLoading && !iErr && intents && intents.items.length > 0 ? (
           <>
@@ -403,7 +405,7 @@ export default function TenantDiagnosticsPage() {
                   >
                     <div style={{ marginBottom: '0.5rem', display: 'flex', flexWrap: 'wrap', gap: '0.35rem', alignItems: 'center' }}>
                       <StatusPill label={status} tone={statusTone} />
-                      <span style={{ fontSize: '0.78rem', color: '#555', fontFamily: 'ui-monospace, monospace' }}>{actionType}</span>
+                      <span style={{ fontSize: '0.78rem', color: '#555', fontFamily: 'inherit' }}>{actionType}</span>
                     </div>
                     <KeyValueRows
                       rows={[
@@ -423,13 +425,13 @@ export default function TenantDiagnosticsPage() {
                           value: typeof reason === 'string' && reason.trim() ? reason : '—',
                         },
                         {
-                          label: 'Gating note',
+                          label: 'Review note',
                           value: typeof gating === 'string' && gating.trim() ? gating : '—',
                         },
                         {
-                          label: 'Params',
+                          label: 'Details',
                           value: (
-                            <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: '0.78rem' }}>
+                            <span style={{ fontFamily: 'inherit', fontSize: '0.78rem' }}>
                               {formatParams(params)}
                             </span>
                           ),

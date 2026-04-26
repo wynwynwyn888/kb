@@ -38,10 +38,36 @@ export function isApiHttpError(e: unknown): e is ApiHttpError {
 
 interface ApiOptions extends RequestInit {
   token?: string;
+  /** Abort the request after this many ms (browser fetch otherwise can hang if the API proxy waits on a dead backend). */
+  timeoutMs?: number;
+}
+
+/** Combine optional caller `signal` with a timeout so `fetch` always settles. */
+function abortSignalForTimeout(timeoutMs: number, existing?: AbortSignal): { signal: AbortSignal; cancel: () => void } {
+  const c = new AbortController();
+  const tid = setTimeout(() => c.abort(), timeoutMs);
+  const cancel = () => {
+    clearTimeout(tid);
+    if (existing) existing.removeEventListener('abort', onExisting);
+  };
+  const onExisting = () => {
+    clearTimeout(tid);
+    c.abort();
+  };
+  if (existing) {
+    if (existing.aborted) {
+      clearTimeout(tid);
+      c.abort();
+      return { signal: c.signal, cancel };
+    }
+    existing.addEventListener('abort', onExisting);
+  }
+  return { signal: c.signal, cancel };
 }
 
 async function apiRequest<T>(endpoint: string, options: ApiOptions = {}): Promise<T> {
-  const { token, ...fetchOptions } = options;
+  const { token, timeoutMs, signal: outerSignalRaw, ...fetchOptions } = options;
+  const outerSignal = outerSignalRaw ?? undefined;
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -52,12 +78,26 @@ async function apiRequest<T>(endpoint: string, options: ApiOptions = {}): Promis
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const response = await fetch(`${getApiBaseUrl()}${endpoint}`, {
-    ...fetchOptions,
-    // Avoid HTTP cache of authenticated GETs (e.g. agency AI rehydrate after save).
-    cache: fetchOptions.cache ?? 'no-store',
-    headers,
-  });
+  let cancelTimeout: (() => void) | undefined;
+  let signal: AbortSignal | undefined = outerSignal;
+  if (typeof timeoutMs === 'number' && timeoutMs > 0) {
+    const w = abortSignalForTimeout(timeoutMs, outerSignal);
+    signal = w.signal;
+    cancelTimeout = w.cancel;
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(`${getApiBaseUrl()}${endpoint}`, {
+      ...fetchOptions,
+      // Avoid HTTP cache of authenticated GETs (e.g. agency AI rehydrate after save).
+      cache: fetchOptions.cache ?? 'no-store',
+      headers,
+      signal,
+    });
+  } finally {
+    cancelTimeout?.();
+  }
 
   if (!response.ok) {
     const status = response.status;
@@ -122,7 +162,9 @@ async function apiRequestNoContent(endpoint: string, options: ApiOptions = {}): 
 }
 
 // Auth
-export async function getCurrentUser(token: string) {
+const AUTH_ME_TIMEOUT_MS = 18_000;
+
+export async function getCurrentUser(token: string, requestOptions?: { timeoutMs?: number }) {
   return apiRequest<{
     id: string;
     email: string;
@@ -131,7 +173,7 @@ export async function getCurrentUser(token: string) {
     tenantRole?: string;
     agencyId?: string;
     tenantId?: string;
-  }>('/auth/me', { token });
+  }>('/auth/me', { token, timeoutMs: requestOptions?.timeoutMs ?? AUTH_ME_TIMEOUT_MS });
 }
 
 // Agencies
@@ -147,6 +189,8 @@ export async function getAgencyById(
 }
 
 // Tenants
+export type WorkspaceBotMode = 'off' | 'suggestive' | 'autopilot';
+
 export async function getTenantById(token: string, tenantId: string) {
   return apiRequest<{
     id: string;
@@ -154,6 +198,8 @@ export async function getTenantById(token: string, tenantId: string) {
     ghlLocationId: string | null;
     status: string;
     agencyId: string;
+    botMode: WorkspaceBotMode;
+    botEnabled: boolean;
     promptConfig?: {
       id: string;
       name: string;
@@ -203,16 +249,39 @@ export async function createSubaccount(
 }
 
 export async function updateSubaccountName(token: string, tenantId: string, name: string) {
+  return updateWorkspaceSettings(token, tenantId, { name });
+}
+
+/**
+ * Update workspace name (agency) and/or bot mode (anyone with workspace access).
+ */
+export async function updateWorkspaceSettings(
+  token: string,
+  tenantId: string,
+  body: { name?: string; botMode?: WorkspaceBotMode },
+) {
+  if (body.name === undefined && body.botMode === undefined) {
+    throw new Error('Provide at least one of: name, botMode');
+  }
   return apiRequest<{
     id: string;
     name: string;
     ghlLocationId: string | null;
     status: string;
     agencyId: string;
+    botMode: WorkspaceBotMode;
+    botEnabled: boolean;
+    promptConfig?: {
+      id: string;
+      name: string;
+      temperature: number;
+      modelOverride?: string;
+      isActive?: boolean;
+    } | null;
   }>(`/tenants/${encodeURIComponent(tenantId)}`, {
     token,
     method: 'PATCH',
-    body: JSON.stringify({ name }),
+    body: JSON.stringify(body),
   });
 }
 
@@ -529,6 +598,8 @@ export async function postSubaccountBotTest(
     activeProvider: string;
     modelUsed: string;
     kbChunksUsed: number;
+    /** Support-only diagnostic (shown under Response details, not inline). */
+    supportDetail?: string;
   }>(`/tenants/${encodeURIComponent(tenantId)}/bot-test`, { token, method: 'POST', body: JSON.stringify(body) });
 }
 
@@ -634,6 +705,8 @@ export async function upsertAgencyPolicy(
     content: string;
     priority?: number;
     isDefault?: boolean;
+    /** Update this version in place. Omit to upsert by name (create or replace-by-name). */
+    policyId?: string;
   }
 ): Promise<AgencyPolicyRow> {
   return apiRequest<AgencyPolicyRow>('/prompts/policy', {
@@ -708,6 +781,24 @@ export async function addTenantMember(
   dto: { tenantId: string; profileId: string; role: TenantRoleValue },
 ): Promise<RosterMember & { createdAt?: string }> {
   return apiRequest(`/tenant-users`, { token, method: 'POST', body: JSON.stringify(dto) });
+}
+
+/** Create Supabase Auth user (or reset password) and attach to workspace. Agency staff or tenant ADMIN. */
+export async function provisionWorkspaceMemberCredentials(
+  token: string,
+  dto: {
+    tenantId: string;
+    email: string;
+    password: string;
+    fullName?: string | null;
+    role: TenantRoleValue;
+  },
+): Promise<RosterMember & { createdAt?: string }> {
+  return apiRequest(`/tenant-users/provision-credentials`, {
+    token,
+    method: 'POST',
+    body: JSON.stringify(dto),
+  });
 }
 
 export async function updateTenantMemberRole(

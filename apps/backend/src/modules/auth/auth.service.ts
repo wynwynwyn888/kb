@@ -1,7 +1,7 @@
 // Auth service - handles Supabase Auth integration and user resolution
 // Maps Supabase auth user -> profile -> agency/tenant access
 
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { getSupabaseService } from '../../lib/supabase';
 import type { SessionUser } from '../../lib/supabase';
 import type { AgencyRole, TenantRole } from '../../lib/enums';
@@ -21,6 +21,8 @@ function tenantEmbedAgencyId(tenants: unknown): string | undefined {
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   /**
    * Verify a JWT token and return the authenticated user
    */
@@ -31,6 +33,9 @@ export class AuthService {
       const { data: { user }, error } = await supabase.auth.getUser(token);
 
       if (error || !user) {
+        if (error && process.env['AUTH_DEBUG'] !== '1') {
+          this.logger.debug(`getUser: ${error.message ?? 'no user'}`);
+        }
         if (process.env['AUTH_DEBUG'] === '1') {
           throw new UnauthorizedException(
             `getUser failed: ${error?.message ?? 'no user'}`,
@@ -57,8 +62,18 @@ export class AuthService {
         return null;
       }
 
-      const agencyMembership = await this.getAgencyMembership(user.id);
-      const tenantMemberships = await this.getTenantMemberships(user.id);
+      let agencyMembership: { agencyId: string; role: AgencyRole } | null = null;
+      let tenantMemberships: Array<{ tenantId: string; agencyId: string; role: TenantRole }> = [];
+      try {
+        agencyMembership = await this.getAgencyMembership(user.id);
+      } catch (e) {
+        this.logger.warn(`getAgencyMembership failed: ${e instanceof Error ? e.message : e}`);
+      }
+      try {
+        tenantMemberships = await this.getTenantMemberships(user.id);
+      } catch (e) {
+        this.logger.warn(`getTenantMemberships failed: ${e instanceof Error ? e.message : e}`);
+      }
 
       let agencyRole: AgencyRole | undefined;
       let tenantRole: TenantRole | undefined;
@@ -142,7 +157,8 @@ export class AuthService {
   }
 
   /**
-   * Get all tenant memberships for a user
+   * Get all tenant memberships for a user.
+   * Tries a single join first; on PostgREST embed errors (relation hints / schema drift) falls back to two queries.
    */
   async getTenantMemberships(profileId: string): Promise<Array<{ tenantId: string; agencyId: string; role: TenantRole }>> {
     const supabase = getSupabaseService();
@@ -151,21 +167,67 @@ export class AuthService {
       .select('tenant_id, role, tenants!inner(agency_id)')
       .eq('profile_id', profileId);
 
-    if (error || !data) {
+    if (!error && data?.length) {
+      const out: Array<{ tenantId: string; agencyId: string; role: TenantRole }> = [];
+      for (const d of data) {
+        const agencyId = tenantEmbedAgencyId(d.tenants);
+        if (!agencyId) {
+          continue;
+        }
+        out.push({
+          tenantId: d.tenant_id,
+          agencyId,
+          role: d.role as TenantRole,
+        });
+      }
+      if (out.length > 0) {
+        return out;
+      }
+    }
+
+    if (error) {
+      this.logger.debug(
+        `tenant membership embed query: ${error.code ?? ''} ${error.message ?? 'unknown'} — using fallback`,
+      );
+    }
+
+    return this.getTenantMembershipsByLookup(profileId);
+  }
+
+  /** Resolve tenant + agency without embed (more compatible across Supabase/PostgREST). */
+  private async getTenantMembershipsByLookup(
+    profileId: string,
+  ): Promise<Array<{ tenantId: string; agencyId: string; role: TenantRole }>> {
+    const supabase = getSupabaseService();
+    const { data: rows, error } = await supabase
+      .from('tenant_users')
+      .select('tenant_id, role')
+      .eq('profile_id', profileId);
+
+    if (error || !rows?.length) {
+      if (error) {
+        this.logger.warn(`getTenantMembershipsByLookup: ${error.message ?? error.code ?? 'error'}`);
+      }
       return [];
     }
 
-    const out: Array<{ tenantId: string; agencyId: string; role: TenantRole }> = [];
-    for (const d of data) {
-      const agencyId = tenantEmbedAgencyId(d.tenants);
-      if (!agencyId) {
-        continue;
+    const tenantIds = [...new Set(rows.map(r => r.tenant_id as string))];
+    const { data: tenants, error: te } = await supabase.from('tenants').select('id, agency_id').in('id', tenantIds);
+    if (te || !tenants?.length) {
+      if (te) {
+        this.logger.warn(`getTenantMembershipsByLookup tenants: ${te.message ?? te.code ?? 'error'}`);
       }
-      out.push({
-        tenantId: d.tenant_id,
-        agencyId,
-        role: d.role as TenantRole,
-      });
+      return [];
+    }
+
+    const byTenant = new Map(tenants.map(t => [t.id, t.agency_id as string]));
+    const out: Array<{ tenantId: string; agencyId: string; role: TenantRole }> = [];
+    for (const r of rows) {
+      const tid = r.tenant_id as string;
+      const agencyId = byTenant.get(tid);
+      if (agencyId) {
+        out.push({ tenantId: tid, agencyId, role: r.role as TenantRole });
+      }
     }
     return out;
   }

@@ -7,6 +7,10 @@
     "build": "turbo build",
     "build:libs": "pnpm --filter @aisbp/types exec tsc -b && pnpm --filter @aisbp/db exec tsc -b && pnpm --filter @aisbp/formatter exec tsc -b && pnpm --filter @aisbp/ghl-client exec tsc -b && pnpm --filter @aisbp/ai-router exec tsc -b && pnpm --filter @aisbp/ai-provider-openai exec tsc -b",
     "dev": "turbo dev",
+    "dev:web": "pnpm --filter @aisbp/frontend dev",
+    "dev:api": "pnpm --filter @aisbp/backend dev",
+    "dev:redis": "node scripts/redis-docker.mjs",
+    "dev:redis:down": "node scripts/redis-docker.mjs down",
     "lint": "turbo lint",
     "test": "turbo test",
     "typecheck": "turbo typecheck"

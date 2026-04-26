@@ -1,0 +1,16 @@
+# Local Redis for BullMQ (matches README: redis:7-alpine on 6379).
+# Usage: pnpm dev:redis
+name: aisbp-dev
+
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - '6379:6379'
+    command: ['redis-server', '--appendonly', 'yes']
+    volumes:
+      - aisbp_redis_data:/data
+
+volumes:
+  aisbp_redis_data:

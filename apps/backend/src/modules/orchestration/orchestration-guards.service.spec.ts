@@ -11,7 +11,13 @@ jestGlobal.mock('../../lib/supabase', () => ({
 function makeInput(overrides: {
   tenantId?: string;
   conversationId?: string;
-  tenant?: { id: string; botEnabled: boolean; handoverPaused: boolean; ghlLocationId: string };
+  tenant?: {
+    id: string;
+    botEnabled: boolean;
+    botMode?: 'off' | 'suggestive' | 'autopilot';
+    handoverPaused: boolean;
+    ghlLocationId: string;
+  };
   incomingMessage?: { messageType: string; messageContent: string };
   conversation?: { channel: string };
 } = {}) {
@@ -21,8 +27,10 @@ function makeInput(overrides: {
     incomingMessage: overrides.incomingMessage ?? { messageType: 'text', messageContent: 'Hello' },
     conversation: overrides.conversation ?? { channel: 'WHATSAPP' },
     tenant: Object.prototype.hasOwnProperty.call(overrides, 'tenant')
-      ? overrides.tenant
-      : { id: 'tenant_1', botEnabled: true, handoverPaused: false, ghlLocationId: 'loc_1' },
+      ? overrides.tenant === undefined
+        ? undefined
+        : { botMode: 'autopilot' as const, ...overrides.tenant! }
+      : { id: 'tenant_1', botEnabled: true, botMode: 'autopilot' as const, handoverPaused: false, ghlLocationId: 'loc_1' },
   } as never;
 }
 

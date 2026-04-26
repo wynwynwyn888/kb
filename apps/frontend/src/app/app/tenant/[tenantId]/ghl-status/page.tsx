@@ -76,18 +76,18 @@ export default function TenantGhlStatusPage() {
 
   return (
     <div>
-      <PageHeader title="GHL connection" eyebrow="Advanced" />
+      <PageHeader title="HighLevel connection" eyebrow="Advanced" />
       <p style={{ fontSize: '0.88rem', color: '#64748b', margin: '0 0 0.85rem', lineHeight: 1.5, maxWidth: '560px' }}>
-        Read-only status for this subaccount. To change credentials, ask an agency admin to open{' '}
+        Read-only status for this workspace. To change credentials, ask an agency admin to open{' '}
         <Link href={`/app/agency/settings/ghl?subaccount=${tenantId}`} style={{ color: '#2563eb', fontWeight: 600 }}>
-          Integrations
+          HighLevel
         </Link>
         .
       </p>
       {err && <ErrorBanner message={err} />}
 
       <p style={{ fontSize: '0.82rem', color: '#64748b', marginBottom: '0.85rem' }}>
-        Health check confirms the API can reach GHL with the saved token. Refresh loads the latest stored status.
+        Connection check confirms AISBP can reach HighLevel with the saved token. Refresh loads the latest stored status.
       </p>
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '1rem' }}>
@@ -97,7 +97,7 @@ export default function TenantGhlStatusPage() {
           disabled={healthLoading}
           style={{ padding: '0.4rem 0.65rem', opacity: healthLoading ? 0.7 : 1 }}
         >
-          {healthLoading ? 'Running…' : 'Run health check'}
+          {healthLoading ? 'Checking…' : 'Run connection check'}
         </button>
         <button
           type="button"
@@ -126,7 +126,7 @@ export default function TenantGhlStatusPage() {
                 { label: 'Location ID', value: conn.ghlLocationId ?? '—', mono: true },
                 { label: 'Last verified', value: formatDateTime(conn.verifiedAt) },
                 { label: 'Last health check', value: formatDateTime(conn.lastHealthCheckAt) },
-                { label: 'Stored token (masked)', value: conn.maskToken ?? '—', mono: true },
+                { label: 'Connection token', value: conn.maskToken ? 'Saved and hidden' : '—' },
                 {
                   label: 'Last error',
                   value: conn.lastError ? (
@@ -139,7 +139,7 @@ export default function TenantGhlStatusPage() {
             />
             {conn.metadata && Object.keys(conn.metadata).length > 0 ? (
               <details style={{ marginTop: '0.75rem', fontSize: '0.82rem' }}>
-                <summary style={{ cursor: 'pointer', color: '#444' }}>Technical details (JSON)</summary>
+                <summary style={{ cursor: 'pointer', color: '#444' }}>Support details</summary>
                 <pre
                   style={{
                     margin: '0.5rem 0 0',
@@ -158,13 +158,13 @@ export default function TenantGhlStatusPage() {
         ) : (
           <EmptyState
             title="No connection on file"
-            detail="Once an agency admin saves GoHighLevel credentials for this subaccount, status will appear here."
+            detail="Once an agency admin saves HighLevel credentials for this workspace, status will appear here."
           />
         )}
       </SectionCard>
 
       {health ? (
-        <SectionCard title="Latest health check" subtitle="From the last check you ran above (this page does not auto-refresh).">
+        <SectionCard title="Latest connection check" subtitle="From the last check you ran above (this page does not auto-refresh).">
           <KeyValueRows
             rows={[
               {

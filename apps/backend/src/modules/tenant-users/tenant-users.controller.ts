@@ -32,7 +32,7 @@ export class TenantUsersController {
   @ApiOperation({
     summary: 'List tenant members',
     description:
-      'Requires Bearer JWT. Caller must be a member of `tenantId`. Returns `tenant_users` rows with profile email/full name when available.',
+      'Requires Bearer JWT. Caller must be a member of `tenantId` or agency staff for that workspace. Returns `tenant_users` rows with profile email/full name when available.',
   })
   async findAll(
     @Query('tenantId') tenantId: string | undefined,
@@ -42,6 +42,45 @@ export class TenantUsersController {
       throw new BadRequestException('tenantId query parameter is required');
     }
     return this.service.listMembers(tenantId.trim(), user.id);
+  }
+
+  @Post('provision-credentials')
+  @ApiOperation({
+    summary: 'Create or reset workspace member login (Supabase Auth)',
+    description:
+      'Agency staff for the workspace agency or tenant ADMIN. Sets email + password on Supabase Auth, ensures `profiles` and adds `tenant_users` when missing. If the user is already in the workspace, only the password is updated.',
+  })
+  async provisionCredentials(
+    @Body()
+    dto: {
+      tenantId: string;
+      email: string;
+      password: string;
+      fullName?: string | null;
+      role: TenantRole;
+    },
+    @CurrentUser() user: SessionUser,
+  ) {
+    if (!dto.tenantId?.trim()) {
+      throw new BadRequestException('tenantId is required');
+    }
+    if (!dto.email?.trim()) {
+      throw new BadRequestException('email is required');
+    }
+    if (!dto.password) {
+      throw new BadRequestException('password is required');
+    }
+    if (!dto.role) {
+      throw new BadRequestException('role is required');
+    }
+    TenantUsersService.assertValidRole(dto.role);
+    return this.service.provisionWorkspaceMemberWithCredentials(user.id, {
+      tenantId: dto.tenantId.trim(),
+      email: dto.email.trim(),
+      password: dto.password,
+      fullName: dto.fullName,
+      role: dto.role,
+    });
   }
 
   @Post()

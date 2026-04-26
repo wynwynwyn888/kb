@@ -123,20 +123,27 @@ export class InboundMessageProcessor extends WorkerHost {
       // Step 7: Run full orchestration pipeline (guards + memory + routing)
       const result = await this.orchestrationService.orchestrate(orchestrationInput);
 
-      // Step 8: Enqueue send-bubble job if orchestration produced reply bubbles
+      // Step 8: Enqueue send-bubble job if orchestration produced reply bubbles (not in "suggestive" mode)
       if (result.outcome === 'PROCEED' && result.replyPlan && result.replyPlan.bubbles.length > 0) {
-        await this.sendBubbleQueue.add('send-bubble', {
-          conversationId: conversation.id,
-          tenantId: tenant.id,
-          contactId: ghlContactId,
-          ghlLocationId: locationId,
-          replyPlanJson: JSON.stringify(result.replyPlan),
-        });
+        const mode = tenantContext?.botMode ?? 'autopilot';
+        if (mode === 'suggestive') {
+          this.logger.log(
+            `Suggestive mode: skipping GHL send for conversationId=${conversation.id} (drafts in orchestration log)`,
+          );
+        } else {
+          await this.sendBubbleQueue.add('send-bubble', {
+            conversationId: conversation.id,
+            tenantId: tenant.id,
+            contactId: ghlContactId,
+            ghlLocationId: locationId,
+            replyPlanJson: JSON.stringify(result.replyPlan),
+          });
 
-        this.logger.log(
-          `Send-bubble job enqueued: conversationId=${conversation.id}, ` +
-          `bubbleCount=${result.replyPlan.bubbles.length}`,
-        );
+          this.logger.log(
+            `Send-bubble job enqueued: conversationId=${conversation.id}, ` +
+            `bubbleCount=${result.replyPlan.bubbles.length}`,
+          );
+        }
       }
 
       // Step 9: Update webhook event based on orchestration outcome

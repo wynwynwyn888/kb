@@ -8,6 +8,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { getSupabaseService } from '../../lib/supabase';
 import type { TenantRole } from '../../lib/enums';
 import { AuthService } from '../auth/auth.service';
@@ -30,13 +31,16 @@ export class TenantUsersService {
   constructor(private readonly auth: AuthService) {}
 
   /**
-   * List members of a tenant. Caller must already be a member of that tenant.
+   * List members of a tenant. Caller must be a member of that tenant or agency staff for its agency.
    */
   async listMembers(tenantId: string, actorProfileId: string): Promise<TenantMemberRow[]> {
     const supabase = getSupabaseService();
     const member = await this.getMembership(actorProfileId, tenantId);
     if (!member) {
-      throw new NotFoundException('Tenant not found');
+      const agencyOk = await this.isAgencyStaffForTenant(actorProfileId, tenantId);
+      if (!agencyOk) {
+        throw new NotFoundException('Tenant not found');
+      }
     }
 
     const { data, error } = await supabase
@@ -140,7 +144,187 @@ export class TenantUsersService {
   }
 
   /**
-   * Update role for a membership row. Caller must be tenant ADMIN; only ADMIN may assign ADMIN.
+   * Create or update a Supabase Auth user (email + password), ensure `profiles` and `tenant_users`,
+   * so the person can sign in at the app login. Agency staff for the workspace agency or tenant ADMIN.
+   * Existing workspace members only get a password reset (role unchanged).
+   */
+  async provisionWorkspaceMemberWithCredentials(
+    actorProfileId: string,
+    dto: {
+      tenantId: string;
+      email: string;
+      password: string;
+      fullName?: string | null;
+      role: TenantRole;
+    },
+  ): Promise<TenantMemberRow> {
+    TenantUsersService.assertValidRole(dto.role);
+    const tenantId = dto.tenantId.trim();
+    const emailNorm = dto.email.trim().toLowerCase();
+    const password = dto.password;
+    if (!tenantId) {
+      throw new BadRequestException('tenantId is required');
+    }
+    if (!emailNorm) {
+      throw new BadRequestException('email is required');
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailNorm)) {
+      throw new BadRequestException('Invalid email');
+    }
+    if (password.length < 8) {
+      throw new BadRequestException('Password must be at least 8 characters');
+    }
+
+    const supabase = getSupabaseService();
+    const { data: tenant, error: tErr } = await supabase
+      .from('tenants')
+      .select('id, agency_id')
+      .eq('id', tenantId)
+      .maybeSingle();
+    if (tErr || !tenant) {
+      throw new NotFoundException('Workspace not found');
+    }
+
+    const actorIsAgency = await this.isAgencyStaffForTenant(actorProfileId, tenantId);
+    const actorIsTenantAdmin = await this.auth.isTenantAdmin(actorProfileId, tenantId);
+    if (!actorIsAgency && !actorIsTenantAdmin) {
+      throw new ForbiddenException('Agency staff or workspace admin access required');
+    }
+
+    if (dto.role === 'ADMIN' && !actorIsAgency) {
+      const actorRole = await this.getRole(actorProfileId, tenantId);
+      if (actorRole !== 'ADMIN') {
+        throw new ForbiddenException(
+          'Only a workspace Admin can grant Admin (agency accounts can also bootstrap access).',
+        );
+      }
+    }
+
+    const fullName = dto.fullName?.trim() ? dto.fullName.trim() : null;
+
+    const { data: profileRow } = await supabase
+      .from('profiles')
+      .select('id, email')
+      .eq('email', emailNorm)
+      .maybeSingle();
+
+    let profileId = profileRow?.id as string | undefined;
+    if (!profileId) {
+      const { data: created, error: cErr } = await supabase.auth.admin.createUser({
+        email: emailNorm,
+        password,
+        email_confirm: true,
+        user_metadata: fullName ? { full_name: fullName } : {},
+      });
+      if (cErr) {
+        const msg = cErr.message ?? '';
+        const dup =
+          /already\s+been\s+registered|already\s+exists|duplicate/i.test(msg) || cErr.status === 422;
+        if (!dup) {
+          throw new BadRequestException(`Could not create sign-in: ${msg}`);
+        }
+        const foundId = await this.findAuthUserIdByEmail(supabase, emailNorm);
+        if (!foundId) {
+          throw new BadRequestException(
+            'That email is already registered; reset the password from the team list or contact support.',
+          );
+        }
+        profileId = foundId;
+        const { error: uErr } = await supabase.auth.admin.updateUserById(profileId, {
+          password,
+          email_confirm: true,
+        });
+        if (uErr) {
+          throw new BadRequestException(`Could not update password: ${uErr.message}`);
+        }
+      } else {
+        profileId = created.user!.id;
+      }
+    } else {
+      const { error: uErr } = await supabase.auth.admin.updateUserById(profileId, {
+        password,
+        email_confirm: true,
+      });
+      if (uErr) {
+        throw new BadRequestException(`Could not update password: ${uErr.message}`);
+      }
+    }
+
+    if (!profileId) {
+      throw new BadRequestException('Could not resolve user id');
+    }
+
+    const now = new Date().toISOString();
+    const { data: profExists } = await supabase.from('profiles').select('id').eq('id', profileId).maybeSingle();
+    if (profExists) {
+      const patch: Record<string, unknown> = { email: emailNorm, updated_at: now };
+      if (fullName) {
+        patch['full_name'] = fullName;
+      }
+      const { error: upErr } = await supabase.from('profiles').update(patch).eq('id', profileId);
+      if (upErr) {
+        throw new BadRequestException(`Profile save failed: ${upErr.message}`);
+      }
+    } else {
+      const { error: insP } = await supabase.from('profiles').insert({
+        id: profileId,
+        email: emailNorm,
+        full_name: fullName,
+        created_at: now,
+        updated_at: now,
+      });
+      if (insP) {
+        throw new BadRequestException(`Profile save failed: ${insP.message}`);
+      }
+    }
+
+    const { data: existingMem } = await supabase
+      .from('tenant_users')
+      .select('id, role')
+      .eq('tenant_id', tenantId)
+      .eq('profile_id', profileId)
+      .maybeSingle();
+
+    if (existingMem) {
+      return this.fetchMemberRowByMembershipId(existingMem.id as string);
+    }
+
+    const id = randomUUID();
+    const { data: inserted, error: insErr } = await supabase
+      .from('tenant_users')
+      .insert({
+        id,
+        tenant_id: tenantId,
+        profile_id: profileId,
+        role: dto.role,
+        created_at: now,
+        updated_at: now,
+      })
+      .select(
+        `
+        id,
+        tenant_id,
+        profile_id,
+        role,
+        created_at,
+        updated_at,
+        profiles (email, full_name)
+      `,
+      )
+      .single();
+
+    if (insErr) {
+      if (insErr.code === '23505' || insErr.message?.includes('duplicate')) {
+        throw new ConflictException('User is already a member of this workspace');
+      }
+      throw new BadRequestException(`Could not add to workspace: ${insErr.message}`);
+    }
+
+    return this.mapRow(inserted as Record<string, unknown>);
+  }
+
+  /**
+   * Update role for a membership row. Tenant ADMIN or agency staff for the workspace agency.
    * Cannot demote the only ADMIN.
    */
   async updateRole(
@@ -163,14 +347,17 @@ export class TenantUsersService {
     const tenantId = row.tenant_id as string;
     const oldRole = row.role as TenantRole;
 
-    const canManage = await this.auth.isTenantAdmin(actorProfileId, tenantId);
-    if (!canManage) {
+    const canTenantAdmin = await this.auth.isTenantAdmin(actorProfileId, tenantId);
+    const canAgency = await this.isAgencyStaffForTenant(actorProfileId, tenantId);
+    if (!canTenantAdmin && !canAgency) {
       throw new ForbiddenException('Insufficient permissions to change roles');
     }
 
-    const actorRole = await this.getRole(actorProfileId, tenantId);
-    if (newRole === 'ADMIN' && actorRole !== 'ADMIN') {
-      throw new ForbiddenException('Only a tenant ADMIN can assign the ADMIN role');
+    if (newRole === 'ADMIN' && !canAgency) {
+      const actorRole = await this.getRole(actorProfileId, tenantId);
+      if (actorRole !== 'ADMIN') {
+        throw new ForbiddenException('Only a tenant ADMIN can assign the ADMIN role');
+      }
     }
 
     if (oldRole === 'ADMIN' && newRole !== 'ADMIN') {
@@ -225,8 +412,9 @@ export class TenantUsersService {
     const tenantId = row.tenant_id as string;
     const role = row.role as TenantRole;
 
-    const canManage = await this.auth.isTenantAdmin(actorProfileId, tenantId);
-    if (!canManage) {
+    const canTenantAdmin = await this.auth.isTenantAdmin(actorProfileId, tenantId);
+    const canAgency = await this.isAgencyStaffForTenant(actorProfileId, tenantId);
+    if (!canTenantAdmin && !canAgency) {
       throw new ForbiddenException('Insufficient permissions to remove members');
     }
 
@@ -241,6 +429,55 @@ export class TenantUsersService {
     if (de) {
       throw new BadRequestException(`Failed to remove member: ${de.message}`);
     }
+  }
+
+  private async isAgencyStaffForTenant(actorProfileId: string, tenantId: string): Promise<boolean> {
+    const supabase = getSupabaseService();
+    const { data: t } = await supabase.from('tenants').select('agency_id').eq('id', tenantId).maybeSingle();
+    if (!t?.agency_id) {
+      return false;
+    }
+    return this.auth.hasAgencyAccess(actorProfileId, t.agency_id as string);
+  }
+
+  private async findAuthUserIdByEmail(supabase: SupabaseClient, emailNorm: string): Promise<string | null> {
+    for (let page = 1; page <= 20; page += 1) {
+      const { data, error } = await supabase.auth.admin.listUsers({ page, perPage: 200 });
+      if (error || !data?.users?.length) {
+        break;
+      }
+      const hit = data.users.find(u => u.email?.toLowerCase() === emailNorm);
+      if (hit?.id) {
+        return hit.id;
+      }
+      if (data.users.length < 200) {
+        break;
+      }
+    }
+    return null;
+  }
+
+  private async fetchMemberRowByMembershipId(membershipId: string): Promise<TenantMemberRow> {
+    const supabase = getSupabaseService();
+    const { data, error } = await supabase
+      .from('tenant_users')
+      .select(
+        `
+        id,
+        tenant_id,
+        profile_id,
+        role,
+        created_at,
+        updated_at,
+        profiles (email, full_name)
+      `,
+      )
+      .eq('id', membershipId)
+      .single();
+    if (error || !data) {
+      throw new BadRequestException('Failed to load member after update');
+    }
+    return this.mapRow(data as Record<string, unknown>);
   }
 
   private async getMembership(

@@ -1,0 +1,15 @@
+/* Inter is applied via next/font in layout.tsx; normalize UA monospace on semantic tags. */
+code,
+kbd,
+pre,
+samp {
+  font-family: inherit;
+}
+
+details > summary {
+  list-style: none;
+}
+
+details > summary::-webkit-details-marker {
+  display: none;
+}

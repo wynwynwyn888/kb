@@ -38,13 +38,16 @@ export default function AgencyPoliciesPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  const load = async (preferredName?: string) => {
+  const load = async (opts?: { preferredId?: string; preferredName?: string }) => {
     if (!token || !user?.agencyId) return;
     const data = await listAgencyPolicies(token, user.agencyId);
     setRows(data);
-    const pick = preferredName
-      ? data.find(d => d.name === preferredName) ?? data[0]
-      : data[0];
+    const pick =
+      opts?.preferredId != null && opts.preferredId.trim()
+        ? (data.find(d => d.id === opts.preferredId) ?? data[0])
+        : opts?.preferredName != null
+          ? (data.find(d => d.name === opts.preferredName) ?? data[0])
+          : data[0];
     if (pick) {
       setSelectedId(pick.id);
       setName(pick.name);
@@ -87,13 +90,13 @@ export default function AgencyPoliciesPage() {
 
   const onDeletePolicy = async () => {
     if (!token || !user?.agencyId || !selectedId) return;
-    if (!window.confirm('Delete this policy? Subaccounts will no longer receive these instructions.')) return;
+    if (!window.confirm('Delete this prompt version? Workspaces will no longer receive these instructions if this version is active.')) return;
     setErr('');
     setOk('');
     setSaving(true);
     try {
       await deleteAgencyPolicy(token, user.agencyId, selectedId);
-      setOk('Policy deleted');
+      setOk('Prompt version deleted');
       setSelectedId(null);
       await load();
     } catch (er) {
@@ -110,15 +113,16 @@ export default function AgencyPoliciesPage() {
     setOk('');
     setSaving(true);
     try {
-      await upsertAgencyPolicy(token, {
+      const saved = await upsertAgencyPolicy(token, {
         agencyId: user.agencyId,
         name: name.trim() || 'default',
         content,
         priority: Number.isFinite(priority) ? Math.trunc(priority) : 0,
         isDefault,
+        ...(selectedId ? { policyId: selectedId } : {}),
       });
-      setOk('Saved');
-      await load(name.trim() || 'default');
+      setOk('Prompt saved');
+      await load({ preferredId: saved.id });
     } catch (er) {
       setErr(er instanceof Error ? er.message : 'Save failed');
     } finally {
@@ -128,10 +132,9 @@ export default function AgencyPoliciesPage() {
 
   return (
     <div>
-      <PageHeader title="Master Prompt" eyebrow="Agency account" />
+      <PageHeader title="Global Prompt" eyebrow="Agency account" />
       <p style={{ fontSize: '0.83rem', color: '#64748b', margin: '0 0 1rem', lineHeight: 1.45, maxWidth: '40rem' }}>
-        Global instructions for your agency: how replies are structured, spacing, formatting, and house rules. This layer is
-        applied <strong>before</strong> each subaccount’s own bot instructions (persona, goals, and business context).
+        Set the agency-wide reply standards applied before each workspace’s own bot instructions.
       </p>
 
       {loading ? (
@@ -163,9 +166,9 @@ export default function AgencyPoliciesPage() {
           {err && <ErrorBanner message={err} />}
           {ok && <SuccessBanner message={ok} />}
 
-          <SectionCard title="Policy versions" subtitle="Select to edit.">
+          <SectionCard title="Prompt versions" subtitle="Select a version to edit.">
             {rows.length === 0 ? (
-              <EmptyState title="No Master Prompt yet" detail="Create a “default” entry in the editor below." />
+              <EmptyState title="No Global Prompt yet" detail="Create your first prompt version below." />
             ) : (
               <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                 {rows.map(r => (
@@ -198,7 +201,7 @@ export default function AgencyPoliciesPage() {
             )}
           </SectionCard>
 
-          <SectionCard title="Editor" subtitle="Plain text or markdown.">
+          <SectionCard title="Prompt editor" subtitle="Plain text or markdown.">
             <form onSubmit={onSubmit} style={{ maxWidth: '720px', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               <div>
                 <label style={mvpLabelStyle}>
@@ -211,7 +214,7 @@ export default function AgencyPoliciesPage() {
                     style={mvpInputStyle}
                   />
                 </label>
-                <p style={mvpFieldHint}>Identifier for this policy record.</p>
+                <p style={mvpFieldHint}>Internal name for this prompt version.</p>
               </div>
 
               <div
@@ -249,16 +252,16 @@ export default function AgencyPoliciesPage() {
                     checked={isDefault}
                     onChange={e => setIsDefault(e.target.checked)}
                   />
-                  <span>Mark as default policy</span>
+                  <span>Use as default</span>
                 </label>
                 <p style={{ ...mvpFieldHint, flex: '1 1 100%', margin: 0 }}>
-                  Higher priority wins when multiple policies exist; the active layer uses the top policy only.
+                  When multiple prompts exist, the highest priority becomes active.
                 </p>
               </div>
 
               <div>
                 <label style={mvpLabelStyle}>
-                  Master Prompt
+                  Prompt instructions
                   <textarea
                     value={content}
                     onChange={e => setContent(e.target.value)}
@@ -284,7 +287,7 @@ export default function AgencyPoliciesPage() {
                   disabled={saving}
                   style={{ ...mvpPrimaryButtonStyle, width: 'fit-content', opacity: saving ? 0.8 : 1 }}
                 >
-                  {saving ? 'Saving…' : 'Save'}
+                  {saving ? 'Saving…' : 'Save prompt'}
                 </button>
                 {selectedId ? (
                   <button
@@ -300,7 +303,7 @@ export default function AgencyPoliciesPage() {
                       opacity: saving ? 0.7 : 1,
                     }}
                   >
-                    Delete policy
+                    Delete version
                   </button>
                 ) : null}
               </div>

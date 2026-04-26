@@ -13,6 +13,8 @@ export interface OrchestrationInput {
     id: string;
     name: string;
     botEnabled: boolean;
+    /** Suggestive: AI runs but auto-replies to GHL are not sent. */
+    botMode: 'off' | 'suggestive' | 'autopilot';
     handoverPaused: boolean;
     ghlLocationId: string;
   };

@@ -7,6 +7,7 @@
 // not invoked during send-bubble execution. Do not assume parity; see drift note on FormatterService.
 
 import { Injectable, Logger } from '@nestjs/common';
+import { stripModelThinking } from '@aisbp/formatter';
 import { GenerationService } from '../generation/generation.service';
 import type {
   ReplyDecision,
@@ -157,7 +158,7 @@ export class ReplyPlannerService {
         : {}),
     });
 
-    const trimmed = liveDraft.content?.trim() ?? '';
+    const trimmed = stripModelThinking(liveDraft.content ?? '').trim();
     if (trimmed.length > 0) {
       this.logger.log(`Live draft generated: ${trimmed.length} chars`);
       return { text: trimmed, provenance: 'live_generation' };
@@ -215,7 +216,7 @@ export class ReplyPlannerService {
    * Not the same as `FormatterService` / `@aisbp/formatter` (see FormatterService drift doc).
    */
   private formatIntoBubbles(text: string): ReplyBubbleDraft[] {
-    const stripped = this.stripMarkdown(text);
+    const stripped = this.stripMarkdown(stripModelThinking(text));
     const paragraphs = stripped
       .split(/\n\s*\n/)
       .map(p => p.trim())

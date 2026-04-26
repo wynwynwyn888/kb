@@ -222,6 +222,8 @@ export class PromptsService {
       content: string;
       priority?: number;
       isDefault?: boolean;
+      /** When set, updates this row in place (including renames). Otherwise upserts by `(agencyId, name)`. */
+      policyId?: string | null;
     },
   ): Promise<AgencyPolicyDto> {
     const { agencyId, name, content } = body;
@@ -234,6 +236,42 @@ export class PromptsService {
     const now = new Date().toISOString();
     const priority = body.priority ?? 0;
     const isDefault = body.isDefault ?? false;
+    const policyId = body.policyId?.trim();
+
+    if (policyId) {
+      const { data: byId, error: fe } = await supabase
+        .from('agency_system_policies')
+        .select('id')
+        .eq('id', policyId)
+        .eq('agency_id', agencyId)
+        .maybeSingle();
+
+      if (fe) {
+        throw new BadRequestException(`Failed to resolve policy: ${fe.message}`);
+      }
+      if (!byId?.id) {
+        throw new NotFoundException('Policy not found');
+      }
+
+      const { data: updatedById, error: ue } = await supabase
+        .from('agency_system_policies')
+        .update({
+          name: name.trim(),
+          content,
+          priority,
+          is_default: isDefault,
+          updated_at: now,
+        })
+        .eq('id', policyId)
+        .eq('agency_id', agencyId)
+        .select('id, agency_id, name, content, priority, is_default, created_at, updated_at')
+        .single();
+
+      if (ue || !updatedById) {
+        throw new BadRequestException(`Failed to update policy: ${ue?.message ?? 'unknown'}`);
+      }
+      return this.mapPolicyRow(updatedById);
+    }
 
     const { data: existing } = await supabase
       .from('agency_system_policies')

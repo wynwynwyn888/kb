@@ -4,6 +4,7 @@ import { Suspense, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '../../contexts/AuthContext';
 import { LoginSessionAlert } from '../../components/app/LoginSessionAlert';
+import { BrandLogo } from '../../components/app/BrandLogo';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -30,9 +31,12 @@ export default function LoginPage() {
 
   return (
     <div style={{ maxWidth: '400px', margin: '100px auto', padding: '2rem' }}>
+      <div style={{ marginBottom: '1.25rem', display: 'flex', justifyContent: 'center' }}>
+        <BrandLogo height={40} maxWidth={220} />
+      </div>
       <h1 style={{ marginBottom: '0.35rem' }}>Sign in</h1>
       <p style={{ color: '#666', marginBottom: '1rem', fontSize: '0.95rem' }}>
-        Staff access to the control panel. Use your org account (local demo list below if available).
+        Sign in with the email and password your administrator invited you to use.
       </p>
 
       <Suspense fallback={null}>
@@ -99,26 +103,30 @@ export default function LoginPage() {
       </form>
 
       <p style={{ fontSize: '0.8rem', color: '#666', marginTop: '1.25rem', lineHeight: 1.45 }}>
-        Sign-in goes through <strong>Supabase Auth</strong>, not this screen directly. If you see a network error, ensure
-        Supabase is running locally (CLI) or your <code style={{ fontSize: '0.75rem' }}>.env.local</code> points at the
-        project where these users exist.
+        Having trouble? Check your internet connection. If your organization just set this up, confirm you were invited
+        with the correct email.
       </p>
 
       <div style={{ marginTop: '1rem', padding: '1rem', backgroundColor: '#f5f5f5', fontSize: '0.875rem', borderRadius: '8px' }}>
-        <strong>Demo accounts (when seeded)</strong>
+        <strong>Optional demo sign-in (local evaluation only)</strong>
         <ul style={{ margin: '0.5rem 0', paddingLeft: '1.5rem' }}>
           <li>agency-admin@demo.aisbp.com / Demo123!</li>
           <li>tenant-a-admin@demo.aisbp.com / Demo123!</li>
         </ul>
         <p style={{ margin: '0.75rem 0 0', fontSize: '0.78rem', color: '#555', lineHeight: 1.45 }}>
-          If login says <strong>invalid credentials</strong> (and the network tab shows a 400 on Supabase token), those
-          users are not in Auth yet. This repo does not use <code style={{ fontSize: '0.72rem' }}>prisma db seed</code>{' '}
-          — run from the repo root:{' '}
-          <code style={{ fontSize: '0.72rem' }}>npx pnpm --filter @aisbp/backend run db:seed</code> with{' '}
-          <code style={{ fontSize: '0.72rem' }}>DATABASE_URL</code>, <code style={{ fontSize: '0.72rem' }}>SUPABASE_URL</code>, and{' '}
-          <code style={{ fontSize: '0.72rem' }}>SUPABASE_SERVICE_ROLE_KEY</code> set for the same project as{' '}
-          <code style={{ fontSize: '0.72rem' }}>.env.local</code>.
+          These only work after an administrator has created them in your environment. If you see “invalid
+          credentials,” ask your administrator to provision demo users or send you an invite.
         </p>
+        {process.env.NODE_ENV === 'development' ? (
+          <details style={{ marginTop: '0.65rem' }}>
+            <summary style={{ cursor: 'pointer', fontSize: '0.78rem', color: '#444' }}>Administrator: seed demo data</summary>
+            <p style={{ margin: '0.45rem 0 0', fontSize: '0.72rem', color: '#555', lineHeight: 1.5 }}>
+              From the repository root, with database and Supabase service credentials configured for this project, run
+              the backend seed command your team documents (for example <code>pnpm --filter @aisbp/backend run db:seed</code>
+              ). Use the same Supabase project as this app&apos;s environment file.
+            </p>
+          </details>
+        ) : null}
       </div>
     </div>
   );

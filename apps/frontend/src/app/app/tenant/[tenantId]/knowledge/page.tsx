@@ -2,6 +2,7 @@
 
 import type { CSSProperties } from 'react';
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { stripModelThinking } from '@aisbp/formatter';
 import { useParams } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import {
@@ -18,56 +19,165 @@ import {
   ErrorBanner,
   EmptyState,
   LoadingBlock,
-  PageHeader,
-  SectionCard,
   SuccessBanner,
+  StatusPill,
+  mvpPrimaryButtonStyle,
+  mvpSecondaryButtonStyle,
+  mvpInputStyle,
+  mvpLabelStyle,
 } from '@/components/app/mvp-ui';
 import { BotTestPanel } from '@/components/app/bot-test/BotTestPanel';
 
-const tabButton = (active: boolean): CSSProperties => ({
-  padding: '0.45rem 0.9rem',
-  fontSize: '0.8rem',
-  fontWeight: 600,
-  border: '1px solid',
-  borderColor: active ? '#0f172a' : '#e2e8f0',
-  background: active ? '#0f172a' : '#fff',
-  color: active ? '#fff' : '#334155',
-  borderRadius: '6px',
-  cursor: 'pointer',
-});
+const PRIMARY = '#0F62FE';
+const PAGE_BG = '#F8FAFC';
 
-const topAction: CSSProperties = {
-  padding: '0.4rem 0.75rem',
-  fontSize: '0.8rem',
-  borderRadius: '6px',
-  border: '1px solid #e2e8f0',
-  background: '#fff',
+const glassSection: CSSProperties = {
+  borderRadius: 16,
+  padding: '1.15rem 1.2rem',
+  marginBottom: '1.1rem',
+  background: 'rgba(255, 255, 255, 0.88)',
+  backdropFilter: 'blur(18px)',
+  WebkitBackdropFilter: 'blur(18px)',
+  border: '1px solid rgba(226, 232, 240, 0.95)',
+  boxShadow: '0 12px 40px rgba(15, 23, 42, 0.04)',
+};
+
+const docCard: CSSProperties = {
+  borderRadius: 14,
+  padding: '1.05rem 1.1rem',
+  marginBottom: 12,
+  background: 'rgba(255, 255, 255, 0.92)',
+  border: '1px solid rgba(226, 232, 240, 0.9)',
+  boxShadow: '0 1px 2px rgba(15, 23, 42, 0.04)',
+  position: 'relative',
+  transition: 'border-color 0.15s ease',
+};
+
+const bentoBtn: CSSProperties = {
+  borderRadius: 14,
+  padding: '1.25rem 0.75rem',
+  display: 'flex',
+  flexDirection: 'column',
+  alignItems: 'center',
+  gap: 10,
+  background: 'rgba(255, 255, 255, 0.9)',
+  backdropFilter: 'blur(14px)',
+  WebkitBackdropFilter: 'blur(14px)',
+  border: '1px solid rgba(255, 255, 255, 1)',
+  boxShadow: '0 12px 40px rgba(15, 23, 42, 0.05)',
+  cursor: 'pointer',
+  font: 'inherit',
   color: '#0f172a',
-  cursor: 'pointer',
-  fontWeight: 600,
 };
 
-const table: CSSProperties = {
-  width: '100%',
-  borderCollapse: 'collapse',
-  fontSize: '0.82rem',
-};
+function relativeTimeLabel(iso?: string | null): string {
+  if (!iso) return '—';
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return '—';
+  const sec = Math.floor((Date.now() - t) / 1000);
+  if (sec < 45) return 'just now';
+  if (sec < 3600) return `${Math.max(1, Math.floor(sec / 60))}m ago`;
+  if (sec < 86400) return `${Math.max(1, Math.floor(sec / 3600))}h ago`;
+  if (sec < 86400 * 14) return `${Math.max(1, Math.floor(sec / 86400))}d ago`;
+  return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
 
-const th: CSSProperties = {
-  textAlign: 'left',
-  padding: '0.5rem 0.45rem',
-  borderBottom: '1px solid #e2e8f0',
-  color: '#64748b',
-  fontSize: '0.72rem',
-  textTransform: 'uppercase',
-  letterSpacing: '0.04em',
-};
+function statusPillTone(status: string): 'ok' | 'neutral' | 'warn' | 'bad' {
+  const u = status.toUpperCase();
+  if (u === 'READY' || u === 'ACTIVE') return 'ok';
+  if (u === 'FAILED' || u === 'ERROR' || u === 'INVALID') return 'bad';
+  if (u === 'PROCESSING' || u === 'PENDING' || u === 'DRAFT') return 'warn';
+  return 'neutral';
+}
 
-const td: CSSProperties = {
-  padding: '0.5rem 0.45rem',
-  borderBottom: '1px solid #f1f5f9',
-  verticalAlign: 'top' as const,
-};
+function KnowledgeDocCard({
+  title,
+  statusRaw,
+  subtitle,
+  timeLabel,
+  timePrefix = 'Updated',
+  usageLine,
+  onDelete,
+  deleting,
+}: {
+  title: string;
+  statusRaw: string;
+  subtitle?: string;
+  timeLabel: string;
+  timePrefix?: string;
+  usageLine?: string;
+  onDelete: () => void;
+  deleting: boolean;
+}) {
+  const fmtStatus = (s: string) => {
+    const u = s.toUpperCase();
+    if (u === 'READY') return 'Ready';
+    if (u === 'PROCESSING') return 'Processing';
+    if (u === 'DRAFT') return 'Draft';
+    if (u === 'FAILED') return 'Needs attention';
+    return s;
+  };
+
+  return (
+    <article
+      style={docCard}
+      onMouseEnter={e => {
+        e.currentTarget.style.borderColor = 'rgba(191, 219, 254, 0.95)';
+      }}
+      onMouseLeave={e => {
+        e.currentTarget.style.borderColor = 'rgba(226, 232, 240, 0.9)';
+      }}
+    >
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 8 }}>
+        <h3 style={{ fontSize: '1.05rem', fontWeight: 700, margin: 0, color: '#0f172a', lineHeight: 1.35, flex: 1, minWidth: 0 }}>
+          {title}
+        </h3>
+        <StatusPill label={fmtStatus(statusRaw)} tone={statusPillTone(statusRaw)} />
+      </div>
+      {subtitle ? (
+        <p
+          style={{
+            fontSize: '0.8125rem',
+            color: '#64748b',
+            margin: '0 0 10px',
+            lineHeight: 1.5,
+            display: '-webkit-box',
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: 'vertical' as const,
+            overflow: 'hidden',
+          }}
+        >
+          {subtitle}
+        </p>
+      ) : null}
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '14px 18px', marginTop: 4 }}>
+        <span style={{ fontSize: '0.65rem', fontWeight: 700, letterSpacing: '0.06em', color: '#94a3b8' }}>
+          {timePrefix} {timeLabel}
+        </span>
+        {usageLine ? (
+          <span style={{ fontSize: '0.65rem', fontWeight: 700, letterSpacing: '0.06em', color: '#94a3b8' }}>{usageLine}</span>
+        ) : null}
+        <button
+          type="button"
+          onClick={onDelete}
+          disabled={deleting}
+          style={{
+            marginLeft: 'auto',
+            fontSize: '0.75rem',
+            fontWeight: 600,
+            color: '#b91c1c',
+            background: 'none',
+            border: 'none',
+            cursor: deleting ? 'wait' : 'pointer',
+            padding: '2px 0',
+          }}
+        >
+          {deleting ? '…' : 'Delete'}
+        </button>
+      </div>
+    </article>
+  );
+}
 
 /** Legacy rows may omit `documentKind` — use source/title heuristics only as fallback. */
 function classifiesAsFaq(d: KbDocumentRow): boolean {
@@ -231,7 +341,7 @@ export default function SubaccountKnowledgePage() {
       await createKbRichText(token, { tenantId: subId, title, content: body });
       setRichTitle('');
       setRichBody('');
-      setSaveOk('Rich text saved.');
+      setSaveOk('Note saved.');
       await load();
     } catch (er) {
       const raw = isApiHttpError(er) ? er.message : er instanceof Error ? er.message : 'Save failed';
@@ -300,435 +410,451 @@ export default function SubaccountKnowledgePage() {
     }
   };
 
-  const fmtStatus = (s: string) => {
-    const u = s.toUpperCase();
-    if (u === 'READY' || u === 'PROCESSING' || u === 'FAILED') return s;
-    return s;
+  const fmtKind = (s: string | null | undefined) => {
+    const u = (s ?? '').toLowerCase();
+    if (u === 'faq') return 'FAQ';
+    if (u === 'rich_text' || u === 'rich' || u === 'manual') return 'Note';
+    if (u === 'file') return 'File';
+    return s || 'Note';
   };
 
-  const inputStyle: CSSProperties = {
-    width: '100%',
-    boxSizing: 'border-box',
-    padding: '0.5rem 0.6rem',
-    borderRadius: '6px',
-    border: '1px solid #e2e8f0',
+  const tabUnderline = (active: boolean): CSSProperties => ({
+    fontSize: '0.875rem',
+    fontWeight: 600,
+    letterSpacing: '-0.01em',
+    padding: '0 2px 14px',
+    marginBottom: -1,
+    border: 'none',
+    background: 'none',
+    cursor: 'pointer',
+    color: active ? PRIMARY : '#64748b',
+    borderBottom: active ? `2px solid ${PRIMARY}` : '2px solid transparent',
+  });
+
+  const iconCircle: CSSProperties = {
+    width: 48,
+    height: 48,
+    borderRadius: '50%',
+    background: 'rgba(15, 98, 254, 0.1)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: '1.35rem',
+    lineHeight: 1,
   };
 
   return (
-    <div>
-      <PageHeader title="Knowledge Base" eyebrow="This subaccount" />
-      <p style={{ fontSize: '0.86rem', color: '#475569', margin: '0 0 1.1rem', maxWidth: '44rem', lineHeight: 1.5 }}>
-        Add FAQs, long-form text, and documents. Plain text and .txt work reliably. PDF, Word .doc, and .docx can be
-        uploaded; if processing is not enabled for a format, the item may stay in a non-ready state—check the status
-        column.
-      </p>
-      <div
-        style={{
-          display: 'flex',
-          flexWrap: 'wrap',
-          gap: '1.5rem',
-          alignItems: 'flex-start',
-        }}
-      >
+    <div style={{ background: PAGE_BG, padding: '0 0 1.75rem', minHeight: '100%' }}>
+      <div style={{ maxWidth: 1200, margin: '0 auto' }}>
+        <header style={{ marginBottom: '1.35rem' }}>
+          <h1 style={{ fontSize: '1.875rem', fontWeight: 800, margin: 0, lineHeight: 1.2, color: '#0f172a', letterSpacing: '-0.03em' }}>
+            Knowledge
+          </h1>
+          <p style={{ fontSize: '0.875rem', color: '#64748b', margin: '0.5rem 0 0', maxWidth: '36rem', lineHeight: 1.55 }}>
+            Manage the information your bot uses to answer customer questions.
+          </p>
+        </header>
+
         <div
           style={{
-            flex: '1 1 480px',
-            minWidth: 0,
-            padding: '0 0 0.5rem 0',
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: '1.5rem',
+            alignItems: 'flex-start',
           }}
         >
-      {loadErr ? (
-        <ErrorBanner message={loadErr} />
-      ) : loading ? (
-        <LoadingBlock message="Loading…" />
-      ) : null}
-      {writeErr ? <ErrorBanner message={writeErr} /> : null}
-      {saveOk && !writeErr ? <SuccessBanner message={saveOk} /> : null}
-      {loadErr ? (
-        <button
-          type="button"
-          onClick={() => {
-            setLoadErr('');
-            bump();
-          }}
-          style={{ marginTop: '0.5rem', fontSize: '0.85rem' }}
-        >
-          Retry
-        </button>
-      ) : null}
-
-      {!loadErr && !loading ? (
-        <>
-          <div
-            style={{
-              display: 'flex',
-              flexWrap: 'wrap',
-              alignItems: 'center',
-              gap: '0.45rem',
-              marginBottom: '0.75rem',
-            }}
-            aria-label="Knowledge Base actions"
-          >
-            <button
-              type="button"
-              style={topAction}
-              onClick={() => {
-                setTab('faq');
-                setSaveOk('');
-              }}
-            >
-              Add FAQ
-            </button>
-            <button
-              type="button"
-              style={topAction}
-              onClick={() => {
-                setTab('rich');
-                setSaveOk('');
-              }}
-            >
-              Add Rich Text
-            </button>
-            <button
-              type="button"
-              style={topAction}
-              onClick={() => {
-                setTab('files');
-                fileInputRef.current?.click();
-              }}
-            >
-              Upload file
-            </button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              onChange={onFileChange}
-              style={{ display: 'none' }}
-              accept=".txt,.pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
-            />
-            {saving ? <span style={{ fontSize: '0.75rem', color: '#64748b' }}>Working…</span> : null}
-          </div>
-
-          <p style={{ fontSize: '0.75rem', color: '#94a3b8', margin: '0 0 0.6rem' }}>Start with a .txt upload to confirm ingestion end to end.</p>
-
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', marginBottom: '0.9rem' }} role="tablist" aria-label="Content type">
-            <button
-              type="button"
-              style={tabButton(tab === 'faq')}
-              onClick={() => {
-                setTab('faq');
-                setSaveOk('');
-              }}
-              role="tab"
-              aria-selected={tab === 'faq'}
-            >
-              FAQ
-            </button>
-            <button
-              type="button"
-              style={tabButton(tab === 'rich')}
-              onClick={() => {
-                setTab('rich');
-                setSaveOk('');
-              }}
-              role="tab"
-              aria-selected={tab === 'rich'}
-            >
-              Rich Text
-            </button>
-            <button
-              type="button"
-              style={tabButton(tab === 'files')}
-              onClick={() => {
-                setTab('files');
-                setSaveOk('');
-              }}
-              role="tab"
-              aria-selected={tab === 'files'}
-            >
-              Files
-            </button>
-          </div>
-
-          {tab === 'faq' ? (
-            <SectionCard title="FAQ" subtitle="Question and answer">
-              <form onSubmit={onFaqSave} style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', maxWidth: '520px', marginBottom: '1.25rem' }}>
-                <label>
-                  <span style={{ display: 'block', fontSize: '0.75rem', color: '#64748b', marginBottom: '0.2rem' }}>Question</span>
-                  <input
-                    name="kb-faq-question"
-                    value={faqQ}
-                    onChange={e => {
-                      setFaqQ(e.target.value);
-                      setSaveOk('');
-                    }}
-                    required
-                    style={inputStyle}
-                    placeholder="Customer question"
-                    autoComplete="off"
-                  />
-                </label>
-                <label>
-                  <span style={{ display: 'block', fontSize: '0.75rem', color: '#64748b', marginBottom: '0.2rem' }}>Answer</span>
-                  <textarea
-                    name="kb-faq-answer"
-                    value={faqA}
-                    onChange={e => {
-                      setFaqA(e.target.value);
-                      setSaveOk('');
-                    }}
-                    required
-                    rows={4}
-                    style={inputStyle}
-                    placeholder="Short answer"
-                    autoComplete="off"
-                  />
-                </label>
-                <button type="submit" disabled={saving} style={{ width: 'fit-content', padding: '0.45rem 0.85rem' }}>
-                  {saving ? 'Saving…' : 'Save'}
-                </button>
-              </form>
-
-              {faqRows.length === 0 ? (
-                <EmptyState compact title="No FAQ entries" detail="Add a FAQ above, or the list is empty." />
-              ) : (
-                <div style={{ overflowX: 'auto' }}>
-                  <table style={table}>
-                    <thead>
-                      <tr>
-                        <th style={th}>Title / question</th>
-                        <th style={th}>Kind</th>
-                        <th style={th}>Status</th>
-                        <th style={th}>Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {faqRows.map(d => (
-                        <tr key={d.id}>
-                          <td style={td}>{d.title}</td>
-                          <td style={td}>{d.documentKind ?? 'faq'}</td>
-                          <td style={td}>{fmtStatus(d.status)}</td>
-                          <td style={td}>
-                            <button
-                              type="button"
-                              onClick={() => onDelete(d.id)}
-                              disabled={deletingId === d.id}
-                              style={{ fontSize: '0.75rem', color: '#b91c1c', background: 'none', border: 'none', cursor: 'pointer' }}
-                            >
-                              {deletingId === d.id ? '…' : 'Delete'}
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </SectionCard>
-          ) : null}
-
-          {tab === 'rich' ? (
-            <SectionCard title="Rich Text" subtitle="Longer reference content">
-              <form onSubmit={onRichSave} style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', maxWidth: '520px', marginBottom: '1.25rem' }}>
-                <label>
-                  <span style={{ display: 'block', fontSize: '0.75rem', color: '#64748b', marginBottom: '0.2rem' }}>Title</span>
-                  <input
-                    name="kb-rich-title"
-                    value={richTitle}
-                    onChange={e => {
-                      setRichTitle(e.target.value);
-                      setSaveOk('');
-                    }}
-                    required
-                    style={inputStyle}
-                    placeholder="Title"
-                    autoComplete="off"
-                  />
-                </label>
-                <label>
-                  <span style={{ display: 'block', fontSize: '0.75rem', color: '#64748b', marginBottom: '0.2rem' }}>Text content</span>
-                  <textarea
-                    name="kb-rich-body"
-                    value={richBody}
-                    onChange={e => {
-                      setRichBody(e.target.value);
-                      setSaveOk('');
-                    }}
-                    required
-                    rows={6}
-                    style={inputStyle}
-                    placeholder="Plain text (HTML can be added later server-side)"
-                    autoComplete="off"
-                  />
-                </label>
-                <button type="submit" disabled={saving} style={{ width: 'fit-content', padding: '0.45rem 0.85rem' }}>
-                  {saving ? 'Saving…' : 'Save'}
-                </button>
-              </form>
-
-              {otherRows.length > 0 ? (
-                <p style={{ fontSize: '0.78rem', color: '#78716c', background: '#fafaf9', border: '1px solid #e7e5e4', borderRadius: '6px', padding: '0.45rem 0.6rem' }}>
-                  {otherRows.length} additional document(s) without a clear type are grouped with rich text. You can delete
-                  and re-add if something looks wrong.
-                </p>
-              ) : null}
-
-              {richRows.length === 0 ? (
-                <EmptyState compact title="No rich text entries" detail="Add content above or upload legacy data." />
-              ) : (
-                <div style={{ overflowX: 'auto' }}>
-                  <table style={table}>
-                    <thead>
-                      <tr>
-                        <th style={th}>Title</th>
-                        <th style={th}>Kind</th>
-                        <th style={th}>Status</th>
-                        <th style={th}>Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {richRows.map(d => (
-                        <tr key={d.id}>
-                          <td style={td}>{d.title}</td>
-                          <td style={td}>{d.documentKind ?? d.source}</td>
-                          <td style={td}>{fmtStatus(d.status)}</td>
-                          <td style={td}>
-                            <button
-                              type="button"
-                              onClick={() => onDelete(d.id)}
-                              disabled={deletingId === d.id}
-                              style={{ fontSize: '0.75rem', color: '#b91c1c', background: 'none', border: 'none', cursor: 'pointer' }}
-                            >
-                              {deletingId === d.id ? '…' : 'Delete'}
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </SectionCard>
-          ) : null}
-
-          {tab === 'files' ? (
-            <SectionCard title="Files" subtitle="PDF, Word, and plain text—status shows processing or issues">
-              <div
-                role="button"
-                tabIndex={0}
-                onKeyDown={e => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    fileInputRef.current?.click();
-                  }
+          <div style={{ flex: '1 1 520px', minWidth: 0 }}>
+            {loadErr ? <ErrorBanner message={loadErr} /> : null}
+            {loading ? <LoadingBlock message="Loading…" /> : null}
+            {writeErr ? <ErrorBanner message={writeErr} /> : null}
+            {saveOk && !writeErr ? <SuccessBanner message={saveOk} /> : null}
+            {loadErr ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setLoadErr('');
+                  bump();
                 }}
-                onClick={() => fileInputRef.current?.click()}
-                style={{
-                  display: 'block',
-                  fontSize: '0.8rem',
-                  padding: '0.85rem 1rem',
-                  borderRadius: '8px',
-                  border: '1px dashed #94a3b8',
-                  background: '#f8fafc',
-                  color: '#334155',
-                  cursor: 'pointer',
-                  textAlign: 'center',
-                  marginBottom: '0.9rem',
-                }}
+                style={{ ...mvpSecondaryButtonStyle, marginTop: '0.5rem' }}
               >
-                Drop a file or tap to choose (PDF, DOC, DOCX, or TXT)
-              </div>
-              {fileRows.length === 0 ? (
-                <EmptyState compact title="No file documents" detail="Upload a .txt to verify ingestion, or add PDF/Word when extraction is on." />
-              ) : (
-                <div style={{ overflowX: 'auto' }}>
-                  <table style={table}>
-                    <thead>
-                      <tr>
-                        <th style={th}>File name</th>
-                        <th style={th}>Kind</th>
-                        <th style={th}>Type</th>
-                        <th style={th}>Status</th>
-                        <th style={th}>Uploaded</th>
-                        <th style={th}>Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {fileRows.map(d => (
-                        <tr key={d.id}>
-                          <td style={td}>{d.title}</td>
-                          <td style={td}>{d.documentKind ?? 'file'}</td>
-                          <td style={td}>{d.source}</td>
-                          <td style={td}>{fmtStatus(d.status)}</td>
-                          <td style={td}>{d.createdAt ? new Date(d.createdAt).toLocaleString() : '—'}</td>
-                          <td style={td}>
-                            <button
-                              type="button"
-                              onClick={() => onDelete(d.id)}
-                              disabled={deletingId === d.id}
-                              style={{ fontSize: '0.75rem', color: '#b91c1c', background: 'none', border: 'none', cursor: 'pointer' }}
-                            >
-                              {deletingId === d.id ? '…' : 'Delete'}
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </SectionCard>
-          ) : null}
-
-          <SectionCard title="Search index" subtitle="Keyword retrieval across chunked content">
-            <form onSubmit={onSearch} style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'center' }}>
-              <input
-                name="kb-search-query"
-                value={qSearch}
-                onChange={e => setQSearch(e.target.value)}
-                placeholder="Query"
-                autoComplete="off"
-                style={{ minWidth: '200px', flex: 1, padding: '0.5rem 0.6rem', borderRadius: '6px', border: '1px solid #d1d5db' }}
-              />
-              <button type="submit" disabled={searching} style={{ padding: '0.5rem 0.85rem' }}>
-                {searching ? 'Searching…' : 'Search'}
+                Retry
               </button>
-            </form>
-            {searchErr ? <p style={{ color: '#b91c1c', fontSize: '0.85rem' }}>{searchErr}</p> : null}
-            {searchChunks && (
-              <ol style={{ margin: '0.75rem 0 0', paddingLeft: '1.2rem', fontSize: '0.86rem' }}>
-                {searchChunks.length === 0 ? (
-                  <li>No results</li>
-                ) : (
-                  searchChunks.slice(0, 8).map((c, i) => (
-                    <li key={i} style={{ marginBottom: '0.4rem' }}>
-                      {typeof c === 'object' && c && 'content' in c
-                        ? String((c as { content?: unknown }).content).slice(0, 200)
-                        : String(c).slice(0, 200)}
-                    </li>
-                  ))
-                )}
-              </ol>
-            )}
-          </SectionCard>
-        </>
-      ) : null}
-        </div>
-        {token && !loadErr && !loading ? (
-          <div
-            style={{
-              flex: '1.2 1 560px',
-              width: '100%',
-              minWidth: 'min(100%, 640px)',
-              maxWidth: 'min(100%, 780px)',
-              position: 'sticky' as const,
-              top: '0.5rem',
-              alignSelf: 'flex-start' as const,
-            }}
-          >
-            <BotTestPanel token={token} subaccountId={subId} />
+            ) : null}
+
+            {!loadErr && !loading ? (
+              <>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+                    gap: '0.75rem',
+                    marginBottom: '1.35rem',
+                  }}
+                  aria-label="Knowledge actions"
+                >
+                  <button
+                    type="button"
+                    style={bentoBtn}
+                    onClick={() => {
+                      setTab('rich');
+                      setSaveOk('');
+                    }}
+                  >
+                    <span style={iconCircle}>📝</span>
+                    <span style={{ fontSize: '0.875rem', fontWeight: 600 }}>Add note</span>
+                  </button>
+                  <button
+                    type="button"
+                    style={bentoBtn}
+                    onClick={() => {
+                      setTab('files');
+                      fileInputRef.current?.click();
+                    }}
+                  >
+                    <span style={iconCircle}>📤</span>
+                    <span style={{ fontSize: '0.875rem', fontWeight: 600 }}>Upload file</span>
+                  </button>
+                  <button
+                    type="button"
+                    style={bentoBtn}
+                    onClick={() => {
+                      setTab('faq');
+                      setSaveOk('');
+                    }}
+                  >
+                    <span style={iconCircle}>❓</span>
+                    <span style={{ fontSize: '0.875rem', fontWeight: 600 }}>Add FAQ</span>
+                  </button>
+                </div>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  onChange={onFileChange}
+                  style={{ display: 'none' }}
+                  accept=".txt,.pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
+                />
+                {saving ? (
+                  <p style={{ fontSize: '0.75rem', color: '#64748b', margin: '0 0 1rem' }}>Working…</p>
+                ) : null}
+
+                <div
+                  style={{
+                    display: 'flex',
+                    gap: '1.5rem',
+                    borderBottom: '1px solid #e2e8f0',
+                    marginBottom: '1.1rem',
+                  }}
+                  role="tablist"
+                  aria-label="Content type"
+                >
+                  <button
+                    type="button"
+                    style={tabUnderline(tab === 'faq')}
+                    onClick={() => {
+                      setTab('faq');
+                      setSaveOk('');
+                    }}
+                    role="tab"
+                    aria-selected={tab === 'faq'}
+                  >
+                    FAQs
+                  </button>
+                  <button
+                    type="button"
+                    style={tabUnderline(tab === 'rich')}
+                    onClick={() => {
+                      setTab('rich');
+                      setSaveOk('');
+                    }}
+                    role="tab"
+                    aria-selected={tab === 'rich'}
+                  >
+                    Notes
+                  </button>
+                  <button
+                    type="button"
+                    style={tabUnderline(tab === 'files')}
+                    onClick={() => {
+                      setTab('files');
+                      setSaveOk('');
+                    }}
+                    role="tab"
+                    aria-selected={tab === 'files'}
+                  >
+                    Files
+                  </button>
+                </div>
+
+                {tab === 'faq' ? (
+                  <section style={glassSection}>
+                    <h2 style={{ fontSize: '1rem', fontWeight: 700, margin: '0 0 0.2rem', color: '#0f172a' }}>Approved FAQ</h2>
+                    <p style={{ fontSize: '0.8125rem', color: '#64748b', margin: '0 0 1rem', lineHeight: 1.45 }}>
+                      Add approved answers your bot can use when replying.
+                    </p>
+                    <form onSubmit={onFaqSave} style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxWidth: 520, marginBottom: '1.25rem' }}>
+                      <label>
+                        <span style={mvpLabelStyle}>Question</span>
+                        <input
+                          name="kb-faq-question"
+                          value={faqQ}
+                          onChange={e => {
+                            setFaqQ(e.target.value);
+                            setSaveOk('');
+                          }}
+                          required
+                          style={{ ...mvpInputStyle, marginTop: '0.35rem' }}
+                          placeholder="e.g. What are your opening hours?"
+                          autoComplete="off"
+                        />
+                      </label>
+                      <label>
+                        <span style={mvpLabelStyle}>Answer</span>
+                        <textarea
+                          name="kb-faq-answer"
+                          value={faqA}
+                          onChange={e => {
+                            setFaqA(e.target.value);
+                            setSaveOk('');
+                          }}
+                          required
+                          rows={4}
+                          style={{ ...mvpInputStyle, marginTop: '0.35rem', minHeight: 100, resize: 'vertical' as const }}
+                          placeholder="Write the approved answer…"
+                          autoComplete="off"
+                        />
+                      </label>
+                      <button type="submit" disabled={saving} style={{ ...mvpPrimaryButtonStyle, width: 'fit-content' }}>
+                        {saving ? 'Saving…' : 'Save FAQ'}
+                      </button>
+                    </form>
+
+                    {faqRows.length === 0 ? (
+                      <EmptyState
+                        compact
+                        title="No answers yet"
+                        detail="Add your first FAQ to help the bot answer common customer questions."
+                      />
+                    ) : (
+                      <div>
+                        {faqRows.map(d => (
+                          <KnowledgeDocCard
+                            key={d.id}
+                            title={d.title}
+                            statusRaw={d.status}
+                            subtitle={`${fmtKind(d.documentKind ?? 'faq')} · indexed for search`}
+                            timeLabel={relativeTimeLabel(d.createdAt)}
+                            usageLine={
+                              typeof d.chunkCount === 'number' && d.chunkCount > 0
+                                ? `${d.chunkCount} chunk${d.chunkCount === 1 ? '' : 's'}`
+                                : undefined
+                            }
+                            onDelete={() => onDelete(d.id)}
+                            deleting={deletingId === d.id}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </section>
+                ) : null}
+
+                {tab === 'rich' ? (
+                  <section style={glassSection}>
+                    <h2 style={{ fontSize: '1rem', fontWeight: 700, margin: '0 0 0.2rem', color: '#0f172a' }}>Notes</h2>
+                    <p style={{ fontSize: '0.8125rem', color: '#64748b', margin: '0 0 1rem', lineHeight: 1.45 }}>
+                      Longer context such as policies, menus, or service details.
+                    </p>
+                    <form onSubmit={onRichSave} style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxWidth: 520, marginBottom: '1.25rem' }}>
+                      <label>
+                        <span style={mvpLabelStyle}>Title</span>
+                        <input
+                          name="kb-rich-title"
+                          value={richTitle}
+                          onChange={e => {
+                            setRichTitle(e.target.value);
+                            setSaveOk('');
+                          }}
+                          required
+                          style={{ ...mvpInputStyle, marginTop: '0.35rem' }}
+                          placeholder="Title"
+                          autoComplete="off"
+                        />
+                      </label>
+                      <label>
+                        <span style={mvpLabelStyle}>Text content</span>
+                        <textarea
+                          name="kb-rich-body"
+                          value={richBody}
+                          onChange={e => {
+                            setRichBody(e.target.value);
+                            setSaveOk('');
+                          }}
+                          required
+                          rows={6}
+                          style={{ ...mvpInputStyle, marginTop: '0.35rem', minHeight: 140, resize: 'vertical' as const }}
+                          placeholder="Paste plain text your bot should know"
+                          autoComplete="off"
+                        />
+                      </label>
+                      <button type="submit" disabled={saving} style={{ ...mvpPrimaryButtonStyle, width: 'fit-content' }}>
+                        {saving ? 'Saving…' : 'Save note'}
+                      </button>
+                    </form>
+
+                    {otherRows.length > 0 ? (
+                      <p
+                        style={{
+                          fontSize: '0.78rem',
+                          color: '#78716c',
+                          background: 'rgba(250, 250, 249, 0.9)',
+                          border: '1px solid #e7e5e4',
+                          borderRadius: 10,
+                          padding: '0.5rem 0.65rem',
+                          marginBottom: '0.85rem',
+                        }}
+                      >
+                        {otherRows.length} additional item(s) are grouped with notes. You can delete and re-add if something looks wrong.
+                      </p>
+                    ) : null}
+
+                    {richRows.length === 0 ? (
+                      <EmptyState compact title="No notes yet" detail="Add business details, policies, hours, or service context above." />
+                    ) : (
+                      <div>
+                        {richRows.map(d => (
+                          <KnowledgeDocCard
+                            key={d.id}
+                            title={d.title}
+                            statusRaw={d.status}
+                            subtitle={`${fmtKind(d.documentKind ?? d.source)}`}
+                            timeLabel={relativeTimeLabel(d.createdAt)}
+                            usageLine={
+                              typeof d.chunkCount === 'number' && d.chunkCount > 0
+                                ? `${d.chunkCount} chunk${d.chunkCount === 1 ? '' : 's'}`
+                                : undefined
+                            }
+                            onDelete={() => onDelete(d.id)}
+                            deleting={deletingId === d.id}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </section>
+                ) : null}
+
+                {tab === 'files' ? (
+                  <section style={glassSection}>
+                    <h2 style={{ fontSize: '1rem', fontWeight: 700, margin: '0 0 0.2rem', color: '#0f172a' }}>Files</h2>
+                    <p style={{ fontSize: '0.8125rem', color: '#64748b', margin: '0 0 1rem', lineHeight: 1.45 }}>
+                      Upload PDF, Word, or plain text files for the bot to use.
+                    </p>
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          fileInputRef.current?.click();
+                        }
+                      }}
+                      onClick={() => fileInputRef.current?.click()}
+                      style={{
+                        display: 'block',
+                        fontSize: '0.8125rem',
+                        padding: '1rem 1.1rem',
+                        borderRadius: 12,
+                        border: '1px dashed #94a3b8',
+                        background: 'rgba(248, 250, 252, 0.8)',
+                        color: '#334155',
+                        cursor: 'pointer',
+                        textAlign: 'center',
+                        marginBottom: '1rem',
+                      }}
+                    >
+                      Choose a file to upload (PDF, DOC, DOCX, or TXT)
+                    </div>
+                    {fileRows.length === 0 ? (
+                      <EmptyState compact title="No files yet" detail="Upload a document your bot should reference." />
+                    ) : (
+                      <div>
+                        {fileRows.map(d => (
+                          <KnowledgeDocCard
+                            key={d.id}
+                            title={d.title}
+                            statusRaw={d.status}
+                            subtitle={`${fmtKind(d.documentKind ?? 'file')} · ${fmtKind(d.source)}`}
+                            timePrefix="Uploaded"
+                            timeLabel={d.createdAt ? new Date(d.createdAt).toLocaleString() : '—'}
+                            onDelete={() => onDelete(d.id)}
+                            deleting={deletingId === d.id}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </section>
+                ) : null}
+
+                <section style={glassSection}>
+                  <h2 style={{ fontSize: '1rem', fontWeight: 700, margin: '0 0 0.2rem', color: '#0f172a' }}>Search knowledge</h2>
+                  <p style={{ fontSize: '0.8125rem', color: '#64748b', margin: '0 0 0.85rem', lineHeight: 1.45 }}>
+                    Check what the bot can retrieve from this workspace.
+                  </p>
+                  <form onSubmit={onSearch} style={{ display: 'flex', gap: '0.65rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                    <input
+                      name="kb-search-query"
+                      value={qSearch}
+                      onChange={e => setQSearch(e.target.value)}
+                      placeholder="Search question or phrase"
+                      autoComplete="off"
+                      style={{
+                        ...mvpInputStyle,
+                        flex: 1,
+                        minWidth: 200,
+                        borderRadius: 999,
+                        background: '#f1f5f9',
+                        border: '1px solid transparent',
+                      }}
+                    />
+                    <button type="submit" disabled={searching} style={{ ...mvpPrimaryButtonStyle, borderRadius: 10 }}>
+                      {searching ? 'Searching…' : 'Search'}
+                    </button>
+                  </form>
+                  {searchErr ? <p style={{ color: '#b91c1c', fontSize: '0.85rem', marginTop: '0.65rem' }}>{searchErr}</p> : null}
+                  {searchChunks && (
+                    <ol style={{ margin: '0.85rem 0 0', paddingLeft: '1.15rem', fontSize: '0.875rem', color: '#334155' }}>
+                      {searchChunks.length === 0 ? (
+                        <li>No matching knowledge found</li>
+                      ) : (
+                        searchChunks.slice(0, 8).map((c, i) => (
+                          <li key={i} style={{ marginBottom: '0.45rem' }}>
+                            {typeof c === 'object' && c && 'content' in c
+                              ? stripModelThinking(String((c as { content?: unknown }).content)).slice(0, 200)
+                              : stripModelThinking(String(c)).slice(0, 200)}
+                          </li>
+                        ))
+                      )}
+                    </ol>
+                  )}
+                </section>
+              </>
+            ) : null}
           </div>
-        ) : null}
+
+          {token && !loadErr && !loading ? (
+            <div
+              style={{
+                flex: '1 1 340px',
+                width: '100%',
+                minWidth: 'min(100%, 300px)',
+                maxWidth: 460,
+                position: 'sticky' as const,
+                top: 12,
+                alignSelf: 'flex-start' as const,
+              }}
+            >
+              <BotTestPanel token={token} subaccountId={subId} />
+            </div>
+          ) : null}
+        </div>
       </div>
     </div>
   );

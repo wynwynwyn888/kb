@@ -48,6 +48,7 @@ function makeInput(overrides: {
       id: 'tenant_1',
       name: 'Test Tenant',
       botEnabled,
+      botMode: 'autopilot' as const,
       handoverPaused: tenantHandoverPaused,
       ghlLocationId: 'loc_1',
     },

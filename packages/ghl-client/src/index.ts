@@ -25,6 +25,28 @@ function isRecord(x: unknown): x is Record<string, unknown> {
   return typeof x === 'object' && x !== null;
 }
 
+/** Official GHL (HighLevel) API host per current docs. */
+const GHL_API_BASE_DEFAULT = 'https://services.leadconnectorhq.com';
+
+/**
+ * `services.gohighlevel.com` does not resolve (ENOTFOUND) — the API lives on leadconnectorhq.com.
+ * Maps legacy env values so deployments that copied old examples still work.
+ */
+export function resolveGhlApiBaseUrl(envValue: string | undefined): string {
+  const raw = (envValue ?? '').trim();
+  if (!raw) return GHL_API_BASE_DEFAULT;
+  const withoutTrailingSlashes = raw.replace(/\/+$/, '');
+  try {
+    const u = new URL(withoutTrailingSlashes);
+    if (u.hostname === 'services.gohighlevel.com') {
+      return GHL_API_BASE_DEFAULT;
+    }
+  } catch {
+    return GHL_API_BASE_DEFAULT;
+  }
+  return withoutTrailingSlashes;
+}
+
 /** Trimmed non-empty string id, or null. */
 export function normalizeGhlLocationId(value: unknown): string | null {
   if (value === undefined || value === null) return null;
@@ -536,7 +558,7 @@ export function createGhlClient(
   locationId: string
 ): GhlClient {
   return new GhlClient({
-    baseUrl: process.env['GHL_API_BASE_URL'] || 'https://services.leadconnectorhq.com',
+    baseUrl: resolveGhlApiBaseUrl(process.env['GHL_API_BASE_URL']),
     accessToken,
     locationId,
   });

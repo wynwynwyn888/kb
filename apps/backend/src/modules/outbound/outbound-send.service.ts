@@ -8,7 +8,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { getSupabaseService } from '../../lib/supabase';
 import { createGhlClient } from '@aisbp/ghl-client';
-import { safeLog } from '../../lib/encryption';
+import { decrypt, safeLog } from '../../lib/encryption';
 import type { ReplyDecision, ReplyBubbleDraft } from '../reply-planning/dto';
 
 export interface BubbleSendResult {
@@ -207,9 +207,6 @@ export class OutboundSendService {
     tenantId: string,
     ghlLocationId: string,
   ): Promise<{ token: string } | null> {
-    // Token is stored encrypted; decrypt before use
-    // Note: In this implementation the stored value is used directly as bearer token
-    // In production, decryption would be applied here
     const { data } = await this.supabase
       .from('tenant_ghl_connections')
       .select('private_token_encrypted')
@@ -219,8 +216,14 @@ export class OutboundSendService {
       .single();
 
     if (!data) return null;
-
-    return { token: data.private_token_encrypted };
+    try {
+      return { token: decrypt(String(data.private_token_encrypted)) };
+    } catch (e) {
+      this.logger.warn(
+        `GHL token decrypt failed tenant=${tenantId}: ${e instanceof Error ? e.message : String(e)}`,
+      );
+      return null;
+    }
   }
 
   private async checkQuotaAvailable(tenantId: string, needed: number): Promise<boolean> {

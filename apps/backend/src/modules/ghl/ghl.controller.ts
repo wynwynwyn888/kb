@@ -68,7 +68,17 @@ export class GhlController {
     @Param('tenantId') tenantId: string,
     @CurrentUser() user: SessionUser
   ) {
-    return this.ghlService.verifyConnection(tenantId, user.id);
+    const r = await this.ghlService.verifyConnection(tenantId, user.id);
+    return {
+      connected: r.isConnected,
+      status: r.status,
+      ghlLocationId: r.ghlLocationId,
+      verifiedAt: r.verifiedAt,
+      lastHealthCheckAt: r.lastHealthCheckAt,
+      lastError: r.lastError,
+      maskToken: r.maskToken,
+      metadata: r.metadata ?? {},
+    };
   }
 
   @Get('health')

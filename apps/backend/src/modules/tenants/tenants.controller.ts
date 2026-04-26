@@ -45,14 +45,24 @@ export class TenantsController {
   }
 
   @Patch(':id')
-  @ApiOperation({ summary: 'Update subaccount display name (agency staff)' })
-  async patchName(
+  @ApiOperation({
+    summary: 'Update workspace: rename (agency staff) and/or bot operating mode (anyone with access)',
+  })
+  async patchTenant(
     @Param('id') id: string,
     @CurrentUser() user: SessionUser,
-    @Body() body: { name: string },
+    @Body() body: { name?: string; botMode?: 'off' | 'suggestive' | 'autopilot' },
   ) {
-    if (!user?.id) return null;
-    return this.tenantsService.updateTenantName(id, user.id, body.name);
+    if (!user?.id) {
+      return null;
+    }
+    if (body?.name === undefined && body?.botMode === undefined) {
+      throw new BadRequestException('Provide at least one of: name, botMode');
+    }
+    return this.tenantsService.updateTenant(id, user.id, {
+      name: body.name,
+      botMode: body.botMode,
+    });
   }
 
   @Delete(':id')

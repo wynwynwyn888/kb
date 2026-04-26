@@ -6,15 +6,12 @@
 // - They do NOT refresh - they are long-lived API keys
 // - The token itself is used directly as the bearer token for GHL API
 //
-// IMPORTANT: This implementation stores the encrypted token and uses it directly.
-// For full production, consider:
-// - Using Supabase Vault for additional security
-// - Adding token rotation if GHL supports it
-// - Proper error handling for expired/revoked tokens
+// Tokens are stored encrypted (`encrypt()`); always `decrypt()` before calling GHL (`createGhlClient`).
 
+import { randomUUID } from 'node:crypto';
 import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { getSupabaseService } from '../../lib/supabase';
-import { encrypt, maskToken, safeLog } from '../../lib/encryption';
+import { decrypt, encrypt, maskToken, safeLog } from '../../lib/encryption';
 import { createGhlClient, GhlConnectionStatus } from '@aisbp/ghl-client';
 
 export interface SaveConnectionDto {
@@ -36,6 +33,16 @@ export interface ConnectionStatusResponse {
 @Injectable()
 export class GhlService {
   private supabase = getSupabaseService();
+
+  private decryptGhlTokenOrThrow(encrypted: string): string {
+    try {
+      return decrypt(String(encrypted));
+    } catch {
+      throw new BadRequestException(
+        'Could not read the stored HighLevel token. Disconnect and save the connection again with a fresh private integration token.',
+      );
+    }
+  }
 
   /**
    * Get GHL connection status for a tenant
@@ -87,8 +94,28 @@ export class GhlService {
       throw new BadRequestException('GHL location ID is required');
     }
 
+    const { data: existingRow } = await this.supabase
+      .from('tenant_ghl_connections')
+      .select('id, private_token_encrypted')
+      .eq('tenant_id', tenantId)
+      .maybeSingle();
+
+    const incomingToken = dto.privateIntegrationToken.trim();
+    let tokenForGhl = incomingToken;
+    if (!tokenForGhl) {
+      if (existingRow?.private_token_encrypted) {
+        try {
+          tokenForGhl = decrypt(String(existingRow.private_token_encrypted));
+        } catch {
+          throw new BadRequestException('Could not read stored token. Paste a new private integration token.');
+        }
+      } else {
+        throw new BadRequestException('Private integration token is required');
+      }
+    }
+
     // Verify token is valid before storing
-    const ghlClient = createGhlClient(dto.privateIntegrationToken.trim(), ghlLocationId);
+    const ghlClient = createGhlClient(tokenForGhl, ghlLocationId);
     const verification = await ghlClient.verifyConnection();
 
     console.log('[GhlService] Token verification:', safeLog({
@@ -101,14 +128,19 @@ export class GhlService {
       throw new BadRequestException(verification.error || 'Invalid token');
     }
 
-    // Encrypt token before storage
-    const encryptedToken = encrypt(dto.privateIntegrationToken);
+    // Encrypt token before storage (use newly pasted token, or re-store same plaintext when field left blank)
+    const encryptedToken = incomingToken ? encrypt(incomingToken) : String(existingRow?.private_token_encrypted ?? '');
+    if (!encryptedToken) {
+      throw new BadRequestException('Private integration token is required');
+    }
 
     // Get location info for metadata
     const locationInfo = await ghlClient.getLocationInfo();
 
-    // Upsert connection record
+    // Upsert connection record (table has no default for `id` — new rows need a generated UUID)
+    const rowId = existingRow?.id && typeof existingRow.id === 'string' ? existingRow.id : randomUUID();
     const connectionData = {
+      id: rowId,
       tenant_id: tenantId,
       ghl_location_id: ghlLocationId,
       private_token_encrypted: encryptedToken,
@@ -132,8 +164,9 @@ export class GhlService {
       .single();
 
     if (error) {
-      console.error('[GhlService] Failed to save connection:', safeLog({ error }));
-      throw new BadRequestException('Failed to save connection');
+      console.error('[GhlService] Failed to save connection:', safeLog({ error: error.message, code: error.code, details: error }));
+      const detail = error.message?.trim() || 'Database error';
+      throw new BadRequestException(`Could not save connection: ${detail}`);
     }
 
     await this.supabase
@@ -175,11 +208,8 @@ export class GhlService {
       throw new ForbiddenException('Access denied to this tenant');
     }
 
-    // Create GHL client using stored token
-    // NOTE: For GHL Private Integration, the stored token IS the access token
-    // We use it directly without decryption since it's stored encrypted
-    // TODO: Verify decryption approach if needed for security hardening
-    const ghlClient = createGhlClient(existing.private_token_encrypted, existing.ghl_location_id);
+    const plaintextToken = this.decryptGhlTokenOrThrow(String(existing.private_token_encrypted));
+    const ghlClient = createGhlClient(plaintextToken, existing.ghl_location_id);
     const verification = await ghlClient.verifyConnection();
 
     // Update status based on verification
@@ -240,9 +270,17 @@ export class GhlService {
       throw new ForbiddenException('Access denied to this tenant');
     }
 
-    // Perform health check using stored token
-    // NOTE: Using stored encrypted token directly as bearer token
-    const ghlClient = createGhlClient(existing.private_token_encrypted, existing.ghl_location_id);
+    let plaintextToken: string;
+    try {
+      plaintextToken = decrypt(String(existing.private_token_encrypted));
+    } catch {
+      return {
+        healthy: false,
+        message: 'Stored token could not be read (re-save the connection with a valid token)',
+        timestamp: new Date().toISOString(),
+      };
+    }
+    const ghlClient = createGhlClient(plaintextToken, existing.ghl_location_id);
     const health = await ghlClient.healthCheck();
 
     // Update last health check timestamp and status

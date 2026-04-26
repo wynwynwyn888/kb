@@ -21,6 +21,47 @@ interface AuthContextType extends AuthState {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+/** After Supabase accepts credentials, GET /auth/me can fail (API down, misconfigured env) — use a clear message. */
+function formatProfileLoadError(err: unknown): string {
+  const dev = process.env.NODE_ENV === 'development';
+  if (api.isApiHttpError(err)) {
+    const st = err.status;
+    if (st === 502 || st === 503 || st === 504) {
+      return dev
+        ? 'Could not reach the application server. Start the API your team uses with this app, then refresh and sign in again.'
+        : 'The application is temporarily unavailable. Please try again in a moment.';
+    }
+    if (st >= 500) {
+      return dev
+        ? 'The server had an error loading your profile. Ask an administrator to check recent deployments and database connectivity.'
+        : 'Something went wrong while loading your account. Please try again later.';
+    }
+    if (st === 401) {
+      return dev
+        ? 'Your session was rejected by the server. Confirm this app and the API use the same sign-in configuration.'
+        : 'Your session is no longer valid. Sign out and sign in again.';
+    }
+    if (st === 404) {
+      return dev
+        ? 'The account service endpoint was not found. Restart the API or confirm you are on the correct app URL.'
+        : 'This version of the app could not load your account. Please contact support.';
+    }
+    if (err.message && err.message !== 'Request failed') {
+      return err.message;
+    }
+    return dev
+      ? `Could not load your account (error ${st}). Check that the API is running.`
+      : 'Could not load your account. Please try again.';
+  }
+  const msg = err instanceof Error ? err.message : 'Login failed';
+  if (msg === 'Failed to fetch' || msg === 'Load failed' || (err instanceof TypeError && /fetch|network/i.test(msg))) {
+    return dev
+      ? 'Network error talking to the app server. Check your connection and that the API is running, then retry.'
+      : 'We could not reach the server. Check your connection and try again.';
+  }
+  return msg;
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState>({ user: null, loading: true, error: null });
   const [token, setToken] = useState<string | null>(null);
@@ -74,21 +115,43 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [token, applyUserFromToken]);
 
   useEffect(() => {
+    const SESSION_MS = 15_000;
+
     const initAuth = async () => {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      if (session?.access_token) {
-        const t = session.access_token;
-        setToken(t);
-        try {
-          await applyUserFromToken(t);
-        } catch {
+      try {
+        const sessionResult = await Promise.race([
+          supabase.auth.getSession(),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('session init timeout')), SESSION_MS),
+          ),
+        ]);
+
+        const {
+          data: { session },
+          error: sessionError,
+        } = sessionResult;
+
+        if (sessionError) {
           setState({ user: null, loading: false, error: null });
           setToken(null);
+          return;
         }
-      } else {
+
+        if (session?.access_token) {
+          const t = session.access_token;
+          setToken(t);
+          try {
+            await applyUserFromToken(t);
+          } catch {
+            setState({ user: null, loading: false, error: null });
+            setToken(null);
+          }
+        } else {
+          setState({ user: null, loading: false, error: null });
+        }
+      } catch {
         setState({ user: null, loading: false, error: null });
+        setToken(null);
       }
     };
 
@@ -120,29 +183,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = useCallback(
     async (email: string, password: string) => {
       setState(s => ({ ...s, loading: true, error: null }));
-      try {
-        const { data, error } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
 
-        if (error) {
-          throw error;
-        }
-
-        if (data.session?.access_token) {
-          const t = data.session.access_token;
-          setToken(t);
-          await applyUserFromToken(t);
-        }
-      } catch (err: unknown) {
-        let message = err instanceof Error ? err.message : 'Login failed';
+      if (error) {
+        let message = error.message || 'Sign-in failed';
         if (message === 'Failed to fetch' || message === 'Load failed') {
           message =
             'Cannot reach Supabase (auth). For local dev: run `supabase start` or set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY in .env.local to your Supabase project — demo users exist in that project.';
         }
         setState({ user: null, loading: false, error: message });
-        throw err;
+        throw new Error(message);
+      }
+
+      if (!data.session?.access_token) {
+        setState({ user: null, loading: false, error: 'No session from sign-in. Try again.' });
+        throw new Error('No session from sign-in. Try again.');
+      }
+
+      const t = data.session.access_token;
+      setToken(t);
+      try {
+        await applyUserFromToken(t);
+      } catch (profileErr: unknown) {
+        await supabase.auth.signOut();
+        setToken(null);
+        const profileMessage = formatProfileLoadError(profileErr);
+        setState({ user: null, loading: false, error: profileMessage });
+        throw new Error(profileMessage);
       }
     },
     [supabase, applyUserFromToken],

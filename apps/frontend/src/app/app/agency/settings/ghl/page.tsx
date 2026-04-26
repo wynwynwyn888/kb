@@ -77,7 +77,7 @@ function AgencyGhlConnectionsInner() {
         setTenants(mapped);
       })
       .catch(e => {
-        if (!cancelled) setTenantsErr(e instanceof Error ? e.message : 'Failed to load subaccounts');
+        if (!cancelled) setTenantsErr(e instanceof Error ? e.message : 'Failed to load workspaces');
       })
       .finally(() => {
         if (!cancelled) setTenantsLoading(false);
@@ -126,7 +126,7 @@ function AgencyGhlConnectionsInner() {
         ghlLocationId: loc.trim(),
         privateIntegrationToken: pit.trim(),
       });
-      setMsg('Connection saved.');
+      setMsg('HighLevel connection saved.');
       setPit('');
       await refreshConn();
     } catch (er) {
@@ -142,9 +142,14 @@ function AgencyGhlConnectionsInner() {
     setMsg('');
     setVerifying(true);
     try {
-      await verifyGhlConnection(token, tenantId);
+      const s = await verifyGhlConnection(token, tenantId);
       await refreshConn();
-      setMsg('Verification finished.');
+      if (s.connected) {
+        setMsg('Connection verified.');
+      } else {
+        setMsg('');
+        setErr(s.lastError?.trim() || 'HighLevel did not accept the saved token. Paste a new private integration token and save.');
+      }
     } catch (er) {
       setErr(er instanceof Error ? er.message : 'Verify failed');
     } finally {
@@ -159,7 +164,12 @@ function AgencyGhlConnectionsInner() {
     try {
       const h = await checkGhlHealth(token, tenantId);
       setHealth(h);
-      setMsg('Health check finished.');
+      if (h.healthy) {
+        setMsg('Connection check finished — healthy.');
+      } else {
+        setMsg('');
+        setErr(h.message || 'Health check reported a problem. Try Verify connection or save a new token.');
+      }
     } catch (er) {
       setErr(er instanceof Error ? er.message : 'Health failed');
       setHealth(null);
@@ -170,7 +180,7 @@ function AgencyGhlConnectionsInner() {
 
   const onDisconnect = async () => {
     if (!token || !tenantId) return;
-    if (!confirm('Disconnect GHL for this subaccount?')) return;
+    if (!confirm('Disconnect HighLevel for this workspace?')) return;
     setErr('');
     setMsg('');
     setDisconnecting(true);
@@ -190,26 +200,26 @@ function AgencyGhlConnectionsInner() {
 
   return (
     <div>
-      <PageHeader title="Integrations" eyebrow="GoHighLevel" />
+      <PageHeader title="HighLevel Connection" eyebrow="Agency account" />
       <p style={{ fontSize: '0.8rem', color: '#64748b', margin: '0 0 1rem', maxWidth: '32rem' }}>
-        Connection for the subaccount in the workspace control.
+        Connect one client workspace to HighLevel so AISBP can read and send conversation data.
       </p>
 
       {err && <ErrorBanner message={err} />}
       {msg && <SuccessBanner message={msg} />}
 
-      {tenantsLoading ? <LoadingBlock message="Loading subaccounts…" /> : null}
+      {tenantsLoading ? <LoadingBlock message="Loading workspaces…" /> : null}
       {!tenantsLoading && tenantsErr ? <ErrorBanner message={tenantsErr} /> : null}
       {!tenantsLoading && !tenantsErr && tenants.length === 0 ? (
-        <EmptyState title="No subaccounts" detail="Add a subaccount to the agency account first." />
+        <EmptyState title="No workspaces" detail="Create a client workspace first, then connect HighLevel." />
       ) : null}
 
-      {unknownTenant ? <ErrorBanner message="That subaccount is not in this agency. Choose another in the workspace control." /> : null}
+      {unknownTenant ? <ErrorBanner message="That workspace is not in this agency. Choose another workspace." /> : null}
 
       {!tenantsLoading && !tenantId && tenants.length > 0 ? (
         <EmptyState
-          title="No subaccount selected"
-          detail="Pick a subaccount in the workspace control to configure GHL."
+          title="No workspace selected"
+          detail="Choose a workspace from the workspace switcher to connect HighLevel."
         />
       ) : null}
 
@@ -223,15 +233,15 @@ function AgencyGhlConnectionsInner() {
             background: '#f8fafc',
           }}
         >
-          <p style={{ margin: 0, fontSize: '0.82rem', color: '#64748b' }}>Configuring GHL for</p>
+          <p style={{ margin: 0, fontSize: '0.82rem', color: '#64748b' }}>Configuring HighLevel for</p>
           <p style={{ margin: '0.2rem 0 0', fontSize: '1.05rem', fontWeight: 800, color: '#0f172a' }}>{selected.name}</p>
           <p style={{ margin: '0.4rem 0 0', display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
             <StatusPill label={selected.status} tone="neutral" />
             {selected.ghlLocationId ? (
-              <span style={{ fontSize: '0.78rem', color: '#64748b' }}>GHL loc on file (prefix: {selected.ghlLocationId.slice(0, 12)}…)</span>
+              <span style={{ fontSize: '0.78rem', color: '#64748b' }}>HighLevel location saved</span>
             ) : null}
             <Link href={`/app/tenant/${selected.id}/goals`} style={{ fontSize: '0.8rem', fontWeight: 600, color: '#2563eb' }}>
-              Open bot workspace →
+              Open workspace →
             </Link>
           </p>
         </div>
@@ -241,25 +251,25 @@ function AgencyGhlConnectionsInner() {
         <>
           <SectionCard
             title="Connection details"
-            subtitle="Location ID and private integration token from GoHighLevel."
+            subtitle="Location ID and private integration token from HighLevel."
           >
             <form onSubmit={onSave} style={{ maxWidth: '520px', display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
               <div>
                 <label style={mvpLabelStyle}>
-                  GHL location ID
+                  HighLevel location ID
                   <input
                     value={loc}
                     onChange={e => setLoc(e.target.value)}
-                    placeholder="From GHL sub-account settings"
+                    placeholder="From HighLevel location settings"
                     autoComplete="off"
                     style={mvpInputStyle}
                   />
                 </label>
-                <p style={mvpFieldHint}>Found in GHL under the subaccount’s location settings.</p>
+                <p style={mvpFieldHint}>Found in HighLevel under the workspace’s location settings.</p>
               </div>
               <div>
                 <label style={mvpLabelStyle}>
-                  Private integration token
+                  HighLevel private integration token
                   <input
                     type="password"
                     value={pit}
@@ -269,7 +279,7 @@ function AgencyGhlConnectionsInner() {
                     style={mvpInputStyle}
                   />
                 </label>
-                <p style={mvpFieldHint}>Paste a new token to rotate credentials. Leave blank when saving to keep the current token.</p>
+                <p style={mvpFieldHint}>Paste a new token to update the connection. Leave blank to keep the current token.</p>
               </div>
               <button type="submit" disabled={saving} style={{ ...mvpPrimaryButtonStyle, width: 'fit-content', opacity: saving ? 0.75 : 1 }}>
                 {saving ? 'Saving…' : 'Save connection'}
@@ -277,7 +287,7 @@ function AgencyGhlConnectionsInner() {
             </form>
           </SectionCard>
 
-          <SectionCard title="Connection status" subtitle="Current status for the selected subaccount.">
+          <SectionCard title="Connection status" subtitle="Current status for the selected workspace.">
             {connLoading && !conn ? (
               <LoadingBlock message="Loading connection…" />
             ) : conn ? (
@@ -294,7 +304,7 @@ function AgencyGhlConnectionsInner() {
                     { label: 'Location ID', value: conn.ghlLocationId ?? '—', mono: true },
                     { label: 'Verified at', value: formatDateTime(conn.verifiedAt) },
                     { label: 'Last health check', value: formatDateTime(conn.lastHealthCheckAt) },
-                    { label: 'Token (masked)', value: conn.maskToken ?? '—', mono: true },
+                    { label: 'Connection token', value: conn.maskToken ? 'Saved and hidden' : '—' },
                     {
                       label: 'Last error',
                       value: conn.lastError ? (
@@ -307,7 +317,7 @@ function AgencyGhlConnectionsInner() {
                 />
                 {conn.metadata && Object.keys(conn.metadata).length > 0 ? (
                   <details style={{ marginTop: '0.75rem', fontSize: '0.82rem' }}>
-                    <summary style={{ cursor: 'pointer', color: '#444' }}>Technical details (JSON)</summary>
+                    <summary style={{ cursor: 'pointer', color: '#444' }}>Support details</summary>
                     <pre
                       style={{
                         margin: '0.5rem 0 0',
@@ -337,7 +347,7 @@ function AgencyGhlConnectionsInner() {
                 {verifying ? 'Verifying…' : 'Verify connection'}
               </button>
               <button type="button" onClick={onHealth} disabled={healthRunning} style={mvpButtonStyle}>
-                {healthRunning ? 'Running…' : 'Health check'}
+                {healthRunning ? 'Checking…' : 'Run connection check'}
               </button>
               <button
                 type="button"

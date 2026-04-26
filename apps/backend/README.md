@@ -18,7 +18,7 @@ SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
 JWT_SECRET=your_jwt_secret_min_32_chars
 REDIS_HOST=localhost
 REDIS_PORT=6379
-GHL_API_BASE=https://services.leadconnectorhq.com
+GHL_API_BASE_URL="https://services.leadconnectorhq.com"
 OPENAI_API_KEY=sk-...          # Optional — enables live LLM generation
 ANTHROPIC_API_KEY=sk-ant-...    # Optional — future provider
 ```

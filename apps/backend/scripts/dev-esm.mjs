@@ -14,8 +14,15 @@ import { existsSync, watch } from 'node:fs';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const patchScript = join(root, 'patch-dist.mjs');
 
-/** Local dev: default to 3001 so smoke scripts (same default) hit this process. */
-const childEnv = { ...process.env, PORT: process.env.PORT ?? '3001' };
+/**
+ * Nest listens on 3001 by default. Ignore a repo-root `PORT` meant for Next/other apps —
+ * turbo often injects one `PORT` for all tasks, which would move the API to 3000 and
+ * collide with the web app. Override with `NEST_PORT` (or `API_PORT`) if needed.
+ */
+const env = { ...process.env };
+delete env.PORT;
+const nestPort = process.env.NEST_PORT?.trim() || process.env.API_PORT?.trim() || '3001';
+const childEnv = { ...env, PORT: nestPort };
 
 function patch() {
   if (!existsSync(join(root, 'dist'))) return;
@@ -74,11 +81,14 @@ const nest = spawn('npx', ['nest', 'start', '--watch'], {
 
 /**
  * Watch mode rewrites `dist/` (often overwriting patched imports) and Nest can spawn `node`
- * before `fs.watch` + debounce run; a short burst of patches after spawn covers that race.
+ * before the first 120ms interval tick — that caused ERR_MODULE_NOT_FOUND on the first run.
+ * Patch at 0–500ms, then a tight interval, then a slower long-running fallback.
  */
-/** Frequent enough to win the ESM race after watch emit; patch-dist now tolerates partial deletes. */
-const burst = setInterval(patch, 120);
-setTimeout(() => clearInterval(burst), 10000);
+for (const ms of [0, 10, 25, 50, 80, 120, 200, 350, 500]) {
+  setTimeout(() => patch(), ms);
+}
+const burst = setInterval(patch, 50);
+setTimeout(() => clearInterval(burst), 12_000);
 
 nest.on('error', (err) => {
   clearInterval(interval);

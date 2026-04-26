@@ -26,10 +26,10 @@
  * [ ] Only after success + UI check: update CHANNEL_MAP in ghl-client with dated comment.
  * -----------------------------------------------------------------------------
  */
+import { resolveGhlApiBaseUrl } from '@aisbp/ghl-client';
 import axios from 'axios';
 
-const BASE =
-  process.env['GHL_API_BASE_URL'] ?? 'https://services.leadconnectorhq.com';
+const BASE = resolveGhlApiBaseUrl(process.env['GHL_API_BASE_URL']);
 
 async function main() {
   const [, , token, locationId, contactId, ghlType, ghlChannel, ...messageParts] = process.argv;

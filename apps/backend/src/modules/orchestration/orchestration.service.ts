@@ -21,6 +21,7 @@ import type { RoutingResponse } from './dto';
 import type { ReplyDecision } from '../reply-planning/dto';
 import type { RetrievalChunk, RetrievalMeta } from '../kb/dto/retrieval.dto';
 import { safeLog } from '../../lib/encryption';
+import { resolveBotMode, type BotOperatingMode } from '../../lib/bot-mode';
 
 @Injectable()
 export class ConversationOrchestrationService {
@@ -166,16 +167,23 @@ export class ConversationOrchestrationService {
   async loadTenantContext(tenantId: string): Promise<OrchestrationInput['tenant'] | null> {
     const { data: tenant } = await this.supabase
       .from('tenants')
-      .select('id, name, bot_enabled, handover_paused, ghl_location_id')
+      .select('id, name, bot_enabled, handover_paused, ghl_location_id, settings')
       .eq('id', tenantId)
       .single();
 
     if (!tenant) return null;
 
+    const settings =
+      tenant.settings && typeof tenant.settings === 'object' && tenant.settings !== null
+        ? (tenant.settings as Record<string, unknown>)
+        : {};
+    const botMode: BotOperatingMode = resolveBotMode(settings, Boolean(tenant.bot_enabled));
+
     return {
       id: tenant.id,
       name: tenant.name,
-      botEnabled: tenant.bot_enabled,
+      botEnabled: Boolean(tenant.bot_enabled),
+      botMode,
       handoverPaused: tenant.handover_paused,
       ghlLocationId: tenant.ghl_location_id,
     };

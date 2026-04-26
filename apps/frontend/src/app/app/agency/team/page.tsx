@@ -1,9 +1,10 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   addAgencyMember,
+  isApiHttpError,
   listAgencyUsers,
   removeAgencyMember,
   updateAgencyMemberRole,
@@ -25,6 +26,16 @@ import {
 
 const AGENCY_ROLES: AgencyRoleValue[] = ['OWNER', 'ADMIN', 'OPERATOR', 'MEMBER'];
 
+function roleLabel(role: string): string {
+  const labels: Record<string, string> = {
+    OWNER: 'Owner',
+    ADMIN: 'Admin',
+    OPERATOR: 'Operator',
+    MEMBER: 'Member',
+  };
+  return labels[role] ?? role;
+}
+
 type Row = {
   id: string;
   role: string;
@@ -36,6 +47,16 @@ type Row = {
 function canManageAgencyRoster(user: { agencyRole?: string } | null): boolean {
   const r = user?.agencyRole;
   return r === 'OWNER' || r === 'ADMIN';
+}
+
+function isPlausibleEmail(raw: string): boolean {
+  const s = raw.trim();
+  if (!s) return false;
+  if (s.includes(' ') || s.includes('\n')) return false;
+  const at = s.indexOf('@');
+  if (at <= 0 || at === s.length - 1) return false;
+  const domain = s.slice(at + 1);
+  return domain.includes('.') && domain.length >= 3;
 }
 
 const thStyle = { padding: '0.65rem 0.6rem', fontWeight: 600, color: '#334155', fontSize: '0.82rem' };
@@ -55,6 +76,8 @@ export default function AgencyTeamPage() {
   const [newEmail, setNewEmail] = useState('');
   const [newProfileId, setNewProfileId] = useState('');
   const [newRole, setNewRole] = useState<AgencyRoleValue>('MEMBER');
+  const [addEmailFieldErr, setAddEmailFieldErr] = useState('');
+  const addEmailInputRef = useRef<HTMLInputElement>(null);
 
   const canManage = canManageAgencyRoster(user);
 
@@ -94,13 +117,25 @@ export default function AgencyTeamPage() {
     const em = newEmail.trim();
     const pid = newProfileId.trim();
     if (!em && !pid) {
-      setErr('Enter a work email, or open Advanced if support gave you an internal id.');
+      setErr('Enter a work email, or open Advanced options if support gave you a user ID.');
       return;
     }
     if (em && pid) {
-      setErr('Use work email or Advanced, not both.');
+      setErr('Use work email or Advanced options, not both.');
       return;
     }
+    if (em) {
+      const el = addEmailInputRef.current;
+      if (el && typeof el.checkValidity === 'function' && !el.checkValidity()) {
+        setAddEmailFieldErr(el.validationMessage || 'Enter a valid email address.');
+        return;
+      }
+      if (!isPlausibleEmail(em)) {
+        setAddEmailFieldErr('Enter a valid email address (for example, name@company.com).');
+        return;
+      }
+    }
+    setAddEmailFieldErr('');
     setErr('');
     setOk('');
     setAdding(true);
@@ -114,9 +149,21 @@ export default function AgencyTeamPage() {
       setNewEmail('');
       setNewProfileId('');
       setNewRole('MEMBER');
+      setAddEmailFieldErr('');
       setLoadKey(k => k + 1);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Failed to add member');
+      if (isApiHttpError(e)) {
+        const m = e.message.toLowerCase();
+        if (e.status === 400 && (m.includes('email') || m.includes('invalid'))) {
+          setAddEmailFieldErr('That email could not be used. Check the address and try again.');
+        } else if (e.status === 404) {
+          setErr('No account exists for that email yet. They need to sign up first, or use Advanced options.');
+        } else {
+          setErr('Could not add this person. Try again or contact support if it keeps happening.');
+        }
+      } else {
+        setErr(e instanceof Error ? e.message : 'Failed to add member');
+      }
     } finally {
       setAdding(false);
     }
@@ -166,10 +213,9 @@ export default function AgencyTeamPage() {
 
   return (
     <div>
-      <PageHeader title="Agency team" eyebrow="Agency account" />
+      <PageHeader title="Team" eyebrow="Agency account" />
       <p style={{ fontSize: '0.86rem', color: '#64748b', margin: '0 0 1rem', lineHeight: 1.5, maxWidth: '44rem' }}>
-        Everyone listed here can sign in to this agency. Add people by <strong>work email</strong> and <strong>role</strong>.
-        The person must already have an account for that email. <strong>Advanced</strong> is for support-led setup only.
+        Manage who can access this agency account. Add people by work email and role.
       </p>
 
       {err && <ErrorBanner message={err} />}
@@ -177,8 +223,7 @@ export default function AgencyTeamPage() {
 
       {!canManage && (
         <p style={{ fontSize: '0.85rem', color: '#64748b', marginBottom: '1rem' }}>
-          Your role is <strong>{user?.agencyRole ?? '—'}</strong>. Only <strong>OWNER</strong> or <strong>ADMIN</strong>{' '}
-          can change the roster.
+          Your role is <strong>{roleLabel(user?.agencyRole ?? '—')}</strong>. Only Owners or Admins can change the team.
         </p>
       )}
 
@@ -229,12 +274,12 @@ export default function AgencyTeamPage() {
                             >
                               {AGENCY_ROLES.map(r => (
                                 <option key={r} value={r}>
-                                  {r}
+                                  {roleLabel(r)}
                                 </option>
                               ))}
                             </select>
                           ) : (
-                            <StatusPill label={m.role} tone="neutral" />
+                            <StatusPill label={roleLabel(m.role)} tone="neutral" />
                           )}
                         </td>
                         {canManage ? (
@@ -288,23 +333,33 @@ export default function AgencyTeamPage() {
       )}
 
       {canManage && agencyId && (
-        <SectionCard title="Add user" subtitle="Work email, then role, then add.">
+        <SectionCard title="Add user" subtitle="Invite a teammate with a work email and role.">
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxWidth: '480px' }}>
             <label style={mvpLabelStyle}>
               Work email
               <input
+                ref={addEmailInputRef}
                 value={newEmail}
                 onChange={e => {
                   setNewEmail(e.target.value);
                   setNewProfileId('');
+                  setAddEmailFieldErr('');
                 }}
                 placeholder="name@company.com"
                 disabled={adding}
                 autoComplete="off"
                 type="email"
-                style={mvpInputStyle}
+                style={{
+                  ...mvpInputStyle,
+                  ...(addEmailFieldErr ? { borderColor: '#f87171', boxShadow: '0 0 0 1px rgba(248, 113, 113, 0.35)' } : {}),
+                }}
               />
             </label>
+            {addEmailFieldErr ? (
+              <p role="alert" style={{ fontSize: '0.8rem', color: '#b91c1c', margin: '-0.35rem 0 0', lineHeight: 1.45 }}>
+                {addEmailFieldErr}
+              </p>
+            ) : null}
             <label style={mvpLabelStyle}>
               Role
               <select
@@ -315,7 +370,7 @@ export default function AgencyTeamPage() {
               >
                 {AGENCY_ROLES.map(r => (
                   <option key={r} value={r}>
-                    {r}
+                    {roleLabel(r)}
                   </option>
                 ))}
               </select>
@@ -329,12 +384,12 @@ export default function AgencyTeamPage() {
               {adding ? 'Adding…' : 'Add user'}
             </button>
             <details>
-              <summary style={{ cursor: 'pointer', fontSize: '0.82rem', fontWeight: 600, color: '#64748b' }}>Advanced (support only)</summary>
+              <summary style={{ cursor: 'pointer', fontSize: '0.82rem', fontWeight: 600, color: '#64748b' }}>Advanced options</summary>
               <p style={{ fontSize: '0.78rem', color: '#64748b', margin: '0.5rem 0' }}>
-                Use this only when support provides an internal user id. Normal invites always use work email.
+                Use this only when support provides a user ID. Normal invites use work email.
               </p>
               <label style={mvpLabelStyle}>
-                Internal user id
+                Support user ID
                 <input
                   value={newProfileId}
                   onChange={e => {

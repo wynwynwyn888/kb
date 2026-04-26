@@ -142,7 +142,7 @@ export default function AgencyAiSettingsPage() {
     if (!token) return;
 
     if (setAsActive && !hasLiveGeneration(selectedProvider)) {
-      setErr('Only OpenAI or MiniMax can be the active live provider with the current stack. Uncheck or switch provider.');
+      setErr('Only OpenAI or MiniMax can be used for live replies right now. Choose one of those providers or save this provider for later.');
       return;
     }
     if (selectedProvider === 'MINIMAX' && !apiKey.trim() && !hasKeyThis) {
@@ -165,7 +165,7 @@ export default function AgencyAiSettingsPage() {
         setAsActive: setAsActive !== false,
         ...(selectedProvider === 'MINIMAX' ? { minimaxGroupId: minimaxGroupId.trim() } : {}),
       });
-      setOk('Provider settings saved');
+      setOk('AI provider saved');
       setApiKey('');
       setActiveProvider(saved.activeProvider ?? saved.provider);
       setActiveModel(saved.activeModel ?? saved.defaultModel);
@@ -203,7 +203,7 @@ export default function AgencyAiSettingsPage() {
     try {
       const saved = await saveSubaccountBehaviorPolicy(token, policy);
       setPolicy(saved);
-      setPolicyOk('Policy saved');
+      setPolicyOk('Workspace limits saved');
     } catch (er) {
       setPolicyErr(er instanceof Error ? er.message : 'Save failed');
     } finally {
@@ -218,10 +218,10 @@ export default function AgencyAiSettingsPage() {
 
   return (
     <div>
-      <PageHeader title="AI & models" eyebrow="Agency account" />
+      <PageHeader title="AI Provider" eyebrow="Agency account" />
       <p style={{ fontSize: '0.84rem', color: '#64748b', margin: '0 0 0.9rem', lineHeight: 1.45, maxWidth: '40rem' }}>
-        Provider keys and the live default model. Subaccount bot copy and response style are configured per subaccount; this
-        page only sets what subaccounts are allowed to change.
+        Choose the AI provider and default model used across your agency. Workspace-specific bot instructions stay in each
+        client workspace.
       </p>
 
       {loading ? (
@@ -252,26 +252,26 @@ export default function AgencyAiSettingsPage() {
         <>
           <div style={strip}>
             <span>
-              <span style={{ color: '#94a3b8', fontWeight: 600 }}>Active provider</span> {activeProvider}
+              <span style={{ color: '#94a3b8', fontWeight: 600 }}>Live provider</span> {activeProvider}
             </span>
             <span>
-              <span style={{ color: '#94a3b8', fontWeight: 600 }}>Active model</span> <span style={{ fontFamily: 'ui-monospace, monospace' }}>{activeModel}</span>
+              <span style={{ color: '#94a3b8', fontWeight: 600 }}>Default model</span> <span>{activeModel}</span>
             </span>
             <span style={{ color: !activeKeyOk ? '#b91c1c' : undefined }}>
-              <span style={{ color: '#94a3b8', fontWeight: 600 }}>API key (active provider)</span>{' '}
+              <span style={{ color: '#94a3b8', fontWeight: 600 }}>API key</span>{' '}
               {activeKeyOk ? 'on file' : 'missing'}
             </span>
             <span>
-              <span style={{ color: '#94a3b8', fontWeight: 600 }}>Editing provider</span> {selectedProvider}
+              <span style={{ color: '#94a3b8', fontWeight: 600 }}>Editing</span> {selectedProvider}
               {setAsActive && !hasLiveGeneration(selectedProvider) ? (
-                <span style={{ color: '#94a3b8' }}> — not live; uncheck to store only</span>
+                <span style={{ color: '#94a3b8' }}> — save for later use</span>
               ) : null}
             </span>
           </div>
 
           <SectionCard
-            title="Provider credentials & default model"
-            subtitle="OpenAI and MiniMax are supported as the live stack; other providers are stored for future use."
+            title="Provider"
+            subtitle="Save the AI provider and default model used for live replies."
           >
             {err ? <ErrorBanner message={err} /> : null}
             {ok ? <SuccessBanner message={ok} /> : null}
@@ -326,9 +326,9 @@ export default function AgencyAiSettingsPage() {
                   onChange={e => setSetAsActive(e.target.checked)}
                   disabled={!hasLiveGeneration(selectedProvider)}
                 />
-                Use this provider as active for generation after save
+                Use this provider for live replies after saving
                 {!hasLiveGeneration(selectedProvider) ? (
-                  <span style={{ color: '#94a3b8', fontSize: '0.75rem' }}>— only OpenAI or MiniMax are live in this stack</span>
+                  <span style={{ color: '#94a3b8', fontSize: '0.75rem' }}>— available to save, but not live yet</span>
                 ) : null}
               </label>
 
@@ -338,16 +338,16 @@ export default function AgencyAiSettingsPage() {
                   type="password"
                   value={apiKey}
                   onChange={e => setApiKey(e.target.value)}
-                  placeholder={hasKeyThis ? 'Leave blank to keep saved key' : 'Required to store this provider'}
+                  placeholder={hasKeyThis ? 'Leave blank to keep saved key' : 'Paste API key'}
                   autoComplete="new-password"
-                  style={{ ...mvpInputStyle, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}
+                  style={mvpInputStyle}
                 />
               </label>
-              {hasKeyThis ? <p style={mvpFieldHint}>A key is on file for this provider.</p> : null}
+              {hasKeyThis ? <p style={mvpFieldHint}>A key is already saved for this provider. It is never shown again.</p> : null}
 
               {selectedProvider === 'MINIMAX' ? (
                 <label style={mvpLabelStyle}>
-                  Group / org id (if your MiniMax project requires it)
+                  Organization or group ID (optional)
                   <input
                     value={minimaxGroupId}
                     onChange={e => setMinimaxGroupId(e.target.value)}
@@ -360,7 +360,7 @@ export default function AgencyAiSettingsPage() {
 
               {modelIsText ? (
                 <label style={mvpLabelStyle}>
-                  Default model id
+                  Default model
                   <input value={defaultModel} onChange={e => setDefaultModel(e.target.value)} style={mvpInputStyle} />
                 </label>
               ) : (
@@ -392,21 +392,21 @@ export default function AgencyAiSettingsPage() {
                 </label>
               )}
 
-              <p style={mvpFieldHint}>Subaccount copy lives in each subaccount’s bot settings.</p>
+              <p style={mvpFieldHint}>Client-specific persona, goals, and business notes live in each workspace.</p>
 
               <button
                 type="submit"
                 disabled={saving}
                 style={{ ...mvpPrimaryButtonStyle, width: 'fit-content', opacity: saving ? 0.85 : 1 }}
               >
-                {saving ? 'Saving…' : 'Save provider settings'}
+                {saving ? 'Saving…' : 'Save provider'}
               </button>
             </form>
           </SectionCard>
 
           <SectionCard
-            title="Subaccount policy limits"
-            subtitle="Upper and lower bounds for what subaccounts may set on their own bot. Not day-to-day tuning—that happens in each subaccount."
+            title="Workspace limits"
+            subtitle="Choose how much each client workspace can adjust its own model and reply settings."
           >
             {policyErr ? <ErrorBanner message={policyErr} /> : null}
             {policyOk ? <SuccessBanner message={policyOk} /> : null}
@@ -424,16 +424,15 @@ export default function AgencyAiSettingsPage() {
                   }
                   onChange={e => applySubaccountOverrideMaster(e.target.checked)}
                 />
-                Allow subaccounts to change model, response style, and max tokens
+                Allow workspaces to adjust model, reply style, and reply length
               </label>
-              <p style={{ ...mvpFieldHint, marginTop: 0 }}>Off locks all three; you can also change each option below on its own.</p>
+              <p style={{ ...mvpFieldHint, marginTop: 0 }}>Turn this off to keep all client workspaces on your agency defaults.</p>
               <p style={{ fontSize: '0.78rem', color: '#64748b', margin: 0 }}>
-                <strong>Style range (numeric)</strong> is the min/max of the &quot;creativity&quot; scale (0–2) subaccounts may
-                use. It is not a bot personality—only the allowed band.
+                <strong>Reply style range</strong> controls how precise or creative workspace replies are allowed to be.
               </p>
               <div style={{ display: 'grid', gap: '0.65rem', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))' }}>
                 <label style={mvpLabelStyle}>
-                  Minimum style (0–2)
+                  Most precise
                   <input
                     type="number"
                     value={policy.temperatureMin}
@@ -453,7 +452,7 @@ export default function AgencyAiSettingsPage() {
                   />
                 </label>
                 <label style={mvpLabelStyle}>
-                  Maximum style (0–2)
+                  Most creative
                   <input
                     type="number"
                     value={policy.temperatureMax}
@@ -473,7 +472,7 @@ export default function AgencyAiSettingsPage() {
                   />
                 </label>
                 <label style={mvpLabelStyle}>
-                  Minimum max tokens (per reply)
+                  Shortest allowed reply
                   <input
                     type="number"
                     value={policy.maxTokensMin}
@@ -486,7 +485,7 @@ export default function AgencyAiSettingsPage() {
                   />
                 </label>
                 <label style={mvpLabelStyle}>
-                  Maximum max tokens (per reply)
+                  Longest allowed reply
                   <input
                     type="number"
                     value={policy.maxTokensMax}
@@ -500,8 +499,7 @@ export default function AgencyAiSettingsPage() {
                 </label>
               </div>
               <p style={{ fontSize: '0.78rem', color: '#94a3b8', margin: '-0.1rem 0 0' }}>
-                Subaccount reply length and max-token fields must stay within the token limits above. Style picks on the
-                subaccount (Precise / Balanced / Creative) must stay within the style min/max.
+                Workspace reply length and style settings must stay within these limits.
               </p>
               <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', cursor: 'pointer' }}>
                 <input
@@ -509,7 +507,7 @@ export default function AgencyAiSettingsPage() {
                   checked={policy.allowResponseStyleOverride}
                   onChange={e => setPolicy(p => ({ ...p, allowResponseStyleOverride: e.target.checked }))}
                 />
-                Subaccounts may change response style
+                Workspaces may change reply style
               </label>
               <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', cursor: 'pointer' }}>
                 <input
@@ -517,7 +515,7 @@ export default function AgencyAiSettingsPage() {
                   checked={policy.allowMaxTokensOverride}
                   onChange={e => setPolicy(p => ({ ...p, allowMaxTokensOverride: e.target.checked }))}
                 />
-                Subaccounts may change reply length and max tokens
+                Workspaces may change reply length
               </label>
               <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', cursor: 'pointer' }}>
                 <input
@@ -525,14 +523,14 @@ export default function AgencyAiSettingsPage() {
                   checked={policy.allowModelOverride}
                   onChange={e => setPolicy(p => ({ ...p, allowModelOverride: e.target.checked }))}
                 />
-                Subaccounts may set an optional model override
+                Workspaces may choose a different model
               </label>
               <button
                 type="submit"
                 disabled={savingPolicy}
                 style={{ ...mvpPrimaryButtonStyle, width: 'fit-content', opacity: savingPolicy ? 0.85 : 1 }}
               >
-                {savingPolicy ? 'Saving…' : 'Save policy'}
+                {savingPolicy ? 'Saving…' : 'Save limits'}
               </button>
             </form>
           </SectionCard>

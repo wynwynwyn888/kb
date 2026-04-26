@@ -29,6 +29,8 @@ const textareaStyle = {
   fontFamily: 'inherit',
   fontSize: '0.9rem',
   lineHeight: 1.5,
+  whiteSpace: 'pre-wrap' as const,
+  overflowWrap: 'break-word' as const,
 };
 
 const sectionCard = {
@@ -87,23 +89,59 @@ function numToPreset(n: number): TempPreset {
   return 'balanced';
 }
 
-/** Parse saved prompt into three sections; legacy single-block content maps to Goals. */
+/**
+ * Parse saved prompt into three sections; legacy single-block content maps to Goals.
+ *
+ * Important: we only treat **exact** AISBP section header lines as boundaries. A previous
+ * regex used `(?=^###\\s|$)` which stopped at *any* markdown `### …` line inside persona/goals,
+ * so pasted playbooks looked like “one line” after load/save.
+ */
 function parsePromptSections(raw: string): { persona: string; goals: string; additional: string } {
-  const t = (raw || '').trim();
+  const t = (raw || '').trimEnd();
   if (!t) return { persona: '', goals: '', additional: '' };
-  if (!/^###\s/im.test(t)) {
-    return { persona: '', goals: t, additional: '' };
+
+  const lines = t.split(/\r?\n/);
+  const headerPersona = '### Bot Persona';
+  const headerGoals = '### Goals';
+  const headerAdditional = '### Additional information';
+
+  const hasOurPersonaHeader = lines.some(l => l.trim() === headerPersona);
+  if (!hasOurPersonaHeader) {
+    return { persona: '', goals: t.trim(), additional: '' };
   }
-  const take = (title: string) => {
-    const re = new RegExp(`^###\\s*${title}\\s*\\n([\\s\\S]*?)(?=^###\\s|$)`, 'im');
-    const m = t.match(re);
-    return m?.[1] != null ? m[1].trim() : '';
+
+  type Section = 'none' | 'persona' | 'goals' | 'additional';
+  let section: Section = 'none';
+  const buckets: Record<'persona' | 'goals' | 'additional', string[]> = {
+    persona: [],
+    goals: [],
+    additional: [],
   };
-  const persona = take('Bot Persona');
-  const goals = take('Goals');
-  const additional = take('Additional information');
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed === headerPersona) {
+      section = 'persona';
+      continue;
+    }
+    if (trimmed === headerGoals) {
+      section = 'goals';
+      continue;
+    }
+    if (trimmed === headerAdditional) {
+      section = 'additional';
+      continue;
+    }
+    if (section === 'none') continue;
+    buckets[section].push(line);
+  }
+
+  const persona = buckets.persona.join('\n').trim();
+  const goals = buckets.goals.join('\n').trim();
+  const additional = buckets.additional.join('\n').trim();
+
   if (!persona && !goals && !additional) {
-    return { persona: '', goals: t, additional: '' };
+    return { persona: '', goals: t.trim(), additional: '' };
   }
   return { persona, goals, additional };
 }
@@ -216,7 +254,7 @@ export function TenantGoalsPanel() {
         maxTokens: tok,
         modelOverride: p.allowModelOverride && mo ? mo : undefined,
       });
-      setOk('Saved.');
+      setOk('Bot instructions saved.');
       const refreshed = await listTenantPrompts(token, subaccountId);
       const list = Array.isArray(refreshed) ? refreshed : [];
       const match = list.find(p2 => p2.name === (profileName.trim() || DEFAULT_PROFILE)) ?? list[0];
@@ -241,10 +279,9 @@ export function TenantGoalsPanel() {
 
   return (
     <div>
-      <PageHeader title="Your bot" eyebrow="This subaccount" />
+      <PageHeader title="Bot Instructions" eyebrow="Client workspace" />
       <p style={{ fontSize: '0.88rem', color: '#64748b', margin: '0 0 1rem', lineHeight: 1.5, maxWidth: '640px' }}>
-        Who the bot is, what it should achieve, and extra business context. Agency-wide Master Prompt is configured under the
-        agency account; knowledge documents are under Knowledge Base.
+        Define how this workspace’s bot should sound, what it should achieve, and what it must know.
       </p>
 
       {err && (
@@ -277,7 +314,7 @@ export function TenantGoalsPanel() {
       {!loading && !err ? (
         <form onSubmit={onSavePrompt}>
           <div style={sectionCard}>
-            <h2 style={{ fontSize: '0.95rem', fontWeight: 800, margin: '0 0 0.5rem', color: '#0f172a' }}>Bot persona</h2>
+            <h2 style={{ fontSize: '0.95rem', fontWeight: 800, margin: '0 0 0.5rem', color: '#0f172a' }}>Persona</h2>
             <p style={{ fontSize: '0.8rem', color: '#64748b', margin: '0 0 0.5rem' }}>Identity, tone, and how the bot should sound.</p>
             <textarea
               style={textareaStyle}
@@ -287,12 +324,12 @@ export function TenantGoalsPanel() {
             />
           </div>
           <div style={sectionCard}>
-            <h2 style={{ fontSize: '0.95rem', fontWeight: 800, margin: '0 0 0.5rem', color: '#0f172a' }}>Goals</h2>
+            <h2 style={{ fontSize: '0.95rem', fontWeight: 800, margin: '0 0 0.5rem', color: '#0f172a' }}>Conversation goals</h2>
             <p style={{ fontSize: '0.8rem', color: '#64748b', margin: '0 0 0.5rem' }}>Outcomes, priorities, and what success looks like.</p>
-            <textarea style={textareaStyle} value={goals} onChange={e => setGoals(e.target.value)} aria-label="Goals" />
+            <textarea style={textareaStyle} value={goals} onChange={e => setGoals(e.target.value)} aria-label="Conversation goals" />
           </div>
           <div style={sectionCard}>
-            <h2 style={{ fontSize: '0.95rem', fontWeight: 800, margin: '0 0 0.5rem', color: '#0f172a' }}>Additional Information</h2>
+            <h2 style={{ fontSize: '0.95rem', fontWeight: 800, margin: '0 0 0.5rem', color: '#0f172a' }}>Business notes</h2>
             <p style={{ fontSize: '0.8rem', color: '#64748b', margin: '0 0 0.5rem' }}>
               Guardrails, hours, products, or anything else the bot should know.
             </p>
@@ -300,7 +337,7 @@ export function TenantGoalsPanel() {
               style={textareaStyle}
               value={additional}
               onChange={e => setAdditional(e.target.value)}
-              aria-label="Additional information"
+              aria-label="Business notes"
             />
           </div>
 
@@ -313,7 +350,7 @@ export function TenantGoalsPanel() {
             }}
           >
             <div>
-              <label style={mvpLabelStyle}>Response style</label>
+              <label style={mvpLabelStyle}>Reply style</label>
               <select
                 value={tempPreset}
                 onChange={e => setTempPreset(e.target.value as TempPreset)}
@@ -325,7 +362,7 @@ export function TenantGoalsPanel() {
                 <option value="creative">Creative</option>
               </select>
               <p style={mvpFieldHint}>
-                Balanced is the usual default. Your agency can narrow how far Precise and Creative are allowed to go.
+                Balanced is the usual default. Your agency can limit how far each workspace can adjust style.
               </p>
             </div>
             <div>
@@ -349,7 +386,7 @@ export function TenantGoalsPanel() {
               </select>
             </div>
             <div>
-              <label style={mvpLabelStyle}>Max tokens</label>
+              <label style={mvpLabelStyle}>Maximum reply length</label>
               <input
                 type="number"
                 value={maxTokens}
@@ -361,23 +398,23 @@ export function TenantGoalsPanel() {
               />
             </div>
             <div>
-              <label style={mvpLabelStyle}>Model override (optional)</label>
+              <label style={mvpLabelStyle}>Model override (Advanced)</label>
               <input
                 style={mvpInputStyle}
                 value={modelOverride}
                 onChange={e => setModelOverride(e.target.value)}
-                placeholder="Model id for this subaccount"
+                placeholder="Optional model ID"
                 autoComplete="off"
                 disabled={!policy.allowModelOverride}
               />
               {!policy.allowModelOverride ? (
-                <p style={mvpFieldHint}>Your agency has disabled model overrides for subaccounts.</p>
+                <p style={mvpFieldHint}>Your agency has disabled model overrides for workspaces.</p>
               ) : null}
             </div>
           </div>
 
           <details style={{ marginBottom: '0.75rem' }}>
-            <summary style={{ cursor: 'pointer', fontSize: '0.82rem', fontWeight: 600, color: '#64748b' }}>Advanced: profile name</summary>
+            <summary style={{ cursor: 'pointer', fontSize: '0.82rem', fontWeight: 600, color: '#64748b' }}>Advanced details</summary>
             <div style={{ marginTop: '0.65rem' }}>
               <label style={mvpLabelStyle}>Profile name</label>
               <input
@@ -386,12 +423,12 @@ export function TenantGoalsPanel() {
                 onChange={e => setProfileName(e.target.value)}
                 autoComplete="off"
               />
-              <p style={mvpFieldHint}>Default is &quot;default&quot;.</p>
+              <p style={mvpFieldHint}>Default profile name is &quot;default&quot;.</p>
             </div>
           </details>
 
           <button type="submit" style={mvpPrimaryButtonStyle} disabled={saving}>
-            {saving ? 'Saving…' : 'Save'}
+            {saving ? 'Saving…' : 'Save instructions'}
           </button>
         </form>
       ) : null}

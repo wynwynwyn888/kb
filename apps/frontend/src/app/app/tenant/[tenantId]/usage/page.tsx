@@ -62,12 +62,12 @@ export default function TenantUsagePage() {
     <div>
       {user?.agencyRole && (
         <p style={{ fontSize: '0.85rem', marginBottom: '0.75rem' }}>
-          <Link href="/app/agency/tenants">← Subaccounts</Link>
+          <Link href="/app/agency/tenants">← Client Workspaces</Link>
         </p>
       )}
-      <PageHeader title="Usage" eyebrow="Your subaccount" />
+      <PageHeader title="Usage" eyebrow="Client workspace" />
       <p style={{ fontSize: '0.88rem', color: '#64748b', margin: '0 0 1rem', lineHeight: 1.5, maxWidth: '560px' }}>
-        Credits for this billing period. Message analytics will appear here when reporting APIs exist.
+        Track credits, message usage, and activity for this workspace.
       </p>
 
       {err && (
@@ -154,10 +154,10 @@ export default function TenantUsagePage() {
               </p>
             </div>
           ) : (
-            <SectionCard title="Credits" subtitle="No wallet returned for this subaccount yet.">
+            <SectionCard title="Credits" subtitle="No usage has been recorded for this workspace yet.">
               <EmptyState
-                title="No quota on file"
-                detail="When your plan includes a credit pool, it will show here automatically."
+                title="No usage recorded yet"
+                detail="Usage will appear here after the bot starts replying to customers."
               />
             </SectionCard>
           )}
@@ -173,8 +173,7 @@ export default function TenantUsagePage() {
               lineHeight: 1.45,
             }}
           >
-            <strong style={{ color: '#475569' }}>Trends &amp; analytics</strong> — not available in this panel yet
-            (needs aggregated usage APIs).
+            <strong style={{ color: '#475569' }}>Trends &amp; analytics</strong> — Coming soon.
           </div>
         </>
       ) : null}

@@ -21,10 +21,10 @@ export function formatPostgrestError(err: unknown): string {
   if (err == null) return 'null';
   if (typeof err === 'object' && err !== null) {
     const o = err as Record<string, unknown>;
-    const msg = typeof o.message === 'string' ? o.message : '';
-    const code = typeof o.code === 'string' ? o.code : '';
-    const details = typeof o.details === 'string' ? o.details : '';
-    const hint = typeof o.hint === 'string' ? o.hint : '';
+    const msg = typeof o['message'] === 'string' ? o['message'] : '';
+    const code = typeof o['code'] === 'string' ? o['code'] : '';
+    const details = typeof o['details'] === 'string' ? o['details'] : '';
+    const hint = typeof o['hint'] === 'string' ? o['hint'] : '';
     const parts = [
       msg,
       code ? `code=${code}` : '',

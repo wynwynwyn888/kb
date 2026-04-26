@@ -36,10 +36,41 @@ type ProviderRow = {
   settings: Record<string, unknown>;
 };
 
+const DEFAULT_MINIMAX_MODEL = 'MiniMax-M2.7';
+const DEFAULT_OPENAI_MODEL = 'gpt-4o-mini';
+
 @Injectable()
 export class GenerationService {
   private readonly logger = new Logger(GenerationService.name);
   private readonly supabase = getSupabaseService();
+
+  /** OpenAI fallback only when a real-looking API key is configured (no demo/placeholder keys). */
+  private isUsableOpenAiFallbackKey(apiKey: string | null | undefined): boolean {
+    const k = (apiKey ?? '').trim();
+    if (!k) return false;
+    const lower = k.toLowerCase();
+    if (lower.startsWith('demo-key')) return false;
+    if (lower.startsWith('sk-test')) return false;
+    if (/^sk-(demo|test|placeholder|xxxx)/i.test(k)) return false;
+    if (lower === 'placeholder' || lower === 'replace-me' || lower === 'your-api-key-here') return false;
+    return true;
+  }
+
+  /** Routing / planner may recommend an OpenAI model id; never send that string to MiniMax. */
+  private isLikelyOpenAiModelId(name: string): boolean {
+    const n = name.trim();
+    if (!n) return false;
+    if (/^gpt-/i.test(n)) return true;
+    if (/^o[0-9]/i.test(n)) return true;
+    if (/^chatgpt-/i.test(n)) return true;
+    if (/^text-davinci|^davinci|^curie|^babbage|^ada\b/i.test(n)) return true;
+    return false;
+  }
+
+  /** Avoid sending MiniMax model names to the OpenAI adapter. */
+  private isLikelyMinimaxModelId(name: string): boolean {
+    return /^minimax-/i.test(name.trim());
+  }
 
   async generateDraft(params: GenerateDraftParams): Promise<GenerateDraftResult> {
     try {
@@ -52,8 +83,9 @@ export class GenerationService {
       const active = await this.getActiveProviderName(agencyId);
       const primary = await this.loadProviderRow(agencyId, active);
       const openaiFallback = await this.loadProviderRow(agencyId, 'OPENAI');
+      const openaiFallbackOk = this.isUsableOpenAiFallbackKey(openaiFallback?.api_key);
 
-      if (!primary?.api_key && !openaiFallback?.api_key) {
+      if (!primary?.api_key && !openaiFallbackOk) {
         this.logger.debug('No API keys for active or OpenAI — skipping');
         return { content: null, skipReason: 'no_provider' };
       }
@@ -67,19 +99,23 @@ export class GenerationService {
             ? { content: cleaned, usedFallbackProvider: 'OPENAI' }
             : { content: cleaned };
         }
-        if (active !== 'OPENAI' && openaiFallback?.api_key) {
+        if (active !== 'OPENAI' && openaiFallbackOk && openaiFallback) {
           this.logger.warn(`Primary provider ${active} failed or empty; trying OpenAI fallback`);
           const r2 = await this.runProvider(params, openaiFallback, 'OPENAI');
           const cleaned2 = this.sanitizeCustomerFacing(r2.content);
           if (cleaned2) {
             return { content: cleaned2, usedFallbackProvider: 'OPENAI' };
           }
+        } else if (active !== 'OPENAI' && openaiFallback?.api_key && !openaiFallbackOk) {
+          this.logger.warn(
+            `Primary provider ${active} failed; OpenAI fallback skipped (no usable OpenAI API key configured)`,
+          );
         }
         return { content: null, skipReason: 'generation_failed' };
       }
 
       // No primary key — use OpenAI only
-      if (openaiFallback?.api_key) {
+      if (openaiFallbackOk && openaiFallback) {
         const r2 = await this.runProvider(params, openaiFallback, 'OPENAI');
         const cleaned2 = this.sanitizeCustomerFacing(r2.content);
         if (cleaned2) {
@@ -112,14 +148,33 @@ export class GenerationService {
     }
 
     const settings = row.settings ?? {};
-    const defModel = (settings['defaultModel'] as string) ?? 'gpt-4o-mini';
+    const settingsModel = (settings['defaultModel'] as string | undefined)?.trim();
+    const defModel =
+      providerName === 'MINIMAX'
+        ? settingsModel || DEFAULT_MINIMAX_MODEL
+        : settingsModel || DEFAULT_OPENAI_MODEL;
     const agTemp = (settings['temperature'] as number) ?? 0.7;
     const agMax = (settings['maxTokens'] as number) ?? 500;
     const temp =
       params.temperature != null && Number.isFinite(params.temperature) ? params.temperature! : agTemp;
     const maxT =
       params.maxTokens != null && Number.isFinite(params.maxTokens) ? Math.floor(params.maxTokens) : agMax;
-    const model = params.model?.trim() || defModel;
+    const requested = params.model?.trim() ?? '';
+    let model = requested || defModel;
+    if (providerName === 'MINIMAX') {
+      if (!requested || this.isLikelyOpenAiModelId(requested) || this.isLikelyOpenAiModelId(model)) {
+        model = defModel;
+      }
+      if (this.isLikelyOpenAiModelId(model)) {
+        model = DEFAULT_MINIMAX_MODEL;
+      }
+    } else if (providerName === 'OPENAI') {
+      if (requested && this.isLikelyMinimaxModelId(requested)) {
+        model = defModel;
+      } else if (this.isLikelyMinimaxModelId(model)) {
+        model = DEFAULT_OPENAI_MODEL;
+      }
+    }
     const messages = this.buildMessages(params);
     const groupId = (settings['minimaxGroupId'] as string | undefined)?.trim() || undefined;
 

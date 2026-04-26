@@ -1,5 +1,6 @@
 // MiniMax text generation — OpenAI-compatible (international) by default; legacy chat host optional.
 import axios from 'axios';
+import { summarizeAxiosErrorForLogs } from '../../lib/safe-http-error';
 
 /** International keys from platform.minimax.io use this base + `/chat/completions`. */
 const DEFAULT_BASE = 'https://api.minimax.io/v1';
@@ -18,6 +19,10 @@ function resolveBase(baseUrl?: string): string {
   // token often returns 2049 "invalid api key" on the older `api.minimax.chat` host.
   if (/\bapi\.minimax\.chat\b/i.test(b)) {
     b = DEFAULT_BASE.replace(/\/$/, '');
+  }
+  // OpenAI-compat client posts `{base}/chat/completions`; base must include `/v1`.
+  if (/^https?:\/\/api\.minimax\.io$/i.test(b)) {
+    b = `${b}/v1`;
   }
   return b;
 }
@@ -71,17 +76,22 @@ async function minimaxOpenAiCompat(
     body['group_id'] = params.groupId;
   }
 
-  const { data } = await axios.post<OpenAiCompatResponse>(
-    url,
-    body,
-    {
+  let data: OpenAiCompatResponse;
+  try {
+    const res = await axios.post<OpenAiCompatResponse>(url, body, {
       headers: {
         Authorization: `Bearer ${params.apiKey}`,
         'Content-Type': 'application/json',
       },
       timeout: 60_000,
-    },
-  );
+    });
+    data = res.data;
+  } catch (err) {
+    const hint = summarizeAxiosErrorForLogs(err, `MiniMax POST ${url}`);
+    throw new Error(
+      `${hint} | model=${params.model} group_id=${params.groupId ? 'set' : 'none'}`,
+    );
+  }
 
   if (data?.error?.message) {
     throw new Error(data.error.message);
@@ -127,17 +137,19 @@ async function minimaxLegacyV2(
     body['group_id'] = params.groupId;
   }
 
-  const { data } = await axios.post<MinimaxV2Response>(
-    url,
-    body,
-    {
+  let data: MinimaxV2Response;
+  try {
+    const res = await axios.post<MinimaxV2Response>(url, body, {
       headers: {
         Authorization: `Bearer ${params.apiKey}`,
         'Content-Type': 'application/json',
       },
       timeout: 60_000,
-    },
-  );
+    });
+    data = res.data;
+  } catch (err) {
+    throw new Error(summarizeAxiosErrorForLogs(err, `MiniMax legacy POST ${url}`));
+  }
 
   const br = (data as { base_resp?: { status_code?: number; status_msg?: string } })?.base_resp;
   if (br && br.status_code != null && br.status_code !== 0) {

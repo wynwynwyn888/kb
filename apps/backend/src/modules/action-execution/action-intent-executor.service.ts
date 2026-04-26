@@ -2,6 +2,7 @@
 // Currently supports TAG_CONTACT and BOOK_SLOT.
 
 import { Injectable, Logger } from '@nestjs/common';
+import { formatPostgrestError } from '../../lib/format-postgrest-error';
 import { getSupabaseService } from '../../lib/supabase';
 import { decrypt } from '../../lib/encryption';
 import { createGhlClient } from '@aisbp/ghl-client';
@@ -274,11 +275,14 @@ export class ActionIntentExecutorService {
       .from('action_intents')
       .select('id, params')
       .eq('conversation_id', conversationId)
-      .eq('action_type', 'BOOK_SLOT')
-      .eq('status', 'DEFERRED');
+      .eq('action_type', 'UPDATE_CALENDAR')
+      .eq('status', 'DEFERRED')
+      .contains('params', { bookSlotIntent: true });
 
     if (error) {
-      this.logger.error(`Failed to load deferred book slot intents: ${error.message}`);
+      this.logger.error(
+        `Failed to load deferred book slot intents: ${formatPostgrestError(error)}`,
+      );
       return [];
     }
 

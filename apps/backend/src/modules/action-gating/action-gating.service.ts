@@ -2,6 +2,8 @@
 // This layer is internal-state only: no GHL writes, no booking API, no notifications.
 
 import { Injectable, Logger } from '@nestjs/common';
+import { randomUUID } from 'crypto';
+import { formatPostgrestError } from '../../lib/format-postgrest-error';
 import { getSupabaseService } from '../../lib/supabase';
 import type { SuggestedAction } from '../reply-planning/dto';
 import type { ActionIntentStatus } from './dto/action-gating.dto';
@@ -91,6 +93,16 @@ export class ActionGatingService {
     }
   }
 
+  /**
+   * Maps planner / gating action labels to Postgres `ActionType` enum values.
+   * `BOOK_SLOT` is persisted as `UPDATE_CALENDAR` (same DB enum used for calendar mutations).
+   */
+  private mapSuggestedActionTypeToDb(actionType: string): string {
+    if (actionType === 'BOOK_SLOT') return 'UPDATE_CALENDAR';
+    if (actionType === 'ESCALATE' || actionType === 'TRANSFER') return 'AI_GENERATE';
+    return actionType;
+  }
+
   private async persistIntent(params: {
     tenantId: string;
     conversationId: string;
@@ -101,13 +113,20 @@ export class ActionGatingService {
     reason: string;
     gatingNote: string;
   }): Promise<void> {
+    const dbActionType = this.mapSuggestedActionTypeToDb(params.actionType);
+    const paramsRow: Record<string, unknown> =
+      params.actionType === 'BOOK_SLOT'
+        ? { ...params.params, bookSlotIntent: true }
+        : { ...params.params };
+
     const { error } = await this.supabase.from('action_intents').insert({
+      id: randomUUID(),
       tenant_id: params.tenantId,
       conversation_id: params.conversationId,
-      action_type: params.actionType,
+      action_type: dbActionType,
       source: params.source,
       status: params.status,
-      params: params.params,
+      params: paramsRow,
       reason: params.reason,
       gating_note: params.gatingNote,
     });
@@ -123,7 +142,7 @@ export class ActionGatingService {
       }
       this.logger.error(
         `Failed to persist action intent: tenantId=${params.tenantId}, ` +
-        `actionType=${params.actionType}, error=${error.message}`,
+          `actionType=${params.actionType}→${dbActionType}, ${formatPostgrestError(error)}`,
       );
     }
   }
@@ -142,7 +161,13 @@ export class ActionGatingService {
       .eq('status', 'DEFERRED');
 
     if (actionType) {
-      query = query.eq('action_type', actionType);
+      if (actionType === 'BOOK_SLOT') {
+        query = query
+          .eq('action_type', 'UPDATE_CALENDAR')
+          .contains('params', { bookSlotIntent: true });
+      } else {
+        query = query.eq('action_type', this.mapSuggestedActionTypeToDb(actionType));
+      }
     }
 
     const { data, error } = await query;

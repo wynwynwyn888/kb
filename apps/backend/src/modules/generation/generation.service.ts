@@ -3,6 +3,7 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { stripModelThinking } from '@aisbp/formatter';
+import { summarizeAxiosErrorForLogs } from '../../lib/safe-http-error';
 import { getSupabaseService } from '../../lib/supabase';
 import { OpenAiProviderAdapter } from '@aisbp/ai-provider-openai';
 import { minimaxChatCompletion } from './minimax.generate';
@@ -140,7 +141,11 @@ export class GenerationService {
         this.logger.log(`MiniMax ok: model=${out.model} tokens~=${out.totalTokens}`);
         return { content: out.content || null, usedFallback: false };
       } catch (e) {
-        this.logger.warn(`MiniMax error: ${e instanceof Error ? e.message : e}`);
+        this.logger.warn(
+          `MiniMax error: ${e instanceof Error ? e.message : e} — ` +
+            `check Agency AI: MiniMax default model, API base (must be https://api.minimax.io/v1), ` +
+            `and minimaxGroupId if your account requires it.`,
+        );
         return { content: null, usedFallback: false };
       }
     }
@@ -153,14 +158,23 @@ export class GenerationService {
       maxTokens: maxT,
       temperature: temp,
     });
-    const result = await adapter.generate({
-      model,
-      messages,
-      temperature: temp,
-      maxTokens: maxT,
-    });
-    this.logger.log(`OpenAI ok: model=${result.model} tokens=${result.usage.totalTokens}`);
-    return { content: result.content || null, usedFallback: false };
+    try {
+      const result = await adapter.generate({
+        model,
+        messages,
+        temperature: temp,
+        maxTokens: maxT,
+      });
+      this.logger.log(`OpenAI ok: model=${result.model} tokens=${result.usage.totalTokens}`);
+      return { content: result.content || null, usedFallback: false };
+    } catch (e) {
+      const detail = summarizeAxiosErrorForLogs(e, 'OpenAI chat/completions');
+      this.logger.warn(
+        `${detail} — verify OPENAI provider API key and endpoint in Agency Settings → AI; ` +
+          `401 usually means missing/invalid/revoked key.`,
+      );
+      return { content: null, usedFallback: false };
+    }
   }
 
   private buildMessages(

@@ -1,4 +1,5 @@
 # Next.js app — build from repo root (same as infra/vps/Dockerfile).
+# Standalone output: copy `.next/static` + `public` into the traced tree (Next does not bundle them into standalone).
 # syntax=docker/dockerfile:1
 
 FROM node:20-bookworm-slim AS base
@@ -30,8 +31,16 @@ FROM base AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3000
+ENV HOSTNAME=0.0.0.0
 # Server-side BFF proxy (see apps/frontend/src/lib/server/proxy-to-nest.ts)
 ENV BACKEND_URL=http://backend:3001
-COPY --from=build /app /app
+
+# Monorepo standalone layout: `.next/standalone` contains `apps/frontend/server.js` + traced `node_modules`.
+COPY --from=build /app/apps/frontend/.next/standalone ./
+# Not included in standalone — without this, `/_next/static/*` returns 404 in production.
+COPY --from=build /app/apps/frontend/.next/static ./apps/frontend/.next/static
+COPY --from=build /app/apps/frontend/public ./apps/frontend/public
+
 EXPOSE 3000
-CMD ["pnpm", "--filter", "@aisbp/frontend", "exec", "next", "start", "-H", "0.0.0.0", "-p", "3000"]
+WORKDIR /app/apps/frontend
+CMD ["node", "server.js"]

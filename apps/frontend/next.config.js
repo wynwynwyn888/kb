@@ -1,6 +1,12 @@
+const path = require('path');
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  /** Trace + minimal server bundle for Docker; static chunks still live under `.next/static` (copied in Dockerfile). */
+  output: 'standalone',
+  /** Monorepo root so `next build` standalone tracing includes workspace packages when cwd is `apps/frontend`. */
+  outputFileTracingRoot: path.join(__dirname, '../..'),
   transpilePackages: ['@aisbp/types', '@aisbp/formatter'],
   /**
    * In dev, avoid the browser reusing a **cached HTML document** that still references old

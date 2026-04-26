@@ -1,6 +1,7 @@
 // Webhooks controller - receives inbound messages from GHL
 
 import {
+  BadRequestException,
   Controller,
   Post,
   Body,
@@ -13,7 +14,11 @@ import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { WebhooksService } from './webhooks.service';
 import { formatPostgrestError } from '../../lib/format-postgrest-error';
 import { WebhookVerificationService } from './webhook-verification.service';
-import { GhlWebhookPayload } from './dto/ghl-webhook.payload';
+import type { GhlWebhookPayload } from './dto/ghl-webhook.payload';
+import {
+  coerceGhlWebhookPayload,
+  summarizeGhlWebhookBodyKeys,
+} from './ghl-webhook-payload-shape';
 
 @ApiTags('webhooks')
 @Controller('webhooks/ghl')
@@ -30,9 +35,22 @@ export class WebhooksController {
   @ApiOperation({ summary: 'Handle GHL webhook events' })
   @ApiResponse({ status: 200, description: 'Webhook acknowledged' })
   async handleWebhook(
-    @Body() payload: GhlWebhookPayload,
+    @Body() body: unknown,
     @Headers('x-ghl-signature') signature: string,
   ) {
+    this.logger.log(summarizeGhlWebhookBodyKeys(body));
+
+    let payload: GhlWebhookPayload;
+    try {
+      const coerced = coerceGhlWebhookPayload(body);
+      payload = coerced.payload;
+      this.logger.log(`Webhook payload shape detected: ${coerced.shape}`);
+    } catch (e) {
+      throw new BadRequestException(
+        e instanceof Error ? e.message : 'Invalid webhook payload',
+      );
+    }
+
     // Log safe fields only — never log raw payload or message content
     this.logger.log(
       `Webhook received: event=${payload.event}, locationId=${payload.locationId}`,

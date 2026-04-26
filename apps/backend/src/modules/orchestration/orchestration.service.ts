@@ -4,6 +4,8 @@
 // Does NOT send outbound message — that is a later layer's responsibility.
 
 import { Injectable, Logger } from '@nestjs/common';
+import { randomUUID } from 'crypto';
+import { formatPostgrestError } from '../../lib/format-postgrest-error';
 import { getSupabaseService } from '../../lib/supabase';
 import { OrchestrationGuards } from './orchestration-guards.service';
 import { ConversationMemoryLoader } from './conversation-memory-loader';
@@ -406,6 +408,7 @@ export class ConversationOrchestrationService {
     }
 
     const logData = {
+      id: randomUUID(),
       tenant_id: input.tenantId,
       conversation_id: input.conversationId,
       webhook_event_id: input.webhookEventId ?? null,
@@ -427,7 +430,7 @@ export class ConversationOrchestrationService {
 
     if (error) {
       this.logger.error(
-        `Failed to persist orchestration log: ${safeLog({ error: error.message })}`,
+        `Failed to persist orchestration log: ${safeLog({ error: formatPostgrestError(error) })}`,
       );
       return undefined;
     }

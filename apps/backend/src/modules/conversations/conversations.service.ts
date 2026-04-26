@@ -1,6 +1,7 @@
 // Conversations service - manages conversation state and messages
 
 import { Injectable, Logger } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import { getSupabaseService } from '../../lib/supabase';
 
 @Injectable()
@@ -19,14 +20,17 @@ export class ConversationsService {
     note?: string,
   ): Promise<string> {
     // Insert handover event
+    const now = new Date().toISOString();
     const { data: event, error: eventError } = await this.supabase
       .from('handover_events')
       .insert({
+        id: randomUUID(),
         conversation_id: conversationId,
         type,
         status: 'ACTIVE',
         initiated_by: initiatedBy,
         note: note ?? null,
+        updated_at: now,
       })
       .select('id')
       .single();

@@ -9,6 +9,8 @@
 import { Processor, WorkerHost, OnWorkerEvent, InjectQueue } from '@nestjs/bullmq';
 import { Job } from 'bullmq';
 import { Injectable, Logger } from '@nestjs/common';
+import { randomUUID } from 'crypto';
+import { formatPostgrestError } from '../../lib/format-postgrest-error';
 import { getSupabaseService } from '../../lib/supabase';
 import { QUEUES } from '../queue.constants';
 import { ConversationOrchestrationService } from '../../modules/orchestration/orchestration.service';
@@ -163,7 +165,7 @@ export class InboundMessageProcessor extends WorkerHost {
         `Orchestration result: conversationId=${conversation.id}, outcome=${result.outcome}, model=${result.routing?.recommendedModel ?? 'n/a'}`,
       );
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'unknown';
+      const message = formatPostgrestError(error);
       this.logger.error(`Failed to process inbound message: ${message}`);
 
       if (webhookEventId) {
@@ -212,21 +214,26 @@ export class InboundMessageProcessor extends WorkerHost {
         return existing;
       }
 
+      const now = new Date().toISOString();
       const { data, error } = await this.supabase
         .from('conversations')
         .insert({
+          id: randomUUID(),
           tenant_id: tenantId,
           ghl_conversation_id: ghlConversationId,
           contact_id: contactId,
           channel: 'WHATSAPP',
           status: 'ACTIVE',
-          last_message_at: new Date().toISOString(),
+          last_message_at: now,
+          updated_at: now,
         })
         .select('id')
         .single();
 
       if (error || !data) {
-        throw new Error(`Failed to create conversation: ${error?.message}`);
+        throw new Error(
+          `Failed to create conversation: ${formatPostgrestError(error)}`,
+        );
       }
 
       return data;
@@ -250,15 +257,18 @@ export class InboundMessageProcessor extends WorkerHost {
       return existing;
     }
 
+    const now = new Date().toISOString();
     const { data, error } = await this.supabase
       .from('conversations')
       .insert({
+        id: randomUUID(),
         tenant_id: tenantId,
         ghl_conversation_id: provisionalGhlConversationId,
         contact_id: contactId,
         channel: 'WHATSAPP',
         status: 'ACTIVE',
-        last_message_at: new Date().toISOString(),
+        last_message_at: now,
+        updated_at: now,
         metadata: {
           provisional: true,
           provisionalKey: `prov:${contactId}`,
@@ -269,7 +279,9 @@ export class InboundMessageProcessor extends WorkerHost {
       .single();
 
     if (error || !data) {
-      throw new Error(`Failed to create provisional conversation: ${error?.message}`);
+      throw new Error(
+        `Failed to create provisional conversation: ${formatPostgrestError(error)}`,
+      );
     }
 
     return data;
@@ -286,6 +298,7 @@ export class InboundMessageProcessor extends WorkerHost {
     },
   ): Promise<void> {
     const { error } = await this.supabase.from('messages').insert({
+      id: randomUUID(),
       conversation_id: conversationId,
       direction: message.direction,
       sender: message.sender,
@@ -295,7 +308,7 @@ export class InboundMessageProcessor extends WorkerHost {
     });
 
     if (error) {
-      throw new Error(`Failed to add message: ${error.message}`);
+      throw new Error(`Failed to add message: ${formatPostgrestError(error)}`);
     }
   }
 

@@ -3,6 +3,7 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
+import { randomUUID } from 'crypto';
 import { getSupabaseService } from '../../lib/supabase';
 import { QUEUES } from '../../queues/queue.constants';
 
@@ -21,15 +22,18 @@ export class HandoverService {
     initiatedBy: string,
     note?: string,
   ): Promise<string> {
+    const now = new Date().toISOString();
     // Insert handover event
     const { data: event, error: eventError } = await this.supabase
       .from('handover_events')
       .insert({
+        id: randomUUID(),
         conversation_id: conversationId,
         type,
         status: 'ACTIVE',
         initiated_by: initiatedBy,
         note: note ?? null,
+        updated_at: now,
       })
       .select('id')
       .single();

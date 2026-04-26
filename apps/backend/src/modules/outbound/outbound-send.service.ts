@@ -6,6 +6,7 @@
 // conversation context in this service.
 
 import { Injectable, Logger } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import { getSupabaseService } from '../../lib/supabase';
 import { createGhlClient } from '@aisbp/ghl-client';
 import { decrypt, safeLog } from '../../lib/encryption';
@@ -275,6 +276,7 @@ export class OutboundSendService {
     ghlMessageId?: string;
   }): Promise<void> {
     await this.supabase.from('messages').insert({
+      id: randomUUID(),
       conversation_id: params.conversationId,
       direction: 'OUTBOUND',
       sender: 'AI',

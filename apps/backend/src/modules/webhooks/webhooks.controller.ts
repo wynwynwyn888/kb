@@ -10,7 +10,8 @@ import {
   Logger,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
-import { WebhooksService, formatPostgrestError } from './webhooks.service';
+import { WebhooksService } from './webhooks.service';
+import { formatPostgrestError } from '../../lib/format-postgrest-error';
 import { WebhookVerificationService } from './webhook-verification.service';
 import { GhlWebhookPayload } from './dto/ghl-webhook.payload';
 

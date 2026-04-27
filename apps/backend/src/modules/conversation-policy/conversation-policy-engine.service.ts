@@ -12,12 +12,21 @@ import {
 import { resolveShortSelection } from './option-resolver';
 import { MENU_CATEGORY_PROMPT, menuCategorySelectedNoKbReply, SELECTION_UNCLEAR_REPLY } from './policy-menu-copy';
 import type { SelectionResolution } from './option-resolver';
+import {
+  assessRestaurantBookingMessage,
+  bookingAskPreferredDateTimeReply,
+  extractGuestCountHint,
+  extractOutOfDomainServicePhrase,
+  outOfDomainBookingClarificationReply,
+} from '../../lib/booking-domain';
 
 export type PolicyReplyKind =
   | 'none'
   | 'menu_category_prompt'
   | 'menu_category_selected_no_kb'
-  | 'selection_clarification';
+  | 'selection_clarification'
+  | 'booking_out_of_domain'
+  | 'booking_ask_preference';
 
 export interface ConversationPolicyOutcome {
   latestIntent: ConversationIntent;
@@ -41,20 +50,48 @@ export class ConversationPolicyEngineService {
     memory: MemoryEntry[];
     policyState: AisbpPolicyStateV1;
     kbChunksRanked: RetrievalChunk[];
+    /** Tenant / subaccount display name for booking copy */
+    tenantDisplayName?: string;
   }): ConversationPolicyOutcome {
-    const { intent, incomingRaw, memory, kbChunksRanked } = params;
+    const { intent, incomingRaw, memory, kbChunksRanked, tenantDisplayName } = params;
     const now = Date.now();
     let state: AisbpPolicyStateV1 = { ...params.policyState, v: 1 };
+    const hadMenuAwaiting = state.awaiting === 'menu_category_selection';
 
     if (policyStateExpired(state, now)) {
+      this.logger.log(`Policy state replaced: reason=expired`);
       state = emptyPolicyState();
+    } else if (hadMenuAwaiting && !state.expiresAt) {
+      this.logger.log(`Policy state kept: reason=no_expiry`);
     }
 
     this.logger.log(
       `Conversation policy: latestIntent=${intent}, activeTopic=${state.activeTopic ?? 'none'}, awaiting=${state.awaiting ?? 'none'}`,
     );
 
+    const tenantName = (tenantDisplayName ?? '').trim() || 'our restaurant';
+
+    const replaceTopicIfNeeded = (
+      base: AisbpPolicyStateV1,
+      topicKey: string,
+    ): { next: AisbpPolicyStateV1; clearedMenu: boolean } => {
+      const clearedMenu = base.awaiting === 'menu_category_selection';
+      const next: AisbpPolicyStateV1 = {
+        ...base,
+        ...clearAwaitingState(base),
+        activeTopic: topicKey,
+        updatedAt: new Date().toISOString(),
+      };
+      if (clearedMenu) {
+        this.logger.log(`Policy state replaced: reason=new_topic intent=${intent}`);
+      }
+      return { next, clearedMenu };
+    };
+
     if (intent === 'HUMAN_HANDOVER' || intent === 'COMPLAINT') {
+      if (hadMenuAwaiting) {
+        this.logger.log(`Policy state replaced: reason=new_topic intent=${intent}`);
+      }
       state = {
         v: 1,
         activeTopic: intent === 'COMPLAINT' ? 'complaint' : 'handover',
@@ -75,15 +112,54 @@ export class ConversationPolicyEngineService {
       };
     }
 
-    if (intent === 'BUSINESS_HOURS') {
-      const next = {
-        ...state,
-        awaiting: null,
-        options: undefined,
-        expiresAt: null,
-        activeTopic: 'hours',
-        updatedAt: new Date().toISOString(),
+    if (intent === 'BOOKING') {
+      const booking = assessRestaurantBookingMessage(incomingRaw);
+      if (!booking.inDomain) {
+        this.logger.log(`Policy booking rejected: out_of_domain_service`);
+        const phrase = extractOutOfDomainServicePhrase(incomingRaw);
+        const { next } = replaceTopicIfNeeded(state, 'booking');
+        return {
+          latestIntent: intent,
+          resolvedSelection: null,
+          kbChunks: [],
+          policyForcedReply: outOfDomainBookingClarificationReply(tenantName, phrase),
+          policyReplyKind: 'booking_out_of_domain',
+          nextPolicyState: next,
+          conversationStateSummary: 'booking_out_of_domain',
+          menuSelectionActive: false,
+        };
+      }
+      const guests = extractGuestCountHint(incomingRaw);
+      const { next } = replaceTopicIfNeeded(state, 'booking');
+      this.logger.log(`Policy reply chosen: booking_ask_preference`);
+      return {
+        latestIntent: intent,
+        resolvedSelection: null,
+        kbChunks: kbChunksRanked,
+        policyForcedReply: bookingAskPreferredDateTimeReply(guests),
+        policyReplyKind: 'booking_ask_preference',
+        nextPolicyState: next,
+        conversationStateSummary: guests != null ? `booking_guests=${guests}` : 'booking_ask_datetime',
+        menuSelectionActive: false,
       };
+    }
+
+    if (intent === 'PRICE' || intent === 'LOCATION') {
+      const { next } = replaceTopicIfNeeded(state, intent === 'PRICE' ? 'price' : 'location');
+      return {
+        latestIntent: intent,
+        resolvedSelection: null,
+        kbChunks: kbChunksRanked,
+        policyForcedReply: null,
+        policyReplyKind: 'none',
+        nextPolicyState: next,
+        conversationStateSummary: `topic=${intent.toLowerCase()}`,
+        menuSelectionActive: false,
+      };
+    }
+
+    if (intent === 'BUSINESS_HOURS') {
+      const { next } = replaceTopicIfNeeded(state, 'hours');
       return {
         latestIntent: intent,
         resolvedSelection: null,
@@ -122,6 +198,26 @@ export class ConversationPolicyEngineService {
             menuSelectionActive: true,
           };
         }
+        if (kbChunksRanked.length > 0) {
+          this.logger.log(
+            `Policy menu KB present: selectedText=${sel.selectedText}, chunks=${kbChunksRanked.length}`,
+          );
+          return {
+            latestIntent: intent,
+            resolvedSelection: sel,
+            kbChunks: kbChunksRanked,
+            policyForcedReply: null,
+            policyReplyKind: 'none',
+            nextPolicyState: {
+              ...clearAwaitingState(state),
+              activeTopic: 'menu',
+              updatedAt: new Date().toISOString(),
+            },
+            conversationStateSummary: `menu_pick=${sel.selectedLabel}`,
+            menuSelectionActive: true,
+          };
+        }
+        this.logger.log(`Policy menu no supported KB: selectedText=${sel.selectedText}`);
         const reply = menuCategorySelectedNoKbReply(sel.selectedText);
         this.logger.log(`Policy reply chosen: menu_category_selected_no_kb`);
         return {
@@ -191,7 +287,6 @@ export class ConversationPolicyEngineService {
         };
       }
 
-      const expires = new Date(now + 10 * 60 * 1000).toISOString();
       const options: Record<string, string> = {
         A: 'Starters',
         B: 'Mains',
@@ -211,7 +306,7 @@ export class ConversationPolicyEngineService {
           awaiting: 'menu_category_selection',
           options,
           lastAssistantOptions: options,
-          expiresAt: expires,
+          expiresAt: null,
           updatedAt: new Date().toISOString(),
         },
         conversationStateSummary: 'awaiting=menu_category_selection',

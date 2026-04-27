@@ -10,6 +10,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { stripCustomerFacingMeta, stripModelThinking } from '@aisbp/formatter';
 import { packPlainTextIntoOutboundBubbles } from '../../lib/outbound-bubbles';
 import { polishKbSnippetForCustomer } from '../../lib/kb-faq-customer-text';
+import { applyBusinessHoursGroundingGuard } from '../../lib/business-hours-grounding-guard';
+import { applyMenuKbGroundingGuard } from '../../lib/menu-kb-grounding-guard';
 import { applyOutboundPolicyGuard } from '../../lib/outbound-policy-guard';
 import { detectMenuIntentInMessage } from '../../lib/kb-relevance';
 import type { ConversationIntent } from '../conversation-policy/conversation-intent';
@@ -32,6 +34,8 @@ export interface ReplyPlanPolicyContext {
   policyForcedReply: string | null;
   policyReplyKind: string;
   menuSelectionActive: boolean;
+  /** Latest inbound customer text (for hours/meal grounding). */
+  latestUserMessage?: string;
 }
 
 @Injectable()
@@ -85,7 +89,20 @@ export class ReplyPlannerService {
         menuSelectionActive: policyContext!.menuSelectionActive,
         draftText: forced,
       });
-      const bubbles = this.formatIntoBubbles(guarded);
+      const afterMenu = applyMenuKbGroundingGuard({
+        latestIntent: policyContext!.latestIntent,
+        menuSelectionActive: policyContext!.menuSelectionActive,
+        draftText: guarded,
+        kbChunks,
+        categoryLabel: policyContext!.resolvedSelection?.selectedText ?? null,
+      });
+      const afterHours = applyBusinessHoursGroundingGuard({
+        latestIntent: policyContext!.latestIntent,
+        userMessage: policyContext?.latestUserMessage ?? '',
+        kbChunks,
+        draftText: afterMenu,
+      });
+      const bubbles = this.formatIntoBubbles(afterHours);
       const suggestedActions = this.suggestActions(routing, kbChunks);
       return {
         planStatus: 'PLANNED',
@@ -117,7 +134,20 @@ export class ReplyPlannerService {
       menuSelectionActive: policyContext?.menuSelectionActive ?? false,
       draftText: draft.text,
     });
-    const bubbles = this.formatIntoBubbles(guardedDraft);
+    const afterMenu = applyMenuKbGroundingGuard({
+      latestIntent: policyContext?.latestIntent ?? 'UNKNOWN',
+      menuSelectionActive: policyContext?.menuSelectionActive ?? false,
+      draftText: guardedDraft,
+      kbChunks,
+      categoryLabel: policyContext?.resolvedSelection?.selectedText ?? null,
+    });
+    const afterHours = applyBusinessHoursGroundingGuard({
+      latestIntent: policyContext?.latestIntent ?? 'UNKNOWN',
+      userMessage: policyContext?.latestUserMessage ?? '',
+      kbChunks,
+      draftText: afterMenu,
+    });
+    const bubbles = this.formatIntoBubbles(afterHours);
 
     // ---------- Suggest actions ----------
     const suggestedActions = this.suggestActions(routing, kbChunks);

@@ -99,4 +99,26 @@ describe('filterKbChunksForPolicy', () => {
     expect(chunks.map(c => c.title)).toContain('FAQ: Do you have a vegan menu?');
     expect(chunks.map(c => c.title)).not.toContain('FAQ: What are your opening hours?');
   });
+
+  it('7: BUSINESS_HOURS + what time you open keeps hours FAQ, drops menu-only', () => {
+    const { chunks } = filterKbChunksForPolicy('BUSINESS_HOURS', 'what time you open', [
+      hoursFaq,
+      menuFaq,
+    ]);
+    expect(chunks.map(c => c.title)).toContain('FAQ: What are your opening hours?');
+    expect(chunks.map(c => c.title)).not.toContain('FAQ: Do you have a vegan menu?');
+  });
+
+  it('SHORT_SELECTION with menuKbAnchor keeps category-relevant menu chunk', () => {
+    const startersChunk = chunk({
+      title: 'Starters list',
+      content: 'Soup of the day and spring rolls.',
+      metadata: {},
+    });
+    const { chunks, rejections } = filterKbChunksForPolicy('SHORT_SELECTION', 'A', [hoursFaq, startersChunk], {
+      menuKbAnchor: 'Starters',
+    });
+    expect(rejections.some(r => r.reason.includes('hours'))).toBe(true);
+    expect(chunks.map(c => c.title)).toContain('Starters list');
+  });
 });

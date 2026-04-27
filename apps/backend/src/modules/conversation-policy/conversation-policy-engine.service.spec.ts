@@ -55,7 +55,7 @@ describe('ConversationPolicyEngineService', () => {
       C: 'Desserts',
       D: 'Vegan options',
     },
-    expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    expiresAt: null,
     updatedAt: new Date().toISOString(),
   };
 
@@ -84,7 +84,7 @@ describe('ConversationPolicyEngineService', () => {
     expect(out.policyReplyKind).toBe('menu_category_prompt');
     expect(out.nextPolicyState.awaiting).toBe('menu_category_selection');
     expect(out.nextPolicyState.options?.A).toBe('Starters');
-    expect(out.nextPolicyState.expiresAt).toBeTruthy();
+    expect(out.nextPolicyState.expiresAt).toBeNull();
   });
 
   it('C: menu awaiting + "A" → starters no-KB reply', () => {
@@ -96,7 +96,8 @@ describe('ConversationPolicyEngineService', () => {
       kbChunksRanked: [],
     });
     expect(out.resolvedSelection?.selectedText).toBe('Starters');
-    expect(out.policyForcedReply).toContain('Starters');
+    expect(out.policyForcedReply).toContain('starters');
+    expect(out.policyForcedReply).toMatch(/send you the menu/i);
     expect(out.policyReplyKind).toBe('menu_category_selected_no_kb');
     expect(out.nextPolicyState.awaiting).toBeNull();
   });
@@ -171,5 +172,67 @@ describe('ConversationPolicyEngineService', () => {
     expect(out.resolvedSelection?.source).toBe('previous_assistant_options');
     expect(out.resolvedSelection?.selectedText).toBe('Mains');
     expect(out.policyForcedReply).toBeNull();
+  });
+
+  it('1: menu awaiting with no expiry — "A" still resolves after long delay semantics', () => {
+    const staleButNoExpiry = { ...menuAwaitingState, expiresAt: null };
+    const out = engine.evaluate({
+      intent: 'SHORT_SELECTION',
+      incomingRaw: 'A',
+      memory: [] as MemoryEntry[],
+      policyState: staleButNoExpiry,
+      kbChunksRanked: [],
+    });
+    expect(out.resolvedSelection?.selectedText).toBe('Starters');
+    expect(out.policyReplyKind).toBe('menu_category_selected_no_kb');
+  });
+
+  it('3: menu category selection with KB does not force template', () => {
+    const mainsKb = chunk({
+      title: 'Mains menu',
+      content: 'Grilled fish and vegetable curry.',
+      metadata: {},
+    });
+    const out = engine.evaluate({
+      intent: 'SHORT_SELECTION',
+      incomingRaw: 'B',
+      memory: [] as MemoryEntry[],
+      policyState: menuAwaitingState,
+      kbChunksRanked: [mainsKb],
+    });
+    expect(out.policyForcedReply).toBeNull();
+    expect(out.kbChunks).toHaveLength(1);
+    expect(out.kbChunks[0]!.title).toContain('Mains');
+  });
+
+  it('5: book face wash is out-of-domain booking', () => {
+    const out = engine.evaluate({
+      intent: 'BOOKING',
+      incomingRaw: 'i want to book face wash for 2pax',
+      memory: [] as MemoryEntry[],
+      policyState: menuAwaitingState,
+      kbChunksRanked: [],
+      tenantDisplayName: 'Ember & Soy',
+    });
+    expect(out.policyReplyKind).toBe('booking_out_of_domain');
+    expect(out.policyForcedReply).toContain('Ember & Soy');
+    expect(out.policyForcedReply).toMatch(/face wash|face\s*wash/i);
+    expect(out.policyForcedReply).not.toMatch(/7:00|7:30/i);
+    expect(out.nextPolicyState.awaiting).toBeNull();
+  });
+
+  it('6: book table for 2 pax asks date/time without invented slots', () => {
+    const out = engine.evaluate({
+      intent: 'BOOKING',
+      incomingRaw: 'book table for 2 pax',
+      memory: [] as MemoryEntry[],
+      policyState: emptyPolicyState(),
+      kbChunksRanked: [],
+      tenantDisplayName: 'Ember & Soy',
+    });
+    expect(out.policyReplyKind).toBe('booking_ask_preference');
+    expect(out.policyForcedReply).toContain('2 guests');
+    expect(out.policyForcedReply).toMatch(/date and time/i);
+    expect(out.policyForcedReply).not.toMatch(/7:00|7:30/);
   });
 });

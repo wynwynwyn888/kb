@@ -34,6 +34,7 @@ import {
   mergePolicyIntoConversationMetadata,
   type AisbpPolicyStateV1,
 } from '../conversation-policy/conversation-policy-state';
+import { resolveShortSelection } from '../conversation-policy/option-resolver';
 
 @Injectable()
 export class ConversationOrchestrationService {
@@ -91,20 +92,33 @@ export class ConversationOrchestrationService {
       const latestMsg = (input.incomingMessage.messageContent ?? '').trim();
       const latestIntent = classifyConversationIntent(latestMsg);
 
-      // Step 3: Retrieve KB (query = latest inbound only) + intent-aware filter
+      const policyStatePre = this.conversationPolicy.parseState(input.conversation?.metadata);
+      let retrieveQuery = latestMsg;
+      let menuKbAnchor: string | undefined;
+      if (latestIntent === 'SHORT_SELECTION' && policyStatePre.awaiting === 'menu_category_selection') {
+        const sel = resolveShortSelection(latestMsg, policyStatePre, memory.entries);
+        if (sel) {
+          menuKbAnchor = sel.selectedText;
+          retrieveQuery = `${sel.selectedText} menu food dishes`;
+        }
+      }
+
+      // Step 3: Retrieve KB + intent-aware filter (query may expand for menu category selection)
       const { chunks: kbAfterRetrieve, meta: retrievalMeta } = await this.retrieveKbContext(
         input,
         conversationId,
         latestIntent,
+        { retrieveQuery, menuKbAnchor },
       );
 
-      const policyState = this.conversationPolicy.parseState(input.conversation?.metadata);
+      const policyState = policyStatePre;
       const policyOutcome = this.conversationPolicy.evaluate({
         intent: latestIntent,
         incomingRaw: latestMsg,
         memory: memory.entries,
         policyState,
         kbChunksRanked: kbAfterRetrieve,
+        tenantDisplayName: input.tenant?.name,
       });
       const kbChunks = policyOutcome.kbChunks;
 
@@ -138,6 +152,7 @@ export class ConversationOrchestrationService {
           policyForcedReply: policyOutcome.policyForcedReply,
           policyReplyKind: policyOutcome.policyReplyKind,
           menuSelectionActive: policyOutcome.menuSelectionActive,
+          latestUserMessage: latestMsg,
         },
       });
 
@@ -355,19 +370,25 @@ export class ConversationOrchestrationService {
     input: OrchestrationInput,
     conversationId: string,
     latestIntent: ConversationIntent,
+    opts?: { retrieveQuery?: string; menuKbAnchor?: string },
   ): Promise<{ chunks: RetrievalChunk[]; meta: RetrievalMeta | null }> {
     try {
+      const retrieveQuery =
+        (opts?.retrieveQuery ?? input.incomingMessage.messageContent ?? '').trim() ||
+        (input.incomingMessage.messageContent ?? '').trim();
+
       const result = await this.kbService.retrieve({
         tenantId: input.tenantId,
         conversationId,
-        query: input.incomingMessage.messageContent,
+        query: retrieveQuery,
         topK: 5,
       });
 
       const { chunks: filteredChunks, rejections } = filterKbChunksForPolicy(
         latestIntent,
-        input.incomingMessage.messageContent,
+        (input.incomingMessage.messageContent ?? '').trim(),
         result.chunks,
+        { menuKbAnchor: opts?.menuKbAnchor },
       );
       for (const r of rejections) {
         this.logger.log(
@@ -379,7 +400,7 @@ export class ConversationOrchestrationService {
         chunksReturned: filteredChunks.length,
         chunksConsidered: result.totalConsidered,
         retrievalMode: result.retrievalMode,
-        topScore: filteredChunks[0]?.relevanceScore ?? null,
+        topScore: filteredChunks[0]?.relevanceScore ?? result.chunks[0]?.relevanceScore ?? null,
       };
 
       return { chunks: filteredChunks, meta };

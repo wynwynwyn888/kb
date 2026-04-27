@@ -346,6 +346,16 @@ export class GenerationService {
           `The user chose option ${pc.resolvedSelection.selectedLabel} (${pc.resolvedSelection.selectedText}).`,
         );
       }
+      if (pc.latestIntent === 'MENU' || pc.latestIntent === 'SHORT_SELECTION') {
+        parts.push(
+          'Menu rule: Never invent dish names, drink names, prices, availability, dietary claims, or marketing descriptions not explicitly supported by the KB excerpts.',
+        );
+      }
+      if (pc.latestIntent === 'BOOKING') {
+        parts.push(
+          'Booking rule: Never invent reservation time slots or table availability. If no booking system data is in context, only ask which date and time they prefer.',
+        );
+      }
       messages.push({ role: 'system', content: parts.join(' ') });
     }
 

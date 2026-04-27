@@ -4,6 +4,7 @@
  */
 
 import type { RetrievalChunk } from '../modules/kb/dto/retrieval.dto';
+import type { ConversationIntent } from '../modules/conversation-policy/conversation-intent';
 
 /** Tokens ignored for overlap / Jaccard (prevents "your" matching every FAQ title). */
 export const KB_STOPWORDS = new Set([
@@ -184,11 +185,11 @@ function chunkCorpus(c: RetrievalChunk): string {
   return `${c.title} ${qMeta} ${c.content}`.toLowerCase();
 }
 
-function chunkLooksHoursFocused(c: RetrievalChunk): boolean {
+export function chunkLooksHoursFocused(c: RetrievalChunk): boolean {
   return HOURS_KB.test(chunkCorpus(c));
 }
 
-function chunkLooksMenuFocused(c: RetrievalChunk): boolean {
+export function chunkLooksMenuFocused(c: RetrievalChunk): boolean {
   return MENU_KB.test(chunkCorpus(c));
 }
 
@@ -277,4 +278,121 @@ function assessKbChunkRelevance(
 
 export function detectMenuIntentInMessage(text: string): boolean {
   return MENU_QUERY.test(text.trim());
+}
+
+/**
+ * Intent-aware KB filter (after retrieval ranking). Tightens MENU / BUSINESS_HOURS;
+ * other intents use lexical relevance vs latest message.
+ */
+export type FilterKbForPolicyOptions = {
+  /** When user picked A/B/C/D, anchor retrieval filter to this category label (e.g. Starters). */
+  menuKbAnchor?: string;
+};
+
+export function filterKbChunksForPolicy(
+  intent: ConversationIntent,
+  latestUserMessage: string,
+  chunks: RetrievalChunk[],
+  opts?: FilterKbForPolicyOptions,
+): { chunks: RetrievalChunk[]; rejections: KbRejectionLogEntry[] } {
+  if (
+    intent === 'GREETING' ||
+    intent === 'CONFIRMATION' ||
+    intent === 'REJECTION' ||
+    intent === 'UNKNOWN'
+  ) {
+    return filterKbChunksForLatestUserMessage(latestUserMessage, chunks);
+  }
+
+  const menuAnchor = opts?.menuKbAnchor?.trim();
+  if (intent === 'SHORT_SELECTION' && menuAnchor) {
+    const synthetic = `${menuAnchor} menu food dishes starters mains desserts`;
+    const rejections: KbRejectionLogEntry[] = [];
+    const kept: RetrievalChunk[] = [];
+    for (const c of chunks) {
+      const hoursOnly = chunkLooksHoursFocused(c) && !chunkLooksMenuFocused(c);
+      if (hoursOnly) {
+        rejections.push({
+          reason: 'intent_menu_selection_policy_hours_only_chunk',
+          queryClass: 'menu',
+          kbTitleShort: kbTitleShortForLog(c),
+        });
+        continue;
+      }
+      const corp = chunkCorpus(c);
+      const anchorLc = menuAnchor.toLowerCase();
+      const anchorHit =
+        corp.includes(anchorLc) ||
+        tokenizeMeaningful(menuAnchor).some(t => t.length >= 3 && corp.includes(t));
+      const r = assessKbChunkRelevance(synthetic, c);
+      if (chunkLooksMenuFocused(c) && (r.ok || anchorHit)) {
+        kept.push(c);
+      } else if (!chunkLooksMenuFocused(c) && r.ok) {
+        kept.push(c);
+      } else if (r.reason) {
+        rejections.push({
+          reason: r.reason,
+          queryClass: 'menu',
+          kbTitleShort: kbTitleShortForLog(c),
+        });
+      }
+    }
+    return { chunks: kept, rejections };
+  }
+
+  if (intent === 'MENU') {
+    const rejections: KbRejectionLogEntry[] = [];
+    const kept: RetrievalChunk[] = [];
+    for (const c of chunks) {
+      const hoursOnly = chunkLooksHoursFocused(c) && !chunkLooksMenuFocused(c);
+      if (hoursOnly) {
+        rejections.push({
+          reason: 'intent_menu_policy_hours_only_chunk',
+          queryClass: 'menu',
+          kbTitleShort: kbTitleShortForLog(c),
+        });
+        continue;
+      }
+      const r = assessKbChunkRelevance(latestUserMessage, c);
+      if (r.ok || chunkLooksMenuFocused(c)) {
+        kept.push(c);
+      } else if (r.reason) {
+        rejections.push({
+          reason: r.reason,
+          queryClass: 'menu',
+          kbTitleShort: kbTitleShortForLog(c),
+        });
+      }
+    }
+    return { chunks: kept, rejections };
+  }
+
+  if (intent === 'BUSINESS_HOURS') {
+    const rejections: KbRejectionLogEntry[] = [];
+    const kept: RetrievalChunk[] = [];
+    for (const c of chunks) {
+      const menuOnly = chunkLooksMenuFocused(c) && !chunkLooksHoursFocused(c);
+      if (menuOnly) {
+        rejections.push({
+          reason: 'intent_hours_policy_menu_only_chunk',
+          queryClass: 'hours',
+          kbTitleShort: kbTitleShortForLog(c),
+        });
+        continue;
+      }
+      const r = assessKbChunkRelevance(latestUserMessage, c);
+      if (r.ok || chunkLooksHoursFocused(c)) {
+        kept.push(c);
+      } else if (r.reason) {
+        rejections.push({
+          reason: r.reason,
+          queryClass: 'hours',
+          kbTitleShort: kbTitleShortForLog(c),
+        });
+      }
+    }
+    return { chunks: kept, rejections };
+  }
+
+  return filterKbChunksForLatestUserMessage(latestUserMessage, chunks);
 }

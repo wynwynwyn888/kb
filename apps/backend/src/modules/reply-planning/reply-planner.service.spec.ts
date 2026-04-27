@@ -47,11 +47,49 @@ describe('ReplyPlannerService', () => {
       expect(bubbles[0]!.text).toBe(text);
     });
 
-    it('respects MAX_BUBBLE_CHARS = 320', () => {
+    it('keeps a single paragraph under 500 chars in one bubble', () => {
       const long = 'A'.repeat(400);
       const bubbles = format(long);
+      expect(bubbles.length).toBe(1);
+      expect(bubbles[0]!.text.length).toBe(400);
+    });
+
+    it('keeps short menu-style lists in one bubble', () => {
+      const text =
+        'Happy to help with our menu.\n\nA) Starters\n\nB) Mains\n\nC) Desserts\n\nD) Vegan options\n\nWhat are you in the mood for?';
+      const bubbles = format(text);
+      expect(bubbles.length).toBe(1);
+      expect(bubbles[0]!.text).toContain('A) Starters');
+      expect(bubbles[0]!.text).toContain('What are you in the mood for?');
+    });
+
+    it('strips customer-facing Source lines before bubbling', () => {
+      const text =
+        'We open at 9am.\n\n(Source: FAQ: What are your opening hours?)\n\nSee you soon.';
+      const bubbles = format(text);
+      expect(bubbles.length).toBeGreaterThanOrEqual(1);
+      const joined = bubbles.map(b => b.text).join('\n');
+      expect(joined).not.toMatch(/Source\s*:/i);
+      expect(joined).not.toMatch(/\(Source/i);
+      expect(joined).toContain('9am');
+    });
+
+    it('strips redacted_thinking before bubbling', () => {
+      const text =
+        '<think>plan</think>Hello!\n\nA) One\n\nB) Two';
+      const bubbles = format(text);
+      expect(bubbles.map(b => b.text).join('')).not.toContain('redacted_thinking');
+      expect(bubbles[0]!.text).toContain('Hello!');
+    });
+
+    it('splits very long content into at most three bubbles', () => {
+      const para = 'Sentence one. Sentence two. Sentence three. ';
+      const text = para.repeat(80).trim();
+      const bubbles = format(text);
+      expect(bubbles.length).toBeGreaterThanOrEqual(2);
+      expect(bubbles.length).toBeLessThanOrEqual(3);
       for (const b of bubbles) {
-        expect(b.text.length).toBeLessThanOrEqual(320);
+        expect(b.text.length).toBeLessThanOrEqual(3600);
       }
     });
 
@@ -93,14 +131,15 @@ describe('ReplyPlannerService', () => {
   });
 
   describe('buildPlaceholderDraft', () => {
-    it('returns KB-first content when chunks present', () => {
+    it('returns KB-first content when chunks present (no source label in draft)', () => {
       const draft = (service as never)['buildPlaceholderDraft'](
         { responseMode: 'standard', draftReply: null, confidence: 0.5, reasoning: '', recommendedModel: 'gpt-4o', handoverRecommended: false, tagsSuggested: [], bookingIntentDetected: false },
         [{ chunkId: 'c1', documentId: 'd1', content: 'Our hours are 9am-5pm', title: 'Business Hours', source: 'website', relevanceScore: 0.9, metadata: {} }],
         []
       );
       expect(draft).toContain('Our hours are 9am-5pm');
-      expect(draft).toContain('Business Hours');
+      expect(draft).not.toMatch(/Source\s*:/i);
+      expect(draft).not.toContain('Business Hours');
     });
 
     it('returns mode-based ack for fast mode with no KB', () => {

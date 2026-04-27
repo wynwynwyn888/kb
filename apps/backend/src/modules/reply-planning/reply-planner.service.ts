@@ -7,7 +7,8 @@
 // not invoked during send-bubble execution. Do not assume parity; see drift note on FormatterService.
 
 import { Injectable, Logger } from '@nestjs/common';
-import { stripModelThinking } from '@aisbp/formatter';
+import { stripCustomerFacingMeta, stripModelThinking } from '@aisbp/formatter';
+import { packPlainTextIntoOutboundBubbles } from '../../lib/outbound-bubbles';
 import { GenerationService } from '../generation/generation.service';
 import type {
   ReplyDecision,
@@ -18,8 +19,6 @@ import type {
 import type { RoutingResponse } from '../orchestration/dto';
 import type { RetrievalChunk } from '../kb/dto/retrieval.dto';
 import type { MemoryEntry } from '../orchestration/dto';
-
-const MAX_BUBBLE_CHARS = 320; // WhatsApp soft limit per bubble
 
 @Injectable()
 export class ReplyPlannerService {
@@ -211,9 +210,8 @@ export class ReplyPlannerService {
     // Build from KB context
     if (kbChunks.length > 0) {
       const top = kbChunks[0]!;
-      const sourceLabel = top.title || top.source || 'Knowledge base';
       const snippet = top.content.slice(0, 240).trim();
-      return `${snippet}${snippet.length === top.content.length ? '' : '...'}\n\n(Source: ${sourceLabel})`;
+      return `${snippet}${snippet.length === top.content.length ? '' : '...'}`;
     }
 
     // Fallback: short acknowledgment based on response mode
@@ -233,35 +231,17 @@ export class ReplyPlannerService {
   /**
    * Canonical outbound bubble shaping for live sends: this is what enqueue → GHL uses.
    * Rules:
+   * - `stripModelThinking` + `stripCustomerFacingMeta` (no citation/debug lines to customers)
    * - Local `stripMarkdown` (regex-based)
-   * - Split at paragraph boundaries (`\n\s*\n`)
-   * - Each bubble ≤ MAX_BUBBLE_CHARS (320)
-   * - Long paragraphs split on sentence / char boundaries
+   * - `packPlainTextIntoOutboundBubbles`: ≤500 chars → one bubble; longer → pack sections
+   *   up to ~520 chars each, at most 3 bubbles (sentence split only when needed)
    * Not the same as `FormatterService` / `@aisbp/formatter` (see FormatterService drift doc).
    */
   private formatIntoBubbles(text: string): ReplyBubbleDraft[] {
-    const stripped = this.stripMarkdown(stripModelThinking(text));
-    const paragraphs = stripped
-      .split(/\n\s*\n/)
-      .map(p => p.trim())
-      .filter(p => p.length > 0);
-
-    const bubbles: ReplyBubbleDraft[] = [];
-    let index = 0;
-
-    for (const para of paragraphs) {
-      if (para.length <= MAX_BUBBLE_CHARS) {
-        bubbles.push({ index: index++, text: para });
-      } else {
-        // Split long paragraph on sentence boundaries
-        const chunks = this.splitOnSentenceBoundary(para, MAX_BUBBLE_CHARS);
-        for (const chunk of chunks) {
-          bubbles.push({ index: index++, text: chunk.trim() });
-        }
-      }
-    }
-
-    return bubbles;
+    const stripped = this.stripMarkdown(
+      stripCustomerFacingMeta(stripModelThinking(text)),
+    );
+    return packPlainTextIntoOutboundBubbles(stripped);
   }
 
   private stripMarkdown(text: string): string {
@@ -277,51 +257,6 @@ export class ReplyPlannerService {
       .replace(/^\s*\d+\.\s+/gm, '')     // ordered list numbers
       .replace(/\n{3,}/g, '\n\n')        // collapse multiple blank lines
       .trim();
-  }
-
-  private splitOnSentenceBoundary(text: string, maxChars: number): string[] {
-    const sentences = text.match(/[^.!?]+[.!?]+\s*/g) ?? [];
-    if (sentences.length === 0) {
-      // No sentence boundaries found — chunk by character count
-      return this.chunkByChar(text, maxChars);
-    }
-
-    const chunks: string[] = [];
-    let current = '';
-
-    for (const sentence of sentences) {
-      if ((current + sentence).trim().length <= maxChars) {
-        current += sentence;
-      } else {
-        if (current.trim()) chunks.push(current.trim());
-        current = sentence;
-      }
-    }
-
-    if (current.trim()) {
-      // Last chunk — if it still exceeds limit, chunk by char
-      const remaining = current.trim();
-      if (remaining.length <= maxChars) {
-        chunks.push(remaining);
-      } else {
-        const sub = this.chunkByChar(remaining, maxChars);
-        for (let i = 0; i < sub.length; i++) {
-          chunks.push(sub[i]!);
-        }
-      }
-    }
-
-    return chunks.length > 0 ? chunks : [text.slice(0, maxChars)];
-  }
-
-  private chunkByChar(text: string, maxChars: number): string[] {
-    const chunks: string[] = [];
-    let i = 0;
-    while (i < text.length) {
-      chunks.push(text.slice(i, i + maxChars).trim());
-      i += maxChars;
-    }
-    return chunks;
   }
 
   private suggestActions(

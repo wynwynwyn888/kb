@@ -10,6 +10,7 @@ import { randomUUID } from 'crypto';
 import { formatPostgrestError } from '../../lib/format-postgrest-error';
 import { getSupabaseService } from '../../lib/supabase';
 import { createGhlClient } from '@aisbp/ghl-client';
+import { sanitizeOutboundCustomerText } from '../../lib/outbound-customer-text';
 import { decrypt, safeLog } from '../../lib/encryption';
 import type { ReplyDecision, ReplyBubbleDraft } from '../reply-planning/dto';
 
@@ -124,10 +125,11 @@ export class OutboundSendService {
     const ghlClient = createGhlClient(credentials.token, ghlLocationId);
 
     for (const bubble of replyPlan.bubbles) {
+      const outboundText = sanitizeOutboundCustomerText(bubble.text);
       const result = await this.sendSingleBubble(ghlClient, {
         locationId: ghlLocationId,
         contactId,
-        bubble,
+        bubble: { ...bubble, text: outboundText },
       });
 
       bubbleResults.push(result);
@@ -139,7 +141,7 @@ export class OutboundSendService {
           conversationId,
           tenantId,
           contactId,
-          content: bubble.text,
+          content: outboundText,
           contentType: 'TEXT',
           ghlMessageId: result.ghlMessageId,
         });

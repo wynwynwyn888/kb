@@ -1,6 +1,7 @@
 // Message formatter - interfaces for cleaning and bubble splitting
 
 export { stripModelThinking } from './strip-model-thinking.js';
+export { stripCustomerFacingMeta } from './strip-customer-facing-meta.js';
 
 export interface FormatOptions {
   format: OutputFormat;

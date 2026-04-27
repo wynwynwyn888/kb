@@ -8,9 +8,10 @@ import { ConversationMemoryLoader } from './conversation-memory-loader';
 import { AiRouterModule } from '../ai-router/ai-router.module';
 import { KbModule } from '../kb/kb.module';
 import { ReplyPlanningModule } from '../reply-planning/reply-planning.module';
+import { ConversationPolicyModule } from '../conversation-policy/conversation-policy.module';
 
 @Module({
-  imports: [AiRouterModule, KbModule, ReplyPlanningModule],
+  imports: [AiRouterModule, KbModule, ReplyPlanningModule, ConversationPolicyModule],
   providers: [
     ConversationOrchestrationService,
     OrchestrationGuards,

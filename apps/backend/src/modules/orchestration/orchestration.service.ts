@@ -35,6 +35,8 @@ import {
   type AisbpPolicyStateV1,
 } from '../conversation-policy/conversation-policy-state';
 import { resolveShortSelection } from '../conversation-policy/option-resolver';
+import { stripInternalGuidanceFromChunks } from '../../lib/kb-internal-guidance';
+import { prepareCustomerFacingMenuKb, shouldCurateMenuKbContext } from '../../lib/menu-kb-curator';
 
 @Injectable()
 export class ConversationOrchestrationService {
@@ -112,12 +114,21 @@ export class ConversationOrchestrationService {
       );
 
       const policyState = policyStatePre;
+      let kbRanked = stripInternalGuidanceFromChunks(kbAfterRetrieve);
+      if (shouldCurateMenuKbContext({ latestIntent, menuKbAnchor })) {
+        kbRanked = prepareCustomerFacingMenuKb(kbRanked, {
+          latestUserMessage: latestMsg,
+          latestIntent,
+          menuAnchorLabel: menuKbAnchor,
+        });
+      }
+
       const policyOutcome = this.conversationPolicy.evaluate({
         intent: latestIntent,
         incomingRaw: latestMsg,
         memory: memory.entries,
         policyState,
-        kbChunksRanked: kbAfterRetrieve,
+        kbChunksRanked: kbRanked,
         tenantDisplayName: input.tenant?.name,
       });
       const kbChunks = policyOutcome.kbChunks;

@@ -1,3 +1,7 @@
+/** One-line overview when we must not paste internal KB. */
+export const MENU_SHORT_OVERVIEW =
+  'Sure — our menu includes starters, mains, desserts, and vegan options.';
+
 /** Default menu prompt when no menu KB — single logical message (bubble packing elsewhere). */
 export const MENU_CATEGORY_PROMPT = `I can help with the menu.
 

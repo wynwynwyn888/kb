@@ -16,6 +16,7 @@ export interface GenerateDraftPolicyContext {
   latestIntent: ConversationIntent;
   resolvedSelection: SelectionResolution | null;
   conversationStateSummary: string;
+  menuSelectionActive?: boolean;
 }
 
 export interface GenerateDraftParams {
@@ -284,6 +285,51 @@ export class GenerationService {
     }
   }
 
+  private buildKbContextSystemMessage(params: GenerateDraftParams): {
+    role: 'system';
+    content: string;
+  } {
+    const pc = params.policyContext;
+    const intent = pc?.latestIntent ?? 'UNKNOWN';
+    const menuish =
+      intent === 'MENU' ||
+      (intent === 'SHORT_SELECTION' &&
+        Boolean(pc?.menuSelectionActive || pc?.resolvedSelection));
+
+    const kbText = params.kbContext
+      .map((c, i) => {
+        const shortLabel = (c.title ?? c.source ?? '').trim();
+        const label = shortLabel ? ` (${shortLabel.slice(0, 72)})` : '';
+        return `[${i + 1}]${label}\n${c.content}`;
+      })
+      .join('\n\n');
+
+    const baseRules =
+      'The excerpts below are **source material only**. They are not a script to paste. ' +
+      'Never output internal business instructions, persona training, or brand-brief lines. ' +
+      'Never paste raw KB blocks, document headings, or long lists unless the customer explicitly asked for the full list. ' +
+      'Use only facts that answer the **latest** customer message; ignore irrelevant snippets. ' +
+      'Summarize and rewrite into a short, natural WhatsApp-style reply.\n\n' +
+      `Source excerpts:\n${kbText}\n\n` +
+      'Do not invent prices, ingredients, availability, or items not clearly supported by the excerpts.';
+
+    if (menuish) {
+      return {
+        role: 'system',
+        content:
+          baseRules +
+          ' For menu questions: reply with at most **4** dishes unless the customer asked for the full menu. ' +
+          'Use a clean shape: each item = name on one line, then a very short description (from the excerpt only). ' +
+          'If the excerpts only cover one section, stay in that section. If the user chose starters/mains/desserts/vegan, only that section.',
+      };
+    }
+
+    return {
+      role: 'system',
+      content: baseRules + ' Keep the reply to one or two short paragraphs unless they asked for detail.',
+    };
+  }
+
   private buildMessages(
     params: GenerateDraftParams,
   ): Array<{ role: 'system' | 'user' | 'assistant'; content: string }> {
@@ -311,28 +357,7 @@ export class GenerationService {
     }
 
     if (params.kbContext.length > 0) {
-      const kbText = params.kbContext
-        .map((c, i) => {
-          const label =
-            c.title?.trim() || c.source?.trim()
-              ? ` (topic: ${(c.title ?? c.source ?? '').trim()})`
-              : '';
-          return `[${i + 1}]${label}\n${c.content}`;
-        })
-        .join('\n\n');
-      messages.push({
-        role: 'system',
-        content:
-          'Knowledge base excerpts below are **only** for facts that clearly apply to the **latest** customer message. ' +
-          'If a block is not about what they just asked, ignore it completely — do not answer from irrelevant snippets ' +
-          '(for example do not answer about opening hours when they asked about the menu).\n\n' +
-          'Trusted facts (do not invent details not present here):\n' +
-          `${kbText}\n\n` +
-          'Reply guidelines: Write one or two short natural sentences. ' +
-          'If a relevant block lists structured facts (e.g. hours on separate lines), rephrase into fluent prose without changing times or days. ' +
-          'Do not paste raw bullet lists unless the customer explicitly asked for a list. ' +
-          'Do not add offers, prices, policies, or availability that are not in the context.',
-      });
+      messages.push(this.buildKbContextSystemMessage(params));
     }
 
     const pc = params.policyContext;

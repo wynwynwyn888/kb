@@ -12,6 +12,7 @@ import { packPlainTextIntoOutboundBubbles } from '../../lib/outbound-bubbles';
 import { polishKbSnippetForCustomer } from '../../lib/kb-faq-customer-text';
 import { applyBusinessHoursGroundingGuard } from '../../lib/business-hours-grounding-guard';
 import { applyMenuKbGroundingGuard } from '../../lib/menu-kb-grounding-guard';
+import { sanitizeOutboundInternalKbLeak } from '../../lib/outbound-internal-kb-sanitizer';
 import { applyOutboundPolicyGuard } from '../../lib/outbound-policy-guard';
 import { detectMenuIntentInMessage } from '../../lib/kb-relevance';
 import type { ConversationIntent } from '../conversation-policy/conversation-intent';
@@ -102,7 +103,8 @@ export class ReplyPlannerService {
         kbChunks,
         draftText: afterMenu,
       });
-      const bubbles = this.formatIntoBubbles(afterHours);
+      const afterKbLeak = sanitizeOutboundInternalKbLeak(afterHours, policyContext!.latestIntent);
+      const bubbles = this.formatIntoBubbles(afterKbLeak);
       const suggestedActions = this.suggestActions(routing, kbChunks);
       return {
         planStatus: 'PLANNED',
@@ -147,7 +149,11 @@ export class ReplyPlannerService {
       kbChunks,
       draftText: afterMenu,
     });
-    const bubbles = this.formatIntoBubbles(afterHours);
+    const afterKbLeak = sanitizeOutboundInternalKbLeak(
+      afterHours,
+      policyContext?.latestIntent ?? 'UNKNOWN',
+    );
+    const bubbles = this.formatIntoBubbles(afterKbLeak);
 
     // ---------- Suggest actions ----------
     const suggestedActions = this.suggestActions(routing, kbChunks);
@@ -250,6 +256,7 @@ export class ReplyPlannerService {
               latestIntent: policyContext.latestIntent,
               resolvedSelection: policyContext.resolvedSelection,
               conversationStateSummary: policyContext.conversationStateSummary,
+              menuSelectionActive: policyContext.menuSelectionActive,
             },
           }
         : {}),
@@ -294,7 +301,9 @@ export class ReplyPlannerService {
     // Build from KB context
     if (kbChunks.length > 0) {
       const top = kbChunks[0]!;
-      const snippet = top.content.slice(0, 480).trim();
+      const curated = top.metadata?.['menuCurated'] === true;
+      const limit = curated ? 900 : 480;
+      const snippet = top.content.slice(0, limit).trim();
       const ellipsed =
         `${snippet}${snippet.length === top.content.length ? '' : '...'}`;
       return polishKbSnippetForCustomer(ellipsed);

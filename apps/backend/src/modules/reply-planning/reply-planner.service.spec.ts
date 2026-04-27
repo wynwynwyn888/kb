@@ -188,6 +188,24 @@ describe('ReplyPlannerService', () => {
       );
       expect(draft.length).toBeGreaterThan(0);
     });
+
+    it('uses menu clarification when no KB and user asks about menu', () => {
+      const draft = (service as never)['buildPlaceholderDraft'](
+        { responseMode: 'standard', draftReply: null, confidence: 0.5, reasoning: '', recommendedModel: 'gpt-4o', handoverRecommended: false, tagsSuggested: [], bookingIntentDetected: false },
+        [],
+        [
+          {
+            role: 'user' as const,
+            sender: 'user',
+            messageType: 'text' as const,
+            content: 'your menu?',
+            timestamp: new Date().toISOString(),
+          },
+        ],
+      );
+      expect(draft).toContain('menu');
+      expect(draft).toContain('starters');
+    });
   });
 
   describe('planReply', () => {
@@ -237,6 +255,7 @@ describe('ReplyPlannerService', () => {
       expect(result.bubbles.length).toBeGreaterThan(0);
       expect(result.draftProvenance).toBe('placeholder_fallback');
       expect(result.draftFallbackReason).toBe('no_provider');
+      expect(result.bubbles[0]!.text).toContain("don't have those details");
     });
 
     it('marks live_generation when generateDraft returns usable content', async () => {

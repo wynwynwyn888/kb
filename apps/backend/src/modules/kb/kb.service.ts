@@ -11,6 +11,7 @@ import type {
   RetrievalResult,
   RetrievalMeta,
 } from './dto/retrieval.dto';
+import { tokenizeMeaningful } from '../../lib/kb-relevance';
 
 const DEFAULT_TOP_K = 5;
 const KEYWORD_WINDOW = 3; // n-gram window for keyword matching
@@ -576,26 +577,23 @@ export class KbService {
     query: string,
     chunks: Array<{ id: string; documentId: string; title: string; source: string; content: string; metadata: Record<string, unknown> }>,
   ): RetrievalChunk[] {
-    const queryTokens = this.tokenize(query);
-
-    if (queryTokens.size === 0) {
-      return chunks.map(c => this.toRetrievalChunk(c, 0));
+    const queryArr = tokenizeMeaningful(query);
+    if (queryArr.length === 0) {
+      return [];
     }
-
-    const queryArr = [...queryTokens];
 
     const scored = chunks
       .map(chunk => {
-        const contentTokens = this.tokenize(chunk.content);
-        const titleTokens = this.tokenize(chunk.title);
+        const contentTokens = new Set(tokenizeMeaningful(chunk.content));
+        const titleTokens = new Set(tokenizeMeaningful(chunk.title));
         const allTokens = new Set([...contentTokens, ...titleTokens]);
 
-        // Jaccard-like overlap
+        // Jaccard-like overlap on **meaningful** tokens (excludes "your", "what", etc.)
         const overlap = queryArr.filter(t => allTokens.has(t)).length;
         const union = new Set([...queryArr, ...allTokens]).size;
         const score = union > 0 ? overlap / union : 0;
 
-        // Boost exact phrase matches
+        // Boost exact phrase matches (full query text)
         const lowerQuery = query.toLowerCase();
         if (chunk.content.toLowerCase().includes(lowerQuery)) {
           return { chunk, score: score + 0.2 };
@@ -627,14 +625,4 @@ export class KbService {
     };
   }
 
-  /** Simple whitespace tokenizer + lowercasing */
-  private tokenize(text: string): Set<string> {
-    return new Set(
-      text
-        .toLowerCase()
-        .split(/\s+/)
-        .map(t => t.replace(/[^\w]/g, ''))
-        .filter(t => t.length >= 2),
-    );
-  }
 }

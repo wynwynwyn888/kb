@@ -10,6 +10,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { stripCustomerFacingMeta, stripModelThinking } from '@aisbp/formatter';
 import { packPlainTextIntoOutboundBubbles } from '../../lib/outbound-bubbles';
 import { polishKbSnippetForCustomer } from '../../lib/kb-faq-customer-text';
+import { detectMenuIntentInMessage } from '../../lib/kb-relevance';
 import { GenerationService } from '../generation/generation.service';
 import type {
   ReplyDecision,
@@ -222,10 +223,15 @@ export class ReplyPlannerService {
       return 'Got it! Let me look into that for you.';
     }
 
-    // Memory-based context reply
     const lastUserMessage = memory.filter(m => m.role === 'user').at(-1);
-    if (lastUserMessage) {
-      return `Thanks for your message. I received: "${lastUserMessage.content.slice(0, 100)}". A team member will follow up if needed.`;
+    const lastMsg = lastUserMessage?.content?.trim() ?? '';
+
+    if (detectMenuIntentInMessage(lastMsg)) {
+      return 'I can help with the menu. Are you looking for starters, mains, desserts, drinks, or vegan options?';
+    }
+
+    if (lastMsg.length > 0) {
+      return "I can help with that, but I don't have those details here yet. Could you tell me what you'd like to know specifically?";
     }
 
     return 'Thanks for reaching out. How can I help?';

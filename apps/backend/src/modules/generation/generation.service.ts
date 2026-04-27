@@ -313,11 +313,13 @@ export class GenerationService {
       messages.push({
         role: 'system',
         content:
-          'Relevant knowledge base context (trusted facts — do not invent details not present here):\n' +
+          'Knowledge base excerpts below are **only** for facts that clearly apply to the **latest** customer message. ' +
+          'If a block is not about what they just asked, ignore it completely — do not answer from irrelevant snippets ' +
+          '(for example do not answer about opening hours when they asked about the menu).\n\n' +
+          'Trusted facts (do not invent details not present here):\n' +
           `${kbText}\n\n` +
-          'Reply guidelines: Write one or two short natural sentences for the customer. ' +
-          'If the context lists structured facts (for example opening hours on separate lines), ' +
-          'rephrase them into fluent prose without changing times or days. ' +
+          'Reply guidelines: Write one or two short natural sentences. ' +
+          'If a relevant block lists structured facts (e.g. hours on separate lines), rephrase into fluent prose without changing times or days. ' +
           'Do not paste raw bullet lists unless the customer explicitly asked for a list. ' +
           'Do not add offers, prices, policies, or availability that are not in the context.',
       });

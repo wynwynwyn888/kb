@@ -24,6 +24,7 @@ import type { ReplyDecision } from '../reply-planning/dto';
 import type { RetrievalChunk, RetrievalMeta } from '../kb/dto/retrieval.dto';
 import { safeLog } from '../../lib/encryption';
 import { resolveBotMode, type BotOperatingMode } from '../../lib/bot-mode';
+import { filterKbChunksForLatestUserMessage } from '../../lib/kb-relevance';
 
 @Injectable()
 export class ConversationOrchestrationService {
@@ -304,14 +305,24 @@ export class ConversationOrchestrationService {
         topK: 5,
       });
 
+      const { chunks: filteredChunks, rejections } = filterKbChunksForLatestUserMessage(
+        input.incomingMessage.messageContent,
+        result.chunks,
+      );
+      for (const r of rejections) {
+        this.logger.log(
+          `KB result rejected: reason=${r.reason}, latestMessage_class=${r.queryClass}, kbTitle=${r.kbTitleShort}`,
+        );
+      }
+
       const meta: RetrievalMeta = {
-        chunksReturned: result.chunks.length,
+        chunksReturned: filteredChunks.length,
         chunksConsidered: result.totalConsidered,
         retrievalMode: result.retrievalMode,
-        topScore: result.chunks[0]?.relevanceScore ?? null,
+        topScore: filteredChunks[0]?.relevanceScore ?? null,
       };
 
-      return { chunks: result.chunks, meta };
+      return { chunks: filteredChunks, meta };
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'unknown';
       this.logger.warn(`KB retrieval failed for conversation=${conversationId}: ${msg}`);

@@ -9,9 +9,11 @@ import {
   createKbFaq,
   createKbRichText,
   deleteKbDocument,
+  getKbDocumentChunks,
   isApiHttpError,
   listKbDocuments,
   searchKb,
+  updateKbFaq,
   uploadKbFile,
   type KbDocumentRow,
 } from '@/lib/api';
@@ -226,6 +228,314 @@ function friendlifyKbMessage(msg: string): string {
   return msg;
 }
 
+function fmtKind(s: string | null | undefined) {
+  const u = (s ?? '').toLowerCase();
+  if (u === 'faq') return 'FAQ';
+  if (u === 'rich_text' || u === 'rich' || u === 'manual') return 'Note';
+  if (u === 'file') return 'File';
+  return s || 'Note';
+}
+
+const faqCardShell: CSSProperties = {
+  borderRadius: 16,
+  padding: '1.15rem 1.25rem',
+  marginBottom: 14,
+  background: 'linear-gradient(180deg, #ffffff 0%, #fafbfc 100%)',
+  border: '1px solid #e2e8f0',
+  boxShadow: '0 4px 24px rgba(15, 23, 42, 0.055)',
+};
+
+function faqListStatusLabel(s: string): string {
+  const u = s.toUpperCase();
+  if (u === 'READY') return 'Ready';
+  if (u === 'PENDING' || u === 'PROCESSING') return 'Indexing';
+  if (u === 'DRAFT') return 'Draft';
+  if (u === 'FAILED') return 'Needs attention';
+  return s;
+}
+
+function FaqKnowledgeCard({
+  doc,
+  token,
+  subId,
+  deleting,
+  onDelete,
+  onUpdated,
+  setWriteErr,
+  setSaveOk,
+}: {
+  doc: KbDocumentRow;
+  token: string;
+  subId: string;
+  deleting: boolean;
+  onDelete: () => void;
+  onUpdated: () => void;
+  setWriteErr: (s: string) => void;
+  setSaveOk: (s: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editQ, setEditQ] = useState('');
+  const [editA, setEditA] = useState('');
+  const [loadingEdit, setLoadingEdit] = useState(false);
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  const question =
+    doc.faqQuestion?.trim() || doc.title.replace(/^FAQ:\s*/i, '').trim() || doc.title;
+  const preview = (doc.answerPreview ?? '').trim();
+  const needsShowMore = preview.length > 160 || preview.split(/\n/).length > 4;
+
+  const startEdit = async () => {
+    setEditing(true);
+    setEditQ(question);
+    setEditA('');
+    setWriteErr('');
+    setSaveOk('');
+    setLoadingEdit(true);
+    try {
+      const chunks = await getKbDocumentChunks(token, subId, doc.id);
+      const body = chunks[0]?.content ?? preview;
+      setEditA(body);
+    } catch {
+      setEditA(preview);
+    } finally {
+      setLoadingEdit(false);
+    }
+  };
+
+  const saveEdit = async () => {
+    const q = editQ.trim();
+    const a = editA.trim();
+    if (!q || !a) {
+      setWriteErr('Question and answer are required.');
+      return;
+    }
+    setSavingEdit(true);
+    setWriteErr('');
+    try {
+      await updateKbFaq(token, doc.id, { tenantId: subId, question: q, answer: a });
+      setSaveOk('FAQ saved.');
+      setEditing(false);
+      onUpdated();
+    } catch (er) {
+      const raw = isApiHttpError(er) ? er.message : er instanceof Error ? er.message : 'Save failed';
+      setWriteErr(friendlifyKbMessage(raw));
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  return (
+    <article style={faqCardShell}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <p
+            style={{
+              fontSize: '0.68rem',
+              fontWeight: 700,
+              letterSpacing: '0.08em',
+              color: '#94a3b8',
+              margin: '0 0 0.35rem',
+              textTransform: 'uppercase' as const,
+            }}
+          >
+            Question
+          </p>
+          <h3 style={{ fontSize: '1.05rem', fontWeight: 700, margin: 0, color: '#0f172a', lineHeight: 1.4 }}>
+            {question}
+          </h3>
+        </div>
+        <StatusPill label={faqListStatusLabel(doc.status)} tone={statusPillTone(doc.status)} />
+      </div>
+
+      {!editing ? (
+        <>
+          <p
+            style={{
+              fontSize: '0.68rem',
+              fontWeight: 700,
+              letterSpacing: '0.08em',
+              color: '#94a3b8',
+              margin: '1rem 0 0.35rem',
+              textTransform: 'uppercase' as const,
+            }}
+          >
+            Answer
+          </p>
+          {preview ? (
+            <div
+              style={
+                expanded
+                  ? {
+                      fontSize: '0.875rem',
+                      color: '#475569',
+                      lineHeight: 1.55,
+                      whiteSpace: 'pre-wrap' as const,
+                      maxHeight: 260,
+                      overflowY: 'auto' as const,
+                    }
+                  : {
+                      fontSize: '0.875rem',
+                      color: '#475569',
+                      lineHeight: 1.55,
+                      whiteSpace: 'pre-wrap' as const,
+                      display: '-webkit-box',
+                      WebkitLineClamp: 3,
+                      WebkitBoxOrient: 'vertical' as const,
+                      overflow: 'hidden',
+                    }
+              }
+            >
+              {preview}
+            </div>
+          ) : (
+            <p style={{ fontSize: '0.8125rem', color: '#94a3b8', margin: 0 }}>No answer text yet.</p>
+          )}
+          {needsShowMore && !expanded ? (
+            <button
+              type="button"
+              onClick={() => setExpanded(true)}
+              style={{
+                marginTop: 8,
+                fontSize: '0.8125rem',
+                fontWeight: 600,
+                color: PRIMARY,
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                padding: 0,
+              }}
+            >
+              Show more
+            </button>
+          ) : null}
+          {expanded && needsShowMore ? (
+            <button
+              type="button"
+              onClick={() => setExpanded(false)}
+              style={{
+                marginTop: 8,
+                fontSize: '0.8125rem',
+                fontWeight: 600,
+                color: '#64748b',
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                padding: 0,
+              }}
+            >
+              Show less
+            </button>
+          ) : null}
+        </>
+      ) : (
+        <div style={{ marginTop: '1rem', display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+          <label>
+            <span style={mvpLabelStyle}>Question</span>
+            <input
+              value={editQ}
+              onChange={e => setEditQ(e.target.value)}
+              style={{ ...mvpInputStyle, marginTop: '0.35rem', width: '100%' }}
+              disabled={loadingEdit}
+            />
+          </label>
+          <label>
+            <span style={mvpLabelStyle}>Answer</span>
+            <textarea
+              value={editA}
+              onChange={e => setEditA(e.target.value)}
+              rows={6}
+              style={{ ...mvpInputStyle, marginTop: '0.35rem', width: '100%', minHeight: 140, resize: 'vertical' as const }}
+              disabled={loadingEdit}
+            />
+          </label>
+          {loadingEdit ? (
+            <p style={{ fontSize: '0.75rem', color: '#64748b', margin: 0 }}>Loading answer…</p>
+          ) : null}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+            <button
+              type="button"
+              disabled={savingEdit || loadingEdit}
+              onClick={() => void saveEdit()}
+              style={{ ...mvpPrimaryButtonStyle, borderRadius: 10 }}
+            >
+              {savingEdit ? 'Saving…' : 'Save changes'}
+            </button>
+            <button
+              type="button"
+              disabled={savingEdit}
+              onClick={() => {
+                setEditing(false);
+                setExpanded(false);
+              }}
+              style={{ ...mvpSecondaryButtonStyle, borderRadius: 10 }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          gap: '12px 16px',
+          marginTop: '1.1rem',
+          paddingTop: '0.85rem',
+          borderTop: '1px solid #f1f5f9',
+        }}
+      >
+        <span style={{ fontSize: '0.68rem', fontWeight: 600, letterSpacing: '0.04em', color: '#94a3b8' }}>
+          {fmtKind(doc.documentKind ?? 'faq')} · {typeof doc.chunkCount === 'number' ? `${doc.chunkCount} chunk${doc.chunkCount === 1 ? '' : 's'}` : '—'}
+        </span>
+        <span style={{ fontSize: '0.68rem', color: '#cbd5e1' }}>·</span>
+        <span style={{ fontSize: '0.68rem', fontWeight: 600, letterSpacing: '0.04em', color: '#94a3b8' }}>
+          Updated {relativeTimeLabel(doc.createdAt)}
+        </span>
+        <div style={{ marginLeft: 'auto', display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
+          {!editing ? (
+            <button
+              type="button"
+              onClick={() => void startEdit()}
+              style={{
+                fontSize: '0.8125rem',
+                fontWeight: 600,
+                color: PRIMARY,
+                background: 'rgba(15, 98, 254, 0.08)',
+                border: '1px solid rgba(15, 98, 254, 0.25)',
+                borderRadius: 10,
+                padding: '0.4rem 0.85rem',
+                cursor: 'pointer',
+              }}
+            >
+              View / Edit
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={onDelete}
+            disabled={deleting}
+            style={{
+              fontSize: '0.75rem',
+              fontWeight: 500,
+              color: '#94a3b8',
+              background: 'none',
+              border: 'none',
+              cursor: deleting ? 'wait' : 'pointer',
+              textDecoration: 'underline',
+              textUnderlineOffset: 2,
+            }}
+          >
+            {deleting ? 'Removing…' : 'Delete'}
+          </button>
+        </div>
+      </div>
+    </article>
+  );
+}
+
 export default function SubaccountKnowledgePage() {
   const params = useParams();
   const subId = params['tenantId'] as string;
@@ -408,14 +718,6 @@ export default function SubaccountKnowledgePage() {
     } finally {
       setSearching(false);
     }
-  };
-
-  const fmtKind = (s: string | null | undefined) => {
-    const u = (s ?? '').toLowerCase();
-    if (u === 'faq') return 'FAQ';
-    if (u === 'rich_text' || u === 'rich' || u === 'manual') return 'Note';
-    if (u === 'file') return 'File';
-    return s || 'Note';
   };
 
   const tabUnderline = (active: boolean): CSSProperties => ({
@@ -637,19 +939,18 @@ export default function SubaccountKnowledgePage() {
                     ) : (
                       <div>
                         {faqRows.map(d => (
-                          <KnowledgeDocCard
+                          <FaqKnowledgeCard
                             key={d.id}
-                            title={d.title}
-                            statusRaw={d.status}
-                            subtitle={`${fmtKind(d.documentKind ?? 'faq')} · indexed for search`}
-                            timeLabel={relativeTimeLabel(d.createdAt)}
-                            usageLine={
-                              typeof d.chunkCount === 'number' && d.chunkCount > 0
-                                ? `${d.chunkCount} chunk${d.chunkCount === 1 ? '' : 's'}`
-                                : undefined
-                            }
-                            onDelete={() => onDelete(d.id)}
+                            doc={d}
+                            token={token!}
+                            subId={subId}
                             deleting={deletingId === d.id}
+                            onDelete={() => onDelete(d.id)}
+                            onUpdated={() => {
+                              bump();
+                            }}
+                            setWriteErr={setWriteErr}
+                            setSaveOk={setSaveOk}
                           />
                         ))}
                       </div>

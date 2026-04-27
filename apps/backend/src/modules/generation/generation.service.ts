@@ -2,7 +2,7 @@
 // Respects agency `active_ai_provider` with OpenAI fallback when active provider is missing or fails.
 
 import { Injectable, Logger } from '@nestjs/common';
-import { stripModelThinking } from '@aisbp/formatter';
+import { stripCustomerFacingMeta, stripModelThinking } from '@aisbp/formatter';
 import { summarizeAxiosErrorForLogs } from '../../lib/safe-http-error';
 import { getSupabaseService } from '../../lib/supabase';
 import { OpenAiProviderAdapter } from '@aisbp/ai-provider-openai';
@@ -159,7 +159,7 @@ export class GenerationService {
   /** Strip internal reasoning; empty after strip is treated as no content. */
   private sanitizeCustomerFacing(content: string | null): string | null {
     if (content == null) return null;
-    const t = stripModelThinking(content).trim();
+    const t = stripCustomerFacingMeta(stripModelThinking(content)).trim();
     return t.length > 0 ? t : null;
   }
 
@@ -301,10 +301,25 @@ export class GenerationService {
     }
 
     if (params.kbContext.length > 0) {
-      const kbText = params.kbContext.map((c, i) => `[${i + 1}] ${c.content}`).join('\n\n');
+      const kbText = params.kbContext
+        .map((c, i) => {
+          const label =
+            c.title?.trim() || c.source?.trim()
+              ? ` (topic: ${(c.title ?? c.source ?? '').trim()})`
+              : '';
+          return `[${i + 1}]${label}\n${c.content}`;
+        })
+        .join('\n\n');
       messages.push({
         role: 'system',
-        content: `Relevant knowledge base context:\n${kbText}`,
+        content:
+          'Relevant knowledge base context (trusted facts — do not invent details not present here):\n' +
+          `${kbText}\n\n` +
+          'Reply guidelines: Write one or two short natural sentences for the customer. ' +
+          'If the context lists structured facts (for example opening hours on separate lines), ' +
+          'rephrase them into fluent prose without changing times or days. ' +
+          'Do not paste raw bullet lists unless the customer explicitly asked for a list. ' +
+          'Do not add offers, prices, policies, or availability that are not in the context.',
       });
     }
 

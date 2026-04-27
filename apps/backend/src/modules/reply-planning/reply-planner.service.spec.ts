@@ -142,6 +142,35 @@ describe('ReplyPlannerService', () => {
       expect(draft).not.toContain('Business Hours');
     });
 
+    it('polishes weekday/weekend FAQ lines in KB fallback', () => {
+      const draft = (service as never)['buildPlaceholderDraft'](
+        {
+          responseMode: 'standard',
+          draftReply: null,
+          confidence: 0.5,
+          reasoning: '',
+          recommendedModel: 'gpt-4o',
+          handoverRecommended: false,
+          tagsSuggested: [],
+          bookingIntentDetected: false,
+        },
+        [
+          {
+            chunkId: 'c1',
+            documentId: 'd1',
+            content: 'Weekdays 9am-11pm\nWeekends 9am-12am',
+            title: 'FAQ: Hours',
+            source: 'faq',
+            relevanceScore: 0.95,
+            metadata: {},
+          },
+        ],
+        [],
+      );
+      expect(draft).toMatch(/We're open from/i);
+      expect(draft.toLowerCase()).toContain('weekday');
+    });
+
     it('returns mode-based ack for fast mode with no KB', () => {
       const draft = (service as never)['buildPlaceholderDraft'](
         { responseMode: 'fast', draftReply: null, confidence: 0.5, reasoning: '', recommendedModel: 'gpt-4o', handoverRecommended: false, tagsSuggested: [], bookingIntentDetected: false },

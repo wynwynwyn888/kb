@@ -829,6 +829,9 @@ export interface KbDocumentRow {
   documentKind?: string;
   chunkCount?: number;
   createdAt?: string;
+  /** First chunk preview (FAQ / notes) */
+  answerPreview?: string;
+  faqQuestion?: string;
 }
 
 export async function listKbDocuments(
@@ -845,6 +848,27 @@ export async function createKbFaq(
   dto: { tenantId: string; question: string; answer: string },
 ): Promise<{ id: string }> {
   return apiRequest('/kb/documents/faq', { token, method: 'POST', body: JSON.stringify(dto) });
+}
+
+export async function updateKbFaq(
+  token: string,
+  documentId: string,
+  dto: { tenantId: string; question: string; answer: string },
+): Promise<{ ok: boolean }> {
+  return apiRequest(`/kb/documents/${encodeURIComponent(documentId)}/faq`, {
+    token,
+    method: 'PATCH',
+    body: JSON.stringify(dto),
+  });
+}
+
+export async function getKbDocumentChunks(
+  token: string,
+  tenantId: string,
+  documentId: string,
+): Promise<Array<{ id: string; content: string; tokenCount?: number }>> {
+  const q = new URLSearchParams({ tenantId });
+  return apiRequest(`/kb/chunks/${encodeURIComponent(documentId)}?${q}`, { token });
 }
 
 export async function createKbRichText(

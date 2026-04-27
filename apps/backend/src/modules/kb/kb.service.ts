@@ -103,6 +103,10 @@ export class KbService {
     documentKind: string;
     chunkCount: number;
     createdAt: string;
+    /** First chunk text — used for FAQ / note preview in UI */
+    answerPreview?: string;
+    /** FAQ question from metadata or title */
+    faqQuestion?: string;
   }>> {
     // Omit `document_kind` from the select list so PostgREST works even if its schema cache
     // lags after migrations; we infer kind from `source` + `metadata.documentKind`.
@@ -129,15 +133,46 @@ export class KbService {
       countMap[c.document_id] = (countMap[c.document_id] ?? 0) + 1;
     }
 
-    return data.map(d => ({
-      id: d.id,
-      title: d.title,
-      source: d.source,
-      status: d.status,
-      documentKind: inferDocumentKind(d.source, (d as { metadata?: unknown }).metadata),
-      chunkCount: countMap[d.id] ?? 0,
-      createdAt: d.created_at,
-    }));
+    const { data: chunkBodies } = await this.supabase
+      .from('knowledge_chunks')
+      .select('document_id, content, id')
+      .in('document_id', docIds)
+      .order('id', { ascending: true });
+
+    const previewByDoc: Record<string, string> = {};
+    for (const row of chunkBodies ?? []) {
+      const did = row.document_id as string;
+      if (previewByDoc[did] === undefined && typeof row.content === 'string') {
+        previewByDoc[did] = row.content;
+      }
+    }
+
+    return data.map(d => {
+      const meta = (d as { metadata?: Record<string, unknown> }).metadata ?? {};
+      const kind = inferDocumentKind(d.source, meta);
+      const qMeta = typeof meta['question'] === 'string' ? meta['question'].trim() : '';
+      const firstChunk = previewByDoc[d.id] ?? '';
+      const faqQuestion =
+        kind === 'faq'
+          ? (qMeta || d.title.replace(/^FAQ:\s*/i, '').trim() || d.title)
+          : undefined;
+      const answerPreview =
+        kind === 'faq' || kind === 'rich_text' ? firstChunk.slice(0, 500) : undefined;
+
+      return {
+        id: d.id,
+        title: d.title,
+        source: d.source,
+        status: d.status,
+        documentKind: kind,
+        chunkCount: countMap[d.id] ?? 0,
+        createdAt: d.created_at,
+        ...(faqQuestion !== undefined ? { faqQuestion } : {}),
+        ...(answerPreview !== undefined && answerPreview.length > 0
+          ? { answerPreview }
+          : {}),
+      };
+    });
   }
 
   async createFaq(tenantId: string, question: string, answer: string): Promise<{ id: string }> {
@@ -261,6 +296,60 @@ export class KbService {
     });
     if (ce) throw new Error(`File chunk: ${ce.message}`);
     return { id: doc.id, status: 'READY' };
+  }
+
+  async updateFaq(
+    tenantId: string,
+    documentId: string,
+    question: string,
+    answer: string,
+  ): Promise<{ ok: true }> {
+    const q = question.trim();
+    const a = answer.trim();
+    if (!q || !a) throw new Error('question and answer required');
+
+    const { data: doc, error: fe } = await this.supabase
+      .from('knowledge_documents')
+      .select('id, source, metadata')
+      .eq('id', documentId)
+      .eq('tenant_id', tenantId)
+      .maybeSingle();
+    if (fe || !doc) throw new Error('Document not found');
+
+    const kind = inferDocumentKind(doc.source, doc.metadata);
+    if (kind !== 'faq' && String(doc.source).toLowerCase() !== 'faq') {
+      throw new Error('Not an FAQ document');
+    }
+
+    const title = `FAQ: ${q.slice(0, 200)}`;
+    const prevMeta =
+      doc.metadata && typeof doc.metadata === 'object' && !Array.isArray(doc.metadata)
+        ? (doc.metadata as Record<string, unknown>)
+        : {};
+    const now = new Date().toISOString();
+
+    const { error: ue } = await this.supabase
+      .from('knowledge_documents')
+      .update({
+        title,
+        size: a.length,
+        metadata: { ...prevMeta, question: q, documentKind: 'faq' },
+        updated_at: now,
+      })
+      .eq('id', documentId)
+      .eq('tenant_id', tenantId);
+    if (ue) throw new Error(ue.message);
+
+    const { error: ce } = await this.supabase
+      .from('knowledge_chunks')
+      .update({
+        content: a,
+        token_count: Math.ceil(a.length / 4),
+      })
+      .eq('document_id', documentId);
+    if (ce) throw new Error(ce.message);
+
+    return { ok: true };
   }
 
   async deleteDocument(tenantId: string, documentId: string): Promise<void> {

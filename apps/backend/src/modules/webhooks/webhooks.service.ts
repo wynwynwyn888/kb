@@ -7,7 +7,7 @@ import {
 } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
-import { createHash, randomUUID } from 'crypto';
+import { randomUUID } from 'crypto';
 import { getSupabaseService } from '../../lib/supabase';
 import { QUEUES } from '../../queues/queue.constants';
 import { InboundMessageJobData } from '../../queues/processors/inbound-message.processor';
@@ -16,6 +16,7 @@ import {
   NormalizedWebhookPayload,
 } from './dto/ghl-webhook.payload';
 import { formatPostgrestError } from '../../lib/format-postgrest-error';
+import { extractGhlInboundDedupeKeys } from './ghl-webhook-dedupe';
 
 @Injectable()
 export class WebhooksService {
@@ -41,8 +42,8 @@ export class WebhooksService {
       );
     }
 
-    // Extract dedupe key (Tier 1 → 2 → 3)
-    const { externalEventId, dedupeKey } = this.extractDedupeKey(payload);
+    // Extract dedupe key (Tier 1 → 2 → 3); tier-2 includes message fingerprint when id is missing
+    const { externalEventId, dedupeKey } = extractGhlInboundDedupeKeys(payload);
 
     // Identify tenant and verify active connection
     const tenantConnection = await this.findTenantByLocationId(
@@ -99,72 +100,6 @@ export class WebhooksService {
     );
 
     return { success: true, eventId: webhookEvent.id, duplicate: false };
-  }
-
-  /**
-   * Extract dedupe key using 3-tier strategy
-   *
-   * Tier 1: Use GHL's data.id directly (preferred)
-   * Tier 2: Derive from provider + locationId + conversationId + eventType + timestamp
-   *         (fallback if data.id missing; swap conversationId for contactId if needed)
-   * Tier 3: SHA-256 hash of locationId + conversationId + message + messageType + timestamp
-   *         (last resort when payload too sparse)
-   */
-  private extractDedupeKey(payload: GhlWebhookPayload): {
-    externalEventId: string;
-    dedupeKey: string;
-  } {
-    const data = payload.data || {};
-
-    // Tier 1: GHL-provided message ID
-    if (data.id) {
-      return {
-        externalEventId: data.id,
-        dedupeKey: `tier1:${data.id}`,
-      };
-    }
-
-    // Tier 2: Derived from stable fields
-    const locationId = payload.locationId;
-    const conversationId = data.conversationId;
-    const contactId = data.contactId;
-    const eventType = payload.event;
-    const timestamp = payload.timestamp;
-
-    if (conversationId) {
-      const tier2Key = `GHL|${locationId}|${conversationId}|${eventType}|${timestamp}`;
-      return {
-        externalEventId: tier2Key,
-        dedupeKey: `tier2:${tier2Key}`,
-      };
-    }
-
-    if (contactId) {
-      const tier2Key = `GHL|${locationId}|${contactId}|${eventType}|${timestamp}`;
-      return {
-        externalEventId: tier2Key,
-        dedupeKey: `tier2:${tier2Key}`,
-      };
-    }
-
-    // Tier 3: Hash of sparse payload content (last resort)
-    const components = [
-      locationId,
-      conversationId || '',
-      data.message || '',
-      data.messageType || '',
-      timestamp,
-    ].join('|');
-
-    const hash = createHash('sha256')
-      .update(components)
-      .digest('hex')
-      .substring(0, 32);
-
-    return {
-      externalEventId: hash,
-      dedupeKey: `tier3:${hash}`,
-    };
   }
 
   /**

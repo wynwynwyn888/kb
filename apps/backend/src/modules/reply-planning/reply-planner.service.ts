@@ -9,6 +9,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { stripCustomerFacingMeta, stripModelThinking } from '@aisbp/formatter';
 import { packPlainTextIntoOutboundBubbles } from '../../lib/outbound-bubbles';
+import { polishKbSnippetForCustomer } from '../../lib/kb-faq-customer-text';
 import { GenerationService } from '../generation/generation.service';
 import type {
   ReplyDecision,
@@ -210,8 +211,10 @@ export class ReplyPlannerService {
     // Build from KB context
     if (kbChunks.length > 0) {
       const top = kbChunks[0]!;
-      const snippet = top.content.slice(0, 240).trim();
-      return `${snippet}${snippet.length === top.content.length ? '' : '...'}`;
+      const snippet = top.content.slice(0, 480).trim();
+      const ellipsed =
+        `${snippet}${snippet.length === top.content.length ? '' : '...'}`;
+      return polishKbSnippetForCustomer(ellipsed);
     }
 
     // Fallback: short acknowledgment based on response mode

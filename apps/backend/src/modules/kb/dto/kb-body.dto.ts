@@ -15,6 +15,20 @@ export class CreateKbFaqBodyDto {
   answer!: string;
 }
 
+export class UpdateKbFaqBodyDto {
+  @IsString()
+  @IsNotEmpty()
+  tenantId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  question!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  answer!: string;
+}
+
 export class CreateKbRichTextBodyDto {
   @IsString()
   @IsNotEmpty()

@@ -4,6 +4,7 @@ import {
   Controller,
   Get,
   Post,
+  Patch,
   Delete,
   Body,
   Param,
@@ -26,6 +27,7 @@ import {
   CreateKbRichTextBodyDto,
   KbFileUploadBodyDto,
   KbSearchBodyDto,
+  UpdateKbFaqBodyDto,
 } from './dto/kb-body.dto';
 
 const KB_MAX_TOP_K = 50;
@@ -85,6 +87,22 @@ export class KbController {
     await this.assertTenantScope(user, dto.tenantId);
     try {
       return await this.kbService.createFaq(dto.tenantId, dto.question, dto.answer);
+    } catch (e) {
+      throw new BadRequestException(mapKbError(e));
+    }
+  }
+
+  @Patch('documents/:documentId/faq')
+  @ApiOperation({ summary: 'Update FAQ question and answer' })
+  async updateFaq(
+    @Param('documentId') documentId: string,
+    @Body() dto: UpdateKbFaqBodyDto,
+    @CurrentUser() user: SessionUser,
+  ) {
+    if (!dto.tenantId?.trim()) throw new BadRequestException('tenantId is required');
+    await this.assertTenantScope(user, dto.tenantId);
+    try {
+      return await this.kbService.updateFaq(dto.tenantId, documentId, dto.question, dto.answer);
     } catch (e) {
       throw new BadRequestException(mapKbError(e));
     }

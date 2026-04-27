@@ -107,7 +107,16 @@ function extractMessageId(
   r: Record<string, unknown>,
   sources: Record<string, unknown>[],
 ): string | undefined {
-  const direct = pickFromSources(sources, ['id', 'messageId', 'data.id']);
+  const direct = pickFromSources(sources, [
+    'id',
+    'messageId',
+    'data.id',
+    /** GHL Workflow / customData: stable per execution when native message id is absent */
+    'workflowExecutionId',
+    'executionId',
+    'runId',
+    'workflowRunId',
+  ]);
   if (direct !== undefined) return direct;
   const msg = r['message'];
   if (isPlainObject(msg)) {

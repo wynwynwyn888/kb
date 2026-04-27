@@ -9,6 +9,14 @@ import { OpenAiProviderAdapter } from '@aisbp/ai-provider-openai';
 import { minimaxChatCompletion } from './minimax.generate';
 import type { MemoryEntry } from '../orchestration/dto';
 import type { RetrievalChunk } from '../kb/dto/retrieval.dto';
+import type { ConversationIntent } from '../conversation-policy/conversation-intent';
+import type { SelectionResolution } from '../conversation-policy/option-resolver';
+
+export interface GenerateDraftPolicyContext {
+  latestIntent: ConversationIntent;
+  resolvedSelection: SelectionResolution | null;
+  conversationStateSummary: string;
+}
 
 export interface GenerateDraftParams {
   tenantId: string;
@@ -20,6 +28,8 @@ export interface GenerateDraftParams {
   /** Subaccount prompt config — when set, overrides agency provider row temperature / max tokens. */
   temperature?: number;
   maxTokens?: number;
+  /** Conversation policy summary for the latest turn (intent, selection, state). */
+  policyContext?: GenerateDraftPolicyContext;
 }
 
 export interface GenerateDraftResult {
@@ -323,6 +333,20 @@ export class GenerationService {
           'Do not paste raw bullet lists unless the customer explicitly asked for a list. ' +
           'Do not add offers, prices, policies, or availability that are not in the context.',
       });
+    }
+
+    const pc = params.policyContext;
+    if (pc) {
+      const parts: string[] = [
+        `Conversation policy: latestIntent=${pc.latestIntent}. State: ${pc.conversationStateSummary}.`,
+        'Use KB only if relevant to the latest customer message. If the user selected an option, continue that flow.',
+      ];
+      if (pc.resolvedSelection) {
+        parts.push(
+          `The user chose option ${pc.resolvedSelection.selectedLabel} (${pc.resolvedSelection.selectedText}).`,
+        );
+      }
+      messages.push({ role: 'system', content: parts.join(' ') });
     }
 
     messages.push({ role: 'user', content: params.incomingMessage });

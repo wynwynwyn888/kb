@@ -31,4 +31,12 @@ describe('ghl-webhook-dedupe', () => {
     expect(a.dedupeKey.startsWith('tier2:')).toBe(true);
     expect(b.dedupeKey.startsWith('tier2:')).toBe(true);
   });
+
+  it('G: identical tier2 payload yields same dedupe key (real duplicate)', () => {
+    const p = makePayload('same text');
+    const a = extractGhlInboundDedupeKeys(p);
+    const b = extractGhlInboundDedupeKeys(makePayload('same text'));
+    expect(a.externalEventId).toBe(b.externalEventId);
+    expect(a.dedupeKey).toBe(b.dedupeKey);
+  });
 });

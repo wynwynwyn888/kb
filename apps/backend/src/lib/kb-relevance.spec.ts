@@ -1,6 +1,7 @@
 import type { RetrievalChunk } from '../modules/kb/dto/retrieval.dto';
 import {
   filterKbChunksForLatestUserMessage,
+  filterKbChunksForPolicy,
   classifyQueryForKbLog,
 } from './kb-relevance';
 
@@ -61,5 +62,41 @@ describe('classifyQueryForKbLog', () => {
   it('classifies menu vs hours', () => {
     expect(classifyQueryForKbLog('ur menu')).toBe('menu');
     expect(classifyQueryForKbLog('opening hours')).toBe('hours');
+  });
+});
+
+describe('filterKbChunksForPolicy', () => {
+  const hoursFaq = chunk({
+    title: 'FAQ: What are your opening hours?',
+    content: 'Weekdays 9am-11pm\nWeekends 9am-12am',
+    metadata: { question: 'What are your opening hours?' },
+  });
+
+  const menuFaq = chunk({
+    title: 'FAQ: Do you have a vegan menu?',
+    content: 'Yes, we offer vegan starters, mains, and desserts.',
+    metadata: { question: 'Do you have a vegan menu?' },
+  });
+
+  it('MENU intent drops hours-only chunks (then menu prompt path can run)', () => {
+    const { chunks, rejections } = filterKbChunksForPolicy('MENU', 'your menu', [hoursFaq]);
+    expect(chunks).toHaveLength(0);
+    expect(rejections.some(r => r.reason.includes('hours'))).toBe(true);
+  });
+
+  it('BUSINESS_HOURS intent drops menu-only chunks', () => {
+    const { chunks, rejections } = filterKbChunksForPolicy(
+      'BUSINESS_HOURS',
+      'ur opening hour?',
+      [menuFaq],
+    );
+    expect(chunks).toHaveLength(0);
+    expect(rejections.some(r => r.reason.includes('menu'))).toBe(true);
+  });
+
+  it('MENU keeps menu-focused chunk even when hours FAQ also ranked', () => {
+    const { chunks } = filterKbChunksForPolicy('MENU', 'your menu', [hoursFaq, menuFaq]);
+    expect(chunks.map(c => c.title)).toContain('FAQ: Do you have a vegan menu?');
+    expect(chunks.map(c => c.title)).not.toContain('FAQ: What are your opening hours?');
   });
 });

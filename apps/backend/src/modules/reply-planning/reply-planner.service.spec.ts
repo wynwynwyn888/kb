@@ -1,6 +1,7 @@
 import { jest as jestGlobal } from '@jest/globals';
 
 import { ReplyPlannerService } from './reply-planner.service';
+import { MENU_CATEGORY_PROMPT } from '../conversation-policy/policy-menu-copy';
 import { GenerationService } from '../generation/generation.service';
 
 // Mock GenerationService to always return null → forces deterministic fallback
@@ -280,6 +281,40 @@ describe('ReplyPlannerService', () => {
       });
       expect(result.draftProvenance).toBe('live_generation');
       expect(result.draftFallbackReason).toBeUndefined();
+    });
+
+    it('H: policy forced menu prompt stays one bubble and skips generation', async () => {
+      const result = await service.planReply({
+        tenantId: 't1',
+        conversationId: 'c1',
+        routing: {
+          recommendedModel: 'gpt-4o',
+          responseMode: 'standard',
+          handoverRecommended: false,
+          confidence: 0.8,
+          reasoning: 'test',
+          draftReply: null,
+          tagsSuggested: [],
+          bookingIntentDetected: false,
+        },
+        kbChunks: [],
+        memory: [],
+        systemPrompt: 'You are a helpful assistant.',
+        channel: 'WHATSAPP',
+        policyContext: {
+          latestIntent: 'MENU',
+          resolvedSelection: null,
+          conversationStateSummary: 'awaiting=menu_category_selection',
+          policyForcedReply: MENU_CATEGORY_PROMPT,
+          policyReplyKind: 'menu_category_prompt',
+          menuSelectionActive: false,
+        },
+      });
+      expect(mockGen.generateDraft).not.toHaveBeenCalled();
+      expect(result.draftProvenance).toBe('policy_reply');
+      expect(result.bubbles).toHaveLength(1);
+      expect(result.bubbles[0]!.text).toContain('A) Starters');
+      expect(result.bubbles[0]!.text).toContain('What are you in the mood for?');
     });
   });
 

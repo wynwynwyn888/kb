@@ -24,7 +24,16 @@ import type { ReplyDecision } from '../reply-planning/dto';
 import type { RetrievalChunk, RetrievalMeta } from '../kb/dto/retrieval.dto';
 import { safeLog } from '../../lib/encryption';
 import { resolveBotMode, type BotOperatingMode } from '../../lib/bot-mode';
-import { filterKbChunksForLatestUserMessage } from '../../lib/kb-relevance';
+import { filterKbChunksForPolicy } from '../../lib/kb-relevance';
+import {
+  classifyConversationIntent,
+  type ConversationIntent,
+} from '../conversation-policy/conversation-intent';
+import { ConversationPolicyEngineService } from '../conversation-policy/conversation-policy-engine.service';
+import {
+  mergePolicyIntoConversationMetadata,
+  type AisbpPolicyStateV1,
+} from '../conversation-policy/conversation-policy-state';
 
 @Injectable()
 export class ConversationOrchestrationService {
@@ -37,6 +46,7 @@ export class ConversationOrchestrationService {
     private readonly aiRouter: AiRouterService,
     private readonly kbService: KbService,
     private readonly replyPlanner: ReplyPlannerService,
+    private readonly conversationPolicy: ConversationPolicyEngineService,
   ) {}
 
   /**
@@ -78,8 +88,25 @@ export class ConversationOrchestrationService {
       // Step 2: Load conversation memory
       const memory = await this.memoryLoader.loadMemory(conversationId);
 
-      // Step 3: Retrieve KB context for the incoming message
-      const { chunks: kbChunks, meta: retrievalMeta } = await this.retrieveKbContext(input, conversationId);
+      const latestMsg = (input.incomingMessage.messageContent ?? '').trim();
+      const latestIntent = classifyConversationIntent(latestMsg);
+
+      // Step 3: Retrieve KB (query = latest inbound only) + intent-aware filter
+      const { chunks: kbAfterRetrieve, meta: retrievalMeta } = await this.retrieveKbContext(
+        input,
+        conversationId,
+        latestIntent,
+      );
+
+      const policyState = this.conversationPolicy.parseState(input.conversation?.metadata);
+      const policyOutcome = this.conversationPolicy.evaluate({
+        intent: latestIntent,
+        incomingRaw: latestMsg,
+        memory: memory.entries,
+        policyState,
+        kbChunksRanked: kbAfterRetrieve,
+      });
+      const kbChunks = policyOutcome.kbChunks;
 
       // Step 4: Build AI routing request (includes KB context)
       const systemPrompt = this.buildSystemPrompt(input);
@@ -104,7 +131,21 @@ export class ConversationOrchestrationService {
         channel: input.conversation?.channel ?? 'WHATSAPP',
         temperature: input.promptConfig?.temperature,
         maxTokens: input.promptConfig?.maxTokens,
+        policyContext: {
+          latestIntent: policyOutcome.latestIntent,
+          resolvedSelection: policyOutcome.resolvedSelection,
+          conversationStateSummary: policyOutcome.conversationStateSummary,
+          policyForcedReply: policyOutcome.policyForcedReply,
+          policyReplyKind: policyOutcome.policyReplyKind,
+          menuSelectionActive: policyOutcome.menuSelectionActive,
+        },
       });
+
+      await this.persistConversationPolicyMetadata(
+        conversationId,
+        (input.conversation?.metadata as Record<string, unknown> | undefined) ?? {},
+        policyOutcome.nextPolicyState,
+      );
 
       this.logger.log(
         `Orchestration completed: conversationId=${conversationId}, ` +
@@ -293,9 +334,27 @@ export class ConversationOrchestrationService {
    * Retrieve KB context for the incoming user message.
    * Returns { chunks, meta } — chunks may be empty even when meta is non-null.
    */
+  private async persistConversationPolicyMetadata(
+    conversationId: string,
+    prevMetadata: Record<string, unknown>,
+    policyState: AisbpPolicyStateV1,
+  ): Promise<void> {
+    const merged = mergePolicyIntoConversationMetadata(prevMetadata, policyState);
+    const { error } = await this.supabase
+      .from('conversations')
+      .update({ metadata: merged, updated_at: new Date().toISOString() })
+      .eq('id', conversationId);
+    if (error) {
+      this.logger.warn(
+        `Failed to persist conversation policy metadata: conversationId=${conversationId} ${formatPostgrestError(error)}`,
+      );
+    }
+  }
+
   private async retrieveKbContext(
     input: OrchestrationInput,
     conversationId: string,
+    latestIntent: ConversationIntent,
   ): Promise<{ chunks: RetrievalChunk[]; meta: RetrievalMeta | null }> {
     try {
       const result = await this.kbService.retrieve({
@@ -305,13 +364,14 @@ export class ConversationOrchestrationService {
         topK: 5,
       });
 
-      const { chunks: filteredChunks, rejections } = filterKbChunksForLatestUserMessage(
+      const { chunks: filteredChunks, rejections } = filterKbChunksForPolicy(
+        latestIntent,
         input.incomingMessage.messageContent,
         result.chunks,
       );
       for (const r of rejections) {
         this.logger.log(
-          `KB result rejected: reason=${r.reason}, latestMessage_class=${r.queryClass}, kbTitle=${r.kbTitleShort}`,
+          `KB rejected: reason=${r.reason}, latestMessage_class=${r.queryClass}, kbTitle=${r.kbTitleShort}`,
         );
       }
 

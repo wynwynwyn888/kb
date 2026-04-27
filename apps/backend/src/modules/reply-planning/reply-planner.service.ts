@@ -10,7 +10,10 @@ import { Injectable, Logger } from '@nestjs/common';
 import { stripCustomerFacingMeta, stripModelThinking } from '@aisbp/formatter';
 import { packPlainTextIntoOutboundBubbles } from '../../lib/outbound-bubbles';
 import { polishKbSnippetForCustomer } from '../../lib/kb-faq-customer-text';
+import { applyOutboundPolicyGuard } from '../../lib/outbound-policy-guard';
 import { detectMenuIntentInMessage } from '../../lib/kb-relevance';
+import type { ConversationIntent } from '../conversation-policy/conversation-intent';
+import type { SelectionResolution } from '../conversation-policy/option-resolver';
 import { GenerationService } from '../generation/generation.service';
 import type {
   ReplyDecision,
@@ -21,6 +24,15 @@ import type {
 import type { RoutingResponse } from '../orchestration/dto';
 import type { RetrievalChunk } from '../kb/dto/retrieval.dto';
 import type { MemoryEntry } from '../orchestration/dto';
+
+export interface ReplyPlanPolicyContext {
+  latestIntent: ConversationIntent;
+  resolvedSelection: SelectionResolution | null;
+  conversationStateSummary: string;
+  policyForcedReply: string | null;
+  policyReplyKind: string;
+  menuSelectionActive: boolean;
+}
 
 @Injectable()
 export class ReplyPlannerService {
@@ -47,8 +59,9 @@ export class ReplyPlannerService {
     /** From subaccount `tenant_prompt_configs` when set. */
     temperature?: number;
     maxTokens?: number | null;
+    policyContext?: ReplyPlanPolicyContext;
   }): Promise<ReplyDecision> {
-    const { tenantId, routing, kbChunks, memory, systemPrompt, conversationId } = params;
+    const { tenantId, routing, kbChunks, memory, systemPrompt, conversationId, policyContext } = params;
 
     this.logger.debug(
       `Reply planning started: conversation=${conversationId}, mode=${routing.responseMode}`,
@@ -63,6 +76,29 @@ export class ReplyPlannerService {
       return plan;
     }
 
+    // ---------- Conversation policy forced reply (no LLM) ----------
+    const forced = policyContext?.policyForcedReply?.trim();
+    if (forced) {
+      this.logger.log(`Policy reply chosen: ${policyContext!.policyReplyKind}`);
+      const guarded = applyOutboundPolicyGuard({
+        latestIntent: policyContext!.latestIntent,
+        menuSelectionActive: policyContext!.menuSelectionActive,
+        draftText: forced,
+      });
+      const bubbles = this.formatIntoBubbles(guarded);
+      const suggestedActions = this.suggestActions(routing, kbChunks);
+      return {
+        planStatus: 'PLANNED',
+        responseMode: routing.responseMode,
+        handoverRecommended: routing.handoverRecommended,
+        confidence: routing.confidence,
+        rationale: routing.reasoning,
+        bubbles,
+        suggestedActions,
+        draftProvenance: 'policy_reply',
+      };
+    }
+
     // ---------- Live generation or fallback ----------
     const draft = await this.buildDraft(
       tenantId,
@@ -72,10 +108,16 @@ export class ReplyPlannerService {
       systemPrompt,
       params.temperature,
       params.maxTokens,
+      policyContext,
     );
 
     // ---------- Format into bubbles ----------
-    const bubbles = this.formatIntoBubbles(draft.text);
+    const guardedDraft = applyOutboundPolicyGuard({
+      latestIntent: policyContext?.latestIntent ?? 'UNKNOWN',
+      menuSelectionActive: policyContext?.menuSelectionActive ?? false,
+      draftText: draft.text,
+    });
+    const bubbles = this.formatIntoBubbles(guardedDraft);
 
     // ---------- Suggest actions ----------
     const suggestedActions = this.suggestActions(routing, kbChunks);
@@ -146,9 +188,10 @@ export class ReplyPlannerService {
     systemPrompt: string,
     subaccountTemperature?: number,
     subaccountMaxTokens?: number | null,
+    policyContext?: ReplyPlanPolicyContext,
   ): Promise<{
     text: string;
-    provenance: 'live_generation' | 'placeholder_fallback';
+    provenance: 'live_generation' | 'placeholder_fallback' | 'policy_reply';
     fallbackReason?: 'no_agency' | 'no_provider' | 'generation_failed';
     agencyActiveProvider?: string;
     generationProvider?: 'MINIMAX' | 'OPENAI';
@@ -170,6 +213,15 @@ export class ReplyPlannerService {
         : {}),
       ...(subaccountMaxTokens != null && subaccountMaxTokens > 0
         ? { maxTokens: subaccountMaxTokens }
+        : {}),
+      ...(policyContext
+        ? {
+            policyContext: {
+              latestIntent: policyContext.latestIntent,
+              resolvedSelection: policyContext.resolvedSelection,
+              conversationStateSummary: policyContext.conversationStateSummary,
+            },
+          }
         : {}),
     });
 

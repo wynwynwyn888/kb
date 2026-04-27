@@ -43,6 +43,20 @@ export class CreateKbRichTextBodyDto {
   content!: string;
 }
 
+export class UpdateKbRichTextBodyDto {
+  @IsString()
+  @IsNotEmpty()
+  tenantId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  title!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  content!: string;
+}
+
 export class KbFileUploadBodyDto {
   @IsString()
   @IsNotEmpty()

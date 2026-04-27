@@ -877,7 +877,13 @@ export interface KbDocumentRow {
   documentKind?: string;
   chunkCount?: number;
   createdAt?: string;
-  /** First chunk preview (FAQ / notes) */
+  /** Server `listDocuments` — prefer over createdAt for “last changed” */
+  updatedAt?: string;
+  mimeType?: string | null;
+  sizeBytes?: number | null;
+  /** When true, GET .../download may return the original upload */
+  originalDownloadable?: boolean;
+  /** First chunk preview (FAQ / notes / files) */
   answerPreview?: string;
   faqQuestion?: string;
 }
@@ -914,7 +920,7 @@ export async function getKbDocumentChunks(
   token: string,
   tenantId: string,
   documentId: string,
-): Promise<Array<{ id: string; content: string; tokenCount?: number }>> {
+): Promise<Array<{ id: string; content: string; tokenCount?: number; metadata?: Record<string, unknown> }>> {
   const q = new URLSearchParams({ tenantId });
   return apiRequest(`/kb/chunks/${encodeURIComponent(documentId)}?${q}`, { token });
 }
@@ -924,6 +930,75 @@ export async function createKbRichText(
   dto: { tenantId: string; title: string; content: string },
 ): Promise<{ id: string }> {
   return apiRequest('/kb/documents/rich', { token, method: 'POST', body: JSON.stringify(dto) });
+}
+
+export async function updateKbRichText(
+  token: string,
+  documentId: string,
+  dto: { tenantId: string; title: string; content: string },
+): Promise<{ ok: boolean }> {
+  return apiRequest(`/kb/documents/${encodeURIComponent(documentId)}/rich`, {
+    token,
+    method: 'PATCH',
+    body: JSON.stringify(dto),
+  });
+}
+
+/** Same-origin KB download URL (use with Bearer via `downloadKbDocumentOriginal`). */
+export function kbDocumentDownloadPath(tenantId: string, documentId: string): string {
+  const q = new URLSearchParams({ tenantId });
+  return `/kb/documents/${encodeURIComponent(documentId)}/download?${q}`;
+}
+
+function parseContentDispositionFilename(header: string | null): string | null {
+  if (!header) return null;
+  const star = /filename\*=UTF-8''([^;\s]+)/i.exec(header);
+  if (star?.[1]) {
+    try {
+      return decodeURIComponent(star[1].replace(/["']/g, ''));
+    } catch {
+      return star[1];
+    }
+  }
+  const plain = /filename="([^"]+)"/i.exec(header);
+  if (plain?.[1]) return plain[1].trim();
+  const plain2 = /filename=([^;\s]+)/i.exec(header);
+  if (plain2?.[1]) return plain2[1].replace(/["']/g, '').trim();
+  return null;
+}
+
+export async function downloadKbDocumentOriginal(
+  token: string,
+  tenantId: string,
+  documentId: string,
+  fallbackFilename: string,
+): Promise<{ blob: Blob; filename: string }> {
+  const path = kbDocumentDownloadPath(tenantId, documentId);
+  const response = await fetch(`${getApiBaseUrl()}${path}`, {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${token}` },
+    cache: 'no-store',
+  });
+  if (!response.ok) {
+    const status = response.status;
+    if (status === 401 && typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent(API_UNAUTHORIZED_EVENT));
+    }
+    const errorJson = await response.json().catch(() => ({ message: 'Request failed' }));
+    let msg = 'Request failed';
+    if (typeof errorJson === 'object' && errorJson !== null && 'message' in errorJson) {
+      const m = (errorJson as { message?: unknown }).message;
+      if (m !== undefined && m !== null && String(m).trim() !== '') msg = String(m);
+      else msg = `HTTP ${status}`;
+    } else {
+      msg = `HTTP ${status}`;
+    }
+    throw new ApiHttpError(status, msg, errorJson);
+  }
+  const blob = await response.blob();
+  const fromHeader = parseContentDispositionFilename(response.headers.get('Content-Disposition'));
+  const filename = fromHeader || fallbackFilename || 'download';
+  return { blob, filename };
 }
 
 export async function uploadKbFile(token: string, tenantId: string, file: File): Promise<{ id: string; status: string }> {

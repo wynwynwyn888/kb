@@ -104,7 +104,12 @@ export class KbService {
     documentKind: string;
     chunkCount: number;
     createdAt: string;
-    /** First chunk text — used for FAQ / note preview in UI */
+    updatedAt: string;
+    mimeType?: string | null;
+    sizeBytes?: number | null;
+    /** True when an object-storage path exists for the uploaded bytes */
+    originalDownloadable?: boolean;
+    /** First chunk text — used for FAQ / note / file preview in UI */
     answerPreview?: string;
     /** FAQ question from metadata or title */
     faqQuestion?: string;
@@ -113,7 +118,7 @@ export class KbService {
     // lags after migrations; we infer kind from `source` + `metadata.documentKind`.
     let q = this.supabase
       .from('knowledge_documents')
-      .select('id, title, source, status, created_at, metadata')
+      .select('id, title, source, status, created_at, updated_at, metadata, mime_type, size')
       .eq('tenant_id', tenantId);
     if (!opts?.includeAllStatuses) {
       q = q.eq('status', 'READY');
@@ -157,8 +162,20 @@ export class KbService {
         kind === 'faq'
           ? (qMeta || d.title.replace(/^FAQ:\s*/i, '').trim() || d.title)
           : undefined;
+      const previewKinds = ['faq', 'rich_text', 'file', 'manual'];
       const answerPreview =
-        kind === 'faq' || kind === 'rich_text' ? firstChunk.slice(0, 500) : undefined;
+        previewKinds.includes(kind) && firstChunk ? firstChunk.slice(0, 500) : undefined;
+
+      const storagePath =
+        typeof meta['originalStoragePath'] === 'string' ? meta['originalStoragePath'].trim() : '';
+      const originalDownloadable = kind === 'file' && storagePath.length > 0;
+
+      const row = d as {
+        created_at: string;
+        updated_at?: string | null;
+        mime_type?: string | null;
+        size?: number | null;
+      };
 
       return {
         id: d.id,
@@ -167,13 +184,32 @@ export class KbService {
         status: d.status,
         documentKind: kind,
         chunkCount: countMap[d.id] ?? 0,
-        createdAt: d.created_at,
+        createdAt: row.created_at,
+        updatedAt: (row.updated_at && String(row.updated_at)) || row.created_at,
+        ...(kind === 'file'
+          ? {
+              mimeType: row.mime_type ?? null,
+              sizeBytes: typeof row.size === 'number' ? row.size : null,
+              originalDownloadable,
+            }
+          : {}),
         ...(faqQuestion !== undefined ? { faqQuestion } : {}),
         ...(answerPreview !== undefined && answerPreview.length > 0
           ? { answerPreview }
           : {}),
       };
     });
+  }
+
+  /** Strip vector-like fields before returning chunk metadata to clients. */
+  sanitizeChunkMetadataForClient(metadata: Record<string, unknown> | null | undefined): Record<string, unknown> {
+    const strip = new Set(['embedding', 'vector', 'vectors', 'embeddings']);
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(metadata ?? {})) {
+      if (strip.has(k.toLowerCase())) continue;
+      out[k] = v;
+    }
+    return out;
   }
 
   async createFaq(tenantId: string, question: string, answer: string): Promise<{ id: string }> {
@@ -247,6 +283,116 @@ export class KbService {
     return { id: doc.id };
   }
 
+  async updateRichText(
+    tenantId: string,
+    documentId: string,
+    title: string,
+    content: string,
+  ): Promise<{ ok: true }> {
+    const t = title.trim();
+    const c = content.trim();
+    if (!t || !c) throw new Error('title and content required');
+
+    const { data: doc, error: fe } = await this.supabase
+      .from('knowledge_documents')
+      .select('id, source, metadata')
+      .eq('id', documentId)
+      .eq('tenant_id', tenantId)
+      .maybeSingle();
+    if (fe || !doc) throw new Error('Document not found');
+
+    const kind = inferDocumentKind(doc.source, doc.metadata);
+    if (kind === 'faq' || kind === 'file') {
+      throw new Error('Not a note document');
+    }
+
+    const prevMeta =
+      doc.metadata && typeof doc.metadata === 'object' && !Array.isArray(doc.metadata)
+        ? (doc.metadata as Record<string, unknown>)
+        : {};
+    const now = new Date().toISOString();
+
+    const { error: ue } = await this.supabase
+      .from('knowledge_documents')
+      .update({
+        title: t,
+        size: c.length,
+        metadata: { ...prevMeta, documentKind: prevMeta['documentKind'] ?? kind },
+        updated_at: now,
+      })
+      .eq('id', documentId)
+      .eq('tenant_id', tenantId);
+    if (ue) throw new Error(ue.message);
+
+    const { error: delE } = await this.supabase
+      .from('knowledge_chunks')
+      .delete()
+      .eq('document_id', documentId);
+    if (delE) throw new Error(delE.message);
+
+    const chunkId = randomUUID();
+    const { error: ce } = await this.supabase.from('knowledge_chunks').insert({
+      id: chunkId,
+      document_id: documentId,
+      content: c,
+      token_count: Math.ceil(c.length / 4),
+      metadata: { kind: kind === 'manual' ? 'manual' : 'rich_text' },
+    });
+    if (ce) throw new Error(ce.message);
+
+    return { ok: true };
+  }
+
+  /**
+   * Return original upload bytes when `metadata.originalStoragePath` is set and the object exists.
+   */
+  async getOriginalFileForDownload(
+    tenantId: string,
+    documentId: string,
+  ): Promise<{ buffer: Buffer; mimeType: string; filename: string } | null> {
+    const { data: doc, error } = await this.supabase
+      .from('knowledge_documents')
+      .select('id, tenant_id, title, source, mime_type, metadata')
+      .eq('id', documentId)
+      .eq('tenant_id', tenantId)
+      .maybeSingle();
+    if (error || !doc) return null;
+
+    const kind = inferDocumentKind(doc.source as string, doc.metadata);
+    if (kind !== 'file') return null;
+
+    const meta =
+      doc.metadata && typeof doc.metadata === 'object' && !Array.isArray(doc.metadata)
+        ? (doc.metadata as Record<string, unknown>)
+        : {};
+    const path = typeof meta['originalStoragePath'] === 'string' ? meta['originalStoragePath'].trim() : '';
+    if (!path) return null;
+
+    const bucket =
+      (typeof meta['originalStorageBucket'] === 'string' && meta['originalStorageBucket'].trim()) ||
+      process.env['KB_ORIGINALS_BUCKET']?.trim() ||
+      'kb-originals';
+
+    const { data: blob, error: dlErr } = await this.supabase.storage.from(bucket).download(path);
+    if (dlErr || !blob) {
+      this.logger.warn(`KB original download failed doc=${documentId}: ${dlErr?.message ?? 'no blob'}`);
+      return null;
+    }
+
+    const arr = await blob.arrayBuffer();
+    const fileLabel =
+      (typeof meta['originalFileName'] === 'string' && meta['originalFileName'].trim()) ||
+      (typeof meta['fileName'] === 'string' && meta['fileName'].trim()) ||
+      (doc.title as string) ||
+      'download';
+
+    return {
+      buffer: Buffer.from(arr),
+      mimeType: (doc.mime_type as string) || 'application/octet-stream',
+      filename: fileLabel,
+    };
+  }
+
   async createFileFromBuffer(
     tenantId: string,
     fileName: string,
@@ -270,6 +416,8 @@ export class KbService {
     if (!text.trim()) throw new Error('Empty or unsupported file content');
     const docId = randomUUID();
     const now = new Date().toISOString();
+    let metadata: Record<string, unknown> = { fileName, mime, documentKind: 'file' };
+
     const { data: doc, error: de } = await this.supabase
       .from('knowledge_documents')
       .insert({
@@ -280,13 +428,42 @@ export class KbService {
         mime_type: mime || 'application/octet-stream',
         size: buffer.length,
         status: 'READY',
-        metadata: { fileName, mime, documentKind: 'file' },
+        metadata,
         created_at: now,
         updated_at: now,
       })
       .select('id')
       .single();
     if (de || !doc) throw new Error(`File doc: ${de?.message}`);
+
+    const bucket = process.env['KB_ORIGINALS_BUCKET']?.trim();
+    if (bucket && buffer.length > 0) {
+      const safe = fileName.replace(/[^\w.\-]+/g, '_').slice(0, 120) || 'upload.bin';
+      const storagePath = `${tenantId}/${doc.id}/${safe}`;
+      const { error: upErr } = await this.supabase.storage.from(bucket).upload(storagePath, buffer, {
+        contentType: mime || 'application/octet-stream',
+        upsert: true,
+      });
+      if (!upErr) {
+        metadata = {
+          ...metadata,
+          originalStoragePath: storagePath,
+          originalStorageBucket: bucket,
+          originalFileName: fileName,
+        };
+        const { error: me } = await this.supabase
+          .from('knowledge_documents')
+          .update({ metadata })
+          .eq('id', doc.id)
+          .eq('tenant_id', tenantId);
+        if (me) {
+          this.logger.warn(`KB file metadata update after storage upload failed: ${me.message}`);
+        }
+      } else {
+        this.logger.warn(`KB original file not stored (${bucket}): ${upErr.message}`);
+      }
+    }
+
     const chunkId = randomUUID();
     const { error: ce } = await this.supabase.from('knowledge_chunks').insert({
       id: chunkId,
@@ -517,7 +694,7 @@ export class KbService {
     // we filter READY + tenant on `knowledge_documents` first, then load chunks.
     const { data: docs, error: dErr } = await this.supabase
       .from('knowledge_documents')
-      .select('id, title, source')
+      .select('id, title, source, updated_at')
       .eq('tenant_id', tenantId)
       .eq('status', 'READY');
 
@@ -527,9 +704,14 @@ export class KbService {
     }
     if (!docs?.length) return [];
 
-    const docById: Record<string, { id: string; title: string; source: string }> = {};
+    const docById: Record<string, { id: string; title: string; source: string; updatedAt: string | null }> = {};
     for (const d of docs) {
-      docById[d.id] = { id: d.id, title: d.title, source: d.source };
+      docById[d.id] = {
+        id: d.id,
+        title: d.title,
+        source: d.source,
+        updatedAt: (d as { updated_at?: string }).updated_at ?? null,
+      };
     }
     const docIds = docs.map(d => d.id);
 
@@ -548,13 +730,17 @@ export class KbService {
       .map(row => {
         const doc = docById[row.document_id as string];
         if (!doc) return null;
+        const baseMeta = (row.metadata as Record<string, unknown>) ?? {};
         return {
           id: row.id,
           documentId: row.document_id,
           title: doc.title,
           source: doc.source,
           content: row.content,
-          metadata: (row.metadata as Record<string, unknown>) ?? {},
+          metadata: {
+            ...baseMeta,
+            ...(doc.updatedAt ? { documentUpdatedAt: doc.updatedAt } : {}),
+          },
         };
       })
       .filter(

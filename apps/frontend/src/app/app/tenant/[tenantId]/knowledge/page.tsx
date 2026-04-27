@@ -1,6 +1,6 @@
 'use client';
 
-import type { CSSProperties } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { stripModelThinking } from '@aisbp/formatter';
 import { useParams } from 'next/navigation';
@@ -9,11 +9,13 @@ import {
   createKbFaq,
   createKbRichText,
   deleteKbDocument,
+  downloadKbDocumentOriginal,
   getKbDocumentChunks,
   isApiHttpError,
   listKbDocuments,
   searchKb,
   updateKbFaq,
+  updateKbRichText,
   uploadKbFile,
   type KbDocumentRow,
 } from '@/lib/api';
@@ -42,17 +44,6 @@ const glassSection: CSSProperties = {
   WebkitBackdropFilter: 'blur(18px)',
   border: '1px solid rgba(226, 232, 240, 0.95)',
   boxShadow: '0 12px 40px rgba(15, 23, 42, 0.04)',
-};
-
-const docCard: CSSProperties = {
-  borderRadius: 14,
-  padding: '1.05rem 1.1rem',
-  marginBottom: 12,
-  background: 'rgba(255, 255, 255, 0.92)',
-  border: '1px solid rgba(226, 232, 240, 0.9)',
-  boxShadow: '0 1px 2px rgba(15, 23, 42, 0.04)',
-  position: 'relative',
-  transition: 'border-color 0.15s ease',
 };
 
 const bentoBtn: CSSProperties = {
@@ -92,93 +83,96 @@ function statusPillTone(status: string): 'ok' | 'neutral' | 'warn' | 'bad' {
   return 'neutral';
 }
 
-function KnowledgeDocCard({
+const modalOverlay: CSSProperties = {
+  position: 'fixed',
+  inset: 0,
+  background: 'rgba(15, 23, 42, 0.48)',
+  zIndex: 60,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  padding: 16,
+};
+
+const modalPanel: CSSProperties = {
+  background: '#fff',
+  borderRadius: 16,
+  width: 'min(720px, 100%)',
+  maxHeight: 'min(82vh, 760px)',
+  overflow: 'hidden',
+  display: 'flex',
+  flexDirection: 'column',
+  boxShadow: '0 24px 48px rgba(15, 23, 42, 0.2)',
+  border: '1px solid #e2e8f0',
+};
+
+function KbModal({
   title,
-  statusRaw,
-  subtitle,
-  timeLabel,
-  timePrefix = 'Updated',
-  usageLine,
-  onDelete,
-  deleting,
+  children,
+  onClose,
+  footer,
 }: {
   title: string;
-  statusRaw: string;
-  subtitle?: string;
-  timeLabel: string;
-  timePrefix?: string;
-  usageLine?: string;
-  onDelete: () => void;
-  deleting: boolean;
+  children: ReactNode;
+  onClose: () => void;
+  footer?: ReactNode;
 }) {
-  const fmtStatus = (s: string) => {
-    const u = s.toUpperCase();
-    if (u === 'READY') return 'Ready';
-    if (u === 'PROCESSING') return 'Processing';
-    if (u === 'DRAFT') return 'Draft';
-    if (u === 'FAILED') return 'Needs attention';
-    return s;
-  };
-
   return (
-    <article
-      style={docCard}
-      onMouseEnter={e => {
-        e.currentTarget.style.borderColor = 'rgba(191, 219, 254, 0.95)';
-      }}
-      onMouseLeave={e => {
-        e.currentTarget.style.borderColor = 'rgba(226, 232, 240, 0.9)';
+    <div
+      style={modalOverlay}
+      role="presentation"
+      onClick={e => {
+        if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 8 }}>
-        <h3 style={{ fontSize: '1.05rem', fontWeight: 700, margin: 0, color: '#0f172a', lineHeight: 1.35, flex: 1, minWidth: 0 }}>
-          {title}
-        </h3>
-        <StatusPill label={fmtStatus(statusRaw)} tone={statusPillTone(statusRaw)} />
+      <div style={modalPanel} role="dialog" aria-modal="true" aria-labelledby="kb-modal-title" onClick={e => e.stopPropagation()}>
+        <div style={{ padding: '1rem 1.15rem', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', gap: 12 }}>
+          <h2 id="kb-modal-title" style={{ fontSize: '1.05rem', fontWeight: 700, margin: 0, flex: 1, minWidth: 0, color: '#0f172a' }}>
+            {title}
+          </h2>
+          <button
+            type="button"
+            onClick={onClose}
+            style={{
+              border: 'none',
+              background: '#f1f5f9',
+              borderRadius: 8,
+              width: 36,
+              height: 36,
+              cursor: 'pointer',
+              fontSize: '1.1rem',
+              lineHeight: 1,
+              color: '#475569',
+            }}
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </div>
+        <div style={{ padding: '1rem 1.15rem', overflowY: 'auto', flex: 1, minHeight: 0 }}>{children}</div>
+        {footer ? <div style={{ padding: '0.75rem 1.15rem', borderTop: '1px solid #f1f5f9' }}>{footer}</div> : null}
       </div>
-      {subtitle ? (
-        <p
-          style={{
-            fontSize: '0.8125rem',
-            color: '#64748b',
-            margin: '0 0 10px',
-            lineHeight: 1.5,
-            display: '-webkit-box',
-            WebkitLineClamp: 2,
-            WebkitBoxOrient: 'vertical' as const,
-            overflow: 'hidden',
-          }}
-        >
-          {subtitle}
-        </p>
-      ) : null}
-      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '14px 18px', marginTop: 4 }}>
-        <span style={{ fontSize: '0.65rem', fontWeight: 700, letterSpacing: '0.06em', color: '#94a3b8' }}>
-          {timePrefix} {timeLabel}
-        </span>
-        {usageLine ? (
-          <span style={{ fontSize: '0.65rem', fontWeight: 700, letterSpacing: '0.06em', color: '#94a3b8' }}>{usageLine}</span>
-        ) : null}
-        <button
-          type="button"
-          onClick={onDelete}
-          disabled={deleting}
-          style={{
-            marginLeft: 'auto',
-            fontSize: '0.75rem',
-            fontWeight: 600,
-            color: '#b91c1c',
-            background: 'none',
-            border: 'none',
-            cursor: deleting ? 'wait' : 'pointer',
-            padding: '2px 0',
-          }}
-        >
-          {deleting ? '…' : 'Delete'}
-        </button>
-      </div>
-    </article>
+    </div>
   );
+}
+
+function formatFileBytes(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n) || n < 0) return '—';
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(n < 10_240 ? 1 : 0)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function fileKindLabel(doc: KbDocumentRow): string {
+  const mt = (doc.mimeType ?? '').toLowerCase();
+  if (mt.includes('pdf')) return 'PDF';
+  if (mt.includes('word') || mt.includes('msword') || mt.includes('wordprocessingml')) return 'Word';
+  if (mt.startsWith('text/')) return 'Text';
+  const s = (doc.source ?? '').toLowerCase();
+  if (s.includes('pdf')) return 'PDF';
+  if (s.includes('word') || s.includes('document')) return 'Word';
+  if (s.includes('text') || s.includes('plain')) return 'Text';
+  return doc.mimeType?.split('/')[1]?.toUpperCase() || 'File';
 }
 
 /** Legacy rows may omit `documentKind` — use source/title heuristics only as fallback. */
@@ -492,7 +486,7 @@ function FaqKnowledgeCard({
         </span>
         <span style={{ fontSize: '0.68rem', color: '#cbd5e1' }}>·</span>
         <span style={{ fontSize: '0.68rem', fontWeight: 600, letterSpacing: '0.04em', color: '#94a3b8' }}>
-          Updated {relativeTimeLabel(doc.createdAt)}
+          Updated {relativeTimeLabel(doc.updatedAt ?? doc.createdAt)}
         </span>
         <div style={{ marginLeft: 'auto', display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
           {!editing ? (
@@ -533,6 +527,616 @@ function FaqKnowledgeCard({
         </div>
       </div>
     </article>
+  );
+}
+
+function NoteKnowledgeCard({
+  doc,
+  token,
+  subId,
+  deleting,
+  onDelete,
+  onUpdated,
+  setWriteErr,
+  setSaveOk,
+}: {
+  doc: KbDocumentRow;
+  token: string;
+  subId: string;
+  deleting: boolean;
+  onDelete: () => void;
+  onUpdated: () => void;
+  setWriteErr: (s: string) => void;
+  setSaveOk: (s: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editTitle, setEditTitle] = useState('');
+  const [editBody, setEditBody] = useState('');
+  const [loadingEdit, setLoadingEdit] = useState(false);
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  const preview = (doc.answerPreview ?? '').trim();
+  const needsShowMore = preview.length > 220 || preview.split(/\n/).length > 3;
+
+  const startEdit = async () => {
+    setEditing(true);
+    setEditTitle(doc.title);
+    setEditBody('');
+    setWriteErr('');
+    setSaveOk('');
+    setLoadingEdit(true);
+    try {
+      const chunks = await getKbDocumentChunks(token, subId, doc.id);
+      const body = chunks.map(c => c.content).filter(c => c.trim()).join('\n\n') || preview;
+      setEditBody(body);
+    } catch {
+      setEditBody(preview);
+    } finally {
+      setLoadingEdit(false);
+    }
+  };
+
+  const saveEdit = async () => {
+    const t = editTitle.trim();
+    const c = editBody.trim();
+    if (!t || !c) {
+      setWriteErr('Title and text content are required.');
+      return;
+    }
+    setSavingEdit(true);
+    setWriteErr('');
+    try {
+      await updateKbRichText(token, doc.id, { tenantId: subId, title: t, content: c });
+      setSaveOk('Note saved.');
+      setEditing(false);
+      onUpdated();
+    } catch (er) {
+      const raw = isApiHttpError(er) ? er.message : er instanceof Error ? er.message : 'Save failed';
+      setWriteErr(friendlifyKbMessage(raw));
+    } finally {
+      setSavingEdit(false);
+    }
+  };
+
+  return (
+    <article style={faqCardShell}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <p
+            style={{
+              fontSize: '0.68rem',
+              fontWeight: 700,
+              letterSpacing: '0.08em',
+              color: '#94a3b8',
+              margin: '0 0 0.35rem',
+              textTransform: 'uppercase' as const,
+            }}
+          >
+            Title
+          </p>
+          <h3 style={{ fontSize: '1.05rem', fontWeight: 700, margin: 0, color: '#0f172a', lineHeight: 1.4 }}>{doc.title}</h3>
+        </div>
+        <StatusPill label={faqListStatusLabel(doc.status)} tone={statusPillTone(doc.status)} />
+      </div>
+
+      {!editing ? (
+        <>
+          <p
+            style={{
+              fontSize: '0.68rem',
+              fontWeight: 700,
+              letterSpacing: '0.08em',
+              color: '#94a3b8',
+              margin: '1rem 0 0.35rem',
+              textTransform: 'uppercase' as const,
+            }}
+          >
+            Content
+          </p>
+          {preview ? (
+            <div
+              style={
+                expanded
+                  ? {
+                      fontSize: '0.875rem',
+                      color: '#475569',
+                      lineHeight: 1.55,
+                      whiteSpace: 'pre-wrap' as const,
+                      maxHeight: 260,
+                      overflowY: 'auto' as const,
+                    }
+                  : {
+                      fontSize: '0.875rem',
+                      color: '#475569',
+                      lineHeight: 1.55,
+                      whiteSpace: 'pre-wrap' as const,
+                      display: '-webkit-box',
+                      WebkitLineClamp: 3,
+                      WebkitBoxOrient: 'vertical' as const,
+                      overflow: 'hidden',
+                    }
+              }
+            >
+              {preview}
+            </div>
+          ) : (
+            <p style={{ fontSize: '0.8125rem', color: '#94a3b8', margin: 0 }}>No preview yet — open View / Edit to load full text.</p>
+          )}
+          {needsShowMore && !expanded ? (
+            <button
+              type="button"
+              onClick={() => setExpanded(true)}
+              style={{
+                marginTop: 8,
+                fontSize: '0.8125rem',
+                fontWeight: 600,
+                color: PRIMARY,
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                padding: 0,
+              }}
+            >
+              Show more
+            </button>
+          ) : null}
+          {expanded && needsShowMore ? (
+            <button
+              type="button"
+              onClick={() => setExpanded(false)}
+              style={{
+                marginTop: 8,
+                fontSize: '0.8125rem',
+                fontWeight: 600,
+                color: '#64748b',
+                background: 'none',
+                border: 'none',
+                cursor: 'pointer',
+                padding: 0,
+              }}
+            >
+              Show less
+            </button>
+          ) : null}
+        </>
+      ) : (
+        <div style={{ marginTop: '1rem', display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+          <label>
+            <span style={mvpLabelStyle}>Title</span>
+            <input
+              value={editTitle}
+              onChange={e => setEditTitle(e.target.value)}
+              style={{ ...mvpInputStyle, marginTop: '0.35rem', width: '100%' }}
+              disabled={loadingEdit}
+            />
+          </label>
+          <label>
+            <span style={mvpLabelStyle}>Text content</span>
+            <textarea
+              value={editBody}
+              onChange={e => setEditBody(e.target.value)}
+              rows={8}
+              style={{ ...mvpInputStyle, marginTop: '0.35rem', width: '100%', minHeight: 160, resize: 'vertical' as const }}
+              disabled={loadingEdit}
+            />
+          </label>
+          {loadingEdit ? <p style={{ fontSize: '0.75rem', color: '#64748b', margin: 0 }}>Loading note…</p> : null}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+            <button
+              type="button"
+              disabled={savingEdit || loadingEdit}
+              onClick={() => void saveEdit()}
+              style={{ ...mvpPrimaryButtonStyle, borderRadius: 10 }}
+            >
+              {savingEdit ? 'Saving…' : 'Save changes'}
+            </button>
+            <button
+              type="button"
+              disabled={savingEdit}
+              onClick={() => {
+                setEditing(false);
+                setExpanded(false);
+              }}
+              style={{ ...mvpSecondaryButtonStyle, borderRadius: 10 }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          gap: '12px 16px',
+          marginTop: '1.1rem',
+          paddingTop: '0.85rem',
+          borderTop: '1px solid #f1f5f9',
+        }}
+      >
+        <span style={{ fontSize: '0.68rem', fontWeight: 600, letterSpacing: '0.04em', color: '#94a3b8' }}>
+          {fmtKind(doc.documentKind ?? 'rich_text')} · {typeof doc.chunkCount === 'number' ? `${doc.chunkCount} chunk${doc.chunkCount === 1 ? '' : 's'}` : '—'}
+        </span>
+        <span style={{ fontSize: '0.68rem', color: '#cbd5e1' }}>·</span>
+        <span style={{ fontSize: '0.68rem', fontWeight: 600, letterSpacing: '0.04em', color: '#94a3b8' }}>
+          Updated {relativeTimeLabel(doc.updatedAt ?? doc.createdAt)}
+        </span>
+        <div style={{ marginLeft: 'auto', display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
+          {!editing ? (
+            <button
+              type="button"
+              onClick={() => void startEdit()}
+              style={{
+                fontSize: '0.8125rem',
+                fontWeight: 600,
+                color: PRIMARY,
+                background: 'rgba(15, 98, 254, 0.08)',
+                border: '1px solid rgba(15, 98, 254, 0.25)',
+                borderRadius: 10,
+                padding: '0.4rem 0.85rem',
+                cursor: 'pointer',
+              }}
+            >
+              View / Edit
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={onDelete}
+            disabled={deleting}
+            style={{
+              fontSize: '0.75rem',
+              fontWeight: 500,
+              color: '#94a3b8',
+              background: 'none',
+              border: 'none',
+              cursor: deleting ? 'wait' : 'pointer',
+              textDecoration: 'underline',
+              textUnderlineOffset: 2,
+            }}
+          >
+            {deleting ? 'Removing…' : 'Delete'}
+          </button>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function FileKnowledgeCard({
+  doc,
+  token,
+  subId,
+  deleting,
+  onDelete,
+  setWriteErr,
+}: {
+  doc: KbDocumentRow;
+  token: string;
+  subId: string;
+  deleting: boolean;
+  onDelete: () => void;
+  setWriteErr: (s: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [extractedOpen, setExtractedOpen] = useState(false);
+  const [chunkLoading, setChunkLoading] = useState(false);
+  const [chunkText, setChunkText] = useState('');
+  const [chunkErr, setChunkErr] = useState('');
+  const [downloading, setDownloading] = useState(false);
+
+  const preview = (doc.answerPreview ?? '').trim();
+  const needsShowMore = preview.length > 220 || preview.split(/\n/).length > 3;
+  const canDownload = doc.originalDownloadable === true;
+
+  const loadChunks = async () => {
+    setChunkLoading(true);
+    setChunkErr('');
+    setChunkText('');
+    try {
+      const chunks = await getKbDocumentChunks(token, subId, doc.id);
+      const text = chunks.map((c, i) => `— Section ${i + 1} —\n${c.content}`).join('\n\n');
+      setChunkText(text.trim());
+    } catch (e) {
+      setChunkErr(isApiHttpError(e) ? e.message : 'Could not load extracted text');
+    } finally {
+      setChunkLoading(false);
+    }
+  };
+
+  const openExtracted = () => {
+    setExtractedOpen(true);
+    void loadChunks();
+  };
+
+  const onDownload = async () => {
+    if (!canDownload) return;
+    setDownloading(true);
+    setWriteErr('');
+    try {
+      const { blob, filename } = await downloadKbDocumentOriginal(token, subId, doc.id, doc.title);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      const raw = isApiHttpError(e) ? e.message : e instanceof Error ? e.message : 'Download failed';
+      setWriteErr(friendlifyKbMessage(raw));
+    } finally {
+      setDownloading(false);
+    }
+  };
+
+  const mimeLine = doc.mimeType?.trim() || '—';
+
+  return (
+    <>
+      <article style={faqCardShell}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <p
+              style={{
+                fontSize: '0.68rem',
+                fontWeight: 700,
+                letterSpacing: '0.08em',
+                color: '#94a3b8',
+                margin: '0 0 0.35rem',
+                textTransform: 'uppercase' as const,
+              }}
+            >
+              File
+            </p>
+            <h3 style={{ fontSize: '1.05rem', fontWeight: 700, margin: 0, color: '#0f172a', lineHeight: 1.4 }}>{doc.title}</h3>
+          </div>
+          <StatusPill label={faqListStatusLabel(doc.status)} tone={statusPillTone(doc.status)} />
+        </div>
+
+        <p style={{ fontSize: '0.8125rem', color: '#64748b', margin: '0.85rem 0 0', lineHeight: 1.5 }}>
+          <strong style={{ color: '#475569' }}>{fileKindLabel(doc)}</strong>
+          {' · '}
+          {mimeLine}
+          {' · '}
+          {formatFileBytes(doc.sizeBytes)}
+        </p>
+        <p style={{ fontSize: '0.75rem', color: '#94a3b8', margin: '0.35rem 0 0', lineHeight: 1.45 }}>
+          Uploaded {doc.createdAt ? new Date(doc.createdAt).toLocaleString() : '—'}
+          {' · '}
+          Updated {relativeTimeLabel(doc.updatedAt ?? doc.createdAt)}
+          {' · '}
+          {typeof doc.chunkCount === 'number' ? `${doc.chunkCount} chunk${doc.chunkCount === 1 ? '' : 's'}` : '—'}
+        </p>
+
+        <p
+          style={{
+            fontSize: '0.68rem',
+            fontWeight: 700,
+            letterSpacing: '0.08em',
+            color: '#94a3b8',
+            margin: '1rem 0 0.35rem',
+            textTransform: 'uppercase' as const,
+          }}
+        >
+          Indexed text preview
+        </p>
+        {preview ? (
+          <>
+            <div
+              style={
+                expanded
+                  ? {
+                      fontSize: '0.875rem',
+                      color: '#475569',
+                      lineHeight: 1.55,
+                      whiteSpace: 'pre-wrap' as const,
+                      maxHeight: 220,
+                      overflowY: 'auto' as const,
+                    }
+                  : {
+                      fontSize: '0.875rem',
+                      color: '#475569',
+                      lineHeight: 1.55,
+                      whiteSpace: 'pre-wrap' as const,
+                      display: '-webkit-box',
+                      WebkitLineClamp: 3,
+                      WebkitBoxOrient: 'vertical' as const,
+                      overflow: 'hidden',
+                    }
+              }
+            >
+              {preview}
+            </div>
+            {needsShowMore && !expanded ? (
+              <button
+                type="button"
+                onClick={() => setExpanded(true)}
+                style={{
+                  marginTop: 8,
+                  fontSize: '0.8125rem',
+                  fontWeight: 600,
+                  color: PRIMARY,
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: 0,
+                }}
+              >
+                Show more
+              </button>
+            ) : null}
+            {expanded && needsShowMore ? (
+              <button
+                type="button"
+                onClick={() => setExpanded(false)}
+                style={{
+                  marginTop: 8,
+                  fontSize: '0.8125rem',
+                  fontWeight: 600,
+                  color: '#64748b',
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: 0,
+                }}
+              >
+                Show less
+              </button>
+            ) : null}
+          </>
+        ) : (
+          <p style={{ fontSize: '0.8125rem', color: '#94a3b8', margin: 0 }}>No preview available.</p>
+        )}
+
+        {!canDownload ? (
+          <p style={{ fontSize: '0.78rem', color: '#78716c', margin: '0.75rem 0 0', lineHeight: 1.45 }}>
+            Original file download unavailable. Parsed text is available.
+          </p>
+        ) : null}
+
+        <div
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            gap: '0.5rem',
+            marginTop: '1.05rem',
+            paddingTop: '0.85rem',
+            borderTop: '1px solid #f1f5f9',
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => setDetailsOpen(true)}
+            style={{
+              fontSize: '0.8125rem',
+              fontWeight: 600,
+              color: PRIMARY,
+              background: 'rgba(15, 98, 254, 0.08)',
+              border: '1px solid rgba(15, 98, 254, 0.25)',
+              borderRadius: 10,
+              padding: '0.4rem 0.85rem',
+              cursor: 'pointer',
+            }}
+          >
+            View details
+          </button>
+          <button
+            type="button"
+            onClick={() => openExtracted()}
+            style={{
+              fontSize: '0.8125rem',
+              fontWeight: 600,
+              color: PRIMARY,
+              background: 'rgba(15, 98, 254, 0.08)',
+              border: '1px solid rgba(15, 98, 254, 0.25)',
+              borderRadius: 10,
+              padding: '0.4rem 0.85rem',
+              cursor: 'pointer',
+            }}
+          >
+            View extracted text
+          </button>
+          <button
+            type="button"
+            disabled={!canDownload || downloading}
+            onClick={() => void onDownload()}
+            title={canDownload ? 'Download the original upload' : 'Original bytes were not kept for this file'}
+            style={{
+              fontSize: '0.8125rem',
+              fontWeight: 600,
+              color: canDownload ? PRIMARY : '#94a3b8',
+              background: canDownload ? 'rgba(15, 98, 254, 0.08)' : '#f1f5f9',
+              border: `1px solid ${canDownload ? 'rgba(15, 98, 254, 0.25)' : '#e2e8f0'}`,
+              borderRadius: 10,
+              padding: '0.4rem 0.85rem',
+              cursor: canDownload && !downloading ? 'pointer' : 'not-allowed',
+            }}
+          >
+            {downloading ? 'Preparing…' : 'Download original'}
+          </button>
+          <button
+            type="button"
+            onClick={onDelete}
+            disabled={deleting}
+            style={{
+              marginLeft: 'auto',
+              fontSize: '0.75rem',
+              fontWeight: 500,
+              color: '#94a3b8',
+              background: 'none',
+              border: 'none',
+              cursor: deleting ? 'wait' : 'pointer',
+              textDecoration: 'underline',
+              textUnderlineOffset: 2,
+            }}
+          >
+            {deleting ? 'Removing…' : 'Delete'}
+          </button>
+        </div>
+      </article>
+
+      {detailsOpen ? (
+        <KbModal title="File details" onClose={() => setDetailsOpen(false)}>
+          <dl style={{ margin: 0, display: 'grid', gap: '0.65rem', fontSize: '0.875rem', color: '#334155' }}>
+            <div>
+              <dt style={{ fontSize: '0.68rem', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', marginBottom: 4 }}>Filename</dt>
+              <dd style={{ margin: 0 }}>{doc.title}</dd>
+            </div>
+            <div>
+              <dt style={{ fontSize: '0.68rem', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', marginBottom: 4 }}>Type</dt>
+              <dd style={{ margin: 0 }}>{fileKindLabel(doc)}</dd>
+            </div>
+            <div>
+              <dt style={{ fontSize: '0.68rem', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', marginBottom: 4 }}>MIME</dt>
+              <dd style={{ margin: 0 }}>{mimeLine}</dd>
+            </div>
+            <div>
+              <dt style={{ fontSize: '0.68rem', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', marginBottom: 4 }}>Size</dt>
+              <dd style={{ margin: 0 }}>{formatFileBytes(doc.sizeBytes)}</dd>
+            </div>
+            <div>
+              <dt style={{ fontSize: '0.68rem', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', marginBottom: 4 }}>Uploaded</dt>
+              <dd style={{ margin: 0 }}>{doc.createdAt ? new Date(doc.createdAt).toLocaleString() : '—'}</dd>
+            </div>
+            <div>
+              <dt style={{ fontSize: '0.68rem', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', marginBottom: 4 }}>Status</dt>
+              <dd style={{ margin: 0 }}>{faqListStatusLabel(doc.status)}</dd>
+            </div>
+            <div>
+              <dt style={{ fontSize: '0.68rem', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', marginBottom: 4 }}>Chunks</dt>
+              <dd style={{ margin: 0 }}>{typeof doc.chunkCount === 'number' ? String(doc.chunkCount) : '—'}</dd>
+            </div>
+          </dl>
+        </KbModal>
+      ) : null}
+
+      {extractedOpen ? (
+        <KbModal title="Extracted text (what the bot reads)" onClose={() => setExtractedOpen(false)}>
+          {chunkLoading ? <p style={{ margin: 0, color: '#64748b' }}>Loading…</p> : null}
+          {chunkErr ? <p style={{ margin: 0, color: '#b91c1c', fontSize: '0.875rem' }}>{chunkErr}</p> : null}
+          {!chunkLoading && !chunkErr ? (
+            <pre
+              style={{
+                margin: 0,
+                fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+                fontSize: '0.8125rem',
+                lineHeight: 1.5,
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+                color: '#1e293b',
+              }}
+            >
+              {chunkText || 'No text chunks for this document.'}
+            </pre>
+          ) : null}
+        </KbModal>
+      ) : null}
+    </>
   );
 }
 
@@ -1018,23 +1622,24 @@ export default function SubaccountKnowledgePage() {
                     ) : null}
 
                     {richRows.length === 0 ? (
-                      <EmptyState compact title="No notes yet" detail="Add business details, policies, hours, or service context above." />
+                      <EmptyState
+                        compact
+                        title="No notes yet"
+                        detail="Save policies, menus, or internal context. Each note shows a preview so you can confirm what the bot will use."
+                      />
                     ) : (
                       <div>
                         {richRows.map(d => (
-                          <KnowledgeDocCard
+                          <NoteKnowledgeCard
                             key={d.id}
-                            title={d.title}
-                            statusRaw={d.status}
-                            subtitle={`${fmtKind(d.documentKind ?? d.source)}`}
-                            timeLabel={relativeTimeLabel(d.createdAt)}
-                            usageLine={
-                              typeof d.chunkCount === 'number' && d.chunkCount > 0
-                                ? `${d.chunkCount} chunk${d.chunkCount === 1 ? '' : 's'}`
-                                : undefined
-                            }
-                            onDelete={() => onDelete(d.id)}
+                            doc={d}
+                            token={token!}
+                            subId={subId}
                             deleting={deletingId === d.id}
+                            onDelete={() => onDelete(d.id)}
+                            onUpdated={() => bump()}
+                            setWriteErr={setWriteErr}
+                            setSaveOk={setSaveOk}
                           />
                         ))}
                       </div>
@@ -1046,7 +1651,8 @@ export default function SubaccountKnowledgePage() {
                   <section style={glassSection}>
                     <h2 style={{ fontSize: '1rem', fontWeight: 700, margin: '0 0 0.2rem', color: '#0f172a' }}>Files</h2>
                     <p style={{ fontSize: '0.8125rem', color: '#64748b', margin: '0 0 1rem', lineHeight: 1.45 }}>
-                      Upload PDF, Word, or plain text files for the bot to use.
+                      Plain text (.txt) is indexed right away. Use <strong style={{ fontWeight: 600 }}>View extracted text</strong> on each
+                      card to confirm what the bot can read. Original download appears only when the server keeps the uploaded file.
                     </p>
                     <div
                       role="button"
@@ -1074,19 +1680,22 @@ export default function SubaccountKnowledgePage() {
                       Choose a file to upload (PDF, DOC, DOCX, or TXT)
                     </div>
                     {fileRows.length === 0 ? (
-                      <EmptyState compact title="No files yet" detail="Upload a document your bot should reference." />
+                      <EmptyState
+                        compact
+                        title="No files yet"
+                        detail="Upload a .txt file to add reference material. After upload, open the card to see metadata, extracted text, and (when available) download the original."
+                      />
                     ) : (
                       <div>
                         {fileRows.map(d => (
-                          <KnowledgeDocCard
+                          <FileKnowledgeCard
                             key={d.id}
-                            title={d.title}
-                            statusRaw={d.status}
-                            subtitle={`${fmtKind(d.documentKind ?? 'file')} · ${fmtKind(d.source)}`}
-                            timePrefix="Uploaded"
-                            timeLabel={d.createdAt ? new Date(d.createdAt).toLocaleString() : '—'}
-                            onDelete={() => onDelete(d.id)}
+                            doc={d}
+                            token={token!}
+                            subId={subId}
                             deleting={deletingId === d.id}
+                            onDelete={() => onDelete(d.id)}
+                            setWriteErr={setWriteErr}
                           />
                         ))}
                       </div>

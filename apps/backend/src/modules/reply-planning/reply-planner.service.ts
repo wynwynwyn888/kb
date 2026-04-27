@@ -103,7 +103,7 @@ export class ReplyPlannerService {
         kbChunks,
         draftText: afterMenu,
       });
-      const afterKbLeak = sanitizeOutboundInternalKbLeak(afterHours, policyContext!.latestIntent);
+      const afterKbLeak = sanitizeOutboundInternalKbLeak(afterHours, policyContext!.latestIntent, kbChunks);
       const bubbles = this.formatIntoBubbles(afterKbLeak);
       const suggestedActions = this.suggestActions(routing, kbChunks);
       return {
@@ -152,6 +152,7 @@ export class ReplyPlannerService {
     const afterKbLeak = sanitizeOutboundInternalKbLeak(
       afterHours,
       policyContext?.latestIntent ?? 'UNKNOWN',
+      kbChunks,
     );
     const bubbles = this.formatIntoBubbles(afterKbLeak);
 

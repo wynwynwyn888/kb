@@ -15,6 +15,11 @@ export const INTERNAL_GUIDANCE_LINE_PATTERNS: RegExp[] = [
   /\btone of voice\b/i,
   /\binternal use only\b/i,
   /\bdo not (?:say|tell|share)\b.*\bguest\b/i,
+  /\buse this exact format\b/i,
+  /\bspecial\s*request\s*:/i,
+  /\brecommendation\s*rules\s*:/i,
+  /\bcomplaint\s*context\b/i,
+  /\blog\s*(?:the|this)\s*(?:request|note)\b/i,
 ];
 
 const MENU_SECTION_HEADERS = new Set([

@@ -36,6 +36,8 @@ import {
 } from '../conversation-policy/conversation-policy-state';
 import { resolveShortSelection } from '../conversation-policy/option-resolver';
 import { stripInternalGuidanceFromChunks } from '../../lib/kb-internal-guidance';
+import { interpretRetrievalChunks } from '../../lib/kb-chunk-interpretation';
+import { resolveOperatingHoursConflictsAmongChunks } from '../../lib/kb-operating-hours-conflict';
 import { prepareCustomerFacingMenuKb, shouldCurateMenuKbContext } from '../../lib/menu-kb-curator';
 
 @Injectable()
@@ -114,7 +116,11 @@ export class ConversationOrchestrationService {
       );
 
       const policyState = policyStatePre;
-      let kbRanked = stripInternalGuidanceFromChunks(kbAfterRetrieve);
+      let kbInterpreted = interpretRetrievalChunks(kbAfterRetrieve);
+      kbInterpreted = resolveOperatingHoursConflictsAmongChunks(kbInterpreted, msg =>
+        this.logger.warn(msg),
+      );
+      let kbRanked = stripInternalGuidanceFromChunks(kbInterpreted);
       if (shouldCurateMenuKbContext({ latestIntent, menuKbAnchor })) {
         kbRanked = prepareCustomerFacingMenuKb(kbRanked, {
           latestUserMessage: latestMsg,

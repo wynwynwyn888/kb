@@ -16,6 +16,18 @@ describe('KbService', () => {
     service = new KbService();
   });
 
+  describe('sanitizeChunkMetadataForClient', () => {
+    it('removes embedding-like keys', () => {
+      const out = service.sanitizeChunkMetadataForClient({
+        embedding: [0.1, 0.2],
+        vector: [1],
+        kind: 'file',
+        note: 'x',
+      });
+      expect(out).toEqual({ kind: 'file', note: 'x' });
+    });
+  });
+
   describe('keywordScore', () => {
     const score = (query: string, chunks: Array<{ content: string; title: string }>) => {
       return (service as never)['keywordScore'](query, chunks.map(c => ({

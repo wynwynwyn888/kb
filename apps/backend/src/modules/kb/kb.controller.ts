@@ -14,6 +14,7 @@ import {
   BadRequestException,
   UseInterceptors,
   UploadedFile,
+  StreamableFile,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiConsumes } from '@nestjs/swagger';
@@ -28,6 +29,7 @@ import {
   KbFileUploadBodyDto,
   KbSearchBodyDto,
   UpdateKbFaqBodyDto,
+  UpdateKbRichTextBodyDto,
 } from './dto/kb-body.dto';
 
 const KB_MAX_TOP_K = 50;
@@ -121,6 +123,50 @@ export class KbController {
     } catch (e) {
       throw new BadRequestException(mapKbError(e));
     }
+  }
+
+  @Patch('documents/:documentId/rich')
+  @ApiOperation({ summary: 'Update note / rich text (same document id; replaces indexed chunks)' })
+  async updateRich(
+    @Param('documentId') documentId: string,
+    @Body() dto: UpdateKbRichTextBodyDto,
+    @CurrentUser() user: SessionUser,
+  ) {
+    if (!dto.tenantId?.trim()) throw new BadRequestException('tenantId is required');
+    await this.assertTenantScope(user, dto.tenantId);
+    try {
+      return await this.kbService.updateRichText(dto.tenantId, documentId, dto.title, dto.content);
+    } catch (e) {
+      const me = e instanceof Error ? e.message : String(e);
+      if (/not a note|document not found/i.test(me)) {
+        throw new NotFoundException('Not found');
+      }
+      throw new BadRequestException(mapKbError(e));
+    }
+  }
+
+  @Get('documents/:documentId/download')
+  @ApiOperation({
+    summary: 'Download original file when stored in object storage (tenantId query required)',
+  })
+  async downloadOriginal(
+    @Param('documentId') documentId: string,
+    @Query('tenantId') tenantId: string | undefined,
+    @CurrentUser() user: SessionUser,
+  ): Promise<StreamableFile> {
+    if (!tenantId?.trim()) throw new BadRequestException('tenantId query parameter is required');
+    await this.assertTenantScope(user, tenantId);
+    const file = await this.kbService.getOriginalFileForDownload(tenantId, documentId);
+    if (!file) {
+      throw new NotFoundException(
+        'Original file download is not available for this document. Parsed text is available from the chunks endpoint.',
+      );
+    }
+    const safeName = file.filename.replace(/[^\w.\- ()\[\]]+/g, '_').slice(0, 180) || 'download';
+    return new StreamableFile(file.buffer, {
+      type: file.mimeType || 'application/octet-stream',
+      disposition: `attachment; filename="${safeName}"`,
+    });
   }
 
   @Post('documents/file')
@@ -219,7 +265,12 @@ export class KbController {
       throw new NotFoundException('Document not found');
     }
 
-    return chunks;
+    return chunks.map(({ id, content, tokenCount, metadata }) => ({
+      id,
+      content,
+      tokenCount,
+      metadata: this.kbService.sanitizeChunkMetadataForClient(metadata),
+    }));
   }
 
   private async assertTenantScope(user: SessionUser, effectiveTenantId: string): Promise<void> {

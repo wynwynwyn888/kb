@@ -178,7 +178,8 @@ export function prepareCustomerFacingMenuKb(
   const merged = chunks.map(c => (c.content ?? '').trim()).filter(Boolean).join('\n\n');
   const sectionHint = inferMenuSectionHint(params.latestUserMessage, params.menuAnchorLabel);
   const full = userRequestsFullMenu(params.latestUserMessage);
-  const maxItems = full ? 12 : 4;
+  /** General “your menu” overview: 2–4 highlights (cap 3 unless user asks for full menu). */
+  const maxItems = full ? 12 : sectionHint === 'general' ? 3 : 4;
   const generalPreamble = sectionHint === 'general' && params.latestIntent === 'MENU';
 
   const curated = curateMenuDocumentForCustomer({

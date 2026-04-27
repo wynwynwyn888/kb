@@ -411,6 +411,11 @@ export class GenerationService {
           'Booking rule: Never invent reservation time slots or table availability. If no booking system data is in context, only ask which date and time they prefer.',
         );
       }
+      if (pc.latestIntent === 'COMPLAINT') {
+        parts.push(
+          'Complaint rule: Be empathetic and solution-oriented. Never paste internal complaint procedures, logging templates, or staff-only scripts to the customer.',
+        );
+      }
       messages.push({ role: 'system', content: parts.join(' ') });
     }
 

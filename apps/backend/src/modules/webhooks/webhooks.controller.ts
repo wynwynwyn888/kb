@@ -37,6 +37,7 @@ export class WebhooksController {
   async handleWebhook(
     @Body() body: unknown,
     @Headers('x-ghl-signature') signature: string,
+    @Headers('x-aisbp-smoke-immediate') aisbpSmokeImmediate?: string,
   ) {
     this.logger.log(summarizeGhlWebhookBodyKeys(body));
 
@@ -74,7 +75,10 @@ export class WebhooksController {
     }
 
     try {
-      const result = await this.webhooksService.handleGhlWebhook(payload);
+      const smokeImmediate =
+        String(aisbpSmokeImmediate ?? '').toLowerCase() === 'true' ||
+        String(process.env['AISBP_WEBHOOK_SMOKE_IMMEDIATE'] ?? '').toLowerCase() === 'true';
+      const result = await this.webhooksService.handleGhlWebhook(payload, { smokeImmediate });
 
       if (result.duplicate) {
         this.logger.debug(`Duplicate event acknowledged: ${result.eventId}`);

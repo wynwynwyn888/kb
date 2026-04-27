@@ -34,6 +34,7 @@ export class WebhooksService {
    */
   async handleGhlWebhook(
     payload: GhlWebhookPayload,
+    opts?: { smokeImmediate?: boolean },
   ): Promise<{ success: boolean; eventId?: string; duplicate?: boolean }> {
     // Validate required top-level fields
     if (!payload.locationId || !payload.event) {
@@ -93,7 +94,9 @@ export class WebhooksService {
     );
 
     // Enqueue for async processing
-    await this.enqueueInboundMessage(normalizedPayload, webhookEvent.id);
+    await this.enqueueInboundMessage(normalizedPayload, webhookEvent.id, {
+      smokeImmediate: Boolean(opts?.smokeImmediate),
+    });
 
     this.logger.log(
       `Webhook processed: eventId=${webhookEvent.id}, locationId=${payload.locationId}, eventType=${payload.event}`,
@@ -251,6 +254,7 @@ export class WebhooksService {
   async enqueueInboundMessage(
     payload: NormalizedWebhookPayload,
     webhookEventId?: string,
+    opts?: { smokeImmediate?: boolean },
   ): Promise<void> {
     const jobData: InboundMessageJobData = {
       locationId: payload.ghlLocationId,
@@ -260,9 +264,10 @@ export class WebhooksService {
       messageType: payload.messageType as 'text' | 'image' | 'audio' | 'video' | 'unknown',
       timestamp: payload.timestamp,
       webhookEventId,
+      smokeImmediate: Boolean(opts?.smokeImmediate),
     };
 
-    await this.inboundQueue.add('process-inbound', jobData, {
+    await this.inboundQueue.add('persist', jobData, {
       attempts: 3,
       backoff: {
         type: 'exponential',

@@ -8,7 +8,7 @@ import {
   type SaveAgencyAiConfigDto,
   type SubaccountBehaviorPolicy,
 } from './agency-ai-config.service';
-import { SaveAgencyAiConfigBodyDto, SetActiveProviderBodyDto } from './save-agency-ai-config.dto';
+import { SaveAgencyAiConfigBodyDto, SetActiveProviderBodyDto, TestAgencyAiModelBodyDto } from './save-agency-ai-config.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentAgencyId, CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { SessionUser } from '../../lib/supabase';
@@ -57,6 +57,21 @@ export class AgencyAiConfigController {
       throw new NotFoundException('Agency context not found');
     }
     return this.configService.saveSubaccountBehaviorPolicy(agencyId, body, user.id);
+  }
+
+  @Post('test')
+  @ApiOperation({
+    summary: 'Health-check the saved API key for a provider/model (minimal token request, ~10s timeout)',
+  })
+  async testModel(@CurrentAgencyId() agencyId: string | null, @Body() dto: TestAgencyAiModelBodyDto) {
+    if (!agencyId) {
+      throw new NotFoundException('Agency context not found');
+    }
+    return this.configService.testModel(agencyId, {
+      provider: dto.provider,
+      model: dto.model,
+      optionalUseSavedKey: dto.optionalUseSavedKey,
+    });
   }
 
   @Patch('active')

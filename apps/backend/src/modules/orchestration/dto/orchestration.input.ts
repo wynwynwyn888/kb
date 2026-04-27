@@ -40,4 +40,6 @@ export interface OrchestrationInput {
     status: string;
     metadata: Record<string, unknown>;
   };
+  /** Recent inbound customer texts (oldest → newest) included in this debounced batch, for logs only. */
+  recentInboundBatch?: string[];
 }

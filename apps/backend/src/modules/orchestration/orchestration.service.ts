@@ -176,15 +176,19 @@ export class ConversationOrchestrationService {
       this.logger.log(
         `Orchestration completed: conversationId=${conversationId}, ` +
           `agencyActiveProvider=${replyPlan.agencyActiveProvider ?? 'n/a'}, ` +
+          `configuredModel=${replyPlan.configuredModel ?? 'n/a'}, ` +
+          `routingRecommendedModel=${replyPlan.routingRecommendedModel ?? routing.recommendedModel ?? 'n/a'}, ` +
           `generationProvider=${replyPlan.generationProvider ?? 'n/a'}, ` +
-          `generationModel=${replyPlan.generationModel ?? 'n/a'}, ` +
-          `routingRecommendedModel=${routing.recommendedModel}, ` +
+          `generationModelActuallyUsed=${replyPlan.generationModelActuallyUsed ?? replyPlan.generationModel ?? 'n/a'}, ` +
           `mode=${routing.responseMode}, bubbles=${replyPlan.bubbles.length}, ` +
           `handover=${replyPlan.handoverRecommended}, ` +
           `draftProvenance=${replyPlan.draftProvenance ?? 'none'}` +
-          (replyPlan.usedOpenAiFallback ? ', usedOpenAiFallback=true' : '') +
+          (replyPlan.fallbackUsed ? ', fallbackUsed=true' : '') +
           (replyPlan.draftFallbackReason
             ? `, draftFallbackReason=${replyPlan.draftFallbackReason}`
+            : '') +
+          (input.recentInboundBatch?.length
+            ? `, inboundBatchCount=${input.recentInboundBatch.length}`
             : ''),
       );
 
@@ -513,15 +517,21 @@ export class ConversationOrchestrationService {
       // Bubble text source: placeholder_fallback is deterministic/KB/memory — not model output.
       metadata['replyDraftProvenance'] = replyPlan.draftProvenance ?? null;
       metadata['replyDraftFallbackReason'] = replyPlan.draftFallbackReason ?? null;
-      metadata['routingRecommendedModel'] = routing?.recommendedModel ?? null;
+      metadata['routingRecommendedModel'] = replyPlan.routingRecommendedModel ?? routing?.recommendedModel ?? null;
       metadata['agencyActiveProvider'] = replyPlan.agencyActiveProvider ?? null;
+      metadata['configuredModel'] = replyPlan.configuredModel ?? null;
       metadata['generationProviderUsed'] = replyPlan.generationProvider ?? null;
-      metadata['generationModelUsed'] = replyPlan.generationModel ?? null;
+      metadata['generationModelUsed'] = replyPlan.generationModelActuallyUsed ?? replyPlan.generationModel ?? null;
+      metadata['generationModelActuallyUsed'] = replyPlan.generationModelActuallyUsed ?? replyPlan.generationModel ?? null;
       metadata['usedOpenAiFallback'] = replyPlan.usedOpenAiFallback ?? false;
+      metadata['fallbackUsed'] = replyPlan.fallbackUsed ?? replyPlan.usedOpenAiFallback ?? false;
     }
 
-    // `model_chosen` column stores the router heuristic / tenant override (not necessarily the live LLM model).
-    // See metadata.generationModelUsed + metadata.routingRecommendedModel for disambiguation.
+    if (input.recentInboundBatch?.length) {
+      metadata['recentInboundBatch'] = input.recentInboundBatch;
+    }
+
+    // `model_chosen` stores the agency-configured default model (cost-relevant). Router recommendation is in metadata.routingRecommendedModel.
     const logData = {
       id: randomUUID(),
       tenant_id: input.tenantId,
@@ -529,7 +539,7 @@ export class ConversationOrchestrationService {
       webhook_event_id: input.webhookEventId ?? null,
       outcome,
       guard_reason: guardReason,
-      model_chosen: routing?.recommendedModel ?? null,
+      model_chosen: replyPlan?.configuredModel ?? routing?.recommendedModel ?? null,
       response_mode: routing?.responseMode ?? null,
       draft_reply: routing?.draftReply ?? null,
       handover_recommended: routing?.handoverRecommended ?? false,

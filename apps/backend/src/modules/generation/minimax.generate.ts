@@ -46,6 +46,8 @@ export async function minimaxChatCompletion(params: {
   messages: MinimaxMessage[];
   temperature: number;
   maxTokens: number;
+  /** Request timeout in ms (default 60s). */
+  timeoutMs?: number;
 }): Promise<{ content: string; totalTokens: number; model: string }> {
   const base = resolveBase(params.baseUrl);
   if (useLegacyChatHost(base)) {
@@ -63,6 +65,7 @@ async function minimaxOpenAiCompat(
     messages: MinimaxMessage[];
     temperature: number;
     maxTokens: number;
+    timeoutMs?: number;
   },
 ): Promise<{ content: string; totalTokens: number; model: string }> {
   const url = `${base}/chat/completions`;
@@ -83,7 +86,7 @@ async function minimaxOpenAiCompat(
         Authorization: `Bearer ${params.apiKey}`,
         'Content-Type': 'application/json',
       },
-      timeout: 60_000,
+      timeout: params.timeoutMs ?? 60_000,
     });
     data = res.data;
   } catch (err) {
@@ -120,6 +123,7 @@ async function minimaxLegacyV2(
     messages: MinimaxMessage[];
     temperature: number;
     maxTokens: number;
+    timeoutMs?: number;
   },
 ): Promise<{ content: string; totalTokens: number; model: string }> {
   const url = `${base}/text/chatcompletion_v2`;
@@ -144,7 +148,7 @@ async function minimaxLegacyV2(
         Authorization: `Bearer ${params.apiKey}`,
         'Content-Type': 'application/json',
       },
-      timeout: 60_000,
+      timeout: params.timeoutMs ?? 60_000,
     });
     data = res.data;
   } catch (err) {

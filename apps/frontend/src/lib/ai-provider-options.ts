@@ -19,6 +19,7 @@ export function snapshotFor(
       temperature: snap.temperature ?? fallbacks.temperature,
       hasKey: snap.hasKey,
       ...(snap.minimaxGroupId ? { minimaxGroupId: snap.minimaxGroupId } : {}),
+      ...(snap.endpoint !== undefined ? { endpoint: snap.endpoint } : {}),
     };
   }
   return {
@@ -26,5 +27,6 @@ export function snapshotFor(
     maxTokens: fallbacks.maxTokens,
     temperature: fallbacks.temperature,
     hasKey: false,
+    endpoint: null,
   };
 }

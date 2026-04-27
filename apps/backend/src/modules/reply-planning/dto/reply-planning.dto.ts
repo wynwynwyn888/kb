@@ -52,12 +52,20 @@ export interface ReplyDecision {
   draftFallbackReason?: 'no_agency' | 'no_provider' | 'generation_failed';
   /** `agencies.active_ai_provider` when live generation ran (non-HANDOVER). */
   agencyActiveProvider?: string;
+  /** Agency active provider row default model (registry-normalized). */
+  configuredModel?: string;
+  /** AI router `recommendedModel` (informational; not necessarily the LLM model billed). */
+  routingRecommendedModel?: string;
   /** HTTP provider that produced live draft text (not the router heuristic). */
   generationProvider?: 'MINIMAX' | 'OPENAI';
   /** Model id sent to that provider for the live draft. */
   generationModel?: string;
+  /** Explicit alias of `generationModel` for logs / UI (actual billed model id). */
+  generationModelActuallyUsed?: string;
   /** True when live text came from OpenAI after primary non-OPENAI failed. */
   usedOpenAiFallback?: boolean;
+  /** Same as `usedOpenAiFallback` for orchestration metadata. */
+  fallbackUsed?: boolean;
 }
 
 /**

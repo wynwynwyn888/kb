@@ -1,11 +1,11 @@
 import { IsBoolean, IsIn, IsNotEmpty, IsNumber, IsOptional, IsString } from 'class-validator';
 
-const SAVEABLE = ['OPENAI', 'MINIMAX', 'ANTHROPIC', 'GOOGLE', 'AZURE', 'CUSTOM'] as const;
+const SAVEABLE = ['OPENAI', 'MINIMAX'] as const;
 
 export class SaveAgencyAiConfigBodyDto {
   @IsString()
   @IsIn(SAVEABLE)
-  provider!: string;
+  provider!: (typeof SAVEABLE)[number];
 
   @IsOptional()
   @IsString()
@@ -43,4 +43,18 @@ export class SetActiveProviderBodyDto {
   @IsString()
   @IsIn(LIVE_PROVIDERS)
   provider!: (typeof LIVE_PROVIDERS)[number];
+}
+
+export class TestAgencyAiModelBodyDto {
+  @IsString()
+  @IsIn(LIVE_PROVIDERS)
+  provider!: (typeof LIVE_PROVIDERS)[number];
+
+  @IsString()
+  @IsNotEmpty()
+  model!: string;
+
+  @IsOptional()
+  @IsBoolean()
+  optionalUseSavedKey?: boolean;
 }

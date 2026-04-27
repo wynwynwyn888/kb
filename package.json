@@ -16,8 +16,18 @@
     "typecheck": "turbo typecheck"
   },
   "devDependencies": {
+    "has-flag": "^4.0.0",
     "turbo": "^2.0.0",
     "typescript": "^5.4.0"
+  },
+  "pnpm": {
+    "packageExtensions": {
+      "supports-color@7.2.0": {
+        "dependencies": {
+          "has-flag": "^4.0.0"
+        }
+      }
+    }
   },
   "engines": {
     "node": ">=20.0.0",

@@ -123,7 +123,7 @@ export class BotTestService {
       systemPrompt,
       memory: hist,
       kbContext: kbChunks,
-      model: modelUsed,
+      tenantGenerationModelOverride: modelUsed,
       ...(Number.isFinite(subTemp) ? { temperature: subTemp } : {}),
       ...(subMax != null && subMax > 0 ? { maxTokens: subMax } : {}),
     };

@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import {
+  type ActiveAiHealthBadge,
   getAgencyAiConfig,
   getAgencyById,
   getCurrentUser,
@@ -91,6 +92,10 @@ export default function AgencyHomePage() {
     hasKey: boolean;
     provider: string;
     model: string;
+    healthBadge: ActiveAiHealthBadge;
+    lastChecked: string | null;
+    latencyMs: number | null;
+    healthError: string | null;
   } | null>(null);
   const [usageAgg, setUsageAgg] = useState<{
     subaccountsWithQuota: number;
@@ -141,10 +146,20 @@ export default function AgencyHomePage() {
         if (ai) {
           const ap = ai.activeProvider ?? ai.provider;
           const hasKey = Boolean((ap && ai.keysPresent?.[ap]) ?? ai.hasApiKey);
+          const ah = ai.activeAiHealth ?? {
+            healthBadge: 'UNKNOWN' as const,
+            lastHealthCheckedAt: null,
+            lastHealthLatencyMs: null,
+            lastHealthErrorSummary: null,
+          };
           setAiSnap({
             hasKey,
             provider: ap || '—',
             model: ai.activeModel ?? (ai.defaultModel || '—'),
+            healthBadge: ah.healthBadge,
+            lastChecked: ah.lastHealthCheckedAt,
+            latencyMs: ah.lastHealthLatencyMs,
+            healthError: ah.lastHealthErrorSummary,
           });
         } else {
           setAiSnap(null);
@@ -230,6 +245,12 @@ export default function AgencyHomePage() {
     const flags: { text: string; tone: 'warn' | 'ok' }[] = [];
     if (aiSnap && !aiSnap.hasKey)
       flags.push({ text: 'AI provider needs setup before live replies can be generated.', tone: 'warn' });
+    if (aiSnap?.hasKey && aiSnap.healthBadge === 'FAIL') {
+      flags.push({
+        text: 'AI model failing. Replies may use fallback or placeholder.',
+        tone: 'warn',
+      });
+    }
     if (lowQuota.length > 0)
       flags.push({
         text: `${lowQuota.length} workspace(s) are below 15% remaining credits: ${lowQuota
@@ -255,6 +276,12 @@ export default function AgencyHomePage() {
     }
     return flags;
   }, [aiSnap, ghlBreakdown, withoutLocationId, snapshotLoading, err, lowQuota]);
+
+  const aiHealthPill = (b: ActiveAiHealthBadge) => {
+    if (b === 'PASS') return <StatusPill label="Working" tone="ok" />;
+    if (b === 'FAIL') return <StatusPill label="Failing" tone="bad" />;
+    return <StatusPill label="Not tested" tone="neutral" />;
+  };
 
   const ghlDrift = ghlBreakdown
     ? ghlBreakdown.connected < (tenantCount ?? 0)
@@ -353,16 +380,37 @@ export default function AgencyHomePage() {
           {snapshotLoading && aiSnap === null && !err ? (
             <LoadingBlock message="Loading…" />
           ) : aiSnap ? (
-            <KeyValueRows
-              rows={[
-                {
-                  label: 'Keys',
-                  value: <StatusPill label={aiSnap.hasKey ? 'Saved' : 'Not set'} tone={aiSnap.hasKey ? 'ok' : 'warn'} />,
-                },
-                { label: 'Provider', value: aiSnap.provider, mono: true },
-                { label: 'Model', value: aiSnap.model, mono: true },
-              ]}
-            />
+            <>
+              <KeyValueRows
+                rows={[
+                  {
+                    label: 'Keys',
+                    value: <StatusPill label={aiSnap.hasKey ? 'Saved' : 'Not set'} tone={aiSnap.hasKey ? 'ok' : 'warn'} />,
+                  },
+                  { label: 'Provider', value: aiSnap.provider, mono: true },
+                  { label: 'Configured model', value: aiSnap.model, mono: true },
+                  {
+                    label: 'Health',
+                    value: aiHealthPill(aiSnap.healthBadge),
+                  },
+                  {
+                    label: 'Last checked',
+                    value:
+                      aiSnap.lastChecked && aiSnap.healthBadge !== 'UNKNOWN'
+                        ? new Date(aiSnap.lastChecked).toLocaleString()
+                        : '—',
+                  },
+                  ...(aiSnap.latencyMs != null && aiSnap.healthBadge !== 'UNKNOWN'
+                    ? [{ label: 'Latency', value: `${aiSnap.latencyMs} ms` }]
+                    : []),
+                ]}
+              />
+              {aiSnap.healthBadge === 'FAIL' && aiSnap.healthError ? (
+                <p style={{ fontSize: '0.78rem', color: '#b45309', margin: '0.65rem 0 0', lineHeight: 1.45 }}>
+                  {aiSnap.healthError}
+                </p>
+              ) : null}
+            </>
           ) : (
             <p style={{ fontSize: '0.85rem', color: '#64748b', margin: 0 }}>AI provider summary is not loaded.</p>
           )}

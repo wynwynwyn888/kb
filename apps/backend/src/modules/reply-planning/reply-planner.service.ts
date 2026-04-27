@@ -171,18 +171,26 @@ export class ReplyPlannerService {
         ? { draftFallbackReason: draft.fallbackReason }
         : {}),
       ...(draft.agencyActiveProvider ? { agencyActiveProvider: draft.agencyActiveProvider } : {}),
+      ...(draft.configuredModel ? { configuredModel: draft.configuredModel } : {}),
+      ...(draft.routingRecommendedModel ? { routingRecommendedModel: draft.routingRecommendedModel } : {}),
       ...(draft.generationProvider ? { generationProvider: draft.generationProvider } : {}),
       ...(draft.generationModel ? { generationModel: draft.generationModel } : {}),
+      ...(draft.generationModelActuallyUsed
+        ? { generationModelActuallyUsed: draft.generationModelActuallyUsed }
+        : {}),
       ...(draft.usedOpenAiFallback ? { usedOpenAiFallback: draft.usedOpenAiFallback } : {}),
+      ...(draft.fallbackUsed != null ? { fallbackUsed: draft.fallbackUsed } : {}),
     };
 
     const genMeta =
       draft.generationProvider && draft.generationModel
-        ? `, agencyActiveProvider=${draft.agencyActiveProvider ?? 'n/a'}, generationProvider=${draft.generationProvider}, generationModel=${draft.generationModel}` +
-          (draft.usedOpenAiFallback ? ', usedOpenAiFallback=true' : '')
+        ? `, agencyActiveProvider=${draft.agencyActiveProvider ?? 'n/a'}, configuredModel=${draft.configuredModel ?? 'n/a'}, ` +
+          `routingRecommendedModel=${draft.routingRecommendedModel ?? routing.recommendedModel}, ` +
+          `generationProvider=${draft.generationProvider}, generationModelActuallyUsed=${draft.generationModelActuallyUsed ?? draft.generationModel}` +
+          (draft.usedOpenAiFallback ? ', fallbackUsed=true' : '')
         : '';
     this.logger.log(
-      `Reply planning completed: conversation=${conversationId}, routingRecommendedModel=${routing.recommendedModel}, ` +
+      `Reply planning completed: conversation=${conversationId}, ` +
         `bubbles=${bubbles.length}, mode=${routing.responseMode}, draftProvenance=${draft.provenance}` +
         genMeta +
         (draft.fallbackReason ? `, draftFallbackReason=${draft.fallbackReason}` : ''),
@@ -230,9 +238,13 @@ export class ReplyPlannerService {
     provenance: 'live_generation' | 'placeholder_fallback' | 'policy_reply';
     fallbackReason?: 'no_agency' | 'no_provider' | 'generation_failed';
     agencyActiveProvider?: string;
+    configuredModel?: string;
+    routingRecommendedModel?: string;
     generationProvider?: 'MINIMAX' | 'OPENAI';
     generationModel?: string;
+    generationModelActuallyUsed?: string;
     usedOpenAiFallback?: boolean;
+    fallbackUsed?: boolean;
   }> {
     const lastUser = [...memory].reverse().find(m => m.role === 'user');
     const incomingMessage = lastUser?.content?.trim() ?? '';
@@ -243,7 +255,7 @@ export class ReplyPlannerService {
       systemPrompt,
       memory,
       kbContext: kbChunks,
-      model: routing.recommendedModel,
+      routingRecommendedModel: routing.recommendedModel ?? '',
       ...(subaccountTemperature != null && Number.isFinite(subaccountTemperature)
         ? { temperature: subaccountTemperature }
         : {}),
@@ -264,16 +276,21 @@ export class ReplyPlannerService {
 
     const trimmed = stripModelThinking(liveDraft.content ?? '').trim();
     if (trimmed.length > 0) {
+      const gma = liveDraft.generationModelActuallyUsed ?? liveDraft.generationModel;
       this.logger.log(
-        `Live draft generated: ${trimmed.length} chars (generationModel=${liveDraft.generationModel ?? 'n/a'})`,
+        `Live draft generated: ${trimmed.length} chars (generationModelActuallyUsed=${gma ?? 'n/a'}, configuredModel=${liveDraft.configuredModel ?? 'n/a'})`,
       );
       return {
         text: trimmed,
         provenance: 'live_generation',
         agencyActiveProvider: liveDraft.agencyActiveProvider,
+        configuredModel: liveDraft.configuredModel,
+        routingRecommendedModel: liveDraft.routingRecommendedModel ?? routing.recommendedModel,
         generationProvider: liveDraft.generationProvider,
         generationModel: liveDraft.generationModel,
+        generationModelActuallyUsed: gma,
         usedOpenAiFallback: liveDraft.usedOpenAiFallback,
+        fallbackUsed: liveDraft.fallbackUsed ?? Boolean(liveDraft.usedOpenAiFallback),
       };
     }
 
@@ -287,6 +304,8 @@ export class ReplyPlannerService {
       provenance: 'placeholder_fallback',
       fallbackReason,
       agencyActiveProvider: liveDraft.agencyActiveProvider,
+      configuredModel: liveDraft.configuredModel,
+      routingRecommendedModel: liveDraft.routingRecommendedModel ?? routing.recommendedModel,
     };
   }
 

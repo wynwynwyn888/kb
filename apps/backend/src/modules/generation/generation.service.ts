@@ -6,6 +6,8 @@ import { stripCustomerFacingMeta, stripModelThinking } from '@aisbp/formatter';
 import { summarizeAxiosErrorForLogs } from '../../lib/safe-http-error';
 import { getSupabaseService } from '../../lib/supabase';
 import { OpenAiProviderAdapter } from '@aisbp/ai-provider-openai';
+import { normalizeModelForLiveProvider } from '@aisbp/types';
+import { isUsableOpenAiFallbackKey, resolveGenerationModel } from '../../lib/ai-live-model-resolve';
 import { minimaxChatCompletion } from './minimax.generate';
 import type { MemoryEntry } from '../orchestration/dto';
 import type { RetrievalChunk } from '../kb/dto/retrieval.dto';
@@ -25,7 +27,13 @@ export interface GenerateDraftParams {
   systemPrompt: string;
   memory: MemoryEntry[];
   kbContext: RetrievalChunk[];
-  model: string;
+  /** Router `recommendedModel` — logged only; never selects the HTTP model by itself. */
+  routingRecommendedModel?: string;
+  /**
+   * Optional model for the active provider (e.g. bot smoke test, future tenant override when policy allows).
+   * Registry-validated via `resolveGenerationModel`; does not include router hints.
+   */
+  tenantGenerationModelOverride?: string;
   /** Subaccount prompt config — when set, overrides agency provider row temperature / max tokens. */
   temperature?: number;
   maxTokens?: number;
@@ -40,12 +48,20 @@ export interface GenerateDraftResult {
   usedFallbackProvider?: 'OPENAI';
   /** `agencies.active_ai_provider` at call time (when resolved). */
   agencyActiveProvider?: string;
+  /** Agency active provider row default model (registry-normalized), for cost accounting. */
+  configuredModel?: string;
+  /** Router-recommended model id (informational; billing uses configured + generation fields). */
+  routingRecommendedModel?: string;
   /** Provider whose HTTP API produced `content` (live path only). */
   generationProvider?: 'MINIMAX' | 'OPENAI';
   /** Model id sent to that provider (not the router heuristic id). */
   generationModel?: string;
-  /** True when `content` came from OpenAI after a non-OPENAI primary failed. */
+  /** Same as `generationModel` — explicit name for logs and orchestration metadata. */
+  generationModelActuallyUsed?: string;
+  /** True when live text came from OpenAI after a non-OPENAI primary failed. */
   usedOpenAiFallback?: boolean;
+  /** True when `usedOpenAiFallback` (alias for orchestration metadata). */
+  fallbackUsed?: boolean;
 }
 
 type ProviderRow = {
@@ -55,58 +71,38 @@ type ProviderRow = {
   settings: Record<string, unknown>;
 };
 
-const DEFAULT_MINIMAX_MODEL = 'MiniMax-M2.7';
-const DEFAULT_OPENAI_MODEL = 'gpt-4o-mini';
-
 @Injectable()
 export class GenerationService {
   private readonly logger = new Logger(GenerationService.name);
   private readonly supabase = getSupabaseService();
 
-  /** OpenAI fallback only when a real-looking API key is configured (no demo/placeholder keys). */
-  private isUsableOpenAiFallbackKey(apiKey: string | null | undefined): boolean {
-    const k = (apiKey ?? '').trim();
-    if (!k) return false;
-    const lower = k.toLowerCase();
-    if (lower.startsWith('demo-key')) return false;
-    if (lower.startsWith('sk-test')) return false;
-    if (/^sk-(demo|test|placeholder|xxxx)/i.test(k)) return false;
-    if (lower === 'placeholder' || lower === 'replace-me' || lower === 'your-api-key-here') return false;
-    return true;
-  }
-
-  /** Routing / planner may recommend an OpenAI model id; never send that string to MiniMax. */
-  private isLikelyOpenAiModelId(name: string): boolean {
-    const n = name.trim();
-    if (!n) return false;
-    if (/^gpt-/i.test(n)) return true;
-    if (/^o[0-9]/i.test(n)) return true;
-    if (/^chatgpt-/i.test(n)) return true;
-    if (/^text-davinci|^davinci|^curie|^babbage|^ada\b/i.test(n)) return true;
-    return false;
-  }
-
-  /** Avoid sending MiniMax model names to the OpenAI adapter. */
-  private isLikelyMinimaxModelId(name: string): boolean {
-    return /^minimax-/i.test(name.trim());
-  }
-
   async generateDraft(params: GenerateDraftParams): Promise<GenerateDraftResult> {
+    const routingRecommendedModel = params.routingRecommendedModel?.trim() || undefined;
     try {
       const agencyId = await this.getAgencyId(params.tenantId);
       if (!agencyId) {
         this.logger.debug('No agencyId for tenant — skipping live generation');
-        return { content: null, skipReason: 'no_agency' };
+        return { content: null, skipReason: 'no_agency', routingRecommendedModel };
       }
 
       const active = await this.getActiveProviderName(agencyId);
       const primary = await this.loadProviderRow(agencyId, active);
+      const configuredModel = normalizeModelForLiveProvider(
+        active,
+        (primary?.settings as Record<string, unknown> | undefined)?.['defaultModel'] as string | undefined,
+      );
       const openaiFallback = await this.loadProviderRow(agencyId, 'OPENAI');
-      const openaiFallbackOk = this.isUsableOpenAiFallbackKey(openaiFallback?.api_key);
+      const openaiFallbackOk = isUsableOpenAiFallbackKey(openaiFallback?.api_key);
 
       if (!primary?.api_key && !openaiFallbackOk) {
         this.logger.debug('No API keys for active or OpenAI — skipping');
-        return { content: null, skipReason: 'no_provider', agencyActiveProvider: active };
+        return {
+          content: null,
+          skipReason: 'no_provider',
+          agencyActiveProvider: active,
+          configuredModel,
+          routingRecommendedModel,
+        };
       }
 
       const tryPrimary = primary && primary.api_key;
@@ -114,12 +110,22 @@ export class GenerationService {
         const r = await this.runProvider(params, primary, active);
         const cleaned = this.sanitizeCustomerFacing(r.content);
         if (cleaned && r.generationProvider && r.generationModel) {
+          const generationModelActuallyUsed = r.generationModel;
+          this.logger.log(
+            `Live generation ok: agencyActiveProvider=${active} configuredModel=${configuredModel} ` +
+              `routingRecommendedModel=${routingRecommendedModel ?? 'n/a'} generationProvider=${r.generationProvider} ` +
+              `generationModelActuallyUsed=${generationModelActuallyUsed}`,
+          );
           return {
             content: cleaned,
             agencyActiveProvider: active,
+            configuredModel,
+            routingRecommendedModel,
             generationProvider: r.generationProvider,
-            generationModel: r.generationModel,
+            generationModel: generationModelActuallyUsed,
+            generationModelActuallyUsed,
             usedOpenAiFallback: false,
+            fallbackUsed: false,
           };
         }
         if (active !== 'OPENAI' && openaiFallbackOk && openaiFallback) {
@@ -127,13 +133,23 @@ export class GenerationService {
           const r2 = await this.runProvider(params, openaiFallback, 'OPENAI');
           const cleaned2 = this.sanitizeCustomerFacing(r2.content);
           if (cleaned2 && r2.generationProvider && r2.generationModel) {
+            const generationModelActuallyUsed = r2.generationModel;
+            this.logger.log(
+              `Live generation ok (OpenAI fallback): agencyActiveProvider=${active} configuredModel=${configuredModel} ` +
+                `routingRecommendedModel=${routingRecommendedModel ?? 'n/a'} generationProvider=${r2.generationProvider} ` +
+                `generationModelActuallyUsed=${generationModelActuallyUsed} fallbackUsed=true`,
+            );
             return {
               content: cleaned2,
               usedFallbackProvider: 'OPENAI',
               agencyActiveProvider: active,
+              configuredModel,
+              routingRecommendedModel,
               generationProvider: r2.generationProvider,
-              generationModel: r2.generationModel,
+              generationModel: generationModelActuallyUsed,
+              generationModelActuallyUsed,
               usedOpenAiFallback: true,
+              fallbackUsed: true,
             };
           }
         } else if (active !== 'OPENAI' && openaiFallback?.api_key && !openaiFallbackOk) {
@@ -141,7 +157,13 @@ export class GenerationService {
             `Primary provider ${active} failed; OpenAI fallback skipped (no usable OpenAI API key configured)`,
           );
         }
-        return { content: null, skipReason: 'generation_failed', agencyActiveProvider: active };
+        return {
+          content: null,
+          skipReason: 'generation_failed',
+          agencyActiveProvider: active,
+          configuredModel,
+          routingRecommendedModel,
+        };
       }
 
       // No primary key — use OpenAI only
@@ -149,21 +171,37 @@ export class GenerationService {
         const r2 = await this.runProvider(params, openaiFallback, 'OPENAI');
         const cleaned2 = this.sanitizeCustomerFacing(r2.content);
         if (cleaned2 && r2.generationProvider && r2.generationModel) {
+          const generationModelActuallyUsed = r2.generationModel;
+          this.logger.log(
+            `Live generation ok (OpenAI-only row): agencyActiveProvider=${active} configuredModel=${configuredModel} ` +
+              `routingRecommendedModel=${routingRecommendedModel ?? 'n/a'} generationProvider=${r2.generationProvider} ` +
+              `generationModelActuallyUsed=${generationModelActuallyUsed}`,
+          );
           return {
             content: cleaned2,
             usedFallbackProvider: 'OPENAI',
             agencyActiveProvider: active,
+            configuredModel,
+            routingRecommendedModel,
             generationProvider: r2.generationProvider,
-            generationModel: r2.generationModel,
+            generationModel: generationModelActuallyUsed,
+            generationModelActuallyUsed,
             usedOpenAiFallback: false,
+            fallbackUsed: false,
           };
         }
       }
-      return { content: null, skipReason: 'no_provider', agencyActiveProvider: active };
+      return {
+        content: null,
+        skipReason: 'no_provider',
+        agencyActiveProvider: active,
+        configuredModel,
+        routingRecommendedModel,
+      };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'unknown';
       this.logger.warn(`Live generation failed: ${message}`);
-      return { content: null, skipReason: 'generation_failed' };
+      return { content: null, skipReason: 'generation_failed', routingRecommendedModel };
     }
   }
 
@@ -190,32 +228,24 @@ export class GenerationService {
 
     const settings = row.settings ?? {};
     const settingsModel = (settings['defaultModel'] as string | undefined)?.trim();
-    const defModel =
-      providerName === 'MINIMAX'
-        ? settingsModel || DEFAULT_MINIMAX_MODEL
-        : settingsModel || DEFAULT_OPENAI_MODEL;
+    const { model, coercedFromStored, coercedFromRequest } = resolveGenerationModel(
+      providerName,
+      settingsModel,
+      params.tenantGenerationModelOverride?.trim() || undefined,
+    );
+    if (coercedFromStored || coercedFromRequest) {
+      this.logger.warn(
+        `Resolved generation model for ${providerName}: using ${model}` +
+          (coercedFromStored ? ' (stored agency default was not in the allowed registry)' : '') +
+          (coercedFromRequest ? ' (tenant/router model was not valid for this provider)' : ''),
+      );
+    }
     const agTemp = (settings['temperature'] as number) ?? 0.7;
     const agMax = (settings['maxTokens'] as number) ?? 500;
     const temp =
       params.temperature != null && Number.isFinite(params.temperature) ? params.temperature! : agTemp;
     const maxT =
       params.maxTokens != null && Number.isFinite(params.maxTokens) ? Math.floor(params.maxTokens) : agMax;
-    const requested = params.model?.trim() ?? '';
-    let model = requested || defModel;
-    if (providerName === 'MINIMAX') {
-      if (!requested || this.isLikelyOpenAiModelId(requested) || this.isLikelyOpenAiModelId(model)) {
-        model = defModel;
-      }
-      if (this.isLikelyOpenAiModelId(model)) {
-        model = DEFAULT_MINIMAX_MODEL;
-      }
-    } else if (providerName === 'OPENAI') {
-      if (requested && this.isLikelyMinimaxModelId(requested)) {
-        model = defModel;
-      } else if (this.isLikelyMinimaxModelId(model)) {
-        model = DEFAULT_OPENAI_MODEL;
-      }
-    }
     const messages = this.buildMessages(params);
     const groupId = (settings['minimaxGroupId'] as string | undefined)?.trim() || undefined;
 
@@ -234,8 +264,8 @@ export class GenerationService {
           temperature: temp,
           maxTokens: maxT,
         });
-        this.logger.log(
-          `Live generation ok: provider=MINIMAX generationModel=${out.model} tokens~=${out.totalTokens}`,
+        this.logger.debug(
+          `MiniMax HTTP ok: generationModelActuallyUsed=${(out.model && String(out.model).trim()) || model} tokens~=${out.totalTokens}`,
         );
         return {
           content: out.content || null,
@@ -256,7 +286,7 @@ export class GenerationService {
     adapter.initialize({
       apiKey: row.api_key,
       endpoint: row.endpoint ?? undefined,
-      defaultModel: defModel,
+      defaultModel: model,
       maxTokens: maxT,
       temperature: temp,
     });
@@ -267,8 +297,8 @@ export class GenerationService {
         temperature: temp,
         maxTokens: maxT,
       });
-      this.logger.log(
-        `Live generation ok: provider=OPENAI generationModel=${result.model} tokens=${result.usage.totalTokens}`,
+      this.logger.debug(
+        `OpenAI HTTP ok: generationModelActuallyUsed=${result.model?.trim() || model} tokens=${result.usage.totalTokens}`,
       );
       return {
         content: result.content || null,

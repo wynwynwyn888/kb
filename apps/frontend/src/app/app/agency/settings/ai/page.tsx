@@ -4,12 +4,16 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   getAgencyAiConfig,
+  postAgencyAiModelHealthTest,
   saveAgencyAiConfig,
   saveSubaccountBehaviorPolicy,
   type AgencyProviderSnapshot,
+  type AiModelHealthSnapshot,
   type SubaccountBehaviorPolicy,
 } from '@/lib/api';
-import { getModelFieldForProvider, PROVIDER_LABEL } from '@/lib/ai-model-options';
+import type { LiveAiCatalogDto } from '@/lib/api';
+import { catalogProviderIds, getModelFieldForProvider, PROVIDER_LABEL } from '@/lib/ai-model-options';
+import { MINIMAX_DEFAULT_API_BASE, OPENAI_DEFAULT_API_BASE } from '@aisbp/types';
 import { hasLiveGeneration, snapshotFor } from '@/lib/ai-provider-options';
 import {
   ErrorBanner,
@@ -52,6 +56,19 @@ const defaultBehavior = (): SubaccountBehaviorPolicy => ({
   allowMaxTokensOverride: true,
 });
 
+function defaultEndpointFor(provider: string): string {
+  return provider.toUpperCase() === 'MINIMAX' ? MINIMAX_DEFAULT_API_BASE : OPENAI_DEFAULT_API_BASE;
+}
+
+function healthAppliesToSelection(
+  snap: AiModelHealthSnapshot | null | undefined,
+  provider: string,
+  model: string,
+): boolean {
+  if (!snap) return false;
+  return snap.lastHealthProvider.toUpperCase() === provider.toUpperCase() && snap.lastHealthModel.trim() === model.trim();
+}
+
 export default function AgencyAiSettingsPage() {
   const { token } = useAuth();
   const [loadKey, setLoadKey] = useState(0);
@@ -68,6 +85,8 @@ export default function AgencyAiSettingsPage() {
   const [apiKey, setApiKey] = useState('');
   const [minimaxGroupId, setMinimaxGroupId] = useState('');
   const [defaultModel, setDefaultModel] = useState('gpt-4o-mini');
+  const [endpointOverride, setEndpointOverride] = useState('');
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   const [activeProvider, setActiveProvider] = useState('OPENAI');
   const [activeModel, setActiveModel] = useState('gpt-4o-mini');
@@ -76,12 +95,26 @@ export default function AgencyAiSettingsPage() {
   const [providerSnapshots, setProviderSnapshots] = useState<
     Partial<Record<string, AgencyProviderSnapshot>> | undefined
   >();
+  const [healthSnap, setHealthSnap] = useState<AiModelHealthSnapshot | null>(null);
+  const [liveAiCatalog, setLiveAiCatalog] = useState<LiveAiCatalogDto | null>(null);
   const [setAsActive, setSetAsActive] = useState(true);
   const [policy, setPolicy] = useState<SubaccountBehaviorPolicy>(defaultBehavior);
 
-  const modelUi = useMemo(() => getModelFieldForProvider(selectedProvider), [selectedProvider]);
+  const [testing, setTesting] = useState(false);
+  const [testErr, setTestErr] = useState('');
+  const [testOk, setTestOk] = useState('');
+
+  const modelUi = useMemo(
+    () => getModelFieldForProvider(selectedProvider, liveAiCatalog),
+    [selectedProvider, liveAiCatalog],
+  );
 
   const hasKeyThis = Boolean(keysPresent[selectedProvider]);
+
+  const healthForForm = useMemo(
+    () => healthAppliesToSelection(healthSnap, selectedProvider, defaultModel),
+    [healthSnap, selectedProvider, defaultModel],
+  );
 
   useEffect(() => {
     if (!token) return;
@@ -99,12 +132,14 @@ export default function AgencyAiSettingsPage() {
         setActiveHasKey(Boolean(c.keysPresent?.[apKey] ?? c.hasApiKey));
         setKeysPresent(c.keysPresent ?? {});
         setProviderSnapshots(c.providerSnapshots);
+        setHealthSnap(c.aiModelHealthSnapshot ?? null);
+        setLiveAiCatalog(c.liveAiCatalog ?? null);
         if (c.subaccountBehaviorPolicy) {
           setPolicy(c.subaccountBehaviorPolicy);
         }
 
         const edit = c.activeProvider ?? c.provider;
-        if (edit) {
+        if (edit && (edit === 'OPENAI' || edit === 'MINIMAX')) {
           setSelectedProvider(edit);
           const snapshots = c.providerSnapshots;
           const s = snapshotFor(edit, snapshots, {
@@ -112,19 +147,19 @@ export default function AgencyAiSettingsPage() {
             maxTokens: PROVIDER_STACK_DEFAULTS.maxTokens,
             temperature: PROVIDER_STACK_DEFAULTS.temperature,
           });
-          const m = getModelFieldForProvider(edit);
+          const m = getModelFieldForProvider(edit, c.liveAiCatalog ?? null);
           if (m.mode === 'list' && m.options.some(o => o.value === s.defaultModel)) {
             setDefaultModel(s.defaultModel);
-          } else if (m.mode === 'list') {
-            setDefaultModel(m.defaultModel);
           } else {
-            setDefaultModel(s.defaultModel);
+            setDefaultModel(m.defaultModel);
           }
           if (edit === 'MINIMAX') {
             setMinimaxGroupId(s.minimaxGroupId?.trim() ?? '');
           } else {
             setMinimaxGroupId('');
           }
+          const ep = s.endpoint?.trim() ?? '';
+          setEndpointOverride(ep);
         }
       } catch (e) {
         if (!cancelled) setBootstrapErr(e instanceof Error ? e.message : 'Failed to load');
@@ -142,7 +177,7 @@ export default function AgencyAiSettingsPage() {
     if (!token) return;
 
     if (setAsActive && !hasLiveGeneration(selectedProvider)) {
-      setErr('Only OpenAI or MiniMax can be used for live replies right now. Choose one of those providers or save this provider for later.');
+      setErr('Only OpenAI or MiniMax can be used for live replies right now.');
       return;
     }
     if (selectedProvider === 'MINIMAX' && !apiKey.trim() && !hasKeyThis) {
@@ -154,17 +189,24 @@ export default function AgencyAiSettingsPage() {
     setOk('');
     setSaving(true);
     try {
-      const saved = await saveAgencyAiConfig(token, {
+      const baseDefault = defaultEndpointFor(selectedProvider);
+      const ep = endpointOverride.trim();
+      const payload: Parameters<typeof saveAgencyAiConfig>[1] = {
         provider: selectedProvider,
         apiKey: apiKey.trim() || undefined,
         defaultModel,
         temperature: PROVIDER_STACK_DEFAULTS.temperature,
         maxTokens: PROVIDER_STACK_DEFAULTS.maxTokens,
-        // JSON.stringify omits `undefined`; the API requires an explicit boolean so active_ai_provider is updated
-        // when the checkbox is on (default) or off.
         setAsActive: setAsActive !== false,
         ...(selectedProvider === 'MINIMAX' ? { minimaxGroupId: minimaxGroupId.trim() } : {}),
-      });
+      };
+      if (advancedOpen && ep && ep !== baseDefault) {
+        payload.endpoint = ep;
+      } else if (advancedOpen && !ep) {
+        payload.endpoint = '';
+      }
+
+      const saved = await saveAgencyAiConfig(token, payload);
       setOk('AI provider saved');
       setApiKey('');
       setActiveProvider(saved.activeProvider ?? saved.provider);
@@ -174,14 +216,39 @@ export default function AgencyAiSettingsPage() {
       if (saved.provider) setSelectedProvider(saved.provider);
       if (saved.providerSnapshots) setProviderSnapshots(saved.providerSnapshots);
       if (saved.defaultModel) setDefaultModel(saved.defaultModel);
-      // Re-align checkbox with the row now shown (active stack) after save.
-      setSetAsActive(
-        hasLiveGeneration(String(saved.activeProvider || saved.provider || 'OPENAI')),
-      );
+      setHealthSnap(saved.aiModelHealthSnapshot ?? null);
+      setLiveAiCatalog(saved.liveAiCatalog ?? null);
+      setSetAsActive(hasLiveGeneration(String(saved.activeProvider || saved.provider || 'OPENAI')));
     } catch (er) {
       setErr(er instanceof Error ? er.message : 'Save failed');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const onTestModel = async () => {
+    if (!token) return;
+    setTestErr('');
+    setTestOk('');
+    setTesting(true);
+    try {
+      const r = await postAgencyAiModelHealthTest(token, {
+        provider: selectedProvider,
+        model: defaultModel,
+        optionalUseSavedKey: true,
+      });
+      const c = await getAgencyAiConfig(token);
+      setHealthSnap(c.aiModelHealthSnapshot ?? null);
+      setLiveAiCatalog(c.liveAiCatalog ?? null);
+      if (r.status === 'PASS') {
+        setTestOk(`Health check passed for ${r.provider} / ${r.model} (${r.latencyMs} ms).`);
+      } else {
+        setTestErr(r.errorSummary || 'Health check failed.');
+      }
+    } catch (er) {
+      setTestErr(er instanceof Error ? er.message : 'Test failed');
+    } finally {
+      setTesting(false);
     }
   };
 
@@ -214,7 +281,11 @@ export default function AgencyAiSettingsPage() {
   const activeNeedsKey = ['OPENAI', 'MINIMAX'].includes((activeProvider || '').toUpperCase());
   const activeKeyOk = !activeNeedsKey || activeHasKey;
 
-  const modelIsText = modelUi.mode === 'text';
+  const healthLabel = !healthForForm
+    ? 'Not tested'
+    : healthSnap?.lastHealthStatus === 'PASS'
+      ? 'Passing'
+      : 'Failing';
 
   return (
     <div>
@@ -269,10 +340,7 @@ export default function AgencyAiSettingsPage() {
             </span>
           </div>
 
-          <SectionCard
-            title="Provider"
-            subtitle="Save the AI provider and default model used for live replies."
-          >
+          <SectionCard title="Provider" subtitle="Save the AI provider and default model used for live replies.">
             {err ? <ErrorBanner message={err} /> : null}
             {ok ? <SuccessBanner message={ok} /> : null}
             <form
@@ -287,22 +355,19 @@ export default function AgencyAiSettingsPage() {
                     const p = e.target.value;
                     setSelectedProvider(p);
                     setApiKey('');
-                    // Only the live row should be pre-checked; switching away from the active row must not keep
-                    // "set as active" true or the next save will rotate the agency stack (e.g. OpenAI overwrites MINIMAX).
                     setSetAsActive(p === activeProvider);
                     const s = snapshotFor(p, providerSnapshots, {
                       defaultModel: p === 'MINIMAX' ? 'MiniMax-M2.7' : 'gpt-4o-mini',
                       maxTokens: PROVIDER_STACK_DEFAULTS.maxTokens,
                       temperature: PROVIDER_STACK_DEFAULTS.temperature,
                     });
-                    const m = getModelFieldForProvider(p);
+                    const m = getModelFieldForProvider(p, liveAiCatalog);
                     if (m.mode === 'list' && m.options.some(o => o.value === s.defaultModel)) {
                       setDefaultModel(s.defaultModel);
-                    } else if (m.mode === 'list') {
-                      setDefaultModel(m.defaultModel);
                     } else {
-                      setDefaultModel(s.defaultModel);
+                      setDefaultModel(m.defaultModel);
                     }
+                    setEndpointOverride(s.endpoint?.trim() ?? '');
                     if (p === 'MINIMAX') {
                       setMinimaxGroupId(s.minimaxGroupId?.trim() ?? '');
                     } else {
@@ -311,7 +376,7 @@ export default function AgencyAiSettingsPage() {
                   }}
                   style={mvpSelectStyle}
                 >
-                  {(['MINIMAX', 'OPENAI', 'GOOGLE', 'ANTHROPIC', 'AZURE', 'CUSTOM'] as const).map(p => (
+                  {catalogProviderIds(liveAiCatalog).map(p => (
                     <option key={p} value={p}>
                       {PROVIDER_LABEL[p] ?? p}
                     </option>
@@ -328,7 +393,7 @@ export default function AgencyAiSettingsPage() {
                 />
                 Use this provider for live replies after saving
                 {!hasLiveGeneration(selectedProvider) ? (
-                  <span style={{ color: '#94a3b8', fontSize: '0.75rem' }}>— available to save, but not live yet</span>
+                  <span style={{ color: '#94a3b8', fontSize: '0.75rem' }}>— not available</span>
                 ) : null}
               </label>
 
@@ -358,50 +423,147 @@ export default function AgencyAiSettingsPage() {
                 </label>
               ) : null}
 
-              {modelIsText ? (
+              <label style={mvpLabelStyle}>
+                Default model
+                <select
+                  value={defaultModel}
+                  onChange={e => setDefaultModel(e.target.value)}
+                  style={mvpSelectStyle}
+                >
+                  {modelUi.mode === 'list' &&
+                    modelUi.options.map(o => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                </select>
+              </label>
+
+              <button
+                type="button"
+                onClick={() => setAdvancedOpen(a => !a)}
+                style={{
+                  alignSelf: 'flex-start',
+                  fontSize: '0.8rem',
+                  color: '#475569',
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  textDecoration: 'underline',
+                  padding: 0,
+                }}
+              >
+                {advancedOpen ? 'Hide advanced' : 'Advanced — API base URL'}
+              </button>
+              {advancedOpen ? (
                 <label style={mvpLabelStyle}>
-                  Default model
-                  <input value={defaultModel} onChange={e => setDefaultModel(e.target.value)} style={mvpInputStyle} />
+                  API base URL
+                  <input
+                    value={endpointOverride}
+                    onChange={e => setEndpointOverride(e.target.value)}
+                    style={mvpInputStyle}
+                    placeholder={defaultEndpointFor(selectedProvider)}
+                    autoComplete="off"
+                  />
+                  <p style={mvpFieldHint}>
+                    Default: OpenAI <code>{OPENAI_DEFAULT_API_BASE}</code>, MiniMax <code>{MINIMAX_DEFAULT_API_BASE}</code>.
+                    Leave blank or match the default unless your account requires a different host.
+                  </p>
                 </label>
-              ) : (
-                <label style={mvpLabelStyle}>
-                  Default model
-                  <select
-                    value={defaultModel}
-                    onChange={e => setDefaultModel(e.target.value)}
-                    style={mvpSelectStyle}
-                  >
-                    {modelUi.mode === 'list' &&
-                      modelUi.groups &&
-                      modelUi.groups.map(g => (
-                        <optgroup key={g.label} label={g.label}>
-                          {g.options.map(o => (
-                            <option key={o.value} value={o.value}>
-                              {o.label}
-                            </option>
-                          ))}
-                        </optgroup>
-                      ))}
-                    {modelUi.mode === 'list' && !modelUi.groups &&
-                      modelUi.options.map(o => (
-                        <option key={o.value} value={o.value}>
-                          {o.label}
-                        </option>
-                      ))}
-                  </select>
-                </label>
-              )}
+              ) : null}
 
               <p style={mvpFieldHint}>Client-specific persona, goals, and business notes live in each workspace.</p>
 
-              <button
-                type="submit"
-                disabled={saving}
-                style={{ ...mvpPrimaryButtonStyle, width: 'fit-content', opacity: saving ? 0.85 : 1 }}
-              >
-                {saving ? 'Saving…' : 'Save provider'}
-              </button>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
+                <button
+                  type="submit"
+                  disabled={saving}
+                  style={{ ...mvpPrimaryButtonStyle, width: 'fit-content', opacity: saving ? 0.85 : 1 }}
+                >
+                  {saving ? 'Saving…' : 'Save provider settings'}
+                </button>
+                <button
+                  type="button"
+                  disabled={testing || !hasKeyThis}
+                  onClick={onTestModel}
+                  style={{
+                    padding: '0.45rem 0.85rem',
+                    borderRadius: '6px',
+                    border: '1px solid #cbd5e1',
+                    background: '#fff',
+                    cursor: testing || !hasKeyThis ? 'not-allowed' : 'pointer',
+                    fontSize: '0.85rem',
+                    fontWeight: 600,
+                    color: '#0f172a',
+                    opacity: testing || !hasKeyThis ? 0.7 : 1,
+                  }}
+                >
+                  {testing ? 'Testing…' : 'Test selected model'}
+                </button>
+              </div>
+              {!hasKeyThis ? <p style={{ ...mvpFieldHint, marginTop: 0 }}>Save an API key before running a health check.</p> : null}
+              {testErr ? <ErrorBanner message={testErr} /> : null}
+              {testOk ? <SuccessBanner message={testOk} /> : null}
             </form>
+          </SectionCard>
+
+          <SectionCard title="Model health" subtitle="Last check against the provider API (uses your saved key only).">
+            {!healthSnap ? (
+              <p style={{ fontSize: '0.85rem', color: '#64748b', margin: 0 }}>No health check recorded yet.</p>
+            ) : (
+              <dl
+                style={{
+                  margin: 0,
+                  display: 'grid',
+                  gridTemplateColumns: 'auto 1fr',
+                  gap: '0.35rem 1rem',
+                  fontSize: '0.85rem',
+                  color: '#334155',
+                }}
+              >
+                <dt style={{ color: '#94a3b8', fontWeight: 600 }}>Status</dt>
+                <dd style={{ margin: 0 }}>{healthLabel}</dd>
+                <dt style={{ color: '#94a3b8', fontWeight: 600 }}>Checked</dt>
+                <dd style={{ margin: 0 }}>{new Date(healthSnap.lastHealthCheckedAt).toLocaleString()}</dd>
+                <dt style={{ color: '#94a3b8', fontWeight: 600 }}>Latency</dt>
+                <dd style={{ margin: 0 }}>
+                  {healthSnap.lastHealthLatencyMs != null ? `${healthSnap.lastHealthLatencyMs} ms` : '—'}
+                </dd>
+                <dt style={{ color: '#94a3b8', fontWeight: 600 }}>Tested provider / model</dt>
+                <dd style={{ margin: 0 }}>
+                  {healthSnap.lastHealthProvider} / {healthSnap.lastHealthModel}
+                </dd>
+                {healthSnap.lastHealthErrorSummary ? (
+                  <>
+                    <dt style={{ color: '#94a3b8', fontWeight: 600 }}>Error</dt>
+                    <dd style={{ margin: 0, color: '#b91c1c' }}>{healthSnap.lastHealthErrorSummary}</dd>
+                  </>
+                ) : null}
+              </dl>
+            )}
+            {!healthForForm && healthSnap ? (
+              <p style={{ fontSize: '0.78rem', color: '#94a3b8', margin: '0.75rem 0 0' }}>
+                Last run was for a different provider or model than you have selected above. Run &quot;Test selected model&quot;
+                to refresh for your current selection.
+              </p>
+            ) : null}
+            <button
+              type="button"
+              disabled={testing || !hasKeyThis}
+              onClick={onTestModel}
+              style={{
+                marginTop: '0.75rem',
+                padding: '0.45rem 0.85rem',
+                borderRadius: '6px',
+                border: '1px solid #cbd5e1',
+                background: '#fff',
+                cursor: testing || !hasKeyThis ? 'not-allowed' : 'pointer',
+                fontSize: '0.85rem',
+                fontWeight: 600,
+              }}
+            >
+              {testing ? 'Testing…' : 'Test selected model'}
+            </button>
           </SectionCard>
 
           <SectionCard

@@ -130,6 +130,58 @@ describe('WebhooksService', () => {
 
       expect(result.success).toBe(true);
       expect(result.duplicate).toBe(false);
+      expect(mockQueue.add).toHaveBeenCalledWith(
+        'persist',
+        expect.objectContaining({
+          locationId: 'loc_123',
+          ghlConversationId: 'conv_1',
+          smokeImmediate: false,
+        }),
+        expect.any(Object),
+      );
+    });
+
+    it('enqueues persist with smokeImmediate when opts request it', async () => {
+      (mockSupabase.from as jest.Mock).mockImplementation((table: string) => {
+        if (table === 'tenants') {
+          return {
+            select: () => ({
+              eq: () => ({ single: async () => ({ data: { id: 'tnt_1' }, error: null }) }),
+            }),
+          };
+        }
+        if (table === 'tenant_ghl_connections') {
+          return {
+            select: () => ({
+              eq: () => ({
+                eq: () => ({ single: async () => ({ data: { tenant_id: 'tnt_1', status: 'CONNECTED' }, error: null }) }),
+              }),
+            }),
+          };
+        }
+        if (table === 'webhook_events') {
+          return {
+            select: () => ({
+              eq: () => ({
+                eq: () => ({ single: async () => ({ data: null, error: { code: 'PGRST116' } }) }),
+              }),
+            }),
+            insert: () => ({ select: () => ({ single: async () => ({ data: { id: 'evt_smoke' }, error: null }) }) }),
+          };
+        }
+        return {};
+      });
+
+      await service.handleGhlWebhook(
+        makePayload({ data: { id: 'msg_smoke', conversationId: 'conv_smoke', message: 'Hi' } }),
+        { smokeImmediate: true },
+      );
+
+      expect(mockQueue.add).toHaveBeenCalledWith(
+        'persist',
+        expect.objectContaining({ smokeImmediate: true }),
+        expect.any(Object),
+      );
     });
   });
 });

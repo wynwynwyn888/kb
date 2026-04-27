@@ -513,6 +513,20 @@ export interface AgencyProviderSnapshot {
   temperature?: number;
   hasKey: boolean;
   minimaxGroupId?: string;
+  /** API base URL saved for this provider row (no secrets). */
+  endpoint?: string | null;
+}
+
+export type ActiveAiHealthBadge = 'PASS' | 'FAIL' | 'UNKNOWN';
+
+export interface AiModelHealthSnapshot {
+  lastHealthStatus: 'PASS' | 'FAIL';
+  lastHealthCheckedAt: string;
+  lastHealthLatencyMs: number | null;
+  lastHealthErrorSummary: string | null;
+  lastHealthModel: string;
+  lastHealthProvider: string;
+  lastHealthErrorCode?: string;
 }
 
 export interface SubaccountBehaviorPolicy {
@@ -523,6 +537,11 @@ export interface SubaccountBehaviorPolicy {
   allowModelOverride: boolean;
   allowResponseStyleOverride: boolean;
   allowMaxTokensOverride: boolean;
+}
+
+export interface LiveAiCatalogDto {
+  providers: Array<{ id: 'OPENAI' | 'MINIMAX'; label: string }>;
+  modelsByProvider: Record<'OPENAI' | 'MINIMAX', Array<{ id: string; label: string; tier?: string }>>;
 }
 
 export interface AgencyAiConfig {
@@ -538,6 +557,15 @@ export interface AgencyAiConfig {
   keysPresent?: Partial<Record<string, boolean>>;
   providerSnapshots?: Partial<Record<string, AgencyProviderSnapshot>>;
   subaccountBehaviorPolicy?: SubaccountBehaviorPolicy;
+  aiModelHealthSnapshot?: AiModelHealthSnapshot | null;
+  activeAiHealth: {
+    healthBadge: ActiveAiHealthBadge;
+    lastHealthCheckedAt: string | null;
+    lastHealthLatencyMs: number | null;
+    lastHealthErrorSummary: string | null;
+  };
+  /** Same registry the backend validates against — use for dropdowns (avoids stale client bundles). */
+  liveAiCatalog: LiveAiCatalogDto;
 }
 
 export async function getAgencyAiConfig(token: string): Promise<AgencyAiConfig> {
@@ -549,6 +577,7 @@ export async function saveAgencyAiConfig(
   data: {
     provider: string;
     apiKey?: string;
+    endpoint?: string;
     defaultModel: string;
     temperature?: number;
     maxTokens?: number;
@@ -560,6 +589,25 @@ export async function saveAgencyAiConfig(
     token,
     method: 'POST',
     body: JSON.stringify(data),
+  });
+}
+
+export async function postAgencyAiModelHealthTest(
+  token: string,
+  body: { provider: string; model: string; optionalUseSavedKey?: boolean },
+): Promise<{
+  status: 'PASS' | 'FAIL';
+  provider: string;
+  model: string;
+  latencyMs: number;
+  checkedAt: string;
+  errorCode?: string;
+  errorSummary?: string;
+}> {
+  return apiRequest('/agency-ai-config/test', {
+    token,
+    method: 'POST',
+    body: JSON.stringify(body),
   });
 }
 

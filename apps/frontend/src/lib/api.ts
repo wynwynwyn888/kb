@@ -951,6 +951,28 @@ export async function getKbDocumentChunks(
   return apiRequest(`/kb/chunks/${encodeURIComponent(documentId)}?${q}`, { token });
 }
 
+/** Authoritative note body for View/Edit (metadata `richTextContent` or chunk fallback). */
+export type KbRichNoteSource = {
+  id: string;
+  title: string;
+  content: string;
+  updatedAt: string;
+  status: string;
+  chunkCount: number;
+};
+
+export async function getKbRichNoteSource(
+  token: string,
+  tenantId: string,
+  documentId: string,
+): Promise<KbRichNoteSource> {
+  const q = new URLSearchParams({ tenantId });
+  return apiRequest<KbRichNoteSource>(
+    `/kb/documents/${encodeURIComponent(documentId)}/rich-source?${q}`,
+    { token },
+  );
+}
+
 export async function createKbRichText(
   token: string,
   dto: { tenantId: string; title: string; content: string },

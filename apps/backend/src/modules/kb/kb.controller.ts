@@ -66,6 +66,26 @@ export class KbController {
     private readonly tenantsService: TenantsService,
   ) {}
 
+  @Get('documents/:documentId/rich-source')
+  @ApiOperation({
+    summary: 'Authoritative note text for View/Edit (stored metadata; chunk reconstruction fallback)',
+  })
+  async getRichNoteSource(
+    @Param('documentId') documentId: string,
+    @Query('tenantId') tenantId: string | undefined,
+    @CurrentUser() user: SessionUser,
+  ) {
+    if (!tenantId?.trim()) {
+      throw new BadRequestException('tenantId query parameter is required');
+    }
+    await this.assertTenantScope(user, tenantId);
+    const row = await this.kbService.getRichNoteSourceForEdit(tenantId, documentId);
+    if (!row) {
+      throw new NotFoundException('Not found');
+    }
+    return row;
+  }
+
   @Get('documents/:tenantId')
   @ApiOperation({ summary: 'List knowledge documents (READY only, or all with ?all=1)' })
   async listDocuments(

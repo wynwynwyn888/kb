@@ -133,6 +133,25 @@ export function rankChunksByRelevance(
 }
 
 /**
+ * Search UI: prefer strict positive matches; if none, return best-effort ranked chunks
+ * (avoids empty results when chunks exist but lexical scores tie at zero).
+ */
+export function rankChunksForKbSearch(
+  query: string,
+  chunks: ScorableChunk[],
+  opts: { intentHint?: string; topK: number },
+): Array<{ chunk: ScorableChunk; score: number }> {
+  const strict = rankChunksByRelevance(query, chunks, opts);
+  if (strict.length > 0) return strict.slice(0, opts.topK);
+  const q = query.trim();
+  if (!q) return chunks.slice(0, opts.topK).map(c => ({ chunk: c, score: 0 }));
+  return chunks
+    .map(chunk => ({ chunk, score: scoreChunkForQuery(q, chunk, opts) }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, opts.topK);
+}
+
+/**
  * Short snippet biased around the first strong query-token hit in content.
  * When `sectionTitle` matches the query (generic heading relevance), lead with it.
  */

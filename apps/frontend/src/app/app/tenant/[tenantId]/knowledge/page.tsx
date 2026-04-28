@@ -11,6 +11,7 @@ import {
   deleteKbDocument,
   downloadKbDocumentOriginal,
   getKbDocumentChunks,
+  getKbRichNoteSource,
   isApiHttpError,
   listKbDocuments,
   searchKb,
@@ -572,6 +573,8 @@ function NoteKnowledgeCard({
   const [editBody, setEditBody] = useState('');
   const [loadingModal, setLoadingModal] = useState(false);
   const [savingModal, setSavingModal] = useState(false);
+  /** Snapshot from GET rich-source (or fallback) for modal metadata while open */
+  const [editorFacts, setEditorFacts] = useState<{ updatedAt: string; chunkCount: number } | null>(null);
 
   const preview = (doc.answerPreview ?? '').trim();
   const previewLines = preview ? preview.split('\n').length : 0;
@@ -581,41 +584,57 @@ function NoteKnowledgeCard({
     setModalOpen(true);
     setEditTitle(doc.title);
     setEditBody('');
+    setEditorFacts(null);
     setWriteErr('');
     setSaveOk('');
     setLoadingModal(true);
     try {
-      const chunks = await getKbDocumentChunks(token, subId, doc.id);
-      const ordered = [...chunks].sort((a, b) => {
-        const ma = (a.metadata ?? {}) as Record<string, unknown>;
-        const mb = (b.metadata ?? {}) as Record<string, unknown>;
-        const ia = Number(ma['sectionIndex']);
-        const ib = Number(mb['sectionIndex']);
-        const pa = Number(ma['sectionPartIndex'] ?? 0);
-        const pb = Number(mb['sectionPartIndex'] ?? 0);
-        const na = Number.isFinite(ia) ? ia : 0;
-        const nb = Number.isFinite(ib) ? ib : 0;
-        if (na !== nb) return na - nb;
-        return pa - pb;
-      });
-      const body =
-        ordered
-          .map(c => {
-            const ma = c.metadata as Record<string, unknown> | undefined;
-            const st = typeof ma?.['sectionTitle'] === 'string' ? String(ma['sectionTitle']).trim() : '';
-            const partIdx = Number(ma?.['sectionPartIndex'] ?? 0);
-            const text = (c.content ?? '').trim();
-            if (st && text) {
-              if (!Number.isFinite(partIdx) || partIdx === 0) return `${st}\n${text}`;
-              return text;
-            }
-            return text;
-          })
-          .filter(Boolean)
-          .join('\n\n') || preview;
-      setEditBody(body);
+      const src = await getKbRichNoteSource(token, subId, doc.id);
+      setEditTitle(src.title);
+      setEditBody(src.content.trim() || preview);
+      setEditorFacts({ updatedAt: src.updatedAt, chunkCount: src.chunkCount });
     } catch {
-      setEditBody(preview);
+      try {
+        const chunks = await getKbDocumentChunks(token, subId, doc.id);
+        const ordered = [...chunks].sort((a, b) => {
+          const ma = (a.metadata ?? {}) as Record<string, unknown>;
+          const mb = (b.metadata ?? {}) as Record<string, unknown>;
+          const ia = Number(ma['sectionIndex']);
+          const ib = Number(mb['sectionIndex']);
+          const pa = Number(ma['sectionPartIndex'] ?? 0);
+          const pb = Number(mb['sectionPartIndex'] ?? 0);
+          const na = Number.isFinite(ia) ? ia : 0;
+          const nb = Number.isFinite(ib) ? ib : 0;
+          if (na !== nb) return na - nb;
+          return pa - pb;
+        });
+        const body =
+          ordered
+            .map(c => {
+              const ma = c.metadata as Record<string, unknown> | undefined;
+              const st = typeof ma?.['sectionTitle'] === 'string' ? String(ma['sectionTitle']).trim() : '';
+              const partIdx = Number(ma?.['sectionPartIndex'] ?? 0);
+              const text = (c.content ?? '').trim();
+              if (st && text) {
+                if (!Number.isFinite(partIdx) || partIdx === 0) return `${st}\n${text}`;
+                return text;
+              }
+              return text;
+            })
+            .filter(Boolean)
+            .join('\n\n') || preview;
+        setEditBody(body);
+        setEditorFacts({
+          updatedAt: doc.updatedAt ?? doc.createdAt ?? '',
+          chunkCount: typeof doc.chunkCount === 'number' ? doc.chunkCount : chunks.length,
+        });
+      } catch {
+        setEditBody(preview);
+        setEditorFacts({
+          updatedAt: doc.updatedAt ?? doc.createdAt ?? '',
+          chunkCount: typeof doc.chunkCount === 'number' ? doc.chunkCount : 0,
+        });
+      }
     } finally {
       setLoadingModal(false);
     }
@@ -804,7 +823,10 @@ function NoteKnowledgeCard({
           wide
           title="View / edit note"
           onClose={() => {
-            if (!savingModal) setModalOpen(false);
+            if (!savingModal) {
+              setModalOpen(false);
+              setEditorFacts(null);
+            }
           }}
           footer={
             <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-end', gap: '0.5rem' }}>
@@ -844,12 +866,19 @@ function NoteKnowledgeCard({
             <div>
               <dt style={{ fontSize: '0.65rem', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', marginBottom: 4 }}>Updated</dt>
               <dd style={{ margin: 0 }}>
-                {doc.updatedAt ? new Date(doc.updatedAt).toLocaleString() : '—'} ({relativeTimeLabel(doc.updatedAt ?? doc.createdAt)})
+                {(editorFacts?.updatedAt || doc.updatedAt)
+                  ? new Date(editorFacts?.updatedAt || doc.updatedAt!).toLocaleString()
+                  : '—'}{' '}
+                ({relativeTimeLabel(editorFacts?.updatedAt || doc.updatedAt || doc.createdAt)})
               </dd>
             </div>
             <div>
               <dt style={{ fontSize: '0.65rem', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', marginBottom: 4 }}>Chunks</dt>
-              <dd style={{ margin: 0 }}>{typeof doc.chunkCount === 'number' ? String(doc.chunkCount) : '—'}</dd>
+              <dd style={{ margin: 0 }}>
+                {typeof (editorFacts?.chunkCount ?? doc.chunkCount) === 'number'
+                  ? String(editorFacts?.chunkCount ?? doc.chunkCount)
+                  : '—'}
+              </dd>
             </div>
           </dl>
           <label>
@@ -1728,7 +1757,7 @@ export default function SubaccountKnowledgePage() {
                                         ...x,
                                         title: patch.title,
                                         status: patch.status,
-                                        updatedAt: patch.updatedAt,
+                                        updatedAt: patch.updatedAt || new Date().toISOString(),
                                         chunkCount: patch.chunkCount,
                                         answerPreview: patch.answerPreview,
                                       }

@@ -17,14 +17,13 @@ describe('KbService', () => {
   });
 
   describe('sanitizeChunkMetadataForClient', () => {
-    it('removes embedding-like keys', () => {
+    it('removes embedding-like keys and richTextContent (document-only field)', () => {
       const out = service.sanitizeChunkMetadataForClient({
-        embedding: [0.1, 0.2],
-        vector: [1],
-        kind: 'file',
-        note: 'x',
+        embedding: [0.1],
+        richTextContent: 'secret',
+        kind: 'rich_text',
       });
-      expect(out).toEqual({ kind: 'file', note: 'x' });
+      expect(out).toEqual({ kind: 'rich_text' });
     });
   });
 

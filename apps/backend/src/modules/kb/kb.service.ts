@@ -14,7 +14,16 @@ import type {
   KbRichTextDocumentPayload,
 } from './dto/retrieval.dto';
 import { buildRichTextChunkSpecs, type RichTextChunkSpec } from '../../lib/kb-section-chunking';
-import { rankChunksByRelevance, buildSnippetAroundQuery, type ScorableChunk } from '../../lib/kb-retrieval-score';
+import {
+  rankChunksByRelevance,
+  rankChunksForKbSearch,
+  buildSnippetAroundQuery,
+  type ScorableChunk,
+} from '../../lib/kb-retrieval-score';
+import {
+  KB_RICH_TEXT_SOURCE_METADATA_KEY,
+  reconstructEditableNoteFromChunks,
+} from '../../lib/kb-rich-text-source';
 
 const DEFAULT_TOP_K = 5;
 
@@ -103,13 +112,13 @@ export class KbService {
   }): Promise<KbSearchResponse> {
     const topK = Math.min(50, Math.max(1, Math.floor(params.topK ?? DEFAULT_TOP_K)));
     const chunks = await this.loadTenantChunks(params.tenantId);
-    const ranked = rankChunksByRelevance(params.query, chunks as ScorableChunk[], {
+    const ranked = rankChunksForKbSearch(params.query, chunks as ScorableChunk[], {
       intentHint: params.intentHint,
+      topK,
     });
-    const top = ranked.slice(0, topK);
-    const maxS = top[0]?.score ?? 1;
+    const maxS = ranked[0]?.score ?? 1;
     const norm = maxS > 0 ? maxS : 1;
-    const hits: KbSearchHit[] = top.map(({ chunk, score }) => {
+    const hits: KbSearchHit[] = ranked.map(({ chunk, score }) => {
       const st = chunk.metadata['sectionTitle'];
       const sectionTitle = typeof st === 'string' && st.trim() ? st.trim() : null;
       return {
@@ -248,7 +257,13 @@ export class KbService {
 
   /** Strip vector-like fields before returning chunk metadata to clients. */
   sanitizeChunkMetadataForClient(metadata: Record<string, unknown> | null | undefined): Record<string, unknown> {
-    const strip = new Set(['embedding', 'vector', 'vectors', 'embeddings']);
+    const strip = new Set([
+      'embedding',
+      'vector',
+      'vectors',
+      'embeddings',
+      KB_RICH_TEXT_SOURCE_METADATA_KEY.toLowerCase(),
+    ]);
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(metadata ?? {})) {
       if (strip.has(k.toLowerCase())) continue;
@@ -309,7 +324,7 @@ export class KbService {
         mime_type: 'text/plain',
         size: c.length,
         status: 'READY',
-        metadata: { documentKind: 'rich_text' },
+        metadata: { documentKind: 'rich_text', [KB_RICH_TEXT_SOURCE_METADATA_KEY]: c },
         created_at: now,
         updated_at: now,
       })
@@ -325,6 +340,70 @@ export class KbService {
     return { id: doc.id };
   }
 
+  async getRichNoteSourceForEdit(
+    tenantId: string,
+    documentId: string,
+  ): Promise<{
+    id: string;
+    title: string;
+    content: string;
+    updatedAt: string;
+    status: string;
+    chunkCount: number;
+  } | null> {
+    const { data: doc, error } = await this.supabase
+      .from('knowledge_documents')
+      .select('id, tenant_id, title, source, status, created_at, updated_at, metadata')
+      .eq('id', documentId)
+      .eq('tenant_id', tenantId)
+      .maybeSingle();
+    if (error || !doc) return null;
+
+    const kind = inferDocumentKind(doc.source as string, doc.metadata);
+    if (kind === 'faq' || kind === 'file') return null;
+
+    const meta =
+      doc.metadata && typeof doc.metadata === 'object' && !Array.isArray(doc.metadata)
+        ? (doc.metadata as Record<string, unknown>)
+        : {};
+    const stored =
+      typeof meta[KB_RICH_TEXT_SOURCE_METADATA_KEY] === 'string'
+        ? (meta[KB_RICH_TEXT_SOURCE_METADATA_KEY] as string)
+        : '';
+    let content = stored.trim();
+    if (!content) {
+      const chunks = await this.getChunks(documentId);
+      content = reconstructEditableNoteFromChunks(
+        chunks.map(c => ({
+          id: c.id,
+          content: c.content,
+          metadata: c.metadata,
+          createdAt: c.createdAt ?? null,
+        })),
+      );
+    }
+
+    const { count, error: cErr } = await this.supabase
+      .from('knowledge_chunks')
+      .select('id', { count: 'exact', head: true })
+      .eq('document_id', documentId);
+    if (cErr) {
+      this.logger.warn(`getRichNoteSourceForEdit: chunk count failed doc=${documentId}: ${cErr.message}`);
+    }
+
+    const row = doc as { title: string; status: string; updated_at?: string | null; created_at?: string };
+    const updatedAt = (row.updated_at && String(row.updated_at)) || String(row.created_at ?? '');
+
+    return {
+      id: documentId,
+      title: row.title,
+      content,
+      updatedAt,
+      status: row.status,
+      chunkCount: count ?? 0,
+    };
+  }
+
   async updateRichText(
     tenantId: string,
     documentId: string,
@@ -337,7 +416,7 @@ export class KbService {
 
     const { data: doc, error: fe } = await this.supabase
       .from('knowledge_documents')
-      .select('id, source, metadata')
+      .select('id, source, metadata, updated_at')
       .eq('id', documentId)
       .eq('tenant_id', tenantId)
       .maybeSingle();
@@ -352,14 +431,27 @@ export class KbService {
       doc.metadata && typeof doc.metadata === 'object' && !Array.isArray(doc.metadata)
         ? (doc.metadata as Record<string, unknown>)
         : {};
+    const prevUpdatedAt = (doc as { updated_at?: string | null }).updated_at ?? null;
     const now = new Date().toISOString();
+
+    const { count: oldChunkCount, error: ocErr } = await this.supabase
+      .from('knowledge_chunks')
+      .select('id', { count: 'exact', head: true })
+      .eq('document_id', documentId);
+    if (ocErr) {
+      this.logger.warn(`updateRichText: old chunk count query failed doc=${documentId}: ${ocErr.message}`);
+    }
 
     const { error: ue } = await this.supabase
       .from('knowledge_documents')
       .update({
         title: t,
         size: c.length,
-        metadata: { ...prevMeta, documentKind: prevMeta['documentKind'] ?? kind },
+        metadata: {
+          ...prevMeta,
+          documentKind: prevMeta['documentKind'] ?? kind,
+          [KB_RICH_TEXT_SOURCE_METADATA_KEY]: c,
+        },
         updated_at: now,
       })
       .eq('id', documentId)
@@ -379,6 +471,20 @@ export class KbService {
       documentUpdatedAtIso: now,
     });
     await this.insertChunkSpecsForDocument(documentId, specs, kindLabel);
+
+    const sectionTitlesLog = [
+      ...new Set(
+        specs.map(s => {
+          const st = s.metadata['sectionTitle'];
+          return typeof st === 'string' && st.trim() ? st.trim() : '(intro)';
+        }),
+      ),
+    ];
+    this.logger.log(
+      `KB rich PATCH doc=${documentId} tenant=${tenantId} titleLen=${t.length} contentLen=${c.length} ` +
+        `oldChunks=${oldChunkCount ?? 0} newChunks=${specs.length} sectionTitles=${JSON.stringify(sectionTitlesLog)} ` +
+        `updatedAtBefore=${JSON.stringify(prevUpdatedAt)} updatedAtAfter=${JSON.stringify(now)}`,
+    );
 
     const { data: rows, error: chErr } = await this.supabase
       .from('knowledge_chunks')
@@ -627,10 +733,11 @@ export class KbService {
     content: string;
     tokenCount: number;
     metadata: Record<string, unknown>;
+    createdAt?: string | null;
   }>> {
     const { data, error } = await this.supabase
       .from('knowledge_chunks')
-      .select('id, content, token_count, metadata')
+      .select('id, content, token_count, metadata, created_at')
       .eq('document_id', documentId)
       .order('created_at', { ascending: true });
 
@@ -640,6 +747,7 @@ export class KbService {
       content: c.content,
       tokenCount: c.token_count,
       metadata: (c.metadata as Record<string, unknown>) ?? {},
+      createdAt: (c as { created_at?: string | null }).created_at ?? null,
     }));
   }
 
@@ -655,6 +763,7 @@ export class KbService {
     content: string;
     tokenCount: number;
     metadata: Record<string, unknown>;
+    createdAt?: string | null;
   }> | null> {
     const { data: doc, error } = await this.supabase
       .from('knowledge_documents')

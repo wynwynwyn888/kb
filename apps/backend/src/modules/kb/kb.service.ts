@@ -13,7 +13,11 @@ import type {
   KbSearchHit,
   KbRichTextDocumentPayload,
 } from './dto/retrieval.dto';
-import { buildRichTextChunkSpecs, type RichTextChunkSpec } from '../../lib/kb-section-chunking';
+import {
+  buildRichTextChunkSpecs,
+  classifyHeadingLines,
+  type RichTextChunkSpec,
+} from '../../lib/kb-section-chunking';
 import {
   rankChunksByRelevance,
   rankChunksForKbSearch,
@@ -359,6 +363,33 @@ export class KbService {
       documentUpdatedAtIso: now,
     });
     await this.insertChunkSpecsForDocument(doc.id, specs, 'rich_text');
+
+    const sectionTitlesLog = [
+      ...new Set(
+        specs.map(s => {
+          const st = s.metadata['sectionTitle'];
+          return typeof st === 'string' && st.trim() ? st.trim() : '(intro)';
+        }),
+      ),
+    ];
+    this.logger.log(
+      `KB rich CREATE doc=${doc.id} tenant=${tenantId} titleLen=${t.length} contentLen=${c.length} ` +
+        `chunkCount=${specs.length} sectionTitles=${JSON.stringify(sectionTitlesLog)}`,
+    );
+    if (specs.length <= 1 && c.length > 600) {
+      this.logger.warn(
+        `section_chunking_suspicious=true doc=${doc.id} tenant=${tenantId} ` +
+          `contentLen=${c.length} chunkCount=${specs.length} sectionTitles=${JSON.stringify(sectionTitlesLog)}`,
+      );
+      const sample = classifyHeadingLines(c, 20);
+      for (const row of sample) {
+        this.logger.warn(
+          `chunk_diag line=${row.lineNum} rawLen=${row.rawLen} ` +
+            `isHeading=${row.isHeading} reason=${row.headingReason} ` +
+            `preview=${JSON.stringify(row.trimmedPreview)}`,
+        );
+      }
+    }
     return { id: doc.id };
   }
 
@@ -515,6 +546,16 @@ export class KbService {
         `section_chunking_suspicious=true doc=${documentId} tenant=${tenantId} ` +
           `contentLen=${c.length} chunkCount=${specs.length} sectionTitles=${JSON.stringify(sectionTitlesLog)}`,
       );
+      // Diagnostic: print the first 20 non-empty lines + classification so we can see WHY
+      // headings are not being detected (no full body, just trimmed previews ≤80 chars).
+      const sample = classifyHeadingLines(c, 20);
+      for (const row of sample) {
+        this.logger.warn(
+          `chunk_diag line=${row.lineNum} rawLen=${row.rawLen} ` +
+            `isHeading=${row.isHeading} reason=${row.headingReason} ` +
+            `preview=${JSON.stringify(row.trimmedPreview)}`,
+        );
+      }
     }
 
     const { data: rows, error: chErr } = await this.supabase

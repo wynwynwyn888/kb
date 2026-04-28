@@ -344,13 +344,17 @@ export class GenerationService {
       'Do not invent prices, ingredients, availability, or items not clearly supported by the excerpts.';
 
     if (menuish) {
+      const selectedSection = pc?.resolvedSelection?.selectedText?.trim();
+      const sectionRule = selectedSection
+        ? ` The customer selected "${selectedSection}" — only answer from that section of the excerpts; ignore other sections.`
+        : ' If the excerpts only cover one section, stay in that section. If the customer named a specific category, only answer from that section.';
       return {
         role: 'system',
         content:
           baseRules +
-          ' For menu questions: reply with at most **4** dishes unless the customer asked for the full menu. ' +
-          'Use a clean shape: each item = name on one line, then a very short description (from the excerpt only). ' +
-          'If the excerpts only cover one section, stay in that section. If the user chose starters/mains/desserts/vegan, only that section.',
+          ' For menu/services/products questions: reply with at most **4** items unless the customer asked for the full list. ' +
+          'Use a clean shape: each item = name on one line, then a very short description (from the excerpt only).' +
+          sectionRule,
       };
     }
 

@@ -14,6 +14,7 @@ import { ConversationOrchestrationService } from '../../modules/orchestration/or
 import type { NormalizedWebhookPayload } from '../../modules/webhooks/dto/ghl-webhook.payload';
 import { bumpInboundDebounceMeta, shouldSkipStaleDebounceJob } from '../../lib/inbound-debounce';
 import { classifyConversationIntent } from '../../modules/conversation-policy/conversation-intent';
+import { deriveConversationIdentity } from '../../lib/conversation-identity';
 
 export interface InboundMessageJobData {
   locationId: string;
@@ -92,6 +93,7 @@ export class InboundMessageProcessor extends WorkerHost {
         ghlConversationId,
         ghlContactId,
         timestamp,
+        locationId,
       );
 
       await this.addMessage(conversation.id, {
@@ -198,8 +200,11 @@ export class InboundMessageProcessor extends WorkerHost {
     const latestText = recentBatch.length ? recentBatch[recentBatch.length - 1]! : '';
 
     const latestIntent = latestText ? classifyConversationIntent(latestText) : 'UNKNOWN';
+    const combinedText = recentBatch.join(' ').trim();
     this.logger.log(
-      `Debounce processing batch: conversationId=${conversationId}, messageCount=${recentBatch.length}, latestIntent=${latestIntent}`,
+      `Debounce processing batch: conversationId=${conversationId}, messageCount=${recentBatch.length}, ` +
+        `latestIntent=${latestIntent}, combinedTextPreviewLen=${combinedText.length}, ` +
+        `inboundBatchCount=${recentBatch.length}`,
     );
 
     await this.executeOrchestrationPipeline({
@@ -313,89 +318,150 @@ export class InboundMessageProcessor extends WorkerHost {
     return data;
   }
 
+  /**
+   * Stable conversation lookup:
+   * 1. If provider supplied a real conversation id, look it up directly.
+   * 2. Otherwise (or if not yet stored), look up by tenant + channel + contactId via the
+   *    derived `aisbp:conv:<channel>:<tenant>:<contact>` key stored in `ghl_conversation_id`.
+   * 3. As a final safety net, look up by `(tenant_id, contact_id, channel)` so legacy rows
+   *    created with provisional / different keys are still reused.
+   *
+   * One stable internal conversation per contact per channel — debounce, option memory, booking
+   * state and all downstream policy logic depend on this.
+   */
   private async getOrCreateConversation(
     tenantId: string,
     ghlConversationId: string,
     contactId: string,
     timestamp: string,
-  ): Promise<{ id: string }> {
-    if (ghlConversationId && ghlConversationId.trim() !== '') {
+    locationId: string,
+  ): Promise<{ id: string; reused: boolean; derivedKeyHash: string }> {
+    const identity = deriveConversationIdentity({
+      tenantId,
+      channel: 'WHATSAPP',
+      externalContactId: contactId,
+      externalConversationId: ghlConversationId,
+    });
+
+    const safeLog = (
+      reusedExisting: boolean,
+      internalId: string,
+      reason: string,
+    ): void => {
+      this.logger.log(
+        `Conversation identity: locationId=${locationId} tenantId=${tenantId} channel=${identity.channel} ` +
+          `contactIdPresent=${Boolean(contactId?.trim())} ` +
+          `externalConversationIdPresent=${identity.externalConversationId !== null} ` +
+          `derivedKeyHash=${identity.derivedKeyHash} reusedExistingConversation=${reusedExisting} ` +
+          `internalConversationId=${internalId} reason=${reason}`,
+      );
+    };
+
+    // 1) Try the provider-supplied id (highest priority).
+    if (identity.externalConversationId) {
       const { data: existing } = await this.supabase
         .from('conversations')
         .select('id')
-        .eq('ghl_conversation_id', ghlConversationId)
-        .single();
-
+        .eq('ghl_conversation_id', identity.externalConversationId)
+        .maybeSingle();
       if (existing) {
-        return existing;
+        safeLog(true, existing.id, 'external_conversation_id');
+        return { id: existing.id, reused: true, derivedKeyHash: identity.derivedKeyHash };
       }
-
-      const now = new Date().toISOString();
-      const { data, error } = await this.supabase
-        .from('conversations')
-        .insert({
-          id: randomUUID(),
-          tenant_id: tenantId,
-          ghl_conversation_id: ghlConversationId,
-          contact_id: contactId,
-          channel: 'WHATSAPP',
-          status: 'ACTIVE',
-          last_message_at: now,
-          updated_at: now,
-        })
-        .select('id')
-        .single();
-
-      if (error || !data) {
-        throw new Error(`Failed to create conversation: ${formatPostgrestError(error)}`);
-      }
-
-      return data;
     }
 
-    const provisionalGhlConversationId = `prov:${contactId}:${timestamp}`;
-
-    this.logger.warn(
-      `Conversation created with provisional ID for tenant=${tenantId}, contactId=${contactId}`,
-    );
-
-    const { data: existing } = await this.supabase
+    // 2) Try the derived key (works whether or not external id was present).
+    const { data: derivedExisting } = await this.supabase
       .from('conversations')
       .select('id')
       .eq('tenant_id', tenantId)
-      .eq('ghl_conversation_id', provisionalGhlConversationId)
-      .single();
-
-    if (existing) {
-      return existing;
+      .eq('ghl_conversation_id', identity.derivedConversationKey)
+      .maybeSingle();
+    if (derivedExisting) {
+      safeLog(true, derivedExisting.id, 'derived_conversation_key');
+      return { id: derivedExisting.id, reused: true, derivedKeyHash: identity.derivedKeyHash };
     }
 
+    // 3) Fallback: legacy rows for the same (tenant, contact, channel) — pick the most recent.
+    const { data: legacyMatches } = await this.supabase
+      .from('conversations')
+      .select('id, ghl_conversation_id, last_message_at, metadata')
+      .eq('tenant_id', tenantId)
+      .eq('contact_id', contactId)
+      .eq('channel', 'WHATSAPP')
+      .order('last_message_at', { ascending: false })
+      .limit(1);
+    const legacy = Array.isArray(legacyMatches) ? legacyMatches[0] : null;
+    if (legacy) {
+      const prevMeta =
+        legacy.metadata && typeof legacy.metadata === 'object' && !Array.isArray(legacy.metadata)
+          ? (legacy.metadata as Record<string, unknown>)
+          : {};
+      const merged = {
+        ...prevMeta,
+        derivedConversationKey: identity.derivedConversationKey,
+        externalContactId: contactId,
+        channel: identity.channel,
+        locationId,
+        ...(identity.externalConversationId
+          ? { externalConversationId: identity.externalConversationId }
+          : {}),
+      };
+      const ghlIdToWrite = identity.externalConversationId ?? identity.derivedConversationKey;
+      const { error: upErr } = await this.supabase
+        .from('conversations')
+        .update({
+          ghl_conversation_id: ghlIdToWrite,
+          metadata: merged,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', legacy.id);
+      if (upErr) {
+        this.logger.warn(
+          `Failed to backfill stable identity on legacy conversation ${legacy.id}: ${formatPostgrestError(upErr)}`,
+        );
+      }
+      safeLog(true, legacy.id, 'legacy_tenant_contact_channel');
+      return { id: legacy.id, reused: true, derivedKeyHash: identity.derivedKeyHash };
+    }
+
+    // 4) Truly first message — create a new row using the derived key (or external id when present).
     const now = new Date().toISOString();
+    const newId = randomUUID();
+    const ghlIdToWrite = identity.externalConversationId ?? identity.derivedConversationKey;
+    const metadata: Record<string, unknown> = {
+      derivedConversationKey: identity.derivedConversationKey,
+      externalContactId: contactId,
+      channel: identity.channel,
+      locationId,
+      createdFromTimestamp: timestamp,
+      ...(identity.externalConversationId
+        ? { externalConversationId: identity.externalConversationId }
+        : { derivedFromContact: true }),
+    };
+
     const { data, error } = await this.supabase
       .from('conversations')
       .insert({
-        id: randomUUID(),
+        id: newId,
         tenant_id: tenantId,
-        ghl_conversation_id: provisionalGhlConversationId,
+        ghl_conversation_id: ghlIdToWrite,
         contact_id: contactId,
         channel: 'WHATSAPP',
         status: 'ACTIVE',
         last_message_at: now,
         updated_at: now,
-        metadata: {
-          provisional: true,
-          provisionalKey: `prov:${contactId}`,
-          originalTimestamp: timestamp,
-        },
+        metadata,
       })
       .select('id')
       .single();
 
     if (error || !data) {
-      throw new Error(`Failed to create provisional conversation: ${formatPostgrestError(error)}`);
+      throw new Error(`Failed to create conversation: ${formatPostgrestError(error)}`);
     }
 
-    return data;
+    safeLog(false, data.id, 'created_new');
+    return { id: data.id, reused: false, derivedKeyHash: identity.derivedKeyHash };
   }
 
   private mapToDbContentType(

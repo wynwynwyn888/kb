@@ -10,7 +10,7 @@ import {
   operatingHoursConflictDetected,
   resolveOperatingHoursConflictsAmongChunks,
 } from './kb-operating-hours-conflict';
-import { curateMenuDocumentForCustomer, inferMenuSectionHint } from './menu-kb-curator';
+import { findSectionSliceByLabel, prepareCustomerFacingMenuKb } from './menu-kb-curator';
 import {
   composeFactsOnlyFallbackFromKb,
   outboundContainsHardKbLeak,
@@ -57,49 +57,38 @@ describe('KB production hardening', () => {
     expect(out).not.toMatch(/dining experience should feel/i);
   });
 
-  it('3: menu query — curated overview is short, not full raw note', () => {
-    const raw = [
+  it('3: menu query without anchor → original chunks pass through (no fake categories)', () => {
+    const c = chunk('m1', [
       'Internal: When responding to guests, be selective.',
       '',
-      'RESTAURANT MENU',
-      'STARTERS',
-      'A) Soup — $12',
-      'B) Salad — $10',
-      'C) Bruschetta — $14',
-      'D) Calamari — $18',
-      'MAINS',
-      'E) Steak — $45',
-    ].join('\n');
-    const out = curateMenuDocumentForCustomer({
-      mergedKbText: raw,
-      sectionHint: 'general',
-      maxItems: 3,
-      generalPreamble: true,
+      'SERVICE MENU',
+      'A) Cuts',
+      'B) Colour',
+    ].join('\n'), { sectionTitle: 'SERVICE MENU' });
+    const out = prepareCustomerFacingMenuKb([c], {
+      latestUserMessage: 'menu pls',
+      latestIntent: 'MENU',
     });
-    expect(out.length).toBeLessThan(raw.length);
-    expect(out).toMatch(/starters|highlights|menu includes/i);
-    expect(out.split(/\d+\./).length - 1).toBeLessThanOrEqual(4);
+    expect(out).toEqual([c]);
   });
 
-  it('4: starters query returns only starters section (bounded items)', () => {
-    const raw = [
-      'RESTAURANT MENU',
-      'STARTERS',
-      'A) Soup — $12',
-      'B) Salad — $10',
-      'MAINS',
-      'Steak — $99',
+  it('4: anchor query slices only that section (universal section detection)', () => {
+    const merged = [
+      'OPENING HOURS',
+      'Mon-Fri 10am-7pm',
+      '',
+      'COLOUR SERVICES',
+      'Balayage from RM350',
+      'Root touch up RM150',
+      '',
+      'HAIRCUT & STYLING',
+      'Ladies cut RM80',
     ].join('\n');
-    const hint = inferMenuSectionHint('show me starters', undefined);
-    expect(hint).toBe('starters');
-    const out = curateMenuDocumentForCustomer({
-      mergedKbText: raw,
-      sectionHint: 'starters',
-      maxItems: 4,
-      generalPreamble: false,
-    });
-    expect(out).toMatch(/Soup|Salad/i);
-    expect(out).not.toMatch(/\$99|Steak/i);
+    const slice = findSectionSliceByLabel(merged, 'Colour Services');
+    expect(slice).not.toBeNull();
+    const text = merged.slice(slice!.start, slice!.end);
+    expect(text).toMatch(/Balayage|Root touch/i);
+    expect(text).not.toMatch(/Ladies cut/i);
   });
 
   it('5: special request logging guidance is not in customer-facing assembly', () => {

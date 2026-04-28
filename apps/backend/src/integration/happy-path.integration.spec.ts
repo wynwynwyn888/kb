@@ -97,7 +97,15 @@ describe('InboundMessageProcessor (happy path)', () => {
       }
       if (table === 'conversations') {
         return {
-          select: () => ({ eq: () => ({ single: async () => ({ data: null, error: { code: 'PGRST116' } }) }) }),
+          select: () => {
+            const chainable: Record<string, unknown> = {};
+            chainable['eq'] = () => chainable;
+            chainable['order'] = () => chainable;
+            chainable['limit'] = async () => ({ data: [], error: null });
+            chainable['single'] = async () => ({ data: null, error: { code: 'PGRST116' } });
+            chainable['maybeSingle'] = async () => ({ data: null, error: null });
+            return chainable;
+          },
           insert: jestGlobal.fn(() => ({ select: jestGlobal.fn(() => ({ single: jestGlobal.fn(async () => ({ data: { id: 'c1' }, error: null })) })) })),
           update: jestGlobal.fn(() => ({
             eq: jestGlobal.fn(async () => ({ data: null, error: null })),
@@ -114,6 +122,9 @@ describe('InboundMessageProcessor (happy path)', () => {
     const OrchestrationService = require('../modules/orchestration/orchestration.service').ConversationOrchestrationService;
     processor = new InboundMessageProcessor(
       new OrchestrationService(),
+      // sendBubbleQueue
+      { add: mockQueueAdd } as never,
+      // inboundQueue (debounced re-enqueue) — receives the same mock for visibility.
       { add: mockQueueAdd } as never,
     );
   });

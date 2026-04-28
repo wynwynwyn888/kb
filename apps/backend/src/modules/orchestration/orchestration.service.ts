@@ -39,6 +39,7 @@ import { stripInternalGuidanceFromChunks } from '../../lib/kb-internal-guidance'
 import { interpretRetrievalChunks } from '../../lib/kb-chunk-interpretation';
 import { resolveOperatingHoursConflictsAmongChunks } from '../../lib/kb-operating-hours-conflict';
 import { prepareCustomerFacingMenuKb, shouldCurateMenuKbContext } from '../../lib/menu-kb-curator';
+import { detectOldDemoTermsInText } from '../../lib/old-demo-terms';
 
 @Injectable()
 export class ConversationOrchestrationService {
@@ -99,11 +100,19 @@ export class ConversationOrchestrationService {
       const policyStatePre = this.conversationPolicy.parseState(input.conversation?.metadata);
       let retrieveQuery = latestMsg;
       let menuKbAnchor: string | undefined;
-      if (latestIntent === 'SHORT_SELECTION' && policyStatePre.awaiting === 'menu_category_selection') {
+      // Universal: if user replied with a short selection AND we have option memory, expand the
+      // KB query to use the selectedText (e.g. "Haircut & Styling") instead of the literal "A".
+      const optionsAwaiting =
+        policyStatePre.awaiting === 'menu_category_selection' ||
+        policyStatePre.awaiting === 'option_selection';
+      if (latestIntent === 'SHORT_SELECTION' && optionsAwaiting) {
         const sel = resolveShortSelection(latestMsg, policyStatePre, memory.entries);
         if (sel) {
           menuKbAnchor = sel.selectedText;
-          retrieveQuery = `${sel.selectedText} menu food dishes`;
+          retrieveQuery = sel.selectedText;
+          this.logger.log(
+            `Resolved selection for KB query: label=${sel.selectedLabel} text=${JSON.stringify(sel.selectedText.slice(0, 60))} source=${sel.source}`,
+          );
         }
       }
 
@@ -129,6 +138,24 @@ export class ConversationOrchestrationService {
         });
       }
 
+      // Safe prompt metadata log — no body, only counts + presence of legacy demo terms.
+      const promptForScan = `${input.promptConfig?.systemPrompt ?? ''}\n${input.agencyPolicy?.systemPrompt ?? ''}`;
+      const oldDemoFinding = detectOldDemoTermsInText(promptForScan);
+      this.logger.log(
+        `Prompt metadata: promptConfigId=${input.promptConfig?.id ?? 'n/a'} ` +
+          `promptUpdatedAt=${input.promptConfig?.updatedAt ?? 'n/a'} ` +
+          `personaLength=${input.promptConfig?.systemPrompt?.length ?? 0} ` +
+          `agencyPolicyLength=${input.agencyPolicy?.systemPrompt?.length ?? 0} ` +
+          `businessNotesContainsOldDemoTerms=${oldDemoFinding.hit} ` +
+          `oldDemoTermsFound=${JSON.stringify(oldDemoFinding.termsFound)}`,
+      );
+
+      const latestKbDocumentUpdatedAt = kbRanked.reduce<string | null>((acc, c) => {
+        const raw = c.metadata['documentUpdatedAt'];
+        if (typeof raw !== 'string') return acc;
+        if (!acc) return raw;
+        return Date.parse(raw) > Date.parse(acc) ? raw : acc;
+      }, null);
       const policyOutcome = this.conversationPolicy.evaluate({
         intent: latestIntent,
         incomingRaw: latestMsg,
@@ -136,6 +163,9 @@ export class ConversationOrchestrationService {
         policyState,
         kbChunksRanked: kbRanked,
         tenantDisplayName: input.tenant?.name,
+        promptConfigUpdatedAtIso: input.promptConfig?.updatedAt ?? null,
+        kbDocumentUpdatedAtIso: latestKbDocumentUpdatedAt,
+        currentTenantId: input.tenantId ?? null,
       });
       const kbChunks = policyOutcome.kbChunks;
 
@@ -173,10 +203,26 @@ export class ConversationOrchestrationService {
         },
       });
 
+      // Inspect the planned reply bubbles for option lists (A/B/C, 1./2., bullets) and capture
+      // them into option memory so the next user reply ("A") can be resolved against them.
+      const assistantText = replyPlan.bubbles.map(b => b.text).join('\n');
+      const stateAfterOptions = this.conversationPolicy.recordAssistantOptions(
+        policyOutcome.nextPolicyState,
+        assistantText,
+        { tenantId: input.tenantId ?? null },
+      );
+      if (stateAfterOptions !== policyOutcome.nextPolicyState) {
+        const labels = stateAfterOptions.options ? Object.keys(stateAfterOptions.options) : [];
+        this.logger.log(
+          `Option memory captured: source=${stateAfterOptions.optionsSource ?? 'n/a'} ` +
+            `labels=${JSON.stringify(labels)} tenantId=${input.tenantId ?? 'n/a'}`,
+        );
+      }
+
       await this.persistConversationPolicyMetadata(
         conversationId,
         (input.conversation?.metadata as Record<string, unknown> | undefined) ?? {},
-        policyOutcome.nextPolicyState,
+        stateAfterOptions,
       );
 
       this.logger.log(
@@ -283,7 +329,7 @@ export class ConversationOrchestrationService {
   ): Promise<OrchestrationInput['promptConfig']> {
     const { data: rows, error } = await this.supabase
       .from('tenant_prompt_configs')
-      .select('id, system_prompt, temperature, model_override, max_tokens, is_active')
+      .select('id, system_prompt, temperature, model_override, max_tokens, is_active, updated_at')
       .eq('tenant_id', tenantId)
       .eq('is_active', true)
       .order('updated_at', { ascending: false })
@@ -303,6 +349,7 @@ export class ConversationOrchestrationService {
       modelOverride: config.model_override || undefined,
       maxTokens: (config as { max_tokens?: number | null }).max_tokens ?? null,
       isActive: config.is_active,
+      updatedAt: (config as { updated_at?: string | null }).updated_at ?? null,
     };
   }
 

@@ -1,10 +1,11 @@
 import type { ConversationIntent } from '../modules/conversation-policy/conversation-intent';
-import { MENU_SHORT_OVERVIEW } from '../modules/conversation-policy/policy-menu-copy';
+import { MENU_PROMPT_NO_KB } from '../modules/conversation-policy/policy-menu-copy';
 import type { RetrievalChunk } from '../modules/kb/dto/retrieval.dto';
 import { polishKbSnippetForCustomer } from './kb-faq-customer-text';
 import { segmentKbContent } from './kb-chunk-interpretation';
 import { INTERNAL_GUIDANCE_LINE_PATTERNS, stripInternalGuidanceFromText } from './kb-internal-guidance';
 
+/** Detects when a raw, very-large RESTAURANT MENU document body has leaked into the draft. */
 const RAW_MENU_DUMP = /\bRESTAURANT MENU\b/i;
 
 /** Phrases that must never appear verbatim in customer messages (last-line guard). */
@@ -70,7 +71,8 @@ export function composeFactsOnlyFallbackFromKb(
     if (addr.length) return addr.join('\n').slice(0, 600);
   }
   if (latestIntent === 'MENU' || latestIntent === 'SHORT_SELECTION') {
-    return `${MENU_SHORT_OVERVIEW}\n\nWhich section would you like — starters, mains, desserts, or vegan options?`;
+    // Universal fallback — never names categories the tenant may not have.
+    return MENU_PROMPT_NO_KB;
   }
   if (latestIntent === 'COMPLAINT') {
     return (
@@ -109,15 +111,16 @@ export function sanitizeOutboundInternalKbLeak(
       return t;
     }
     if (menuish) {
-      return `${MENU_SHORT_OVERVIEW}\n\nWhich section would you like — starters, mains, desserts, or vegan options?`;
+      return MENU_PROMPT_NO_KB;
     }
     return t.length >= 12 ? t : 'How can I help you today?';
   }
 
   if (menuish && RAW_MENU_DUMP.test(t) && t.length > 2200) {
+    // Truncate the leak and ask the customer what they want, without inventing categories.
     return (
       `${t.slice(0, 1900).trim()}…\n\n` +
-      'Would you like more detail on starters, mains, desserts, or vegan options?'
+      'Would you like more detail on a specific section?'
     );
   }
 

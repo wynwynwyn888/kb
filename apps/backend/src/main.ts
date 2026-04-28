@@ -2,13 +2,21 @@
 import './load-env.js';
 import { NestFactory } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
-import { ValidationPipe } from '@nestjs/common';
+import { ValidationPipe, Logger } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { AppModule } from './app.module.js';
+import { formatRuntimeBootLine } from './lib/runtime-build-marker.js';
 
 async function bootstrap() {
+  // Print build marker as the very first boot log so the running container is
+  // unambiguous before we even initialise Nest.
+  // eslint-disable-next-line no-console
+  console.log(formatRuntimeBootLine());
+
   const app = await NestFactory.create(AppModule);
   const configService = app.get(ConfigService);
+  const bootLogger = new Logger('Bootstrap');
+  bootLogger.log(formatRuntimeBootLine('AISBP runtime'));
 
   // Global prefix
   const apiPrefix = configService.get<string>('API_PREFIX', 'api/v1');

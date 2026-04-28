@@ -1,10 +1,12 @@
 /**
- * Generic keyword relevance for KB chunks (sections + titles). No domain-specific boosts.
+ * Generic keyword relevance for KB chunks (sections + titles).
+ * No business-specific topics — uses universal intent synonyms (hour/menu/address/price/booking/complaint).
  */
 
 import { tokenizeMeaningful } from './kb-relevance';
+import { expandKbQueryWithIntent } from './kb-intent-synonyms';
 
-/** Light query expansion (generic word-form variants, not domain topics). */
+/** Word-form variants kept as legacy export for callers that care about plural forms only. */
 const TOKEN_ALIASES: ReadonlyArray<[string, string]> = [
   ['hour', 'hours'],
   ['menu', 'menus'],
@@ -14,6 +16,10 @@ const TOKEN_ALIASES: ReadonlyArray<[string, string]> = [
   ['book', 'booking'],
   ['price', 'pricing'],
   ['address', 'location'],
+  ['service', 'services'],
+  ['offering', 'offerings'],
+  ['product', 'products'],
+  ['package', 'packages'],
 ];
 
 export function expandKbQueryTokens(tokens: string[]): string[] {
@@ -69,8 +75,10 @@ export function scoreChunkForQuery(
 
   const queryTokens = tokenizeMeaningful(qRaw);
   const intentToks = intentVirtualTokens(opts?.intentHint);
+  const expanded = expandKbQueryWithIntent(qRaw, opts?.intentHint);
+
   const allQueryToks = expandKbQueryTokens(
-    [...new Set([...queryTokens, ...intentToks])].filter(t => t.length >= 2),
+    [...new Set([...queryTokens, ...intentToks, ...expanded.tokens])].filter(t => t.length >= 2),
   );
 
   const contentNorm = normWords(chunk.content);
@@ -78,6 +86,7 @@ export function scoreChunkForQuery(
   const sectionTitle =
     typeof chunk.metadata['sectionTitle'] === 'string' ? chunk.metadata['sectionTitle'].trim() : '';
   const sectionNorm = sectionTitle ? normWords(sectionTitle) : '';
+  const sectionTitleLc = sectionTitle.toLowerCase();
 
   let score = 0;
   score += tokenOverlapScore(allQueryToks, contentNorm) * 1.0;
@@ -90,11 +99,25 @@ export function scoreChunkForQuery(
   const ls = sectionTitle.toLowerCase();
   if (qn.length >= 3 && lc.includes(qn)) score += 2.4;
   if (qn.length >= 3 && lt.includes(qn)) score += 2.8;
-  if (qn.length >= 3 && sectionTitle && ls.includes(qn)) score += 3.2;
+  // Exact query phrase in section title is the strongest signal — heavily preferred over
+  // chunks that only match through synonym title hints (e.g. "menu" must beat "services").
+  if (qn.length >= 3 && sectionTitle && ls.includes(qn)) score += 8.0;
 
   for (const t of allQueryToks) {
     if (t.length < 4) continue;
     if (sectionNorm.includes(t)) score += 0.55;
+  }
+
+  // Intent-driven section heading boost: if the user's intent (hour / address / menu / etc.)
+  // matches a heading hint that appears in the chunk's section title, give a strong boost.
+  if (sectionTitleLc) {
+    for (const hint of expanded.sectionTitleHints) {
+      if (!hint) continue;
+      if (sectionTitleLc.includes(hint)) {
+        score += 4.5;
+        break;
+      }
+    }
   }
 
   const du = chunk.metadata['documentUpdatedAt'];
@@ -111,7 +134,7 @@ export function scoreChunkForQuery(
     (chunk.metadata['sectionTitle'] == null || String(chunk.metadata['sectionTitle']).trim() === '');
   const substantive = queryTokens.filter(t => t.length >= 4).length;
   if (isIntro && sectionNorm.length === 0) {
-    score -= substantive > 0 ? 0.85 : 0.35;
+    score -= substantive > 0 ? 1.4 : 0.35;
   }
 
   return score;
@@ -135,20 +158,42 @@ export function rankChunksByRelevance(
 /**
  * Search UI: prefer strict positive matches; if none, return best-effort ranked chunks
  * (avoids empty results when chunks exist but lexical scores tie at zero).
+ *
+ * Returns raw scores; UI normalizes with `normalizeForDisplay`.
  */
 export function rankChunksForKbSearch(
   query: string,
   chunks: ScorableChunk[],
   opts: { intentHint?: string; topK: number },
-): Array<{ chunk: ScorableChunk; score: number }> {
+): Array<{ chunk: ScorableChunk; score: number; bestEffort?: boolean }> {
   const strict = rankChunksByRelevance(query, chunks, opts);
   if (strict.length > 0) return strict.slice(0, opts.topK);
   const q = query.trim();
-  if (!q) return chunks.slice(0, opts.topK).map(c => ({ chunk: c, score: 0 }));
+  if (!q) return chunks.slice(0, opts.topK).map(c => ({ chunk: c, score: 0, bestEffort: true }));
   return chunks
-    .map(chunk => ({ chunk, score: scoreChunkForQuery(q, chunk, opts) }))
+    .map(chunk => ({ chunk, score: scoreChunkForQuery(q, chunk, opts), bestEffort: true }))
     .sort((a, b) => b.score - a.score)
     .slice(0, opts.topK);
+}
+
+/**
+ * Normalize search scores for UI display.
+ * - For the strong leader, returns a high (≤1) score.
+ * - For best-effort hits with raw score ≤ 0, caps display at 0.2 — never shows 100% on a bad match.
+ */
+export function normalizeKbSearchScores(
+  raw: Array<{ chunk: ScorableChunk; score: number; bestEffort?: boolean }>,
+): Array<{ chunk: ScorableChunk; score: number; bestEffort: boolean }> {
+  if (raw.length === 0) return [];
+  const max = raw[0]!.score;
+  const norm = max > 0 ? max : 1;
+  return raw.map(r => {
+    const isBestEffort = Boolean(r.bestEffort) || r.score <= 0;
+    if (isBestEffort) {
+      return { chunk: r.chunk, score: Math.min(0.2, Math.max(0, r.score / norm)), bestEffort: true };
+    }
+    return { chunk: r.chunk, score: Math.min(1, Math.max(0, r.score / norm)), bestEffort: false };
+  });
 }
 
 /**
@@ -167,8 +212,13 @@ export function buildSnippetAroundQuery(
   const st = sectionTitle?.trim();
   if (st) {
     const stNorm = normWords(st);
-    const qToks = expandKbQueryTokens(tokenizeMeaningful(query).filter(t => t.length >= 2));
-    const titleHit = qToks.some(t => t.length >= 3 && stNorm.includes(t));
+    const expanded = expandKbQueryWithIntent(query);
+    const qToks = expandKbQueryTokens(
+      [...new Set([...tokenizeMeaningful(query), ...expanded.tokens])].filter(t => t.length >= 2),
+    );
+    const titleHit =
+      qToks.some(t => t.length >= 3 && stNorm.includes(t)) ||
+      expanded.sectionTitleHints.some(h => h && st.toLowerCase().includes(h));
     if (titleHit) {
       const innerBudget = Math.max(80, maxLen - st.length - 4);
       const body = snippetBodyOnly(text, query, innerBudget);
@@ -187,7 +237,10 @@ function snippetBodyOnly(content: string, query: string, maxLen: number): string
   if (!text) return '';
   if (text.length <= maxLen) return text;
 
-  const toks = expandKbQueryTokens(tokenizeMeaningful(query)).filter(t => t.length >= 3);
+  const expanded = expandKbQueryWithIntent(query);
+  const toks = expandKbQueryTokens(
+    [...new Set([...tokenizeMeaningful(query), ...expanded.tokens])],
+  ).filter(t => t.length >= 3);
   const lower = text.toLowerCase();
   let idx = -1;
   for (const t of toks) {

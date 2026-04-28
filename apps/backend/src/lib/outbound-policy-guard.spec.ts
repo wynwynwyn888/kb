@@ -1,7 +1,7 @@
 import { applyOutboundPolicyGuard } from './outbound-policy-guard';
-import { MENU_CATEGORY_PROMPT } from '../modules/conversation-policy/policy-menu-copy';
+import { MENU_PROMPT_NO_KB } from '../modules/conversation-policy/policy-menu-copy';
 
-describe('applyOutboundPolicyGuard', () => {
+describe('applyOutboundPolicyGuard (universal — no hardcoded categories)', () => {
   it('replaces hours-like draft when intent is MENU without menu vocabulary', () => {
     const draft = 'We are open weekdays 9am to 11pm and weekends until midnight.';
     const out = applyOutboundPolicyGuard({
@@ -9,13 +9,12 @@ describe('applyOutboundPolicyGuard', () => {
       menuSelectionActive: false,
       draftText: draft,
     });
-    expect(out).toContain('Our menu covers');
-    expect(out).toContain('A) Starters');
-    expect(out).not.toMatch(/9am/i);
+    expect(out).toBe(MENU_PROMPT_NO_KB);
+    expect(out).not.toMatch(/starters|mains|desserts|vegan/i);
   });
 
-  it('does not replace when draft already mentions menu items', () => {
-    const draft = 'Our starters menu is available from 9am; we also open at 9am weekdays.';
+  it('does not replace when draft already mentions menu/services vocabulary', () => {
+    const draft = 'Our service menu is available all day; please ask for a price list.';
     const out = applyOutboundPolicyGuard({
       latestIntent: 'MENU',
       menuSelectionActive: false,
@@ -34,12 +33,22 @@ describe('applyOutboundPolicyGuard', () => {
     ).toBe(draft);
   });
 
-  it('H: does not replace canonical menu category prompt (already menu-shaped)', () => {
+  it('does not replace canonical menu clarification (already menu-shaped)', () => {
     expect(
       applyOutboundPolicyGuard({
         latestIntent: 'MENU',
-        draftText: MENU_CATEGORY_PROMPT,
+        draftText: MENU_PROMPT_NO_KB,
       }),
-    ).toBe(MENU_CATEGORY_PROMPT);
+    ).toBe(MENU_PROMPT_NO_KB);
+  });
+
+  it('never injects restaurant-specific options into salon flow', () => {
+    const draft = 'We are open at 9am.';
+    const out = applyOutboundPolicyGuard({
+      latestIntent: 'SHORT_SELECTION',
+      menuSelectionActive: true,
+      draftText: draft,
+    });
+    expect(out).not.toMatch(/Starters|Mains|Desserts|Vegan options/);
   });
 });

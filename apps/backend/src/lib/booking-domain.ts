@@ -1,27 +1,26 @@
 /**
- * Restaurant booking vs other services — lexical guard (no external API).
+ * Generic booking helpers — no business-specific allow/deny lists.
+ *
+ * The previous implementation hard-coded a "table booking" assumption and rejected services
+ * like haircut/facial/massage as out-of-domain. That was incorrect for a universal chatbot
+ * platform, where the *same* helpers must serve restaurants, salons, clinics, spas, gyms, etc.
+ *
+ * The current behaviour:
+ * - `assessRestaurantBookingMessage` always returns `inDomain: true` and is kept as a no-op
+ *   compatibility shim (the name is preserved so the rest of the code keeps compiling). New code
+ *   should not branch on it.
+ * - Helpers like guest-count extraction and "ask date/time" copy remain useful and generic.
  */
-
-const OUT_OF_DOMAIN_SERVICE =
-  /\b(face\s*wash|facial|facials|massage|haircut|hair\s*cut|clinic|doctor|dentist|car\s*wash|repair|spa\s*treatment|manicure|pedicure|waxing|botox|therapy\s*session)\b/i;
 
 export type RestaurantBookingAssessment =
   | { inDomain: true }
   | { inDomain: false; matchedOutOfDomain?: string };
 
 /**
- * True when message looks like a restaurant/table booking intent for this tenant.
- * Out-of-domain beauty/spa/auto/etc. with "book" should not run table-booking flows.
+ * @deprecated In a universal chatbot platform, booking validity is decided by the tenant's KB
+ * + LLM, not by a hardcoded service allow-list. This shim always reports `inDomain: true`.
  */
-export function assessRestaurantBookingMessage(message: string): RestaurantBookingAssessment {
-  const t = message.trim();
-  if (!t) return { inDomain: true };
-
-  const out = OUT_OF_DOMAIN_SERVICE.exec(t);
-  if (out?.[0]) {
-    return { inDomain: false, matchedOutOfDomain: out[0] };
-  }
-
+export function assessRestaurantBookingMessage(_message: string): RestaurantBookingAssessment {
   return { inDomain: true };
 }
 
@@ -36,13 +35,13 @@ export function extractGuestCountHint(message: string): number | null {
   return null;
 }
 
+/** @deprecated Retained for callers that still reference the old name. */
 export function extractOutOfDomainServicePhrase(message: string): string {
   const t = message.trim();
-  const m = OUT_OF_DOMAIN_SERVICE.exec(t);
-  if (m?.[0]) return m[0].replace(/\s+/g, ' ').trim();
   return t.length > 48 ? `${t.slice(0, 45)}...` : t;
 }
 
+/** @deprecated Returns a generic "let's confirm what you'd like to book" copy now. */
 export function outOfDomainBookingClarificationReply(
   tenantDisplayName: string,
   userPhraseSnippet: string,
@@ -50,8 +49,8 @@ export function outOfDomainBookingClarificationReply(
   const name = tenantDisplayName.trim() || 'us';
   const phrase = userPhraseSnippet.trim() || 'that';
   return (
-    `I can help with ${name} reservations, but I'm not sure what you mean by "${phrase}". ` +
-    `Are you trying to book a table at ${name}, or is this for another service?`
+    `Happy to help with bookings at ${name}. Could you tell me a little more about "${phrase}" — ` +
+    `what service or visit are you trying to book, and for when?`
   );
 }
 

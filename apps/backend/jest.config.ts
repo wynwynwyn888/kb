@@ -23,6 +23,9 @@ const config: Config = {
     '^@aisbp/ghl-client$': '<rootDir>/../../packages/ghl-client/src',
     '^@aisbp/ai-router$': '<rootDir>/../../packages/ai-router/src',
     '^@aisbp/formatter$': '<rootDir>/../../packages/formatter/src',
+    // Allow TS source imports that use NodeNext-style ".js" suffixes when running under
+    // Jest+ts-jest with classic CommonJS resolution.
+    '^(\\.{1,2}/.+)\\.js$': '$1',
   },
 };
 

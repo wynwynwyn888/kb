@@ -7,26 +7,43 @@ import {
   emptyPolicyState,
   parseAisbpPolicyState,
   policyStateExpired,
+  shouldClearOptionMemory,
   type AisbpPolicyStateV1,
 } from './conversation-policy-state';
-import { resolveShortSelection } from './option-resolver';
-import { MENU_CATEGORY_PROMPT, menuCategorySelectedNoKbReply, SELECTION_UNCLEAR_REPLY } from './policy-menu-copy';
-import type { SelectionResolution } from './option-resolver';
 import {
-  assessRestaurantBookingMessage,
-  bookingAskPreferredDateTimeReply,
-  extractGuestCountHint,
-  extractOutOfDomainServicePhrase,
-  outOfDomainBookingClarificationReply,
-} from '../../lib/booking-domain';
+  parseAssistantOptionLines,
+  resolveShortSelection,
+  type SelectionResolution,
+} from './option-resolver';
+import {
+  buildOptionsFromKbSectionTitles,
+  MENU_PROMPT_NO_KB,
+  selectedCategoryNoKbReply,
+  SELECTION_UNCLEAR_REPLY,
+} from './policy-menu-copy';
 
 export type PolicyReplyKind =
   | 'none'
   | 'menu_category_prompt'
   | 'menu_category_selected_no_kb'
   | 'selection_clarification'
-  | 'booking_out_of_domain'
-  | 'booking_ask_preference';
+  | 'menu_no_kb_clarification';
+
+export interface ConversationPolicyEvaluateInput {
+  intent: ConversationIntent;
+  incomingRaw: string;
+  memory: MemoryEntry[];
+  policyState: AisbpPolicyStateV1;
+  kbChunksRanked: RetrievalChunk[];
+  /** Tenant / subaccount display name for booking copy */
+  tenantDisplayName?: string;
+  /** Active prompt config updated_at — used to invalidate stale option memory. */
+  promptConfigUpdatedAtIso?: string | null;
+  /** Latest tenant KB document updated_at — used together with KB titles to invalidate stale memory. */
+  kbDocumentUpdatedAtIso?: string | null;
+  /** Current tenant id — invalidates option memory tied to a previous tenant. */
+  currentTenantId?: string | null;
+}
 
 export interface ConversationPolicyOutcome {
   latestIntent: ConversationIntent;
@@ -44,52 +61,73 @@ export interface ConversationPolicyOutcome {
 export class ConversationPolicyEngineService {
   private readonly logger = new Logger(ConversationPolicyEngineService.name);
 
-  evaluate(params: {
-    intent: ConversationIntent;
-    incomingRaw: string;
-    memory: MemoryEntry[];
-    policyState: AisbpPolicyStateV1;
-    kbChunksRanked: RetrievalChunk[];
-    /** Tenant / subaccount display name for booking copy */
-    tenantDisplayName?: string;
-  }): ConversationPolicyOutcome {
-    const { intent, incomingRaw, memory, kbChunksRanked, tenantDisplayName } = params;
+  evaluate(params: ConversationPolicyEvaluateInput): ConversationPolicyOutcome {
+    const {
+      intent,
+      incomingRaw,
+      memory,
+      kbChunksRanked,
+      promptConfigUpdatedAtIso,
+      kbDocumentUpdatedAtIso,
+      currentTenantId,
+    } = params;
     const now = Date.now();
     let state: AisbpPolicyStateV1 = { ...params.policyState, v: 1 };
-    const hadMenuAwaiting = state.awaiting === 'menu_category_selection';
+    const hadOptionsAwaiting =
+      state.awaiting === 'menu_category_selection' || state.awaiting === 'option_selection';
 
+    // Clear obvious stale state up-front: legacy expiresAt path.
     if (policyStateExpired(state, now)) {
-      this.logger.log(`Policy state replaced: reason=expired`);
+      this.logger.log('Policy state replaced: reason=expired');
       state = emptyPolicyState();
-    } else if (hadMenuAwaiting && !state.expiresAt) {
-      this.logger.log(`Policy state kept: reason=no_expiry`);
+    }
+
+    // Newer prompt config / KB / tenant change / TTL → clear option memory.
+    const currentKbSectionTitles = kbChunksRanked
+      .map(c => {
+        const t = c.metadata['sectionTitle'];
+        return typeof t === 'string' ? t : '';
+      })
+      .filter(Boolean);
+    const stale = shouldClearOptionMemory(state, {
+      promptConfigUpdatedAtIso,
+      kbDocumentUpdatedAtIso,
+      currentKbSectionTitles,
+      currentTenantId,
+      nowMs: now,
+    });
+    if (stale.stale) {
+      this.logger.log(`Option memory cleared: reason=${stale.reason}`);
+      state = {
+        ...state,
+        ...clearAwaitingState(state),
+      };
     }
 
     this.logger.log(
-      `Conversation policy: latestIntent=${intent}, activeTopic=${state.activeTopic ?? 'none'}, awaiting=${state.awaiting ?? 'none'}`,
+      `Conversation policy: latestIntent=${intent}, activeTopic=${state.activeTopic ?? 'none'}, awaiting=${state.awaiting ?? 'none'}, optionsCount=${state.options ? Object.keys(state.options).length : 0}`,
     );
-
-    const tenantName = (tenantDisplayName ?? '').trim() || 'our restaurant';
 
     const replaceTopicIfNeeded = (
       base: AisbpPolicyStateV1,
       topicKey: string,
-    ): { next: AisbpPolicyStateV1; clearedMenu: boolean } => {
-      const clearedMenu = base.awaiting === 'menu_category_selection';
+    ): { next: AisbpPolicyStateV1; clearedAwaiting: boolean } => {
+      const clearedAwaiting =
+        base.awaiting === 'menu_category_selection' || base.awaiting === 'option_selection';
       const next: AisbpPolicyStateV1 = {
         ...base,
         ...clearAwaitingState(base),
         activeTopic: topicKey,
         updatedAt: new Date().toISOString(),
       };
-      if (clearedMenu) {
+      if (clearedAwaiting) {
         this.logger.log(`Policy state replaced: reason=new_topic intent=${intent}`);
       }
-      return { next, clearedMenu };
+      return { next, clearedAwaiting };
     };
 
     if (intent === 'HUMAN_HANDOVER' || intent === 'COMPLAINT') {
-      if (hadMenuAwaiting) {
+      if (hadOptionsAwaiting) {
         this.logger.log(`Policy state replaced: reason=new_topic intent=${intent}`);
       }
       state = {
@@ -97,6 +135,9 @@ export class ConversationPolicyEngineService {
         activeTopic: intent === 'COMPLAINT' ? 'complaint' : 'handover',
         awaiting: null,
         options: undefined,
+        optionsUpdatedAt: null,
+        optionsSource: null,
+        optionsDerivedFromChunkIds: null,
         expiresAt: null,
         updatedAt: new Date().toISOString(),
       };
@@ -113,33 +154,16 @@ export class ConversationPolicyEngineService {
     }
 
     if (intent === 'BOOKING') {
-      const booking = assessRestaurantBookingMessage(incomingRaw);
-      if (!booking.inDomain) {
-        this.logger.log(`Policy booking rejected: out_of_domain_service`);
-        const phrase = extractOutOfDomainServicePhrase(incomingRaw);
-        const { next } = replaceTopicIfNeeded(state, 'booking');
-        return {
-          latestIntent: intent,
-          resolvedSelection: null,
-          kbChunks: [],
-          policyForcedReply: outOfDomainBookingClarificationReply(tenantName, phrase),
-          policyReplyKind: 'booking_out_of_domain',
-          nextPolicyState: next,
-          conversationStateSummary: 'booking_out_of_domain',
-          menuSelectionActive: false,
-        };
-      }
-      const guests = extractGuestCountHint(incomingRaw);
+      // Universal booking: just record the topic, let generation use KB context.
       const { next } = replaceTopicIfNeeded(state, 'booking');
-      this.logger.log(`Policy reply chosen: booking_ask_preference`);
       return {
         latestIntent: intent,
         resolvedSelection: null,
         kbChunks: kbChunksRanked,
-        policyForcedReply: bookingAskPreferredDateTimeReply(guests),
-        policyReplyKind: 'booking_ask_preference',
+        policyForcedReply: null,
+        policyReplyKind: 'none',
         nextPolicyState: next,
-        conversationStateSummary: guests != null ? `booking_guests=${guests}` : 'booking_ask_datetime',
+        conversationStateSummary: 'topic=booking',
         menuSelectionActive: false,
       };
     }
@@ -174,104 +198,77 @@ export class ConversationPolicyEngineService {
 
     if (intent === 'SHORT_SELECTION') {
       const sel = resolveShortSelection(incomingRaw, state, memory);
-      if (sel) {
-        const labelShort =
-          sel.selectedText.length > 48 ? `${sel.selectedText.slice(0, 45)}...` : sel.selectedText;
-        this.logger.log(
-          `Selection resolved: raw=${sel.raw}, selectedText=${labelShort}, source=${sel.source}`,
-        );
-      }
+      const optionMemoryFound = Boolean(sel);
+      const optionMemoryLabels = state.options ? Object.keys(state.options) : [];
+      const optionsAge = state.optionsUpdatedAt
+        ? Math.max(0, now - Date.parse(state.optionsUpdatedAt))
+        : null;
 
-      if (state.awaiting === 'menu_category_selection') {
-        if (!sel) {
-          this.logger.log(
-            `KB rejected: reason=selection_unresolved, latestMessage_class=short_selection, kbTitle=n/a`,
-          );
-          return {
-            latestIntent: intent,
-            resolvedSelection: null,
-            kbChunks: [],
-            policyForcedReply: SELECTION_UNCLEAR_REPLY,
-            policyReplyKind: 'selection_clarification',
-            nextPolicyState: { ...state, updatedAt: new Date().toISOString() },
-            conversationStateSummary: 'awaiting=menu_category_selection unresolved',
-            menuSelectionActive: true,
-          };
-        }
+      this.logger.log(
+        `SHORT_SELECTION: shortSelectionDetected=true optionMemoryFound=${optionMemoryFound} ` +
+          `optionMemoryLabels=${JSON.stringify(optionMemoryLabels)} ` +
+          (sel
+            ? `resolvedSelectionLabel=${sel.selectedLabel} resolvedSelectionText=${JSON.stringify(sel.selectedText.slice(0, 60))} `
+            : 'resolvedSelectionLabel=none ') +
+          `optionMemoryAgeMs=${optionsAge ?? 'n/a'} optionMemorySource=${state.optionsSource ?? 'n/a'}`,
+      );
+
+      if (sel) {
+        // Selection resolved — clear awaiting so we move to the resolved-topic generation.
+        const next: AisbpPolicyStateV1 = {
+          ...clearAwaitingState(state),
+          activeTopic: state.activeTopic ?? 'menu',
+          updatedAt: new Date().toISOString(),
+        };
         if (kbChunksRanked.length > 0) {
-          this.logger.log(
-            `Policy menu KB present: selectedText=${sel.selectedText}, chunks=${kbChunksRanked.length}`,
-          );
           return {
             latestIntent: intent,
             resolvedSelection: sel,
             kbChunks: kbChunksRanked,
             policyForcedReply: null,
             policyReplyKind: 'none',
-            nextPolicyState: {
-              ...clearAwaitingState(state),
-              activeTopic: 'menu',
-              updatedAt: new Date().toISOString(),
-            },
-            conversationStateSummary: `menu_pick=${sel.selectedLabel}`,
+            nextPolicyState: next,
+            conversationStateSummary: `pick=${sel.selectedLabel}`,
             menuSelectionActive: true,
           };
         }
-        this.logger.log(`Policy menu no supported KB: selectedText=${sel.selectedText}`);
-        const reply = menuCategorySelectedNoKbReply(sel.selectedText);
-        this.logger.log(`Policy reply chosen: menu_category_selected_no_kb`);
+        // Selection without KB — generic, business-agnostic copy.
         return {
           latestIntent: intent,
           resolvedSelection: sel,
           kbChunks: [],
-          policyForcedReply: reply,
+          policyForcedReply: selectedCategoryNoKbReply(sel.selectedText),
           policyReplyKind: 'menu_category_selected_no_kb',
-          nextPolicyState: {
-            ...clearAwaitingState(state),
-            activeTopic: 'menu',
-            updatedAt: new Date().toISOString(),
-          },
-          conversationStateSummary: `menu_pick=${sel.selectedLabel}`,
+          nextPolicyState: next,
+          conversationStateSummary: `pick=${sel.selectedLabel}`,
           menuSelectionActive: true,
         };
       }
 
-      if (!sel) {
-        this.logger.log(
-          `KB rejected: reason=selection_no_context, latestMessage_class=short_selection, kbTitle=n/a`,
-        );
-        return {
-          latestIntent: intent,
-          resolvedSelection: null,
-          kbChunks: kbChunksRanked,
-          policyForcedReply: SELECTION_UNCLEAR_REPLY,
-          policyReplyKind: 'selection_clarification',
-          nextPolicyState: { ...state, updatedAt: new Date().toISOString() },
-          conversationStateSummary: 'selection_without_options',
-          menuSelectionActive: true,
-        };
-      }
-
+      // No selection resolvable — keep awaiting (if it was set), and ask for clarification.
+      this.logger.log(
+        `KB rejected: reason=${state.awaiting ? 'selection_unresolved' : 'selection_no_context'}, latestMessage_class=short_selection, kbTitle=n/a`,
+      );
       return {
         latestIntent: intent,
-        resolvedSelection: sel,
-        kbChunks: kbChunksRanked,
-        policyForcedReply: null,
-        policyReplyKind: 'none',
+        resolvedSelection: null,
+        kbChunks: [],
+        policyForcedReply: SELECTION_UNCLEAR_REPLY,
+        policyReplyKind: 'selection_clarification',
         nextPolicyState: { ...state, updatedAt: new Date().toISOString() },
-        conversationStateSummary: `pick=${sel.selectedLabel}`,
-        menuSelectionActive: true,
+        conversationStateSummary: state.awaiting
+          ? `awaiting=${state.awaiting} unresolved`
+          : 'selection_without_options',
+        menuSelectionActive: Boolean(state.awaiting),
       };
     }
 
     if (intent === 'MENU') {
+      // KB available → just retrieve and let generation answer; record topic.
       if (kbChunksRanked.length > 0) {
-        this.logger.log(`Policy reply chosen: generation_with_menu_kb chunks=${kbChunksRanked.length}`);
-        const next = {
+        const next: AisbpPolicyStateV1 = {
           ...state,
-          awaiting: null,
-          options: undefined,
-          expiresAt: null,
+          ...clearAwaitingState(state),
           activeTopic: 'menu',
           updatedAt: new Date().toISOString(),
         };
@@ -287,29 +284,27 @@ export class ConversationPolicyEngineService {
         };
       }
 
-      const options: Record<string, string> = {
-        A: 'Starters',
-        B: 'Mains',
-        C: 'Desserts',
-        D: 'Vegan options',
-      };
-      this.logger.log(`Policy reply chosen: menu_category_prompt`);
+      // No KB chunks for menu intent → ask the user to clarify (NO hardcoded categories).
+      this.logger.log('Policy reply chosen: menu_no_kb_clarification');
       return {
         latestIntent: intent,
         resolvedSelection: null,
         kbChunks: [],
-        policyForcedReply: MENU_CATEGORY_PROMPT,
-        policyReplyKind: 'menu_category_prompt',
+        policyForcedReply: MENU_PROMPT_NO_KB,
+        policyReplyKind: 'menu_no_kb_clarification',
         nextPolicyState: {
           v: 1,
           activeTopic: 'menu',
-          awaiting: 'menu_category_selection',
-          options,
-          lastAssistantOptions: options,
+          awaiting: null,
+          options: undefined,
+          optionsUpdatedAt: null,
+          optionsSource: null,
+          optionsDerivedFromChunkIds: null,
+          lastAssistantOptions: state.lastAssistantOptions,
           expiresAt: null,
           updatedAt: new Date().toISOString(),
         },
-        conversationStateSummary: 'awaiting=menu_category_selection',
+        conversationStateSummary: 'menu_no_kb',
         menuSelectionActive: false,
       };
     }
@@ -329,5 +324,60 @@ export class ConversationPolicyEngineService {
   /** Parse policy blob from conversation row metadata (Supabase JSON). */
   parseState(metadata: Record<string, unknown> | undefined): AisbpPolicyStateV1 {
     return parseAisbpPolicyState(metadata);
+  }
+
+  /**
+   * After a reply is finalised, capture any A/B/C/D choices the assistant offered so the next
+   * inbound message can be resolved by `resolveShortSelection`. Returns the next policy state.
+   */
+  recordAssistantOptions(
+    state: AisbpPolicyStateV1,
+    assistantText: string,
+    ctx: { tenantId?: string | null; nowIso?: string } = {},
+  ): AisbpPolicyStateV1 {
+    const opts = parseAssistantOptionLines(assistantText);
+    if (Object.keys(opts).length < 2) {
+      return state;
+    }
+    const nowIso = ctx.nowIso ?? new Date().toISOString();
+    return {
+      ...state,
+      v: 1,
+      awaiting: state.awaiting ?? 'option_selection',
+      options: opts,
+      lastAssistantOptions: opts,
+      optionsUpdatedAt: nowIso,
+      optionsSource: 'assistant_reply',
+      optionsDerivedFromChunkIds: state.optionsDerivedFromChunkIds ?? null,
+      optionsTenantId: ctx.tenantId ?? state.optionsTenantId ?? null,
+      updatedAt: nowIso,
+    };
+  }
+
+  /**
+   * Build A/B/C/D choices from KB section titles and capture them in option memory.
+   * Returns `null` when the KB has no usable section headings.
+   */
+  buildAndRecordOptionsFromKb(
+    state: AisbpPolicyStateV1,
+    chunks: RetrievalChunk[],
+    ctx: { tenantId?: string | null; nowIso?: string } = {},
+  ): { reply: string; nextState: AisbpPolicyStateV1 } | null {
+    const built = buildOptionsFromKbSectionTitles(chunks);
+    if (!built) return null;
+    const nowIso = ctx.nowIso ?? new Date().toISOString();
+    const next: AisbpPolicyStateV1 = {
+      ...state,
+      v: 1,
+      awaiting: 'option_selection',
+      options: built.options,
+      lastAssistantOptions: built.options,
+      optionsUpdatedAt: nowIso,
+      optionsSource: 'policy_engine',
+      optionsDerivedFromChunkIds: chunks.map(c => c.chunkId),
+      optionsTenantId: ctx.tenantId ?? state.optionsTenantId ?? null,
+      updatedAt: nowIso,
+    };
+    return { reply: built.reply, nextState: next };
   }
 }

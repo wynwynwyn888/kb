@@ -5,11 +5,11 @@ import {
 
 describe('outbound-bubbles', () => {
   describe('normalizeShortMultilineBody', () => {
-    it('joins short menu lines separated by blank lines', () => {
+    it('joins short option lines separated by blank lines (universal labels)', () => {
       const raw =
-        'Happy to help with our menu.\n\nA) Starters\n\nB) Mains\n\nC) Desserts\n\nWhat next?';
+        'Happy to help.\n\nA) Service Menu\n\nB) Address\n\nC) Hours\n\nWhich would you like?';
       const out = normalizeShortMultilineBody(raw);
-      expect(out).toContain('A) Starters\nB) Mains');
+      expect(out).toContain('A) Service Menu\nB) Address');
       expect(out.startsWith('Happy to help')).toBe(true);
     });
   });

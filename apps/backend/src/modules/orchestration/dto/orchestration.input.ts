@@ -26,6 +26,8 @@ export interface OrchestrationInput {
     modelOverride?: string;
     maxTokens: number | null;
     isActive: boolean;
+    /** ISO timestamp of last config save — used to invalidate stale option memory. */
+    updatedAt?: string | null;
   } | null;
   /** From `agency_system_policies`; `systemPrompt` is the `content` column. */
   agencyPolicy?: {

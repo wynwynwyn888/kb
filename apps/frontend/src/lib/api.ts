@@ -885,7 +885,13 @@ export type KbSearchHit = {
   sectionTitle: string | null;
   snippet: string;
   score: number;
+  /** Set when this row came from the best-effort fallback (no strict lexical match). */
+  bestEffort?: boolean;
   chunkId: string;
+  /** Source/kind of the document — `rich_text`, `faq`, `manual`, MIME, etc. */
+  kind?: string | null;
+  /** Document updated_at when known (recency tie-breaker). */
+  updatedAt?: string | null;
 };
 
 export type KbSearchResponse = {

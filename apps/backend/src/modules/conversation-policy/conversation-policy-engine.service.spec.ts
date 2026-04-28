@@ -1,14 +1,10 @@
 import { ConversationPolicyEngineService } from './conversation-policy-engine.service';
-import { MENU_CATEGORY_PROMPT, SELECTION_UNCLEAR_REPLY } from './policy-menu-copy';
+import { MENU_PROMPT_NO_KB, SELECTION_UNCLEAR_REPLY } from './policy-menu-copy';
 import { emptyPolicyState } from './conversation-policy-state';
 import type { RetrievalChunk } from '../kb/dto/retrieval.dto';
 import type { MemoryEntry } from '../orchestration/dto';
 
-function mem(
-  role: MemoryEntry['role'],
-  content: string,
-  ts: string,
-): MemoryEntry {
+function mem(role: MemoryEntry['role'], content: string, ts: string): MemoryEntry {
   return {
     role,
     content,
@@ -18,52 +14,60 @@ function mem(
   };
 }
 
-function chunk(partial: Partial<RetrievalChunk> & Pick<RetrievalChunk, 'title' | 'content'>): RetrievalChunk {
+function chunk(
+  partial: Partial<RetrievalChunk> & Pick<RetrievalChunk, 'title' | 'content'>,
+  id = 'c1',
+): RetrievalChunk {
   return {
-    chunkId: 'c1',
-    documentId: 'd1',
+    chunkId: id,
+    documentId: partial.documentId ?? 'd1',
     title: partial.title,
     content: partial.content,
-    source: partial.source ?? 'faq',
+    source: partial.source ?? 'rich_text',
     relevanceScore: partial.relevanceScore ?? 0.5,
     metadata: partial.metadata ?? {},
   };
 }
 
-describe('ConversationPolicyEngineService', () => {
+describe('ConversationPolicyEngineService (universal — no hardcoded categories)', () => {
   const engine = new ConversationPolicyEngineService();
 
   const hoursFaq = chunk({
     title: 'FAQ: What are your opening hours?',
     content: 'Weekdays 9am-11pm\nWeekends 9am-12am',
-    metadata: { question: 'What are your opening hours?' },
+    metadata: { question: 'What are your opening hours?', sectionTitle: 'OPENING HOURS' },
   });
 
-  const menuAwaitingState = {
+  // Generic salon-style options, BUT note: the engine never invents these — they come from KB
+  // section titles or assistant replies. The test simply seeds option memory for resolution paths.
+  const salonAwaitingState = {
     v: 1 as const,
     activeTopic: 'menu',
-    awaiting: 'menu_category_selection' as const,
+    awaiting: 'option_selection' as const,
     options: {
-      A: 'Starters',
-      B: 'Mains',
-      C: 'Desserts',
-      D: 'Vegan options',
+      A: 'Haircut & Styling',
+      B: 'Colour Services',
+      C: 'Perm & Rebonding',
+      D: 'Hair & Scalp Treatments',
     },
     lastAssistantOptions: {
-      A: 'Starters',
-      B: 'Mains',
-      C: 'Desserts',
-      D: 'Vegan options',
+      A: 'Haircut & Styling',
+      B: 'Colour Services',
+      C: 'Perm & Rebonding',
+      D: 'Hair & Scalp Treatments',
     },
+    optionsUpdatedAt: new Date().toISOString(),
+    optionsSource: 'assistant_reply' as const,
+    optionsDerivedFromChunkIds: null,
     expiresAt: null,
     updatedAt: new Date().toISOString(),
   };
 
-  it('A: hours intent keeps ranked KB for generation (no forced reply)', () => {
+  it('hours intent keeps ranked KB for generation (no forced reply)', () => {
     const out = engine.evaluate({
       intent: 'BUSINESS_HOURS',
       incomingRaw: 'ur opening hour?',
-      memory: [] as MemoryEntry[],
+      memory: [],
       policyState: emptyPolicyState(),
       kbChunksRanked: [hoursFaq],
     });
@@ -72,53 +76,76 @@ describe('ConversationPolicyEngineService', () => {
     expect(out.policyReplyKind).toBe('none');
   });
 
-  it('B: menu intent with no usable KB → category prompt + awaiting state', () => {
+  it('MENU with KB present → no forced reply, KB passed through (universal flow)', () => {
+    const menuKb = chunk({
+      title: 'Service Menu',
+      content: 'We offer haircuts, colour, treatments and more.',
+      metadata: { sectionTitle: 'SERVICE MENU' },
+    });
     const out = engine.evaluate({
       intent: 'MENU',
-      incomingRaw: 'your menu',
-      memory: [] as MemoryEntry[],
+      incomingRaw: 'menu pls',
+      memory: [],
+      policyState: emptyPolicyState(),
+      kbChunksRanked: [menuKb],
+    });
+    expect(out.policyForcedReply).toBeNull();
+    expect(out.policyReplyKind).toBe('none');
+    expect(out.kbChunks).toHaveLength(1);
+    expect(out.nextPolicyState.activeTopic).toBe('menu');
+  });
+
+  it('MENU without KB → generic clarification (NEVER hardcoded categories)', () => {
+    const out = engine.evaluate({
+      intent: 'MENU',
+      incomingRaw: 'menu pls',
+      memory: [],
       policyState: emptyPolicyState(),
       kbChunksRanked: [],
     });
-    expect(out.policyForcedReply).toBe(MENU_CATEGORY_PROMPT);
-    expect(out.policyReplyKind).toBe('menu_category_prompt');
-    expect(out.nextPolicyState.awaiting).toBe('menu_category_selection');
-    expect(out.nextPolicyState.options?.A).toBe('Starters');
-    expect(out.nextPolicyState.expiresAt).toBeNull();
+    expect(out.policyForcedReply).toBe(MENU_PROMPT_NO_KB);
+    expect(out.policyForcedReply).not.toMatch(/Starters|Mains|Desserts|Vegan/);
+    expect(out.policyReplyKind).toBe('menu_no_kb_clarification');
   });
 
-  it('C: menu awaiting + "A" → starters no-KB reply', () => {
+  it('SHORT_SELECTION "A" with option memory → resolves to selectedText, KB if present', () => {
+    const haircutKb = chunk({
+      title: 'Haircut services',
+      content: 'Ladies cut, men cut, kids cut',
+      metadata: { sectionTitle: 'HAIRCUT & STYLING' },
+    });
     const out = engine.evaluate({
       intent: 'SHORT_SELECTION',
       incomingRaw: 'A',
-      memory: [] as MemoryEntry[],
-      policyState: menuAwaitingState,
-      kbChunksRanked: [],
+      memory: [],
+      policyState: salonAwaitingState,
+      kbChunksRanked: [haircutKb],
     });
-    expect(out.resolvedSelection?.selectedText).toBe('Starters');
-    expect(out.policyForcedReply).toContain('starters');
-    expect(out.policyForcedReply).toMatch(/send you the menu/i);
-    expect(out.policyReplyKind).toBe('menu_category_selected_no_kb');
+    expect(out.resolvedSelection?.selectedLabel).toBe('A');
+    expect(out.resolvedSelection?.selectedText).toBe('Haircut & Styling');
+    expect(out.policyForcedReply).toBeNull();
+    expect(out.kbChunks).toHaveLength(1);
+    expect(out.menuSelectionActive).toBe(true);
     expect(out.nextPolicyState.awaiting).toBeNull();
   });
 
-  it('D: menu awaiting + "first one" → starters', () => {
+  it('SHORT_SELECTION "first" resolves to label A from option memory', () => {
     const out = engine.evaluate({
       intent: 'SHORT_SELECTION',
       incomingRaw: 'first one',
-      memory: [] as MemoryEntry[],
-      policyState: menuAwaitingState,
+      memory: [],
+      policyState: salonAwaitingState,
       kbChunksRanked: [],
     });
     expect(out.resolvedSelection?.selectedLabel).toBe('A');
-    expect(out.resolvedSelection?.selectedText).toBe('Starters');
+    expect(out.resolvedSelection?.selectedText).toBe('Haircut & Styling');
   });
 
-  it('E: short selection with no options anywhere → clarification', () => {
+  it('SHORT_SELECTION with no options → clarification, no hardcoded list', () => {
     const out = engine.evaluate({
       intent: 'SHORT_SELECTION',
       incomingRaw: 'A',
-      memory: [] as MemoryEntry[],
+      memory: [],
       policyState: emptyPolicyState(),
       kbChunksRanked: [hoursFaq],
     });
@@ -126,31 +153,17 @@ describe('ConversationPolicyEngineService', () => {
     expect(out.policyReplyKind).toBe('selection_clarification');
   });
 
-  it('F: business hours after menu flow clears awaiting (no selection path)', () => {
+  it('BUSINESS_HOURS after option flow clears option memory (topic switch)', () => {
     const out = engine.evaluate({
       intent: 'BUSINESS_HOURS',
-      incomingRaw: 'what time you open',
-      memory: [] as MemoryEntry[],
-      policyState: menuAwaitingState,
+      incomingRaw: 'what time do you open',
+      memory: [],
+      policyState: salonAwaitingState,
       kbChunksRanked: [hoursFaq],
     });
     expect(out.policyForcedReply).toBeNull();
     expect(out.nextPolicyState.awaiting).toBeNull();
     expect(out.nextPolicyState.options).toBeUndefined();
-    expect(out.latestIntent).toBe('BUSINESS_HOURS');
-    expect(out.kbChunks).toHaveLength(1);
-  });
-
-  it('menu awaiting + unresolved gibberish → clarification, keeps awaiting', () => {
-    const out = engine.evaluate({
-      intent: 'SHORT_SELECTION',
-      incomingRaw: 'zzz',
-      memory: [] as MemoryEntry[],
-      policyState: menuAwaitingState,
-      kbChunksRanked: [],
-    });
-    expect(out.policyForcedReply).toBe(SELECTION_UNCLEAR_REPLY);
-    expect(out.nextPolicyState.awaiting).toBe('menu_category_selection');
   });
 
   it('SHORT_SELECTION resolves from previous assistant options in memory', () => {
@@ -158,7 +171,7 @@ describe('ConversationPolicyEngineService', () => {
       mem('user', 'menu?', '2026-04-26T10:00:00.000Z'),
       mem(
         'assistant',
-        'Pick one:\nA) Starters\nB) Mains\nC) Desserts\nD) Vegan options',
+        'Pick one:\nA) Service Menu\nB) Address\nC) Hours\nD) Bookings',
         '2026-04-26T10:00:01.000Z',
       ),
     ];
@@ -167,72 +180,118 @@ describe('ConversationPolicyEngineService', () => {
       incomingRaw: 'B',
       memory,
       policyState: emptyPolicyState(),
-      kbChunksRanked: [hoursFaq],
+      kbChunksRanked: [],
     });
     expect(out.resolvedSelection?.source).toBe('previous_assistant_options');
-    expect(out.resolvedSelection?.selectedText).toBe('Mains');
-    expect(out.policyForcedReply).toBeNull();
+    expect(out.resolvedSelection?.selectedText).toBe('Address');
   });
 
-  it('1: menu awaiting with no expiry — "A" still resolves after long delay semantics', () => {
-    const staleButNoExpiry = { ...menuAwaitingState, expiresAt: null };
+  it('BOOKING is universal — does NOT reject "haircut" as out-of-domain', () => {
+    const out = engine.evaluate({
+      intent: 'BOOKING',
+      incomingRaw: 'i want to book a haircut for tomorrow',
+      memory: [],
+      policyState: emptyPolicyState(),
+      kbChunksRanked: [],
+      tenantDisplayName: 'Lumière Hair Atelier',
+    });
+    // No forced restaurant-style "out of domain" rejection — let generation handle it.
+    expect(out.policyForcedReply).toBeNull();
+    expect(out.policyReplyKind).toBe('none');
+    expect(out.nextPolicyState.activeTopic).toBe('booking');
+  });
+
+  it('stale option memory: when prompt config updatedAt is newer, options are cleared', () => {
+    // Options recorded "yesterday", prompt re-saved "now" → engine should drop option memory.
+    const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const stateWithOldOptions = {
+      ...salonAwaitingState,
+      optionsUpdatedAt: dayAgo,
+    };
     const out = engine.evaluate({
       intent: 'SHORT_SELECTION',
       incomingRaw: 'A',
-      memory: [] as MemoryEntry[],
-      policyState: staleButNoExpiry,
+      memory: [],
+      policyState: stateWithOldOptions,
       kbChunksRanked: [],
+      promptConfigUpdatedAtIso: new Date().toISOString(),
     });
-    expect(out.resolvedSelection?.selectedText).toBe('Starters');
-    expect(out.policyReplyKind).toBe('menu_category_selected_no_kb');
+    // After clearing, "A" no longer resolves.
+    expect(out.resolvedSelection).toBeNull();
+    expect(out.policyForcedReply).toBe(SELECTION_UNCLEAR_REPLY);
   });
 
-  it('3: menu category selection with KB does not force template', () => {
-    const mainsKb = chunk({
-      title: 'Mains menu',
-      content: 'Grilled fish and vegetable curry.',
-      metadata: {},
-    });
+  it('option memory beyond TTL is cleared (24h)', () => {
+    const wayBack = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
+    const stateExpired = {
+      ...salonAwaitingState,
+      optionsUpdatedAt: wayBack,
+    };
     const out = engine.evaluate({
       intent: 'SHORT_SELECTION',
-      incomingRaw: 'B',
-      memory: [] as MemoryEntry[],
-      policyState: menuAwaitingState,
-      kbChunksRanked: [mainsKb],
+      incomingRaw: 'A',
+      memory: [],
+      policyState: stateExpired,
+      kbChunksRanked: [],
     });
-    expect(out.policyForcedReply).toBeNull();
-    expect(out.kbChunks).toHaveLength(1);
-    expect(out.kbChunks[0]!.title).toContain('Mains');
+    expect(out.resolvedSelection).toBeNull();
   });
 
-  it('5: book face wash is out-of-domain booking', () => {
-    const out = engine.evaluate({
-      intent: 'BOOKING',
-      incomingRaw: 'i want to book face wash for 2pax',
-      memory: [] as MemoryEntry[],
-      policyState: menuAwaitingState,
-      kbChunksRanked: [],
-      tenantDisplayName: 'Ember & Soy',
-    });
-    expect(out.policyReplyKind).toBe('booking_out_of_domain');
-    expect(out.policyForcedReply).toContain('Ember & Soy');
-    expect(out.policyForcedReply).toMatch(/face wash|face\s*wash/i);
-    expect(out.policyForcedReply).not.toMatch(/7:00|7:30/i);
-    expect(out.nextPolicyState.awaiting).toBeNull();
+  it('recordAssistantOptions captures A/B/C lists into option memory', () => {
+    const next = engine.recordAssistantOptions(
+      emptyPolicyState(),
+      'Pick one:\nA) Haircut & Styling\nB) Colour Services',
+      { tenantId: 'tenant-salon-1' },
+    );
+    expect(next.options?.A).toBe('Haircut & Styling');
+    expect(next.options?.B).toBe('Colour Services');
+    expect(next.optionsSource).toBe('assistant_reply');
+    expect(next.optionsUpdatedAt).toBeTruthy();
+    expect(next.optionsTenantId).toBe('tenant-salon-1');
   });
 
-  it('6: book table for 2 pax asks date/time without invented slots', () => {
+  it('clears option memory when tenant changes (tenant_changed)', () => {
+    const dayAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    const stateForOldTenant = {
+      ...salonAwaitingState,
+      optionsUpdatedAt: dayAgo,
+      optionsTenantId: 'tenant-old',
+    };
     const out = engine.evaluate({
-      intent: 'BOOKING',
-      incomingRaw: 'book table for 2 pax',
-      memory: [] as MemoryEntry[],
-      policyState: emptyPolicyState(),
+      intent: 'SHORT_SELECTION',
+      incomingRaw: 'A',
+      memory: [],
+      policyState: stateForOldTenant,
       kbChunksRanked: [],
-      tenantDisplayName: 'Ember & Soy',
+      currentTenantId: 'tenant-new',
     });
-    expect(out.policyReplyKind).toBe('booking_ask_preference');
-    expect(out.policyForcedReply).toContain('2 guests');
-    expect(out.policyForcedReply).toMatch(/date and time/i);
-    expect(out.policyForcedReply).not.toMatch(/7:00|7:30/);
+    expect(out.resolvedSelection).toBeNull();
+    expect(out.policyForcedReply).toBe(SELECTION_UNCLEAR_REPLY);
+  });
+
+  it('buildAndRecordOptionsFromKb derives generic options from KB section titles', () => {
+    const built = engine.buildAndRecordOptionsFromKb(
+      emptyPolicyState(),
+      [
+        chunk({
+          title: 'Haircut',
+          content: 'Cut',
+          metadata: { sectionTitle: 'HAIRCUT & STYLING' },
+        }, 'k1'),
+        chunk({
+          title: 'Colour',
+          content: 'Colour',
+          metadata: { sectionTitle: 'COLOUR SERVICES' },
+        }, 'k2'),
+      ],
+      { tenantId: 'tenant-salon-1' },
+    );
+    expect(built).not.toBeNull();
+    expect(built!.nextState.options?.A).toBe('Haircut & Styling');
+    expect(built!.nextState.options?.B).toBe('Colour Services');
+    expect(built!.reply).toContain('A) Haircut & Styling');
+    expect(built!.nextState.optionsSource).toBe('policy_engine');
+    expect(built!.nextState.optionsDerivedFromChunkIds).toEqual(['k1', 'k2']);
+    expect(built!.nextState.optionsTenantId).toBe('tenant-salon-1');
   });
 });

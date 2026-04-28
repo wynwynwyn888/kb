@@ -1,7 +1,7 @@
 import { jest as jestGlobal } from '@jest/globals';
 
 import { ReplyPlannerService } from './reply-planner.service';
-import { MENU_CATEGORY_PROMPT } from '../conversation-policy/policy-menu-copy';
+import { MENU_PROMPT_NO_KB } from '../conversation-policy/policy-menu-copy';
 import { GenerationService } from '../generation/generation.service';
 
 // Mock GenerationService to always return null → forces deterministic fallback
@@ -55,13 +55,13 @@ describe('ReplyPlannerService', () => {
       expect(bubbles[0]!.text.length).toBe(400);
     });
 
-    it('keeps short menu-style lists in one bubble', () => {
+    it('keeps short option-style lists in one bubble (universal labels)', () => {
       const text =
-        'Happy to help with our menu.\n\nA) Starters\n\nB) Mains\n\nC) Desserts\n\nD) Vegan options\n\nWhat are you in the mood for?';
+        'Happy to help.\n\nA) Service Menu\n\nB) Address\n\nC) Opening Hours\n\nReply with the letter.';
       const bubbles = format(text);
       expect(bubbles.length).toBe(1);
-      expect(bubbles[0]!.text).toContain('A) Starters');
-      expect(bubbles[0]!.text).toContain('What are you in the mood for?');
+      expect(bubbles[0]!.text).toContain('A) Service Menu');
+      expect(bubbles[0]!.text).toContain('Reply with the letter.');
     });
 
     it('strips customer-facing Source lines before bubbling', () => {
@@ -190,7 +190,7 @@ describe('ReplyPlannerService', () => {
       expect(draft.length).toBeGreaterThan(0);
     });
 
-    it('uses menu clarification when no KB and user asks about menu', () => {
+    it('uses generic menu clarification when no KB and user asks about menu (no hardcoded categories)', () => {
       const draft = (service as never)['buildPlaceholderDraft'](
         { responseMode: 'standard', draftReply: null, confidence: 0.5, reasoning: '', recommendedModel: 'gpt-4o', handoverRecommended: false, tagsSuggested: [], bookingIntentDetected: false },
         [],
@@ -204,8 +204,8 @@ describe('ReplyPlannerService', () => {
           },
         ],
       );
-      expect(draft).toContain('menu');
-      expect(draft).toContain('starters');
+      expect(draft).toMatch(/help|offerings|details/i);
+      expect(draft).not.toMatch(/starters|mains|desserts|vegan/i);
     });
   });
 
@@ -283,7 +283,7 @@ describe('ReplyPlannerService', () => {
       expect(result.draftFallbackReason).toBeUndefined();
     });
 
-    it('H: policy forced menu prompt stays one bubble and skips generation', async () => {
+    it('H: policy forced no-KB menu clarification stays one bubble and skips generation', async () => {
       const result = await service.planReply({
         tenantId: 't1',
         conversationId: 'c1',
@@ -304,17 +304,17 @@ describe('ReplyPlannerService', () => {
         policyContext: {
           latestIntent: 'MENU',
           resolvedSelection: null,
-          conversationStateSummary: 'awaiting=menu_category_selection',
-          policyForcedReply: MENU_CATEGORY_PROMPT,
-          policyReplyKind: 'menu_category_prompt',
+          conversationStateSummary: 'menu_no_kb',
+          policyForcedReply: MENU_PROMPT_NO_KB,
+          policyReplyKind: 'menu_no_kb_clarification',
           menuSelectionActive: false,
         },
       });
       expect(mockGen.generateDraft).not.toHaveBeenCalled();
       expect(result.draftProvenance).toBe('policy_reply');
       expect(result.bubbles).toHaveLength(1);
-      expect(result.bubbles[0]!.text).toContain('A) Starters');
-      expect(result.bubbles[0]!.text).toContain('What are you in the mood for?');
+      expect(result.bubbles[0]!.text).toMatch(/Happy to help|connect you/i);
+      expect(result.bubbles[0]!.text).not.toMatch(/Starters|Mains|Desserts|Vegan/);
     });
   });
 

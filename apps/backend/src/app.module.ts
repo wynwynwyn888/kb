@@ -27,6 +27,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
 import { QueuesModule } from './queues/queues.module';
 import { ActionIntentsModule } from './modules/action-intents/action-intents.module';
 import { AgencyAiConfigModule } from './modules/agency-ai-config/agency-ai-config.module';
+import { DebugModule } from './modules/debug/debug.module';
 
 @Module({
   imports: [
@@ -103,6 +104,7 @@ import { AgencyAiConfigModule } from './modules/agency-ai-config/agency-ai-confi
     QueuesModule,
     ActionIntentsModule,
     AgencyAiConfigModule,
+    DebugModule,
   ],
   providers: [
     // Global rate limit guard

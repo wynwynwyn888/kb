@@ -13,44 +13,57 @@ function chunk(partial: Partial<RetrievalChunk> & Pick<RetrievalChunk, 'title' |
   };
 }
 
-describe('menu-kb-grounding-guard', () => {
-  const mainsKb = chunk({
+describe('menu-kb-grounding-guard (universal)', () => {
+  const restaurantMainsKb = chunk({
     title: 'Mains',
     content: 'Chicken rice and beef noodles are available.',
     metadata: {},
   });
 
-  it('4: flags seafood/marketing menu prose as ungrounded vs KB', () => {
+  it('flags seafood/marketing menu prose as ungrounded vs KB', () => {
     const draft =
       'Our seafood mains include ocean-fresh salmon, and our meat mains are hearty, richly flavoured signatures.';
-    expect(menuDraftLooksUngrounded(draft, [mainsKb])).toBe(true);
+    expect(menuDraftLooksUngrounded(draft, [restaurantMainsKb])).toBe(true);
   });
 
-  it('replace invented menu copy with safe no-KB template', () => {
+  it('replaces invented menu copy with selectedCategoryNoKbReply when categoryLabel given', () => {
     const draft =
       'Sure — mains.\n\nOur seafood mains and meat mains are elegantly seasoned with ocean-fresh ingredients.';
     const out = applyMenuKbGroundingGuard({
       latestIntent: 'MENU',
       menuSelectionActive: false,
       draftText: draft,
-      kbChunks: [mainsKb],
+      kbChunks: [restaurantMainsKb],
       categoryLabel: 'Mains',
     });
-    expect(out).toMatch(/send you the menu/i);
+    // Generic "no full details" copy referencing the chosen category — no invented seafood/ocean prose.
     expect(out.toLowerCase()).not.toContain('seafood');
     expect(out.toLowerCase()).not.toContain('ocean');
+    expect(out.toLowerCase()).toContain('mains');
   });
 
-  it('does not rewrite policy no-KB template', () => {
-    const safe =
-      "Sure — mains.\n\nI don't have the full mains details here yet. Would you like the team to send you the menu?";
+  it('falls back to MENU_PROMPT_NO_KB when ungrounded and no categoryLabel', () => {
+    const draft =
+      'Our seafood mains include ocean-fresh salmon and richly flavoured signatures.';
     const out = applyMenuKbGroundingGuard({
-      latestIntent: 'SHORT_SELECTION',
-      menuSelectionActive: true,
-      draftText: safe,
+      latestIntent: 'MENU',
+      menuSelectionActive: false,
+      draftText: draft,
       kbChunks: [],
+    });
+    expect(out).toMatch(/Happy to help|connect you/i);
+    expect(out.toLowerCase()).not.toContain('seafood');
+  });
+
+  it('does not rewrite a draft already grounded in KB', () => {
+    const grounded = 'We have chicken rice and beef noodles.';
+    const out = applyMenuKbGroundingGuard({
+      latestIntent: 'MENU',
+      menuSelectionActive: false,
+      draftText: grounded,
+      kbChunks: [restaurantMainsKb],
       categoryLabel: 'Mains',
     });
-    expect(out).toBe(safe);
+    expect(out).toBe(grounded);
   });
 });

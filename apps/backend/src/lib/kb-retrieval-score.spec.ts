@@ -1,69 +1,152 @@
-import { rankChunksByRelevance, buildSnippetAroundQuery, type ScorableChunk } from './kb-retrieval-score';
+import { describe, it, expect } from '@jest/globals';
+import { expandKbQueryWithIntent } from './kb-intent-synonyms';
+import {
+  buildSnippetAroundQuery,
+  normalizeKbSearchScores,
+  rankChunksForKbSearch,
+  scoreChunkForQuery,
+  type ScorableChunk,
+} from './kb-retrieval-score';
 
-function docChunks(): ScorableChunk[] {
-  const base = {
-    documentId: 'd1',
-    title: 'Policies',
-    source: 'rich_text',
+const ISO = '2026-04-26T12:00:00.000Z';
+
+function chunk(partial: Partial<ScorableChunk> & Pick<ScorableChunk, 'content'>): ScorableChunk {
+  return {
+    id: partial.id ?? `c-${Math.random().toString(36).slice(2, 8)}`,
+    documentId: partial.documentId ?? 'd1',
+    title: partial.title ?? 'Note',
+    source: partial.source ?? 'rich_text',
+    content: partial.content,
+    metadata: { documentUpdatedAt: ISO, ...(partial.metadata ?? {}) },
   };
-  return [
-    {
-      ...base,
-      id: 'intro',
-      content: 'Welcome to our venue. We care about quality.',
-      metadata: { chunkType: 'section', sectionTitle: null, sectionIndex: 0, documentUpdatedAt: '2026-01-01T00:00:00Z' },
-    },
-    {
-      ...base,
-      id: 'hours',
-      content: 'Mon–Fri 9am–6pm, Sat 10–4.',
-      metadata: { chunkType: 'section', sectionTitle: 'OPENING HOURS', sectionIndex: 1, documentUpdatedAt: '2026-01-01T00:00:00Z' },
-    },
-    {
-      ...base,
-      id: 'menu',
-      content: 'Cut & colour — from 50\nBlow dry — 35',
-      metadata: { chunkType: 'section', sectionTitle: 'SERVICE MENU', sectionIndex: 2, documentUpdatedAt: '2026-01-01T00:00:00Z' },
-    },
-    {
-      ...base,
-      id: 'colour',
-      content: 'Balayage full head — 120\nFoils — from 95',
-      metadata: { chunkType: 'section', sectionTitle: 'COLOUR SERVICES', sectionIndex: 3, documentUpdatedAt: '2026-01-01T00:00:00Z' },
-    },
-    {
-      ...base,
-      id: 'addr',
-      content: '123 High Street, Exampletown.',
-      metadata: { chunkType: 'section', sectionTitle: 'ADDRESS', sectionIndex: 4, documentUpdatedAt: '2026-01-01T00:00:00Z' },
-    },
-  ];
 }
 
-describe('kb-retrieval-score', () => {
-  it('rankChunks: "hour" prefers OPENING HOURS over intro', () => {
-    const ranked = rankChunksByRelevance('hour', docChunks());
-    expect(ranked[0]?.chunk.id).toBe('hours');
+describe('expandKbQueryWithIntent', () => {
+  it('"hour" → INTENT_HOURS with section title hint "hours"', () => {
+    const out = expandKbQueryWithIntent('hour');
+    expect(out.intents).toContain('INTENT_HOURS');
+    expect(out.sectionTitleHints.some(h => h.toLowerCase().includes('hour'))).toBe(true);
   });
 
-  it('rankChunks: "menu" prefers SERVICE MENU chunk', () => {
-    const ranked = rankChunksByRelevance('menu pls', docChunks());
-    expect(ranked[0]?.chunk.id).toBe('menu');
+  it('"location" or "where" → INTENT_ADDRESS with hint "address"', () => {
+    expect(expandKbQueryWithIntent('location').intents).toContain('INTENT_ADDRESS');
+    expect(expandKbQueryWithIntent('where are you').intents).toContain('INTENT_ADDRESS');
+    expect(expandKbQueryWithIntent('location').sectionTitleHints).toContain('address');
   });
 
-  it('rankChunks: "balayage" prefers section containing the term', () => {
-    const ranked = rankChunksByRelevance('balayage', docChunks());
-    expect(ranked[0]?.chunk.id).toBe('colour');
+  it('"menu" → INTENT_MENU; "refund" → INTENT_COMPLAINT', () => {
+    expect(expandKbQueryWithIntent('menu').intents).toContain('INTENT_MENU');
+    expect(expandKbQueryWithIntent('refund please').intents).toContain('INTENT_COMPLAINT');
   });
 
-  it('rankChunks: "address" prefers ADDRESS section', () => {
-    const ranked = rankChunksByRelevance('address', docChunks());
-    expect(ranked[0]?.chunk.id).toBe('addr');
+  it('intentHint enum names map to the right intent group', () => {
+    expect(expandKbQueryWithIntent('', 'BUSINESS_HOURS').intents).toContain('INTENT_HOURS');
+    expect(expandKbQueryWithIntent('', 'LOCATION').intents).toContain('INTENT_ADDRESS');
+    expect(expandKbQueryWithIntent('', 'MENU').intents).toContain('INTENT_MENU');
+  });
+});
+
+describe('scoreChunkForQuery (universal heading boost)', () => {
+  const opening = chunk({
+    id: 'opening',
+    title: 'Studio policy',
+    content: 'Mon–Fri 9 to 6\nSat 10 to 4',
+    metadata: { sectionTitle: 'OPENING HOURS', chunkType: 'section', sectionIndex: 1 },
   });
 
-  it('buildSnippetAroundQuery leads with heading when heading matches query', () => {
-    const sn = buildSnippetAroundQuery('Mon–Fri 9–5', 'hours', 120, 'OPENING HOURS');
-    expect(sn.toLowerCase()).toContain('opening');
-    expect(sn.toLowerCase()).toContain('mon');
+  const colour = chunk({
+    id: 'colour',
+    title: 'Studio policy',
+    content: 'Balayage from 120, root touch-up from 70',
+    metadata: { sectionTitle: 'COLOUR SERVICES', chunkType: 'section', sectionIndex: 4 },
+  });
+
+  const intro = chunk({
+    id: 'intro',
+    title: 'Studio policy',
+    content: 'Welcome to our studio.',
+    metadata: { sectionTitle: null, chunkType: 'section', sectionIndex: 0 },
+  });
+
+  it('"hour" beats colour services (heading hint boost)', () => {
+    const sOpen = scoreChunkForQuery('hour', opening);
+    const sColour = scoreChunkForQuery('hour', colour);
+    expect(sOpen).toBeGreaterThan(sColour);
+  });
+
+  it('"balayage" beats hours (token in colour content)', () => {
+    expect(scoreChunkForQuery('balayage', colour)).toBeGreaterThan(scoreChunkForQuery('balayage', opening));
+  });
+
+  it('intro chunks lose to titled sections for substantive queries', () => {
+    expect(scoreChunkForQuery('hour', opening)).toBeGreaterThan(scoreChunkForQuery('hour', intro));
+  });
+});
+
+describe('normalizeKbSearchScores', () => {
+  it('strict match leader is 1.0 and bestEffort is false', () => {
+    const ranked = [
+      { chunk: chunk({ content: 'open hours' }), score: 12 },
+      { chunk: chunk({ content: 'other' }), score: 4 },
+    ];
+    const out = normalizeKbSearchScores(ranked);
+    expect(out[0]!.score).toBeCloseTo(1, 5);
+    expect(out[0]!.bestEffort).toBe(false);
+  });
+
+  it('best-effort hits are capped at 0.2 (never 100%)', () => {
+    const ranked = [{ chunk: chunk({ content: 'other' }), score: 0, bestEffort: true }];
+    const out = normalizeKbSearchScores(ranked);
+    expect(out[0]!.score).toBeLessThanOrEqual(0.2);
+    expect(out[0]!.bestEffort).toBe(true);
+  });
+});
+
+describe('rankChunksForKbSearch (acceptance)', () => {
+  const chunks: ScorableChunk[] = [
+    chunk({
+      id: 'addr',
+      content: '10 Example Road, Suite 7',
+      metadata: { sectionTitle: 'ADDRESS', chunkType: 'section', sectionIndex: 1 },
+    }),
+    chunk({
+      id: 'open',
+      content: 'Mon–Fri 9–6\nSat 10–4',
+      metadata: { sectionTitle: 'OPENING HOURS', chunkType: 'section', sectionIndex: 2 },
+    }),
+    chunk({
+      id: 'svc',
+      content: 'Cut — 40\nColour — from 60',
+      metadata: { sectionTitle: 'SERVICE MENU', chunkType: 'section', sectionIndex: 3 },
+    }),
+    chunk({
+      id: 'col',
+      content: 'Balayage — 120',
+      metadata: { sectionTitle: 'COLOUR SERVICES', chunkType: 'section', sectionIndex: 4 },
+    }),
+  ];
+
+  it('"hour" → OPENING HOURS', () => {
+    expect(rankChunksForKbSearch('hour', chunks, { topK: 3 })[0]!.chunk.id).toBe('open');
+  });
+
+  it('"location" → ADDRESS', () => {
+    expect(rankChunksForKbSearch('location', chunks, { topK: 3 })[0]!.chunk.id).toBe('addr');
+  });
+
+  it('"menu" → SERVICE MENU', () => {
+    expect(rankChunksForKbSearch('menu', chunks, { topK: 3 })[0]!.chunk.id).toBe('svc');
+  });
+
+  it('"balayage" → COLOUR SERVICES', () => {
+    expect(rankChunksForKbSearch('balayage', chunks, { topK: 3 })[0]!.chunk.id).toBe('col');
+  });
+});
+
+describe('buildSnippetAroundQuery', () => {
+  it('leads with sectionTitle when intent matches heading', () => {
+    const text = 'Mon–Fri 9 to 6\nSat 10 to 4';
+    const snippet = buildSnippetAroundQuery(text, 'hour', 240, 'OPENING HOURS');
+    expect(snippet).toMatch(/^OPENING HOURS — /);
   });
 });

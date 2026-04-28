@@ -776,6 +776,26 @@ function NoteKnowledgeCard({
           <span style={{ fontSize: '0.68rem', fontWeight: 600, letterSpacing: '0.04em', color: '#94a3b8' }}>
             {fmtKind(doc.documentKind ?? 'rich_text')} · {typeof doc.chunkCount === 'number' ? `${doc.chunkCount} chunk${doc.chunkCount === 1 ? '' : 's'}` : '—'}
           </span>
+          {typeof doc.chunkCount === 'number' &&
+          doc.chunkCount <= 1 &&
+          typeof doc.sizeBytes === 'number' &&
+          doc.sizeBytes > 600 ? (
+            <span
+              title="Long note indexed as a single chunk — section detection may have failed. Open and re-save."
+              style={{
+                fontSize: '0.62rem',
+                fontWeight: 700,
+                letterSpacing: '0.04em',
+                color: '#b45309',
+                background: 'rgba(251, 191, 36, 0.18)',
+                border: '1px solid rgba(251, 191, 36, 0.55)',
+                borderRadius: 999,
+                padding: '0.05rem 0.45rem',
+              }}
+            >
+              CHECK CHUNKING
+            </span>
+          ) : null}
           <span style={{ fontSize: '0.68rem', color: '#cbd5e1' }}>·</span>
           <span style={{ fontSize: '0.68rem', fontWeight: 600, letterSpacing: '0.04em', color: '#94a3b8' }}>
             Updated {relativeTimeLabel(doc.updatedAt ?? doc.createdAt)}
@@ -1871,7 +1891,10 @@ export default function SubaccountKnowledgePage() {
                               {stripModelThinking(h.snippet)}
                             </div>
                             <div style={{ fontSize: '0.72rem', color: '#94a3b8', marginTop: 4 }}>
-                              score {(h.score * 100).toFixed(0)}% · chunk {h.chunkId.slice(0, 8)}…
+                              {h.bestEffort
+                                ? `best-effort · chunk ${h.chunkId.slice(0, 8)}…`
+                                : `score ${(h.score * 100).toFixed(0)}% · chunk ${h.chunkId.slice(0, 8)}…`}
+                              {h.kind ? ` · ${h.kind}` : ''}
                             </div>
                           </li>
                         ))

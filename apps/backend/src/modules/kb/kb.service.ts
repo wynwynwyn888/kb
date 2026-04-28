@@ -17,6 +17,7 @@ import { buildRichTextChunkSpecs, type RichTextChunkSpec } from '../../lib/kb-se
 import {
   rankChunksByRelevance,
   rankChunksForKbSearch,
+  normalizeKbSearchScores,
   buildSnippetAroundQuery,
   type ScorableChunk,
 } from '../../lib/kb-retrieval-score';
@@ -103,6 +104,11 @@ export class KbService {
 
   /**
    * Tenant KB search for UI / diagnostics — returns compact hits with snippets (not full chunks).
+   *
+   * Behavioural contract:
+   * - Strict matches are normalised to [0..1] with the leader at 1.
+   * - When no strict matches exist, hits are still returned (best-effort) but capped at 0.2 so
+   *   the UI never shows "100%" on a weak result.
    */
   async searchKnowledge(params: {
     tenantId: string;
@@ -116,20 +122,36 @@ export class KbService {
       intentHint: params.intentHint,
       topK,
     });
-    const maxS = ranked[0]?.score ?? 1;
-    const norm = maxS > 0 ? maxS : 1;
-    const hits: KbSearchHit[] = ranked.map(({ chunk, score }) => {
+    const normalized = normalizeKbSearchScores(ranked);
+    const hits: KbSearchHit[] = normalized.map(({ chunk, score, bestEffort }) => {
       const st = chunk.metadata['sectionTitle'];
       const sectionTitle = typeof st === 'string' && st.trim() ? st.trim() : null;
+      const updatedAtRaw = chunk.metadata['documentUpdatedAt'] ?? chunk.metadata['updatedAt'];
+      const updatedAt =
+        typeof updatedAtRaw === 'string' && updatedAtRaw.trim() ? updatedAtRaw : null;
       return {
         documentId: chunk.documentId,
         documentTitle: chunk.title,
         sectionTitle,
         snippet: buildSnippetAroundQuery(chunk.content, params.query, 240, sectionTitle),
-        score: Math.min(1, Math.max(0, score / norm)),
+        score,
+        bestEffort,
         chunkId: chunk.id,
+        kind: chunk.source,
+        updatedAt,
       };
     });
+
+    const topSectionTitles = hits.slice(0, 5).map(h => h.sectionTitle ?? '(intro)');
+    const topScores = hits.slice(0, 5).map(h => Number(h.score.toFixed(3)));
+    const topDocIds = [...new Set(hits.slice(0, 5).map(h => h.documentId))];
+    this.logger.log(
+      `KB search: tenant=${params.tenantId} query=${JSON.stringify(params.query)} ` +
+        `intentHint=${params.intentHint ?? 'n/a'} candidateCount=${chunks.length} returnedCount=${hits.length} ` +
+        `topSectionTitles=${JSON.stringify(topSectionTitles)} topScores=${JSON.stringify(topScores)} ` +
+        `topDocumentIds=${JSON.stringify(topDocIds)}`,
+    );
+
     return {
       query: params.query,
       hits,
@@ -485,6 +507,15 @@ export class KbService {
         `oldChunks=${oldChunkCount ?? 0} newChunks=${specs.length} sectionTitles=${JSON.stringify(sectionTitlesLog)} ` +
         `updatedAtBefore=${JSON.stringify(prevUpdatedAt)} updatedAtAfter=${JSON.stringify(now)}`,
     );
+
+    // Heuristic warning: a long note that produced only 1 chunk almost certainly indicates that
+    // the section detector failed (no headings recognised) — surface this so we can investigate.
+    if (specs.length <= 1 && c.length > 600) {
+      this.logger.warn(
+        `section_chunking_suspicious=true doc=${documentId} tenant=${tenantId} ` +
+          `contentLen=${c.length} chunkCount=${specs.length} sectionTitles=${JSON.stringify(sectionTitlesLog)}`,
+      );
+    }
 
     const { data: rows, error: chErr } = await this.supabase
       .from('knowledge_chunks')

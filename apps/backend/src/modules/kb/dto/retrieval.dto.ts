@@ -23,7 +23,13 @@ export interface KbSearchHit {
   sectionTitle: string | null;
   snippet: string;
   score: number;
+  /** True when the result was returned by the best-effort fallback (no strict match). */
+  bestEffort?: boolean;
   chunkId: string;
+  /** Source/kind of the document — `rich_text`, `faq`, `manual`, mime type, etc. */
+  kind?: string | null;
+  /** Document updated_at when known (used for recency tie-breaks in UI). */
+  updatedAt?: string | null;
 }
 
 export interface KbSearchResponse {

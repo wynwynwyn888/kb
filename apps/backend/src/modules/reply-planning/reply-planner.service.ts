@@ -338,7 +338,8 @@ export class ReplyPlannerService {
     const lastMsg = lastUserMessage?.content?.trim() ?? '';
 
     if (detectMenuIntentInMessage(lastMsg)) {
-      return 'I can help with the menu. Are you looking for starters, mains, desserts, drinks, or vegan options?';
+      // Generic, business-agnostic — never invent categories.
+      return "Happy to help — what would you like to know about our offerings? If you'd like, I can connect you with the team for the full details.";
     }
 
     if (lastMsg.length > 0) {

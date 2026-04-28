@@ -1,73 +1,26 @@
 /**
- * Curates menu KB into short customer-facing excerpts for the model (not raw dumps).
+ * Universal "menu / services / products" KB curator.
+ *
+ * Goals:
+ * - Never hardcode restaurant categories (Starters / Mains / Desserts / Vegan).
+ * - When the user picked an option (e.g. "Haircut & Styling"), prefer chunks whose `sectionTitle`
+ *   matches that label and slice their content to a short customer-facing excerpt.
+ * - When no anchor is given, return the original chunks unchanged — section-aware retrieval has
+ *   already done the right thing.
  */
 
 import type { RetrievalChunk } from '../modules/kb/dto/retrieval.dto';
 import type { ConversationIntent } from '../modules/conversation-policy/conversation-intent';
 import { stripInternalGuidanceFromText } from './kb-internal-guidance';
 
-export type MenuSectionHint = 'starters' | 'mains' | 'desserts' | 'vegan' | 'general';
-
-const SECTION_ALIASES: Record<MenuSectionHint, RegExp[]> = {
-  starters: [/\bSTARTERS?\b/i, /\bSTARTER\b/i],
-  mains: [/\bMAINS?\b/i, /\bMAIN COURSE\b/i],
-  desserts: [/\bDESSERTS?\b/i],
-  vegan: [/\bVEGAN\b/i, /\bPLANT-?BASED\b/i],
-  general: [],
-};
-
 export function userRequestsFullMenu(userMessage: string): boolean {
-  return /\b(full|entire|complete|whole|all)\s+(?:the\s+)?menu\b/i.test(userMessage.trim());
-}
-
-export function inferMenuSectionHint(
-  userMessage: string,
-  menuAnchorLabel: string | undefined,
-): MenuSectionHint {
-  const t = userMessage.toLowerCase();
-  if (menuAnchorLabel) {
-    const a = menuAnchorLabel.toLowerCase();
-    if (a.includes('starter')) return 'starters';
-    if (a.includes('main')) return 'mains';
-    if (a.includes('dessert')) return 'desserts';
-    if (a.includes('vegan')) return 'vegan';
-  }
-  if (/\bvegan|plant\s*based\b/i.test(t)) return 'vegan';
-  if (/\bstarter\b|\bstarters\b/i.test(t)) return 'starters';
-  if (/\bdessert\b|\bdesserts\b/i.test(t)) return 'desserts';
-  if (/\bmain\b|\bmains\b/i.test(t)) return 'mains';
-  return 'general';
-}
-
-function findSectionStartIndex(text: string, section: MenuSectionHint): number {
-  if (section === 'general') {
-    const m = text.search(/\bRESTAURANT MENU\b/i);
-    if (m >= 0) return m;
-    for (const s of ['STARTERS', 'MAINS', 'DESSERTS', 'VEGAN'] as const) {
-      const re = new RegExp(`^${s}\\b`, 'im');
-      const hit = text.search(re);
-      if (hit >= 0) return hit;
-    }
-    return 0;
-  }
-  let best = -1;
-  for (const re of SECTION_ALIASES[section]) {
-    const hit = text.search(re);
-    if (hit >= 0 && (best < 0 || hit < best)) best = hit;
-  }
-  return best >= 0 ? best : 0;
-}
-
-function findNextSectionIndex(text: string, from: number): number {
-  const tail = text.slice(from + 1);
-  const re = /\n(?=(?:STARTERS?|MAINS?|DESSERTS?|VEGAN|DRINKS|BEVERAGES|SIDES|RESTAURANT MENU)\b)/i;
-  const m = tail.match(re);
-  if (!m || m.index == null) return text.length;
-  return from + 1 + m.index;
+  return /\b(full|entire|complete|whole|all)\s+(?:the\s+)?(menu|services|products|catalog(?:ue)?|offerings?)\b/i.test(
+    userMessage.trim(),
+  );
 }
 
 const ITEM_LINE =
-  /^(?:[A-D]\)\s*.+|\d+\.\s+.+|[-•*]\s*.+|.+?\b(?:\$|SGD|EUR|USD)\s*\d|\d{1,3}\s*(?:g|ml|mins?)\b.*)/i;
+  /^(?:[A-D]\)\s*.+|\d+\.\s+.+|[-•*]\s*.+|.+?\b(?:\$|RM|SGD|EUR|USD|GBP)\s*\d|\d{1,3}\s*(?:g|ml|mins?)\b.*)/i;
 
 function isLikelyItemLine(line: string): boolean {
   const s = line.trim();
@@ -77,7 +30,7 @@ function isLikelyItemLine(line: string): boolean {
 }
 
 /**
- * Extract up to `maxItems` menu item blocks (item line + optional short continuation).
+ * Extract up to `maxItems` item blocks (item line + optional short continuation).
  */
 export function extractMenuItemBlocks(sectionText: string, maxItems: number): string[] {
   const lines = sectionText.split('\n').map(l => l.trimEnd());
@@ -95,15 +48,9 @@ export function extractMenuItemBlocks(sectionText: string, maxItems: number): st
     }
     let block = line;
     i++;
-    // absorb one continuation line if it looks like description (not a new item)
     if (i < lines.length) {
       const next = lines[i]!.trim();
-      if (
-        next &&
-        !isLikelyItemLine(next) &&
-        next.length <= 160 &&
-        !/^(?:STARTERS?|MAINS?|DESSERTS?|VEGAN)\b/i.test(next)
-      ) {
+      if (next && !isLikelyItemLine(next) && next.length <= 160) {
         block += `\n   ${next}`;
         i++;
       }
@@ -113,96 +60,138 @@ export function extractMenuItemBlocks(sectionText: string, maxItems: number): st
   return blocks;
 }
 
-export function curateMenuDocumentForCustomer(params: {
-  mergedKbText: string;
-  sectionHint: MenuSectionHint;
-  maxItems: number;
-  generalPreamble: boolean;
-}): string {
-  const base = stripInternalGuidanceFromText(params.mergedKbText);
-  if (!base) return '';
+/**
+ * Find the slice of merged KB text that corresponds to the given section label, generically.
+ *
+ * - Looks for a heading line that contains all of the label's significant tokens, regardless of
+ *   case ("HAIRCUT & STYLING" matches "Haircut", "ADDRESS" matches "address", etc.).
+ * - If found, slice up to the next ALL-CAPS heading line (or 1.6kB cap).
+ * - If not found, returns null.
+ */
+export function findSectionSliceByLabel(
+  mergedText: string,
+  label: string,
+): { start: number; end: number } | null {
+  const tokens = label
+    .toLowerCase()
+    .split(/\W+/)
+    .filter(t => t.length >= 3);
+  if (tokens.length === 0) return null;
 
-  const start = findSectionStartIndex(base, params.sectionHint);
-  let end = base.length;
-  if (params.sectionHint !== 'general') {
-    end = findNextSectionIndex(base, start);
-  }
-  let slice = base.slice(start, end).trim();
-  if (!slice) slice = base.trim();
-
-  const blocks = extractMenuItemBlocks(slice, params.maxItems);
-  if (blocks.length === 0) {
-    const cap = slice.length > 1600 ? `${slice.slice(0, 1600).trim()}…` : slice;
-    if (params.generalPreamble && params.sectionHint === 'general') {
-      return `Sure — our menu includes starters, mains, desserts, and vegan options.\n\n${cap}`;
+  const lines = mergedText.split('\n');
+  let charIdx = 0;
+  let startLine = -1;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    const lower = line.toLowerCase();
+    const isHeading =
+      line.trim().length > 0 &&
+      (line.trim() === line.trim().toUpperCase() || /^#{1,6}\s+/.test(line));
+    if (isHeading && tokens.every(t => lower.includes(t))) {
+      startLine = i;
+      break;
     }
-    if (params.sectionHint !== 'general') {
-      return '';
+    charIdx += line.length + 1; // +1 for "\n"
+  }
+  if (startLine < 0) return null;
+
+  // Find the next heading line after startLine.
+  let end = mergedText.length;
+  let cIdx = charIdx + lines[startLine]!.length + 1;
+  for (let j = startLine + 1; j < lines.length; j++) {
+    const line = lines[j]!;
+    const isHeading =
+      line.trim().length > 4 &&
+      ((line.trim() === line.trim().toUpperCase() && /[A-Z]/.test(line)) ||
+        /^#{1,6}\s+/.test(line));
+    if (isHeading) {
+      end = cIdx;
+      break;
     }
-    return cap;
+    cIdx += line.length + 1;
   }
-
-  const numbered = blocks.map((b, idx) => {
-    const [first, ...rest] = b.split('\n');
-    const head = `${idx + 1}. ${first!.trim()}`;
-    const tail = rest.map(l => `   ${l.trim()}`).join('\n');
-    return tail ? `${head}\n${tail}` : head;
-  });
-
-  if (params.generalPreamble && params.sectionHint === 'general') {
-    return (
-      'Sure — our menu includes starters, mains, desserts, and vegan options.\n\n' +
-      'Here are a few highlights:\n\n' +
-      numbered.join('\n\n')
-    );
-  }
-
-  return numbered.join('\n\n');
+  return { start: charIdx, end };
 }
 
 export type PrepareMenuKbParams = {
   latestUserMessage: string;
   latestIntent: ConversationIntent;
-  /** From orchestration when resolving A/B/C/D to a category label */
+  /** From orchestration when resolving A/B/C/D to a section label (any vertical). */
   menuAnchorLabel?: string;
 };
 
 /**
- * Returns a single synthetic chunk with curated menu text for the LLM, or [] if nothing usable.
+ * Curated chunks for menu/services flows. Universal:
+ *
+ * - With anchor → slice by section label and emit one curated synthetic chunk.
+ * - Without anchor → pass chunks through unchanged (no restaurant assumptions).
  */
 export function prepareCustomerFacingMenuKb(
   chunks: RetrievalChunk[],
   params: PrepareMenuKbParams,
 ): RetrievalChunk[] {
   if (chunks.length === 0) return [];
-  const merged = chunks.map(c => (c.content ?? '').trim()).filter(Boolean).join('\n\n');
-  const sectionHint = inferMenuSectionHint(params.latestUserMessage, params.menuAnchorLabel);
-  const full = userRequestsFullMenu(params.latestUserMessage);
-  /** General “your menu” overview: 2–4 highlights (cap 3 unless user asks for full menu). */
-  const maxItems = full ? 12 : sectionHint === 'general' ? 3 : 4;
-  const generalPreamble = sectionHint === 'general' && params.latestIntent === 'MENU';
 
-  const curated = curateMenuDocumentForCustomer({
-    mergedKbText: merged,
-    sectionHint,
-    maxItems,
-    generalPreamble,
+  const anchor = params.menuAnchorLabel?.trim();
+  if (!anchor) {
+    // No section to slice for — let section-aware retrieval results pass through.
+    return chunks;
+  }
+
+  // Try to find a chunk whose own sectionTitle matches the anchor first (cleanest path).
+  const tokens = anchor.toLowerCase().split(/\W+/).filter(t => t.length >= 3);
+  const anchored = chunks.find(c => {
+    const st = c.metadata?.['sectionTitle'];
+    if (typeof st !== 'string') return false;
+    const lower = st.toLowerCase();
+    return tokens.length > 0 && tokens.every(t => lower.includes(t));
   });
-  if (!curated.trim()) return [];
+
+  if (anchored) {
+    const cleaned = stripInternalGuidanceFromText(anchored.content ?? '');
+    if (!cleaned) return chunks;
+    return [
+      {
+        ...anchored,
+        chunkId: `curated-${anchored.chunkId}`,
+        title: anchored.title,
+        content: cleaned.slice(0, 1600),
+        metadata: {
+          ...anchored.metadata,
+          menuCurated: true,
+          menuAnchorLabel: anchor,
+        },
+      },
+    ];
+  }
+
+  // Fallback: search the merged content for a heading line matching the anchor tokens.
+  const merged = chunks.map(c => (c.content ?? '').trim()).filter(Boolean).join('\n\n');
+  const cleaned = stripInternalGuidanceFromText(merged);
+  if (!cleaned) return chunks;
+
+  const slice = findSectionSliceByLabel(cleaned, anchor);
+  if (!slice) {
+    // No matching section — return original chunks instead of inventing categories.
+    return chunks;
+  }
+
+  const text = cleaned.slice(slice.start, slice.end).trim();
+  if (!text) return chunks;
 
   const top = chunks[0]!;
   return [
     {
-      chunkId: `curated-menu-${top.chunkId}`,
+      chunkId: `curated-${top.chunkId}`,
       documentId: top.documentId,
-      title: 'Menu highlights',
-      content: curated,
+      title: anchor,
+      content: text.slice(0, 1600),
       source: top.source ?? 'kb_curated',
       relevanceScore: top.relevanceScore,
       metadata: {
         ...top.metadata,
         menuCurated: true,
-        menuSectionHint: sectionHint,
+        menuAnchorLabel: anchor,
       },
     },
   ];
@@ -212,7 +201,7 @@ export function shouldCurateMenuKbContext(params: {
   latestIntent: ConversationIntent;
   menuKbAnchor?: string;
 }): boolean {
-  if (params.latestIntent === 'MENU') return true;
-  if (params.latestIntent === 'SHORT_SELECTION' && params.menuKbAnchor?.trim()) return true;
-  return false;
+  // Only curate when we have a concrete anchor (a resolved selection). For plain MENU we just let
+  // section-aware retrieval results flow through unchanged.
+  return params.latestIntent === 'SHORT_SELECTION' && Boolean(params.menuKbAnchor?.trim());
 }

@@ -2,29 +2,28 @@ import {
   assessRestaurantBookingMessage,
   bookingAskPreferredDateTimeReply,
   extractGuestCountHint,
-  extractOutOfDomainServicePhrase,
 } from './booking-domain';
 
-describe('booking-domain', () => {
-  it('rejects face wash booking as out of domain', () => {
-    expect(assessRestaurantBookingMessage('i want to book face wash for 2pax').inDomain).toBe(false);
+describe('booking-domain (universal — no service allow-list)', () => {
+  it('does NOT reject salon services as out-of-domain', () => {
+    // Universal chatbot platform: the booking validity is decided by tenant KB, not by hardcoded lists.
+    expect(assessRestaurantBookingMessage('i want to book a haircut for tomorrow').inDomain).toBe(
+      true,
+    );
+    expect(assessRestaurantBookingMessage('book balayage at 3pm').inDomain).toBe(true);
   });
 
-  it('accepts table booking phrasing', () => {
+  it('still accepts table booking phrasing (restaurants keep working)', () => {
     expect(assessRestaurantBookingMessage('book table for 2 pax').inDomain).toBe(true);
   });
 
-  it('extracts guest count from pax', () => {
+  it('extracts guest count from pax / party / for N', () => {
     expect(extractGuestCountHint('book for 2 pax')).toBe(2);
     expect(extractGuestCountHint('party of 4')).toBe(4);
+    expect(extractGuestCountHint('for 6 people')).toBe(6);
   });
 
-  it('extractOutOfDomainServicePhrase surfaces matched term', () => {
-    const s = extractOutOfDomainServicePhrase('book a facial tomorrow');
-    expect(s.toLowerCase()).toContain('facial');
-  });
-
-  it('bookingAskPreferredDateTimeReply acknowledges guests', () => {
+  it('bookingAskPreferredDateTimeReply acknowledges guests when provided', () => {
     expect(bookingAskPreferredDateTimeReply(2)).toContain('2 guests');
     expect(bookingAskPreferredDateTimeReply(null)).toContain('What date and time');
   });

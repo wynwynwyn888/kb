@@ -1,25 +1,91 @@
-/** One-line overview when we must not paste internal KB. */
-export const MENU_SHORT_OVERVIEW =
-  'Sure — our menu includes starters, mains, desserts, and vegan options.';
+/**
+ * Generic, business-agnostic copy for the menu/services flow. No vertical-specific categories
+ * (no Starters/Mains/Desserts, no Cuts/Colours, etc.). When the assistant must offer choices, it
+ * builds them from the tenant's KB section titles via {@link buildOptionsFromKbSectionTitles}.
+ */
 
-/** Default menu prompt when no menu KB — single logical message (bubble packing elsewhere). */
-export const MENU_CATEGORY_PROMPT = `I can help with the menu.
-
-Our menu covers:
-A) Starters
-B) Mains
-C) Desserts
-D) Vegan options
-
-What are you in the mood for?`;
-
-export function menuCategorySelectedNoKbReply(categoryLabel: string): string {
-  const catLower = (categoryLabel.trim() || 'that category').toLowerCase();
-  return (
-    `Sure — ${catLower}.\n\n` +
-    `I don't have the full ${catLower} details here yet. Would you like the team to send you the menu?`
-  );
-}
+import type { RetrievalChunk } from '../kb/dto/retrieval.dto';
 
 export const SELECTION_UNCLEAR_REPLY =
-  'Which option did you mean — A, B, C, or D? Reply with the letter.';
+  'Sorry, I missed which option you meant. Could you reply with the letter or number from the previous list?';
+
+/** Used only when option memory is missing AND no KB sections are available. */
+export const MENU_PROMPT_NO_KB =
+  "Happy to help. Could you tell me a bit more about what you're looking for? " +
+  "If you'd like, I can connect you to the team for the full details.";
+
+const LETTER_LABELS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'] as const;
+
+/** Pretty-cased section title for customer text — preserves intent without all-caps shouting. */
+export function prettySectionTitle(raw: string): string {
+  const t = raw.trim();
+  if (!t) return t;
+  if (t.length > 4 && t === t.toUpperCase()) {
+    return t
+      .toLowerCase()
+      .split(/\s+/)
+      .map(word => (word ? word[0]!.toUpperCase() + word.slice(1) : word))
+      .join(' ');
+  }
+  return t;
+}
+
+export interface BuildOptionsResult {
+  /** Letter label (A/B/...) → human label, e.g. { A: "Service Menu", B: "Address" } */
+  options: Record<string, string>;
+  /** Customer-facing reply text including the choices. */
+  reply: string;
+  /** Source section titles (raw, in order) for option memory metadata. */
+  rawSectionTitles: string[];
+}
+
+/**
+ * Build A/B/C/D options from KB section titles for the **menu/services** intent.
+ *
+ * - We pick chunks whose section title looks like a service / menu / product category. We do NOT
+ *   inject hardcoded categories — if a tenant has none, we return `null` so the caller falls back
+ *   to a clarification reply.
+ */
+export function buildOptionsFromKbSectionTitles(
+  chunks: RetrievalChunk[],
+  opts: { headPrompt?: string } = {},
+): BuildOptionsResult | null {
+  const seen = new Set<string>();
+  const titles: string[] = [];
+  for (const c of chunks) {
+    const st = c.metadata['sectionTitle'];
+    if (typeof st !== 'string') continue;
+    const trimmed = st.trim();
+    if (!trimmed) continue;
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    titles.push(trimmed);
+    if (titles.length >= LETTER_LABELS.length) break;
+  }
+
+  if (titles.length === 0) return null;
+
+  const options: Record<string, string> = {};
+  const lines: string[] = [];
+  titles.forEach((raw, idx) => {
+    const label = LETTER_LABELS[idx]!;
+    const display = prettySectionTitle(raw);
+    options[label] = display;
+    lines.push(`${label}) ${display}`);
+  });
+
+  const head = opts.headPrompt?.trim() || 'Happy to help — which would you like to know more about?';
+  const reply = `${head}\n\n${lines.join('\n')}\n\nReply with the letter and I'll share the details.`;
+
+  return { options, reply, rawSectionTitles: titles };
+}
+
+/**
+ * Fallback "I don't have the details for X yet" copy when the user picked a category but we can't
+ * find a matching KB chunk. Generic and tenant-neutral.
+ */
+export function selectedCategoryNoKbReply(label: string): string {
+  const cat = (label.trim() || 'that').replace(/\s+/g, ' ');
+  return `Sure — ${cat}.\n\nI don't have the full ${cat} details handy. Would you like me to share more or connect you with the team?`;
+}

@@ -60,6 +60,37 @@ function resolvedQuery<T>(value: T) {
   return chain;
 }
 
+/**
+ * Conversation lookup builder used by the processor:
+ * - `.from('conversations').select(...).eq(...).maybeSingle()` → returns `{data, error}` for external id and derived key paths
+ * - `.from('conversations').select(...).eq(...).eq(...).eq(...).order(...).limit(...)` → returns
+ *   the legacy fallback list (always [] in our happy-path tests).
+ * - `.from('conversations').select('metadata').eq(...).single()` → metadata row read for debounce bump.
+ * - `.from('conversations').update(...).eq(...)` → returns `{error: null}`.
+ */
+function makeConversationsTableMock(externalIdLookup: { id: string } | null) {
+  return {
+    select: (_cols?: string) => {
+      const chainable = {
+        eq: () => chainable,
+        order: () => chainable,
+        limit: async () => ({ data: [], error: null }),
+        single: async () => ({ data: { metadata: {} }, error: null }),
+        maybeSingle: async () => ({ data: externalIdLookup, error: null }),
+      };
+      return chainable;
+    },
+    update: () => ({
+      eq: () => ({ error: null }),
+    }),
+    insert: () => ({
+      select: () => ({
+        single: async () => ({ data: { id: CONV_ID }, error: null }),
+      }),
+    }),
+  };
+}
+
 describe('InboundMessageProcessor', () => {
   let processor: InboundMessageProcessor;
 
@@ -85,33 +116,10 @@ describe('InboundMessageProcessor', () => {
         };
       }
       if (table === 'conversations') {
-        return {
-          select: (cols: string) => {
-            if (cols === 'id') {
-              return {
-                eq: () => ({
-                  single: async () => ({ data: { id: CONV_ID }, error: null }),
-                }),
-              };
-            }
-            if (cols === 'metadata') {
-              return {
-                eq: () => ({
-                  single: async () => ({ data: { metadata: {} }, error: null }),
-                }),
-              };
-            }
-            return {} as never;
-          },
-          update: () => ({
-            eq: () => ({ error: null }),
-          }),
-        };
+        return makeConversationsTableMock({ id: CONV_ID });
       }
       if (table === 'messages') {
-        return {
-          insert: () => ({ error: null }),
-        };
+        return { insert: () => ({ error: null }) };
       }
       return {} as never;
     });
@@ -141,6 +149,83 @@ describe('InboundMessageProcessor', () => {
       }),
     );
     expect(orchestrate).not.toHaveBeenCalled();
+  });
+
+  it('persist without provider conversationId reuses the same row by tenant+channel+contact', async () => {
+    let createCalls = 0;
+    mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'tenants') {
+        return {
+          select: () => ({
+            eq: () => ({
+              single: async () => ({ data: { id: 'tenant-1' }, error: null }),
+            }),
+          }),
+        };
+      }
+      if (table === 'conversations') {
+        return {
+          select: (_cols?: string) => {
+            const chainable = {
+              eq: () => chainable,
+              order: () => chainable,
+              limit: async () => ({ data: [], error: null }),
+              single: async () => ({ data: { metadata: {} }, error: null }),
+              // Once a row exists (createCalls>0), the derived-key lookup finds it and we reuse.
+              maybeSingle: async () => ({
+                data: createCalls > 0 ? { id: CONV_ID } : null,
+                error: null,
+              }),
+            };
+            return chainable;
+          },
+          update: () => ({ eq: () => ({ error: null }) }),
+          insert: () => ({
+            select: () => ({
+              single: async () => {
+                createCalls++;
+                return { data: { id: CONV_ID }, error: null };
+              },
+            }),
+          }),
+        };
+      }
+      if (table === 'messages') return { insert: () => ({ error: null }) };
+      return {} as never;
+    });
+
+    await processor.process(
+      makeJob('persist', {
+        locationId: 'loc_1',
+        ghlConversationId: '',
+        ghlContactId: 'ct_1',
+        messageContent: 'Hello',
+        messageType: 'text',
+        timestamp: '2026-01-01T00:00:00Z',
+        smokeImmediate: false,
+      }),
+    );
+
+    expect(createCalls).toBe(1);
+    expect(mockInboundQueueAdd).toHaveBeenCalledWith(
+      'orchestrate',
+      expect.objectContaining({ conversationId: CONV_ID, debounceVersion: 1 }),
+      expect.any(Object),
+    );
+
+    // Second message from the same contact: derived-key lookup finds the existing row.
+    await processor.process(
+      makeJob('persist', {
+        locationId: 'loc_1',
+        ghlConversationId: '',
+        ghlContactId: 'ct_1',
+        messageContent: 'still me',
+        messageType: 'text',
+        timestamp: '2026-01-01T00:00:01Z',
+        smokeImmediate: false,
+      }),
+    );
+    expect(createCalls).toBe(1);
   });
 
   it('orchestrate skips when conversation debounce version advanced (stale job)', async () => {

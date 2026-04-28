@@ -8,21 +8,62 @@ export type SelectionResolution = {
   source: 'conversation_state' | 'previous_assistant_options';
 };
 
-const RE_LINES = /^([A-Da-d])\)\s*(.+)$/gm;
+const LETTER_LABELS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'] as const;
+
+/** Match `A) Label`, `A. Label`, `A: Label` (also `1) ...`, `1. ...`). */
+const RE_OPTION_LINE = /^\s*(?:([A-Ha-h])|(\d{1,2}))\s*[\)\.\:]\s*(.+?)\s*$/;
+/** Match unlabelled bullets like `- Label` or `* Label` (only when 2+ in a row). */
+const RE_BULLET_LINE = /^\s*[-•*]\s+(.+?)\s*$/;
 
 /**
- * Parse A) Label / B) Label from assistant bubble text.
+ * Parse option lines from an assistant bubble. Supports A/B/C/D, 1/2/3, A) / A. / A: variants,
+ * and bullet lists (when at least 2 consecutive bullets exist).
  */
 export function parseAssistantOptionLines(assistantText: string): Record<string, string> {
-  const out: Record<string, string> = {};
-  let m: RegExpExecArray | null;
-  const re = new RegExp(RE_LINES.source, RE_LINES.flags);
-  while ((m = re.exec(assistantText)) !== null) {
-    const key = m[1]!.toUpperCase();
-    const label = m[2]!.trim();
-    if (label) out[key] = label;
+  const lines = assistantText.split(/\r?\n/);
+  const labelled: Record<string, string> = {};
+
+  // Pass 1: explicit labels (letters, then digits)
+  for (const line of lines) {
+    const m = line.match(RE_OPTION_LINE);
+    if (!m) continue;
+    const letter = m[1]?.toUpperCase();
+    const digit = m[2];
+    const label = (m[3] ?? '').trim();
+    if (!label) continue;
+    if (letter && /^[A-H]$/.test(letter)) {
+      if (!labelled[letter]) labelled[letter] = label;
+    } else if (digit) {
+      const idx = parseInt(digit, 10);
+      if (idx >= 1 && idx <= LETTER_LABELS.length) {
+        const k = LETTER_LABELS[idx - 1]!;
+        if (!labelled[k]) labelled[k] = label;
+      }
+    }
   }
-  return out;
+  if (Object.keys(labelled).length > 0) return labelled;
+
+  // Pass 2: consecutive bullets — treat as unnumbered options.
+  const bullets: string[] = [];
+  let inBlock = false;
+  for (const line of lines) {
+    const m = line.match(RE_BULLET_LINE);
+    if (m) {
+      const label = (m[1] ?? '').trim();
+      if (label) bullets.push(label);
+      inBlock = true;
+    } else if (inBlock && line.trim() === '') {
+      // continue the bullet block across blank lines
+    } else if (line.trim().length > 0) {
+      inBlock = false;
+    }
+  }
+  if (bullets.length >= 2) {
+    bullets.slice(0, LETTER_LABELS.length).forEach((label, idx) => {
+      labelled[LETTER_LABELS[idx]!] = label;
+    });
+  }
+  return labelled;
 }
 
 function optionsFromState(state: AisbpPolicyStateV1): Record<string, string> | null {
@@ -45,11 +86,17 @@ function recentAssistantTexts(memory: MemoryEntry[], max = 4): string[] {
 }
 
 function normalizeSelectionRaw(raw: string): string {
-  return raw.trim().replace(/^option\s*/i, '').replace(/[!?.]+$/g, '').trim();
+  return raw
+    .trim()
+    .replace(/^option\s*/i, '')
+    .replace(/^choice\s*/i, '')
+    .replace(/[!?.]+$/g, '')
+    .trim();
 }
 
 /**
- * Resolve SHORT_SELECTION from state first, then last assistant messages.
+ * Resolve SHORT_SELECTION (a single A–H letter, 1–8 digit, "first", "last") against the option
+ * memory. Looks at the policy state first, then walks recent assistant messages.
  */
 export function resolveShortSelection(
   rawMessage: string,
@@ -77,13 +124,13 @@ export function resolveShortSelection(
 
   const lower = raw.toLowerCase();
 
-  if (/^[abcd]$/i.test(lower)) {
+  if (/^[a-h]$/i.test(lower)) {
     const k = lower.toUpperCase();
     const text = opts[k];
     if (text) return { raw: rawMessage.trim(), selectedLabel: k, selectedText: text, source };
   }
 
-  if (/^[1-4]$/.test(lower)) {
+  if (/^[1-8]$/.test(lower)) {
     const keys = Object.keys(opts).sort();
     const idx = Number(lower) - 1;
     const k = keys[idx];
@@ -100,7 +147,7 @@ export function resolveShortSelection(
     }
   }
 
-  if (/\blast\b/i.test(lower)) {
+  if (/\b(last|final)\b/i.test(lower)) {
     const keys = Object.keys(opts).sort();
     const k = keys[keys.length - 1];
     if (k && opts[k]) {
@@ -108,14 +155,36 @@ export function resolveShortSelection(
     }
   }
 
-  const optMatch = lower.match(/\boption\s*([abcd1-4])\b/);
+  if (/\bsecond\b/i.test(lower)) {
+    const keys = Object.keys(opts).sort();
+    const k = keys[1];
+    if (k && opts[k]) {
+      return { raw: rawMessage.trim(), selectedLabel: k, selectedText: opts[k]!, source };
+    }
+  }
+  if (/\bthird\b/i.test(lower)) {
+    const keys = Object.keys(opts).sort();
+    const k = keys[2];
+    if (k && opts[k]) {
+      return { raw: rawMessage.trim(), selectedLabel: k, selectedText: opts[k]!, source };
+    }
+  }
+  if (/\bfourth\b/i.test(lower)) {
+    const keys = Object.keys(opts).sort();
+    const k = keys[3];
+    if (k && opts[k]) {
+      return { raw: rawMessage.trim(), selectedLabel: k, selectedText: opts[k]!, source };
+    }
+  }
+
+  const optMatch = lower.match(/\boption\s*([a-h1-8])\b/);
   if (optMatch) {
     const x = optMatch[1]!.toUpperCase();
-    if (/[ABCD]/.test(x) && opts[x]) {
+    if (/[A-H]/.test(x) && opts[x]) {
       return { raw: rawMessage.trim(), selectedLabel: x, selectedText: opts[x]!, source };
     }
     const n = Number(x);
-    if (n >= 1 && n <= 4) {
+    if (n >= 1 && n <= 8) {
       const keys = Object.keys(opts).sort();
       const k = keys[n - 1];
       if (k && opts[k]) {

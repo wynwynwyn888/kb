@@ -182,7 +182,9 @@ function chunkCorpus(c: RetrievalChunk): string {
   const meta = c.metadata;
   const qMeta =
     meta && typeof meta['question'] === 'string' ? String(meta['question']) : '';
-  return `${c.title} ${qMeta} ${c.content}`.toLowerCase();
+  const sectionTitle =
+    meta && typeof meta['sectionTitle'] === 'string' ? String(meta['sectionTitle']) : '';
+  return `${c.title} ${sectionTitle} ${qMeta} ${c.content}`.toLowerCase();
 }
 
 export function chunkLooksHoursFocused(c: RetrievalChunk): boolean {

@@ -403,6 +403,7 @@ export class ConversationOrchestrationService {
         conversationId,
         query: retrieveQuery,
         topK: 5,
+        intentHint: latestIntent !== 'UNKNOWN' ? latestIntent : undefined,
       });
 
       const { chunks: filteredChunks, rejections } = filterKbChunksForPolicy(
@@ -417,12 +418,29 @@ export class ConversationOrchestrationService {
         );
       }
 
+      const retrievedSectionTitles = filteredChunks.map(c => {
+        const st = c.metadata['sectionTitle'];
+        return typeof st === 'string' && st.trim() ? st.trim() : '';
+      });
+      const topScores = filteredChunks.map(c => c.relevanceScore);
+      const documentIds = [...new Set(filteredChunks.map(c => c.documentId))];
+
       const meta: RetrievalMeta = {
         chunksReturned: filteredChunks.length,
         chunksConsidered: result.totalConsidered,
         retrievalMode: result.retrievalMode,
         topScore: filteredChunks[0]?.relevanceScore ?? result.chunks[0]?.relevanceScore ?? null,
+        kbQuery: retrieveQuery,
+        retrievedSectionTitles,
+        topScores,
+        documentIds,
       };
+
+      this.logger.log(
+        `KB context retrieved: kbQuery=${JSON.stringify(retrieveQuery)} retrievedChunkCount=${filteredChunks.length} ` +
+          `retrievedSectionTitles=${JSON.stringify(retrievedSectionTitles)} topScores=${JSON.stringify(topScores)} ` +
+          `documentIds=${JSON.stringify(documentIds)}`,
+      );
 
       return { chunks: filteredChunks, meta };
     } catch (error) {
@@ -512,6 +530,12 @@ export class ConversationOrchestrationService {
       metadata['kbChunksConsidered'] = retrievalMeta.chunksConsidered;
       metadata['kbRetrievalMode'] = retrievalMeta.retrievalMode;
       metadata['kbTopScore'] = retrievalMeta.topScore;
+      if (retrievalMeta.kbQuery !== undefined) metadata['kbQuery'] = retrievalMeta.kbQuery;
+      if (retrievalMeta.retrievedSectionTitles !== undefined) {
+        metadata['kbRetrievedSectionTitles'] = retrievalMeta.retrievedSectionTitles;
+      }
+      if (retrievalMeta.topScores !== undefined) metadata['kbTopScores'] = retrievalMeta.topScores;
+      if (retrievalMeta.documentIds !== undefined) metadata['kbDocumentIds'] = retrievalMeta.documentIds;
     }
     if (replyPlan) {
       metadata['replyPlanStatus'] = replyPlan.planStatus;

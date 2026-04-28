@@ -29,15 +29,19 @@ describe('KbService', () => {
   });
 
   describe('keywordScore', () => {
-    const score = (query: string, chunks: Array<{ content: string; title: string }>) => {
-      return (service as never)['keywordScore'](query, chunks.map(c => ({
-        id: 'c1',
-        documentId: 'd1',
-        title: c.title,
-        source: 'test',
-        content: c.content,
-        metadata: {},
-      })));
+    const score = (query: string, chunks: Array<{ content: string; title: string; metadata?: Record<string, unknown> }>, topK = 10) => {
+      return (service as never)['keywordScore'](
+        query,
+        chunks.map(c => ({
+          id: 'c1',
+          documentId: 'd1',
+          title: c.title,
+          source: 'test',
+          content: c.content,
+          metadata: c.metadata ?? {},
+        })),
+        topK,
+      );
     };
 
     it('returns empty score for zero-query', () => {
@@ -67,43 +71,21 @@ describe('KbService', () => {
       expect(result[0]!.relevanceScore).toBeGreaterThan(0.2);
     });
 
-    it('title exact match boost > content exact match boost', () => {
-      const chunks = [
-        { content: 'Pricing information', title: 'Pricing' },
-        { content: 'Our pricing is competitive', title: 'Info' },
-      ];
-      const result = score('pricing', chunks);
-      expect(result[0]!.title).toBe('Pricing');
-    });
-  });
-
-  describe('tokenize', () => {
-    const tokenize = (text: string) => {
-      return [...(service as never)['tokenize'](text)];
-    };
-
-    it('lowercases input', () => {
-      const tokens = tokenize('HELLO WORLD');
-      expect(tokens).toContain('hello');
-    });
-
-    it('splits on whitespace', () => {
-      const tokens = tokenize('hello world foo');
-      expect(tokens).toContain('hello');
-      expect(tokens).toContain('world');
-    });
-
-    it('strips punctuation', () => {
-      const tokens = tokenize('hello, world! how are you?');
-      expect(tokens).not.toContain('hello,');
-      expect(tokens).toContain('hello');
-    });
-
-    it('filters tokens shorter than 2 chars', () => {
-      const tokens = tokenize('a b hello c de f');
-      expect(tokens).not.toContain('a');
-      expect(tokens).not.toContain('b');
-      expect(tokens).toContain('de');
+    it('section title boosts retrieval for hours query', () => {
+      const result = score(
+        'hours',
+        [
+          { content: 'General welcome text only.', title: 'Note', metadata: { chunkType: 'section', sectionTitle: null } },
+          {
+            content: 'We open at nine.',
+            title: 'Note',
+            metadata: { chunkType: 'section', sectionTitle: 'OPENING HOURS' },
+          },
+        ],
+        2,
+      );
+      expect(result[0]?.chunkId).toBeDefined();
+      expect(result[0]?.content).toMatch(/nine|open/i);
     });
   });
 

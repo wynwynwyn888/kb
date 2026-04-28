@@ -10,6 +10,37 @@ export interface RetrievalQuery {
   conversationId: string;
   query: string; // raw user message
   topK?: number; // default 5
+  /** Optional intent label (e.g. `BUSINESS_HOURS`) for generic retrieval scoring */
+  intentHint?: string;
+}
+
+/**
+ * Single hit from KB search UI / diagnostics (not the full chunk body).
+ */
+export interface KbSearchHit {
+  documentId: string;
+  documentTitle: string;
+  sectionTitle: string | null;
+  snippet: string;
+  score: number;
+  chunkId: string;
+}
+
+export interface KbSearchResponse {
+  query: string;
+  hits: KbSearchHit[];
+  totalConsidered: number;
+  retrievalMode: 'keyword' | 'vector' | 'hybrid';
+}
+
+export interface KbRichTextDocumentPayload {
+  id: string;
+  title: string;
+  status: string;
+  updatedAt: string;
+  sizeBytes: number;
+  chunkCount: number;
+  answerPreview: string;
 }
 
 /**
@@ -43,4 +74,12 @@ export interface RetrievalMeta {
   chunksConsidered: number;
   retrievalMode: 'keyword' | 'vector' | 'hybrid';
   topScore: number | null;
+  /** Effective KB retrieval query (may differ from raw user text). */
+  kbQuery?: string;
+  /** Section titles from chunks passed to the model after policy filter. */
+  retrievedSectionTitles?: string[];
+  /** Relevance scores for chunks passed to the model (same order). */
+  topScores?: number[];
+  /** Distinct document ids for chunks passed to the model. */
+  documentIds?: string[];
 }

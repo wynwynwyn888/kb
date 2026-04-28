@@ -9,12 +9,14 @@ import type {
   RetrievalQuery,
   RetrievalChunk,
   RetrievalResult,
-  RetrievalMeta,
+  KbSearchResponse,
+  KbSearchHit,
+  KbRichTextDocumentPayload,
 } from './dto/retrieval.dto';
-import { tokenizeMeaningful } from '../../lib/kb-relevance';
+import { buildRichTextChunkSpecs, type RichTextChunkSpec } from '../../lib/kb-section-chunking';
+import { rankChunksByRelevance, buildSnippetAroundQuery, type ScorableChunk } from '../../lib/kb-retrieval-score';
 
 const DEFAULT_TOP_K = 5;
-const KEYWORD_WINDOW = 3; // n-gram window for keyword matching
 
 function inferDocumentKind(
   source: string,
@@ -75,7 +77,7 @@ export class KbService {
     // if (hasVectors) { return this.vectorSearch(query, chunks, topK); }
 
     // Stage 1 — keyword fallback scoring
-    const scored = this.keywordScore(queryText, chunks);
+    const scored = this.keywordScore(queryText, chunks, topK, query.intentHint);
     const top = scored.slice(0, topK);
 
     this.logger.debug(
@@ -86,6 +88,43 @@ export class KbService {
       query: queryText,
       chunks: top,
       totalConsidered,
+      retrievalMode: 'keyword',
+    };
+  }
+
+  /**
+   * Tenant KB search for UI / diagnostics — returns compact hits with snippets (not full chunks).
+   */
+  async searchKnowledge(params: {
+    tenantId: string;
+    query: string;
+    topK?: number;
+    intentHint?: string;
+  }): Promise<KbSearchResponse> {
+    const topK = Math.min(50, Math.max(1, Math.floor(params.topK ?? DEFAULT_TOP_K)));
+    const chunks = await this.loadTenantChunks(params.tenantId);
+    const ranked = rankChunksByRelevance(params.query, chunks as ScorableChunk[], {
+      intentHint: params.intentHint,
+    });
+    const top = ranked.slice(0, topK);
+    const maxS = top[0]?.score ?? 1;
+    const norm = maxS > 0 ? maxS : 1;
+    const hits: KbSearchHit[] = top.map(({ chunk, score }) => {
+      const st = chunk.metadata['sectionTitle'];
+      const sectionTitle = typeof st === 'string' && st.trim() ? st.trim() : null;
+      return {
+        documentId: chunk.documentId,
+        documentTitle: chunk.title,
+        sectionTitle,
+        snippet: buildSnippetAroundQuery(chunk.content, params.query, 240, sectionTitle),
+        score: Math.min(1, Math.max(0, score / norm)),
+        chunkId: chunk.id,
+      };
+    });
+    return {
+      query: params.query,
+      hits,
+      totalConsidered: chunks.length,
       retrievalMode: 'keyword',
     };
   }
@@ -141,16 +180,22 @@ export class KbService {
 
     const { data: chunkBodies } = await this.supabase
       .from('knowledge_chunks')
-      .select('document_id, content, id')
+      .select('document_id, content, id, metadata')
       .in('document_id', docIds)
       .order('id', { ascending: true });
 
-    const previewByDoc: Record<string, string> = {};
+    const chunksByDoc: Record<string, Array<{ content: string; metadata: Record<string, unknown> }>> = {};
     for (const row of chunkBodies ?? []) {
       const did = row.document_id as string;
-      if (previewByDoc[did] === undefined && typeof row.content === 'string') {
-        previewByDoc[did] = row.content;
-      }
+      if (!chunksByDoc[did]) chunksByDoc[did] = [];
+      chunksByDoc[did].push({
+        content: typeof row.content === 'string' ? row.content : '',
+        metadata: (row.metadata as Record<string, unknown>) ?? {},
+      });
+    }
+    const previewByDoc: Record<string, string> = {};
+    for (const did of Object.keys(chunksByDoc)) {
+      previewByDoc[did] = this.buildAnswerPreviewForList(chunksByDoc[did]!);
     }
 
     return data.map(d => {
@@ -271,15 +316,12 @@ export class KbService {
       .select('id')
       .single();
     if (de || !doc) throw new Error(`Rich doc: ${de?.message}`);
-    const chunkId = randomUUID();
-    const { error: ce } = await this.supabase.from('knowledge_chunks').insert({
-      id: chunkId,
-      document_id: doc.id,
-      content: c,
-      token_count: Math.ceil(c.length / 4),
-      metadata: { kind: 'rich_text' },
+    const specs = buildRichTextChunkSpecs({
+      fullText: c,
+      documentTitle: t,
+      documentUpdatedAtIso: now,
     });
-    if (ce) throw new Error(`Rich chunk: ${ce.message}`);
+    await this.insertChunkSpecsForDocument(doc.id, specs, 'rich_text');
     return { id: doc.id };
   }
 
@@ -288,7 +330,7 @@ export class KbService {
     documentId: string,
     title: string,
     content: string,
-  ): Promise<{ ok: true }> {
+  ): Promise<{ document: KbRichTextDocumentPayload }> {
     const t = title.trim();
     const c = content.trim();
     if (!t || !c) throw new Error('title and content required');
@@ -330,17 +372,52 @@ export class KbService {
       .eq('document_id', documentId);
     if (delE) throw new Error(delE.message);
 
-    const chunkId = randomUUID();
-    const { error: ce } = await this.supabase.from('knowledge_chunks').insert({
-      id: chunkId,
-      document_id: documentId,
-      content: c,
-      token_count: Math.ceil(c.length / 4),
-      metadata: { kind: kind === 'manual' ? 'manual' : 'rich_text' },
+    const kindLabel = kind === 'manual' ? 'manual' : 'rich_text';
+    const specs = buildRichTextChunkSpecs({
+      fullText: c,
+      documentTitle: t,
+      documentUpdatedAtIso: now,
     });
-    if (ce) throw new Error(ce.message);
+    await this.insertChunkSpecsForDocument(documentId, specs, kindLabel);
 
-    return { ok: true };
+    const { data: rows, error: chErr } = await this.supabase
+      .from('knowledge_chunks')
+      .select('content, metadata')
+      .eq('document_id', documentId);
+    if (chErr) throw new Error(chErr.message);
+    const preview = this.buildAnswerPreviewForList(
+      (rows ?? []).map(r => ({
+        content: String(r.content ?? ''),
+        metadata: (r.metadata as Record<string, unknown>) ?? {},
+      })),
+    );
+    const { count, error: ctErr } = await this.supabase
+      .from('knowledge_chunks')
+      .select('id', { count: 'exact', head: true })
+      .eq('document_id', documentId);
+    if (ctErr) throw new Error(ctErr.message);
+
+    const { data: docRow, error: re } = await this.supabase
+      .from('knowledge_documents')
+      .select('id, title, status, updated_at, size')
+      .eq('id', documentId)
+      .eq('tenant_id', tenantId)
+      .single();
+    if (re || !docRow) throw new Error(re?.message ?? 'document reload failed');
+
+    const dr = docRow as { id: string; title: string; status: string; updated_at: string; size: number };
+
+    return {
+      document: {
+        id: dr.id,
+        title: dr.title,
+        status: dr.status,
+        updatedAt: dr.updated_at,
+        sizeBytes: dr.size,
+        chunkCount: count ?? specs.length,
+        answerPreview: preview,
+      },
+    };
   }
 
   /**
@@ -680,6 +757,46 @@ export class KbService {
   // Private helpers
   // ---------------------------------------------------------------------------
 
+  private buildAnswerPreviewForList(
+    chunks: Array<{ content: string; metadata: Record<string, unknown> }>,
+  ): string {
+    if (!chunks.length) return '';
+    const sorted = [...chunks].sort((a, b) => {
+      const ia = Number(a.metadata['sectionIndex']);
+      const ib = Number(b.metadata['sectionIndex']);
+      const pa = Number(a.metadata['sectionPartIndex'] ?? 0);
+      const pb = Number(b.metadata['sectionPartIndex'] ?? 0);
+      const na = Number.isFinite(ia) ? ia : 0;
+      const nb = Number.isFinite(ib) ? ib : 0;
+      if (na !== nb) return na - nb;
+      return pa - pb;
+    });
+    const first = sorted[0];
+    if (!first?.content?.trim()) return '';
+    const st =
+      typeof first.metadata['sectionTitle'] === 'string' ? first.metadata['sectionTitle'].trim() : '';
+    const lines = first.content.trim().split('\n');
+    const head = lines.slice(0, 5).join('\n').slice(0, 480);
+    return (st ? `${st}\n${head}` : head).trim();
+  }
+
+  private async insertChunkSpecsForDocument(
+    documentId: string,
+    specs: RichTextChunkSpec[],
+    kindLabel: string,
+  ): Promise<void> {
+    if (specs.length === 0) return;
+    const rows = specs.map(s => ({
+      id: randomUUID(),
+      document_id: documentId,
+      content: s.content,
+      token_count: s.tokenCount,
+      metadata: { ...s.metadata, kind: kindLabel },
+    }));
+    const { error } = await this.supabase.from('knowledge_chunks').insert(rows);
+    if (error) throw new Error(error.message);
+  }
+
   private async loadTenantChunks(tenantId: string): Promise<
     Array<{
       id: string;
@@ -756,44 +873,33 @@ export class KbService {
   }
 
   /**
-   * Keyword scoring: n-gram overlap + length-normalized term frequency.
-   * Returns chunks sorted by score descending.
+   * Keyword scoring with section/title/intent-aware ranking.
    */
   private keywordScore(
     query: string,
-    chunks: Array<{ id: string; documentId: string; title: string; source: string; content: string; metadata: Record<string, unknown> }>,
+    chunks: Array<{
+      id: string;
+      documentId: string;
+      title: string;
+      source: string;
+      content: string;
+      metadata: Record<string, unknown>;
+    }>,
+    topK: number,
+    intentHint?: string,
   ): RetrievalChunk[] {
-    const queryArr = tokenizeMeaningful(query);
-    if (queryArr.length === 0) {
-      return [];
+    const scorable = chunks as ScorableChunk[];
+    if (!query.trim()) {
+      return scorable.slice(0, topK).map(c => this.toRetrievalChunk(c, 0));
     }
-
-    const scored = chunks
-      .map(chunk => {
-        const contentTokens = new Set(tokenizeMeaningful(chunk.content));
-        const titleTokens = new Set(tokenizeMeaningful(chunk.title));
-        const allTokens = new Set([...contentTokens, ...titleTokens]);
-
-        // Jaccard-like overlap on **meaningful** tokens (excludes "your", "what", etc.)
-        const overlap = queryArr.filter(t => allTokens.has(t)).length;
-        const union = new Set([...queryArr, ...allTokens]).size;
-        const score = union > 0 ? overlap / union : 0;
-
-        // Boost exact phrase matches (full query text)
-        const lowerQuery = query.toLowerCase();
-        if (chunk.content.toLowerCase().includes(lowerQuery)) {
-          return { chunk, score: score + 0.2 };
-        }
-        if (chunk.title.toLowerCase().includes(lowerQuery)) {
-          return { chunk, score: score + 0.3 };
-        }
-
-        return { chunk, score };
-      })
-      .filter(r => r.score > 0)
-      .sort((a, b) => b.score - a.score);
-
-    return scored.map(r => this.toRetrievalChunk(r.chunk, r.score));
+    const ranked = rankChunksByRelevance(query, scorable, { intentHint });
+    if (ranked.length === 0) {
+      return scorable.slice(0, topK).map(c => this.toRetrievalChunk(c, 0.02));
+    }
+    const top = ranked.slice(0, topK);
+    const maxS = top[0]!.score;
+    const norm = maxS > 0 ? maxS : 1;
+    return top.map(({ chunk, score }) => this.toRetrievalChunk(chunk, Math.min(1, Math.max(0, score / norm))));
   }
 
   private toRetrievalChunk(

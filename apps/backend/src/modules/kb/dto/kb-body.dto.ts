@@ -81,4 +81,9 @@ export class KbSearchBodyDto {
   @IsOptional()
   @IsString()
   conversationId?: string;
+
+  /** Optional intent label for generic retrieval scoring (e.g. BUSINESS_HOURS, MENU). */
+  @IsOptional()
+  @IsString()
+  intentHint?: string;
 }

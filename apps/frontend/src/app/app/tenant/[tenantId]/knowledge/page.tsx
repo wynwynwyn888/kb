@@ -18,6 +18,8 @@ import {
   updateKbRichText,
   uploadKbFile,
   type KbDocumentRow,
+  type KbRichTextDocumentPayload,
+  type KbSearchHit,
 } from '@/lib/api';
 import {
   ErrorBanner,
@@ -106,16 +108,24 @@ const modalPanel: CSSProperties = {
   border: '1px solid #e2e8f0',
 };
 
+const modalPanelWide: CSSProperties = {
+  ...modalPanel,
+  width: 'min(920px, 100%)',
+  maxHeight: 'min(88vh, 820px)',
+};
+
 function KbModal({
   title,
   children,
   onClose,
   footer,
+  wide,
 }: {
   title: string;
   children: ReactNode;
   onClose: () => void;
   footer?: ReactNode;
+  wide?: boolean;
 }) {
   return (
     <div
@@ -125,7 +135,13 @@ function KbModal({
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div style={modalPanel} role="dialog" aria-modal="true" aria-labelledby="kb-modal-title" onClick={e => e.stopPropagation()}>
+      <div
+        style={wide ? modalPanelWide : modalPanel}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="kb-modal-title"
+        onClick={e => e.stopPropagation()}
+      >
         <div style={{ padding: '1rem 1.15rem', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', gap: 12 }}>
           <h2 id="kb-modal-title" style={{ fontSize: '1.05rem', fontWeight: 700, margin: 0, flex: 1, minWidth: 0, color: '#0f172a' }}>
             {title}
@@ -536,7 +552,7 @@ function NoteKnowledgeCard({
   subId,
   deleting,
   onDelete,
-  onUpdated,
+  onPatchedDocument,
   setWriteErr,
   setSaveOk,
 }: {
@@ -545,230 +561,210 @@ function NoteKnowledgeCard({
   subId: string;
   deleting: boolean;
   onDelete: () => void;
-  onUpdated: () => void;
+  /** Merge PATCH payload into list state so updatedAt / preview refresh without full reload. */
+  onPatchedDocument?: (payload: KbRichTextDocumentPayload) => void;
   setWriteErr: (s: string) => void;
   setSaveOk: (s: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const [editing, setEditing] = useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
   const [editTitle, setEditTitle] = useState('');
   const [editBody, setEditBody] = useState('');
-  const [loadingEdit, setLoadingEdit] = useState(false);
-  const [savingEdit, setSavingEdit] = useState(false);
+  const [loadingModal, setLoadingModal] = useState(false);
+  const [savingModal, setSavingModal] = useState(false);
 
   const preview = (doc.answerPreview ?? '').trim();
-  const needsShowMore = preview.length > 220 || preview.split(/\n/).length > 3;
+  const previewLines = preview ? preview.split('\n').length : 0;
+  const needsShowMore = preview.length > 260 || previewLines > 4;
 
-  const startEdit = async () => {
-    setEditing(true);
+  const openModal = async () => {
+    setModalOpen(true);
     setEditTitle(doc.title);
     setEditBody('');
     setWriteErr('');
     setSaveOk('');
-    setLoadingEdit(true);
+    setLoadingModal(true);
     try {
       const chunks = await getKbDocumentChunks(token, subId, doc.id);
-      const body = chunks.map(c => c.content).filter(c => c.trim()).join('\n\n') || preview;
+      const ordered = [...chunks].sort((a, b) => {
+        const ma = (a.metadata ?? {}) as Record<string, unknown>;
+        const mb = (b.metadata ?? {}) as Record<string, unknown>;
+        const ia = Number(ma['sectionIndex']);
+        const ib = Number(mb['sectionIndex']);
+        const pa = Number(ma['sectionPartIndex'] ?? 0);
+        const pb = Number(mb['sectionPartIndex'] ?? 0);
+        const na = Number.isFinite(ia) ? ia : 0;
+        const nb = Number.isFinite(ib) ? ib : 0;
+        if (na !== nb) return na - nb;
+        return pa - pb;
+      });
+      const body =
+        ordered
+          .map(c => {
+            const ma = c.metadata as Record<string, unknown> | undefined;
+            const st = typeof ma?.['sectionTitle'] === 'string' ? String(ma['sectionTitle']).trim() : '';
+            const partIdx = Number(ma?.['sectionPartIndex'] ?? 0);
+            const text = (c.content ?? '').trim();
+            if (st && text) {
+              if (!Number.isFinite(partIdx) || partIdx === 0) return `${st}\n${text}`;
+              return text;
+            }
+            return text;
+          })
+          .filter(Boolean)
+          .join('\n\n') || preview;
       setEditBody(body);
     } catch {
       setEditBody(preview);
     } finally {
-      setLoadingEdit(false);
+      setLoadingModal(false);
     }
   };
 
-  const saveEdit = async () => {
+  const saveModal = async () => {
     const t = editTitle.trim();
     const c = editBody.trim();
     if (!t || !c) {
       setWriteErr('Title and text content are required.');
       return;
     }
-    setSavingEdit(true);
+    setSavingModal(true);
     setWriteErr('');
     try {
-      await updateKbRichText(token, doc.id, { tenantId: subId, title: t, content: c });
+      const { document: patched } = await updateKbRichText(token, doc.id, { tenantId: subId, title: t, content: c });
       setSaveOk('Note saved.');
-      setEditing(false);
-      onUpdated();
+      onPatchedDocument?.(patched);
+      setModalOpen(false);
     } catch (er) {
       const raw = isApiHttpError(er) ? er.message : er instanceof Error ? er.message : 'Save failed';
       setWriteErr(friendlifyKbMessage(raw));
     } finally {
-      setSavingEdit(false);
+      setSavingModal(false);
     }
   };
 
   return (
-    <article style={faqCardShell}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <p
-            style={{
-              fontSize: '0.68rem',
-              fontWeight: 700,
-              letterSpacing: '0.08em',
-              color: '#94a3b8',
-              margin: '0 0 0.35rem',
-              textTransform: 'uppercase' as const,
-            }}
-          >
-            Title
-          </p>
-          <h3 style={{ fontSize: '1.05rem', fontWeight: 700, margin: 0, color: '#0f172a', lineHeight: 1.4 }}>{doc.title}</h3>
-        </div>
-        <StatusPill label={faqListStatusLabel(doc.status)} tone={statusPillTone(doc.status)} />
-      </div>
-
-      {!editing ? (
-        <>
-          <p
-            style={{
-              fontSize: '0.68rem',
-              fontWeight: 700,
-              letterSpacing: '0.08em',
-              color: '#94a3b8',
-              margin: '1rem 0 0.35rem',
-              textTransform: 'uppercase' as const,
-            }}
-          >
-            Content
-          </p>
-          {preview ? (
-            <div
-              style={
-                expanded
-                  ? {
-                      fontSize: '0.875rem',
-                      color: '#475569',
-                      lineHeight: 1.55,
-                      whiteSpace: 'pre-wrap' as const,
-                      maxHeight: 260,
-                      overflowY: 'auto' as const,
-                    }
-                  : {
-                      fontSize: '0.875rem',
-                      color: '#475569',
-                      lineHeight: 1.55,
-                      whiteSpace: 'pre-wrap' as const,
-                      display: '-webkit-box',
-                      WebkitLineClamp: 3,
-                      WebkitBoxOrient: 'vertical' as const,
-                      overflow: 'hidden',
-                    }
-              }
-            >
-              {preview}
-            </div>
-          ) : (
-            <p style={{ fontSize: '0.8125rem', color: '#94a3b8', margin: 0 }}>No preview yet — open View / Edit to load full text.</p>
-          )}
-          {needsShowMore && !expanded ? (
-            <button
-              type="button"
-              onClick={() => setExpanded(true)}
+    <>
+      <article style={faqCardShell}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <p
               style={{
-                marginTop: 8,
-                fontSize: '0.8125rem',
-                fontWeight: 600,
-                color: PRIMARY,
-                background: 'none',
-                border: 'none',
-                cursor: 'pointer',
-                padding: 0,
+                fontSize: '0.68rem',
+                fontWeight: 700,
+                letterSpacing: '0.08em',
+                color: '#94a3b8',
+                margin: '0 0 0.35rem',
+                textTransform: 'uppercase' as const,
               }}
             >
-              Show more
-            </button>
-          ) : null}
-          {expanded && needsShowMore ? (
-            <button
-              type="button"
-              onClick={() => setExpanded(false)}
-              style={{
-                marginTop: 8,
-                fontSize: '0.8125rem',
-                fontWeight: 600,
-                color: '#64748b',
-                background: 'none',
-                border: 'none',
-                cursor: 'pointer',
-                padding: 0,
-              }}
-            >
-              Show less
-            </button>
-          ) : null}
-        </>
-      ) : (
-        <div style={{ marginTop: '1rem', display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
-          <label>
-            <span style={mvpLabelStyle}>Title</span>
-            <input
-              value={editTitle}
-              onChange={e => setEditTitle(e.target.value)}
-              style={{ ...mvpInputStyle, marginTop: '0.35rem', width: '100%' }}
-              disabled={loadingEdit}
-            />
-          </label>
-          <label>
-            <span style={mvpLabelStyle}>Text content</span>
-            <textarea
-              value={editBody}
-              onChange={e => setEditBody(e.target.value)}
-              rows={8}
-              style={{ ...mvpInputStyle, marginTop: '0.35rem', width: '100%', minHeight: 160, resize: 'vertical' as const }}
-              disabled={loadingEdit}
-            />
-          </label>
-          {loadingEdit ? <p style={{ fontSize: '0.75rem', color: '#64748b', margin: 0 }}>Loading note…</p> : null}
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-            <button
-              type="button"
-              disabled={savingEdit || loadingEdit}
-              onClick={() => void saveEdit()}
-              style={{ ...mvpPrimaryButtonStyle, borderRadius: 10 }}
-            >
-              {savingEdit ? 'Saving…' : 'Save changes'}
-            </button>
-            <button
-              type="button"
-              disabled={savingEdit}
-              onClick={() => {
-                setEditing(false);
-                setExpanded(false);
-              }}
-              style={{ ...mvpSecondaryButtonStyle, borderRadius: 10 }}
-            >
-              Cancel
-            </button>
+              Title
+            </p>
+            <h3 style={{ fontSize: '1.05rem', fontWeight: 700, margin: 0, color: '#0f172a', lineHeight: 1.4 }}>{doc.title}</h3>
           </div>
+          <StatusPill label={faqListStatusLabel(doc.status)} tone={statusPillTone(doc.status)} />
         </div>
-      )}
 
-      <div
-        style={{
-          display: 'flex',
-          flexWrap: 'wrap',
-          alignItems: 'center',
-          gap: '12px 16px',
-          marginTop: '1.1rem',
-          paddingTop: '0.85rem',
-          borderTop: '1px solid #f1f5f9',
-        }}
-      >
-        <span style={{ fontSize: '0.68rem', fontWeight: 600, letterSpacing: '0.04em', color: '#94a3b8' }}>
-          {fmtKind(doc.documentKind ?? 'rich_text')} · {typeof doc.chunkCount === 'number' ? `${doc.chunkCount} chunk${doc.chunkCount === 1 ? '' : 's'}` : '—'}
-        </span>
-        <span style={{ fontSize: '0.68rem', color: '#cbd5e1' }}>·</span>
-        <span style={{ fontSize: '0.68rem', fontWeight: 600, letterSpacing: '0.04em', color: '#94a3b8' }}>
-          Updated {relativeTimeLabel(doc.updatedAt ?? doc.createdAt)}
-        </span>
-        <div style={{ marginLeft: 'auto', display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
-          {!editing ? (
+        <p
+          style={{
+            fontSize: '0.68rem',
+            fontWeight: 700,
+            letterSpacing: '0.08em',
+            color: '#94a3b8',
+            margin: '1rem 0 0.35rem',
+            textTransform: 'uppercase' as const,
+          }}
+        >
+          Preview
+        </p>
+        {preview ? (
+          <div
+            style={
+              expanded
+                ? {
+                    fontSize: '0.875rem',
+                    color: '#475569',
+                    lineHeight: 1.55,
+                    whiteSpace: 'pre-wrap' as const,
+                    maxHeight: 168,
+                    overflowY: 'auto' as const,
+                  }
+                : {
+                    fontSize: '0.875rem',
+                    color: '#475569',
+                    lineHeight: 1.55,
+                    whiteSpace: 'pre-wrap' as const,
+                    display: '-webkit-box',
+                    WebkitLineClamp: 4,
+                    WebkitBoxOrient: 'vertical' as const,
+                    overflow: 'hidden',
+                  }
+            }
+          >
+            {preview}
+          </div>
+        ) : (
+          <p style={{ fontSize: '0.8125rem', color: '#94a3b8', margin: 0 }}>No preview yet — use View / Edit to add text.</p>
+        )}
+        {needsShowMore && !expanded ? (
+          <button
+            type="button"
+            onClick={() => setExpanded(true)}
+            style={{
+              marginTop: 8,
+              fontSize: '0.8125rem',
+              fontWeight: 600,
+              color: PRIMARY,
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              padding: 0,
+            }}
+          >
+            Show more
+          </button>
+        ) : null}
+        {expanded && needsShowMore ? (
+          <button
+            type="button"
+            onClick={() => setExpanded(false)}
+            style={{
+              marginTop: 8,
+              fontSize: '0.8125rem',
+              fontWeight: 600,
+              color: '#64748b',
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              padding: 0,
+            }}
+          >
+            Show less
+          </button>
+        ) : null}
+
+        <div
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            gap: '12px 16px',
+            marginTop: '1.1rem',
+            paddingTop: '0.85rem',
+            borderTop: '1px solid #f1f5f9',
+          }}
+        >
+          <span style={{ fontSize: '0.68rem', fontWeight: 600, letterSpacing: '0.04em', color: '#94a3b8' }}>
+            {fmtKind(doc.documentKind ?? 'rich_text')} · {typeof doc.chunkCount === 'number' ? `${doc.chunkCount} chunk${doc.chunkCount === 1 ? '' : 's'}` : '—'}
+          </span>
+          <span style={{ fontSize: '0.68rem', color: '#cbd5e1' }}>·</span>
+          <span style={{ fontSize: '0.68rem', fontWeight: 600, letterSpacing: '0.04em', color: '#94a3b8' }}>
+            Updated {relativeTimeLabel(doc.updatedAt ?? doc.createdAt)}
+          </span>
+          <div style={{ marginLeft: 'auto', display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
             <button
               type="button"
-              onClick={() => void startEdit()}
+              onClick={() => void openModal()}
               style={{
                 fontSize: '0.8125rem',
                 fontWeight: 600,
@@ -782,27 +778,114 @@ function NoteKnowledgeCard({
             >
               View / Edit
             </button>
-          ) : null}
-          <button
-            type="button"
-            onClick={onDelete}
-            disabled={deleting}
+            <button
+              type="button"
+              onClick={onDelete}
+              disabled={deleting}
+              style={{
+                fontSize: '0.75rem',
+                fontWeight: 500,
+                color: '#94a3b8',
+                background: 'none',
+                border: 'none',
+                cursor: deleting ? 'wait' : 'pointer',
+                textDecoration: 'underline',
+                textUnderlineOffset: 2,
+              }}
+            >
+              {deleting ? 'Removing…' : 'Delete'}
+            </button>
+          </div>
+        </div>
+      </article>
+
+      {modalOpen ? (
+        <KbModal
+          wide
+          title="View / edit note"
+          onClose={() => {
+            if (!savingModal) setModalOpen(false);
+          }}
+          footer={
+            <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'flex-end', gap: '0.5rem' }}>
+              <button
+                type="button"
+                disabled={savingModal}
+                onClick={() => setModalOpen(false)}
+                style={{ ...mvpSecondaryButtonStyle, borderRadius: 10 }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={savingModal || loadingModal}
+                onClick={() => void saveModal()}
+                style={{ ...mvpPrimaryButtonStyle, borderRadius: 10 }}
+              >
+                {savingModal ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+          }
+        >
+          <dl
             style={{
-              fontSize: '0.75rem',
-              fontWeight: 500,
-              color: '#94a3b8',
-              background: 'none',
-              border: 'none',
-              cursor: deleting ? 'wait' : 'pointer',
-              textDecoration: 'underline',
-              textUnderlineOffset: 2,
+              margin: '0 0 1rem',
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))',
+              gap: '0.65rem',
+              fontSize: '0.8125rem',
+              color: '#475569',
             }}
           >
-            {deleting ? 'Removing…' : 'Delete'}
-          </button>
-        </div>
-      </div>
-    </article>
+            <div>
+              <dt style={{ fontSize: '0.65rem', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', marginBottom: 4 }}>Status</dt>
+              <dd style={{ margin: 0 }}>{faqListStatusLabel(doc.status)}</dd>
+            </div>
+            <div>
+              <dt style={{ fontSize: '0.65rem', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', marginBottom: 4 }}>Updated</dt>
+              <dd style={{ margin: 0 }}>
+                {doc.updatedAt ? new Date(doc.updatedAt).toLocaleString() : '—'} ({relativeTimeLabel(doc.updatedAt ?? doc.createdAt)})
+              </dd>
+            </div>
+            <div>
+              <dt style={{ fontSize: '0.65rem', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', marginBottom: 4 }}>Chunks</dt>
+              <dd style={{ margin: 0 }}>{typeof doc.chunkCount === 'number' ? String(doc.chunkCount) : '—'}</dd>
+            </div>
+          </dl>
+          <label>
+            <span style={mvpLabelStyle}>Title</span>
+            <input
+              value={editTitle}
+              onChange={e => setEditTitle(e.target.value)}
+              style={{ ...mvpInputStyle, marginTop: '0.35rem', width: '100%' }}
+              disabled={loadingModal}
+            />
+          </label>
+          <label style={{ display: 'block', marginTop: '0.85rem' }}>
+            <span style={mvpLabelStyle}>Full content</span>
+            <textarea
+              value={editBody}
+              onChange={e => setEditBody(e.target.value)}
+              rows={18}
+              style={{
+                ...mvpInputStyle,
+                marginTop: '0.35rem',
+                width: '100%',
+                minHeight: 280,
+                maxHeight: 'min(52vh, 520px)',
+                resize: 'vertical' as const,
+                overflowY: 'auto' as const,
+                fontFamily: 'ui-sans-serif, system-ui, sans-serif',
+                lineHeight: 1.5,
+              }}
+              disabled={loadingModal}
+              spellCheck
+            />
+          </label>
+          {loadingModal ? <p style={{ fontSize: '0.75rem', color: '#64748b', margin: '0.65rem 0 0' }}>Loading note text…</p> : null}
+        </KbModal>
+      ) : null}
+    </>
   );
 }
 
@@ -1164,7 +1247,7 @@ export default function SubaccountKnowledgePage() {
   const [qSearch, setQSearch] = useState('');
   const [searching, setSearching] = useState(false);
   const [searchErr, setSearchErr] = useState('');
-  const [searchChunks, setSearchChunks] = useState<unknown[] | null>(null);
+  const [searchHits, setSearchHits] = useState<KbSearchHit[] | null>(null);
 
   const load = useCallback(async () => {
     if (!token || !subId) return;
@@ -1312,10 +1395,10 @@ export default function SubaccountKnowledgePage() {
     setQSearch(q);
     setSearchErr('');
     setSearching(true);
-    setSearchChunks(null);
+    setSearchHits(null);
     try {
       const r = await searchKb(token, { tenantId: subId, query: q, topK: 8 });
-      setSearchChunks(Array.isArray(r.chunks) ? r.chunks : []);
+      setSearchHits(Array.isArray(r.hits) ? r.hits : []);
     } catch (er) {
       const raw = er instanceof Error ? er.message : 'Search failed';
       setSearchErr(friendlifyKbMessage(raw));
@@ -1637,7 +1720,22 @@ export default function SubaccountKnowledgePage() {
                             subId={subId}
                             deleting={deletingId === d.id}
                             onDelete={() => onDelete(d.id)}
-                            onUpdated={() => bump()}
+                            onPatchedDocument={patch => {
+                              setDocs(prev =>
+                                prev.map(x =>
+                                  x.id === patch.id
+                                    ? {
+                                        ...x,
+                                        title: patch.title,
+                                        status: patch.status,
+                                        updatedAt: patch.updatedAt,
+                                        chunkCount: patch.chunkCount,
+                                        answerPreview: patch.answerPreview,
+                                      }
+                                    : x,
+                                ),
+                              );
+                            }}
                             setWriteErr={setWriteErr}
                             setSaveOk={setSaveOk}
                           />
@@ -1729,16 +1827,23 @@ export default function SubaccountKnowledgePage() {
                     </button>
                   </form>
                   {searchErr ? <p style={{ color: '#b91c1c', fontSize: '0.85rem', marginTop: '0.65rem' }}>{searchErr}</p> : null}
-                  {searchChunks && (
+                  {searchHits && (
                     <ol style={{ margin: '0.85rem 0 0', paddingLeft: '1.15rem', fontSize: '0.875rem', color: '#334155' }}>
-                      {searchChunks.length === 0 ? (
+                      {searchHits.length === 0 ? (
                         <li>No matching knowledge found</li>
                       ) : (
-                        searchChunks.slice(0, 8).map((c, i) => (
-                          <li key={i} style={{ marginBottom: '0.45rem' }}>
-                            {typeof c === 'object' && c && 'content' in c
-                              ? stripModelThinking(String((c as { content?: unknown }).content)).slice(0, 200)
-                              : stripModelThinking(String(c)).slice(0, 200)}
+                        searchHits.slice(0, 8).map(h => (
+                          <li key={h.chunkId} style={{ marginBottom: '0.65rem' }}>
+                            <div style={{ fontWeight: 600, color: '#0f172a' }}>{h.documentTitle}</div>
+                            {h.sectionTitle ? (
+                              <div style={{ fontSize: '0.78rem', color: '#64748b', marginTop: 2 }}>{h.sectionTitle}</div>
+                            ) : null}
+                            <div style={{ marginTop: 6, whiteSpace: 'pre-wrap', lineHeight: 1.45 }}>
+                              {stripModelThinking(h.snippet)}
+                            </div>
+                            <div style={{ fontSize: '0.72rem', color: '#94a3b8', marginTop: 4 }}>
+                              score {(h.score * 100).toFixed(0)}% · chunk {h.chunkId.slice(0, 8)}…
+                            </div>
                           </li>
                         ))
                       )}

@@ -869,6 +869,32 @@ export async function removeTenantMember(token: string, membershipId: string): P
 }
 
 // Knowledge base: list, search, create, delete
+export interface KbRichTextDocumentPayload {
+  id: string;
+  title: string;
+  status: string;
+  updatedAt: string;
+  sizeBytes: number;
+  chunkCount: number;
+  answerPreview: string;
+}
+
+export type KbSearchHit = {
+  documentId: string;
+  documentTitle: string;
+  sectionTitle: string | null;
+  snippet: string;
+  score: number;
+  chunkId: string;
+};
+
+export type KbSearchResponse = {
+  query: string;
+  hits: KbSearchHit[];
+  totalConsidered: number;
+  retrievalMode: string;
+};
+
 export interface KbDocumentRow {
   id: string;
   title: string;
@@ -936,7 +962,7 @@ export async function updateKbRichText(
   token: string,
   documentId: string,
   dto: { tenantId: string; title: string; content: string },
-): Promise<{ ok: boolean }> {
+): Promise<{ document: KbRichTextDocumentPayload }> {
   return apiRequest(`/kb/documents/${encodeURIComponent(documentId)}/rich`, {
     token,
     method: 'PATCH',
@@ -1034,8 +1060,8 @@ export async function deleteKbDocument(token: string, tenantId: string, document
 
 export async function searchKb(
   token: string,
-  dto: { tenantId: string; query: string; topK?: number; conversationId?: string }
-): Promise<{ chunks: unknown[]; totalConsidered?: number }> {
+  dto: { tenantId: string; query: string; topK?: number; conversationId?: string; intentHint?: string },
+): Promise<KbSearchResponse> {
   return apiRequest(`/kb/search`, { token, method: 'POST', body: JSON.stringify(dto) });
 }
 

@@ -237,11 +237,11 @@ export class KbController {
       topK = Math.min(KB_MAX_TOP_K, Math.floor(topK));
     }
 
-    return this.kbService.retrieve({
+    return this.kbService.searchKnowledge({
       tenantId: dto.tenantId,
-      conversationId: dto.conversationId ?? '',
       query: dto.query,
       topK,
+      intentHint: dto.intentHint?.trim() || undefined,
     });
   }
 

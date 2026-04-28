@@ -41,6 +41,7 @@ applyEnvFile(resolve(cwd, '..', '.env.local'), true);
 applyEnvFile(resolve(cwd, 'apps', 'backend', '.env.local'), true);
 
 /** Default log / Date locale timezone (IANA). Node uses `TZ` for timestamps in Nest logs. Override in `.env`. */
-if (process.env.TZ == null || String(process.env.TZ).trim() === '') {
-  process.env.TZ = 'Asia/Singapore';
+const tz = process.env['TZ'];
+if (tz == null || String(tz).trim() === '') {
+  process.env['TZ'] = 'Asia/Singapore';
 }

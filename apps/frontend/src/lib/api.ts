@@ -892,6 +892,8 @@ export type KbSearchHit = {
   kind?: string | null;
   /** Document updated_at when known (recency tie-breaker). */
   updatedAt?: string | null;
+  relevanceLabel?: 'HIGH' | 'MEDIUM' | 'LOW' | 'BEST_EFFORT';
+  scorePercent?: number;
 };
 
 export type KbSearchResponse = {

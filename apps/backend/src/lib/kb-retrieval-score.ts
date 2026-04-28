@@ -4,7 +4,12 @@
  */
 
 import { tokenizeMeaningful } from './kb-relevance';
-import { expandKbQueryWithIntent } from './kb-intent-synonyms';
+import { expandKbQueryWithIntent, isFocusedEntityServiceQuery } from './kb-intent-synonyms';
+import type { KbSearchRelevanceLabel } from '../modules/kb/dto/retrieval.dto';
+
+/** Section titles that usually describe post-care, not the service itself. */
+const AFTERCARE_SECTION_TITLE =
+  /aftercare|after\s+care|post[- ]?treatment|care\s+guide|aftercare\s+guide|what\s+to\s+expect|following\s+service|home\s+care|after\s+treatment|aftercare\s+guidance/i;
 
 /** Word-form variants kept as legacy export for callers that care about plural forms only. */
 const TOKEN_ALIASES: ReadonlyArray<[string, string]> = [
@@ -48,6 +53,34 @@ function normWords(s: string): string {
   return s.toLowerCase().replace(/[^\w]+/g, '');
 }
 
+/**
+ * Generic heading "strength" for ranking: formal ALL-CAPS blocks score higher than
+ * sentence-like helper headings ("The salon offers…", "After treatment…").
+ */
+export function sectionHeadingStrength(sectionTitle: string | null | undefined): number {
+  if (!sectionTitle?.trim()) return 1;
+  const t = sectionTitle.trim();
+  if (/^(the|for|if|after|when|then|because|while|although)\s+/i.test(t)) return 0.52;
+  if (t.includes('.') || t.split(',').length > 3) return 0.58;
+  const words = t.split(/\s+/).filter(Boolean);
+  if (words.length > 14) return 0.62;
+  const letters = t.replace(/[^\p{L}]/gu, '');
+  if (letters.length < 2) return 0.8;
+  const lower = (t.match(/\p{Ll}/gu) ?? []).length;
+  const upper = (t.match(/\p{Lu}/gu) ?? []).length;
+  if (lower === 0 && upper / letters.length >= 0.65) return 1;
+  return 0.78;
+}
+
+function looksLikeServiceCatalogSectionTitle(st: string): boolean {
+  const s = st.toLowerCase();
+  return (
+    /\b(treatment|treatments|services|menu|styling|colour|color|perm|rebond|scalp|price\s*list|catalog|offerings?|products?)\b/.test(
+      s,
+    ) || /\bservice\s+menu\b/.test(s)
+  );
+}
+
 function tokenOverlapScore(queryTokens: string[], haystackNorm: string): number {
   let s = 0;
   for (const t of queryTokens) {
@@ -77,16 +110,19 @@ export function scoreChunkForQuery(
   const intentToks = intentVirtualTokens(opts?.intentHint);
   const expanded = expandKbQueryWithIntent(qRaw, opts?.intentHint);
 
+  const sectionTitle =
+    typeof chunk.metadata['sectionTitle'] === 'string' ? chunk.metadata['sectionTitle'].trim() : '';
+  const sectionNorm = sectionTitle ? normWords(sectionTitle) : '';
+  const sectionTitleLc = sectionTitle.toLowerCase();
+  const hStrength = sectionHeadingStrength(sectionTitle);
+  const isFocusedEntity = isFocusedEntityServiceQuery(qRaw);
+
   const allQueryToks = expandKbQueryTokens(
     [...new Set([...queryTokens, ...intentToks, ...expanded.tokens])].filter(t => t.length >= 2),
   );
 
   const contentNorm = normWords(chunk.content);
   const titleNorm = normWords(chunk.title);
-  const sectionTitle =
-    typeof chunk.metadata['sectionTitle'] === 'string' ? chunk.metadata['sectionTitle'].trim() : '';
-  const sectionNorm = sectionTitle ? normWords(sectionTitle) : '';
-  const sectionTitleLc = sectionTitle.toLowerCase();
 
   let score = 0;
   score += tokenOverlapScore(allQueryToks, contentNorm) * 1.0;
@@ -99,8 +135,6 @@ export function scoreChunkForQuery(
   const ls = sectionTitle.toLowerCase();
   if (qn.length >= 3 && lc.includes(qn)) score += 2.4;
   if (qn.length >= 3 && lt.includes(qn)) score += 2.8;
-  // Exact query phrase in section title is the strongest signal — heavily preferred over
-  // chunks that only match through synonym title hints (e.g. "menu" must beat "services").
   if (qn.length >= 3 && sectionTitle && ls.includes(qn)) score += 8.0;
 
   for (const t of allQueryToks) {
@@ -108,14 +142,38 @@ export function scoreChunkForQuery(
     if (sectionNorm.includes(t)) score += 0.55;
   }
 
-  // Intent-driven section heading boost: if the user's intent (hour / address / menu / etc.)
-  // matches a heading hint that appears in the chunk's section title, give a strong boost.
+  // Intent-driven section heading boost — broad "menu/services" queries prefer catalog headings.
   if (sectionTitleLc) {
-    for (const hint of expanded.sectionTitleHints) {
-      if (!hint) continue;
-      if (sectionTitleLc.includes(hint)) {
-        score += 4.5;
-        break;
+    if (expanded.broadMenuListingQuery) {
+      let primaryHit = false;
+      for (const hint of expanded.menuListingPrimaryHints) {
+        if (!hint) continue;
+        if (sectionTitleLc.includes(hint)) {
+          score += 20 * hStrength;
+          primaryHit = true;
+          break;
+        }
+      }
+      if (!primaryHit) {
+        for (const hint of expanded.menuListingSecondaryHints) {
+          if (!hint) continue;
+          if (sectionTitleLc.includes(hint)) score += 2.6 * hStrength;
+        }
+      }
+      if (
+        /\bservices\b/i.test(sectionTitleLc) &&
+        !sectionTitleLc.includes('service menu') &&
+        !/\bprice\s*list\b/i.test(sectionTitleLc)
+      ) {
+        score -= 5.5 * (2 - hStrength);
+      }
+    } else {
+      for (const hint of expanded.sectionTitleHints) {
+        if (!hint) continue;
+        if (sectionTitleLc.includes(hint)) {
+          score += 4.5 * hStrength;
+          break;
+        }
       }
     }
   }
@@ -135,6 +193,27 @@ export function scoreChunkForQuery(
   const substantive = queryTokens.filter(t => t.length >= 4).length;
   if (isIntro && sectionNorm.length === 0) {
     score -= substantive > 0 ? 1.4 : 0.35;
+  }
+
+  // Service detail vs aftercare: named-item queries should not land on post-care sections first.
+  if (isFocusedEntity && !expanded.aftercareIntent) {
+    if (sectionTitle && AFTERCARE_SECTION_TITLE.test(sectionTitle)) {
+      score -= 14;
+    }
+    const lead = chunk.content.trim().slice(0, 220).toLowerCase();
+    if (qn.length >= 4 && /^after\s+/.test(lead) && lead.includes(qn) && sectionTitle && AFTERCARE_SECTION_TITLE.test(sectionTitle)) {
+      score -= 8;
+    }
+    if (/\b(from\s*[\$£€¥]|from\s+\d+|\$\s*\d|rm\s*\d|£\s*\d|€\s*\d|\bfrom\s*\$)/i.test(chunk.content)) {
+      score += 5.5;
+    }
+    if (sectionTitle && looksLikeServiceCatalogSectionTitle(sectionTitle) && !AFTERCARE_SECTION_TITLE.test(sectionTitle)) {
+      score += 3.2;
+    }
+  }
+
+  if (expanded.aftercareIntent && sectionTitle && AFTERCARE_SECTION_TITLE.test(sectionTitle)) {
+    score += 12;
   }
 
   return score;
@@ -194,6 +273,75 @@ export function normalizeKbSearchScores(
     }
     return { chunk: r.chunk, score: Math.min(1, Math.max(0, r.score / norm)), bestEffort: false };
   });
+}
+
+/**
+ * Map normalized rank scores + chunk/query signals into UI-friendly labels and 0–100 percentages.
+ * Avoids showing "100%" unless there is a strong lexical or intent-to-heading match.
+ */
+export function computeKbSearchHitPresentation(opts: {
+  query: string;
+  chunk: ScorableChunk;
+  normalizedScore: number;
+  bestEffort: boolean;
+}): { relevanceLabel: KbSearchRelevanceLabel; scorePercent: number; bestEffort: boolean } {
+  const { query, chunk, normalizedScore, bestEffort } = opts;
+  if (bestEffort) {
+    return {
+      relevanceLabel: 'BEST_EFFORT',
+      scorePercent: Math.min(28, Math.round(5 + Math.max(0, normalizedScore) * 23)),
+      bestEffort: true,
+    };
+  }
+
+  const expanded = expandKbQueryWithIntent(query);
+  const qn = query.trim().toLowerCase();
+  const rawQ = query.trim();
+  const st =
+    typeof chunk.metadata['sectionTitle'] === 'string' ? chunk.metadata['sectionTitle'].trim() : '';
+  const stl = st.toLowerCase();
+  const lc = chunk.content.toLowerCase();
+  const strength = sectionHeadingStrength(st);
+
+  const exactPhraseInTitle = qn.length >= 3 && Boolean(st) && stl.includes(qn);
+  const exactPhraseInContent = qn.length >= 3 && lc.includes(qn);
+  const wordCount = rawQ.split(/\s+/).filter(Boolean).length;
+
+  let intentMatchesHeading = false;
+  if (stl) {
+    for (const hint of expanded.sectionTitleHints) {
+      if (hint && stl.includes(hint)) {
+        intentMatchesHeading = true;
+        break;
+      }
+    }
+  }
+
+  const strongIntentToHeading = intentMatchesHeading && strength >= 0.85;
+
+  const qualifiesHigh =
+    exactPhraseInTitle ||
+    (exactPhraseInContent && (qn.length >= 5 || wordCount <= 3)) ||
+    strongIntentToHeading;
+
+  let tier: KbSearchRelevanceLabel;
+  if (qualifiesHigh) tier = 'HIGH';
+  else if (intentMatchesHeading || normalizedScore >= 0.66) tier = 'MEDIUM';
+  else if (normalizedScore >= 0.38) tier = 'LOW';
+  else tier = 'LOW';
+
+  let scorePercent: number;
+  if (tier === 'HIGH') {
+    const allow100 = exactPhraseInTitle || strongIntentToHeading || (exactPhraseInContent && qn.length >= 6);
+    const v = Math.round(70 + normalizedScore * 28);
+    scorePercent = allow100 ? Math.min(100, Math.max(82, v)) : Math.min(92, Math.max(68, v));
+  } else if (tier === 'MEDIUM') {
+    scorePercent = Math.min(86, Math.round(34 + normalizedScore * 52));
+  } else {
+    scorePercent = Math.min(58, Math.round(14 + normalizedScore * 42));
+  }
+
+  return { relevanceLabel: tier, scorePercent, bestEffort: false };
 }
 
 /**

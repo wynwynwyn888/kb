@@ -23,6 +23,7 @@ import {
   rankChunksForKbSearch,
   normalizeKbSearchScores,
   buildSnippetAroundQuery,
+  computeKbSearchHitPresentation,
   type ScorableChunk,
 } from '../../lib/kb-retrieval-score';
 import {
@@ -31,6 +32,18 @@ import {
 } from '../../lib/kb-rich-text-source';
 
 const DEFAULT_TOP_K = 5;
+/** Default rows returned for KB search UI (client may display fewer). */
+const KB_SEARCH_DEFAULT_TOP_K = 12;
+
+function truncateSnippetToLines(snippet: string, maxLines: number, maxChars: number): string {
+  const normalized = snippet.replace(/\r\n/g, '\n');
+  const lines = normalized.split('\n');
+  let out = lines.slice(0, maxLines).join('\n').trim();
+  if (out.length > maxChars) {
+    out = `${out.slice(0, Math.max(0, maxChars - 1)).trimEnd()}…`;
+  }
+  return out;
+}
 
 function inferDocumentKind(
   source: string,
@@ -120,7 +133,7 @@ export class KbService {
     topK?: number;
     intentHint?: string;
   }): Promise<KbSearchResponse> {
-    const topK = Math.min(50, Math.max(1, Math.floor(params.topK ?? DEFAULT_TOP_K)));
+    const topK = Math.min(50, Math.max(1, Math.floor(params.topK ?? KB_SEARCH_DEFAULT_TOP_K)));
     const chunks = await this.loadTenantChunks(params.tenantId);
     const ranked = rankChunksForKbSearch(params.query, chunks as ScorableChunk[], {
       intentHint: params.intentHint,
@@ -133,16 +146,25 @@ export class KbService {
       const updatedAtRaw = chunk.metadata['documentUpdatedAt'] ?? chunk.metadata['updatedAt'];
       const updatedAt =
         typeof updatedAtRaw === 'string' && updatedAtRaw.trim() ? updatedAtRaw : null;
+      const presentation = computeKbSearchHitPresentation({
+        query: params.query,
+        chunk,
+        normalizedScore: score,
+        bestEffort,
+      });
+      const rawSnippet = buildSnippetAroundQuery(chunk.content, params.query, 300, sectionTitle);
       return {
         documentId: chunk.documentId,
         documentTitle: chunk.title,
         sectionTitle,
-        snippet: buildSnippetAroundQuery(chunk.content, params.query, 240, sectionTitle),
+        snippet: truncateSnippetToLines(rawSnippet, 4, 380),
         score,
-        bestEffort,
+        bestEffort: presentation.bestEffort,
         chunkId: chunk.id,
         kind: chunk.source,
         updatedAt,
+        relevanceLabel: presentation.relevanceLabel,
+        scorePercent: presentation.scorePercent,
       };
     });
 

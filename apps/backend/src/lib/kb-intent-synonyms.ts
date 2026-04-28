@@ -6,6 +6,8 @@
  * titles regardless of business vertical. No business-specific topics; only generic intents.
  */
 
+import { KB_STOPWORDS } from './kb-relevance';
+
 export type KbIntentSynonymGroup =
   | 'INTENT_HOURS'
   | 'INTENT_ADDRESS'
@@ -19,6 +21,10 @@ export interface KbIntentSynonymHit {
   expandedTokens: string[];
   /** Section-title fragments that strongly indicate this intent in headings (any case). */
   sectionTitleHints: string[];
+  /** For INTENT_MENU only: headings that indicate a top-level menu / catalog (not category sections). */
+  menuListingPrimaryHints?: string[];
+  /** For INTENT_MENU only: weaker menu-adjacent heading tokens (e.g. "services" inside "Colour Services"). */
+  menuListingSecondaryHints?: string[];
 }
 
 const INTENT_GROUPS: ReadonlyArray<{
@@ -29,6 +35,8 @@ const INTENT_GROUPS: ReadonlyArray<{
   expand: string[];
   /** section-heading hints (lowercase substrings) */
   titleHints: string[];
+  menuListingPrimaryHints?: string[];
+  menuListingSecondaryHints?: string[];
 }> = [
   {
     intent: 'INTENT_HOURS',
@@ -94,6 +102,8 @@ const INTENT_GROUPS: ReadonlyArray<{
       'packages',
       'product',
       'products',
+      'offer',
+      'offers',
     ],
     expand: ['menu', 'service', 'services', 'offering', 'pricing', 'catalog', 'product', 'products'],
     titleHints: [
@@ -108,6 +118,17 @@ const INTENT_GROUPS: ReadonlyArray<{
       'products',
       'packages',
     ],
+    menuListingPrimaryHints: [
+      'service menu',
+      'menu',
+      'price list',
+      'pricelist',
+      'catalogue',
+      'catalog',
+      'offerings',
+      'products',
+    ],
+    menuListingSecondaryHints: ['services', 'service', 'pricing', 'packages'],
   },
   {
     intent: 'INTENT_PRICE',
@@ -153,6 +174,223 @@ export interface ExpandQueryResult {
   intents: KbIntentSynonymGroup[];
   /** Heading substrings (lowercase) that should boost section title matches. */
   sectionTitleHints: string[];
+  /** Primary menu/catalog heading hints (top-level listing sections). */
+  menuListingPrimaryHints: string[];
+  /** Secondary menu-adjacent hints (e.g. "services" inside category titles). */
+  menuListingSecondaryHints: string[];
+  /**
+   * True when the user is browsing offerings (menu / catalog / "what do you offer"),
+   * not asking for a named item like "keratin".
+   */
+  broadMenuListingQuery: boolean;
+  /** Post-care / maintenance / "after X" style queries. */
+  aftercareIntent: boolean;
+}
+
+/** Tokens typical of "show me your menu" style questions — not named services or locations. */
+const MENU_LISTING_TOKEN_ARRAY: readonly string[] = [
+  'menu',
+  'menus',
+  'service',
+  'services',
+  'offering',
+  'offerings',
+  'catalog',
+  'catalogue',
+  'pricelist',
+  'price',
+  'prices',
+  'pricing',
+  'list',
+  'listing',
+  'package',
+  'packages',
+  'product',
+  'products',
+  'show',
+  'please',
+  'help',
+  'what',
+  'which',
+  'kind',
+  'kinds',
+  'type',
+  'types',
+  'do',
+  'you',
+  'we',
+  'our',
+  'the',
+  'a',
+  'an',
+  'of',
+  'for',
+  'me',
+  'my',
+  'i',
+  'want',
+  'need',
+  'looking',
+  'available',
+  'tell',
+  'give',
+  'some',
+  'any',
+  'all',
+  'see',
+  'know',
+  'about',
+  'offer',
+  'offers',
+  'option',
+  'options',
+  'everything',
+  'stuff',
+  'info',
+  'information',
+  'could',
+  'would',
+  'should',
+  'did',
+  'does',
+  'have',
+  'has',
+  'there',
+  'they',
+  'them',
+  'is',
+  'are',
+  'was',
+  'were',
+  'be',
+  'how',
+  'when',
+  'why',
+  'where',
+  'who',
+  'can',
+  'may',
+  'might',
+  'really',
+  'just',
+  'also',
+  'too',
+  'very',
+  'much',
+  'more',
+  'most',
+  'other',
+  'another',
+  'such',
+  'into',
+  'than',
+  'then',
+  'with',
+  'without',
+  'from',
+  'get',
+  'got',
+  'go',
+  'come',
+  'came',
+  'take',
+  'make',
+  'made',
+  'use',
+  'used',
+  'using',
+  'find',
+  'found',
+  'check',
+  'checking',
+  'browse',
+  'exploring',
+  'explore',
+  'your',
+  'their',
+  'this',
+  'that',
+  'these',
+  'those',
+  'here',
+  'something',
+  'anything',
+  'nothing',
+  'every',
+  'both',
+  'each',
+  'either',
+  'neither',
+  'done',
+  'doing',
+  'being',
+  'been',
+  'well',
+  'even',
+  'still',
+  'again',
+  'back',
+  'only',
+  'same',
+  'own',
+  'someone',
+  'anyone',
+  'everyone',
+  'now',
+  'today',
+  'tomorrow',
+  'sale',
+  'sales',
+  'shop',
+  'store',
+  'buy',
+  'purchase',
+  'booking',
+  'book',
+  'online',
+  'super',
+  'superb',
+  'great',
+  'good',
+  'best',
+  'new',
+  'old',
+  'first',
+  'last',
+  'next',
+  'previous',
+  'thanks',
+  'thank',
+  'hello',
+  'hi',
+  'hey',
+];
+
+const MENU_LISTING_TOKEN_SET = new Set<string>(MENU_LISTING_TOKEN_ARRAY);
+
+export function detectAftercareIntentForSearch(query: string, intentHint?: string): boolean {
+  const lc = `${query} ${intentHint ?? ''}`.toLowerCase();
+  if (!lc.trim()) return false;
+  if (/\baftercare\b|after-care|after care\b/.test(lc)) return true;
+  if (/\bwhat\s+to\s+do\s+after\b/.test(lc)) return true;
+  if (/\b(post|following)\s+(-| )?(treatment|care|service)\b/i.test(lc)) return true;
+  if (/\b(maintain|maintenance|wash|washing)\b/.test(lc) && /\b(after|following)\b/.test(lc)) return true;
+  if (/\bafter\s+[a-zÀ-ÿ]{3,}\b/i.test(lc)) return true;
+  return false;
+}
+
+function computeBroadMenuListingQuery(query: string, intents: KbIntentSynonymGroup[]): boolean {
+  if (!intents.includes('INTENT_MENU')) return false;
+  const toks = lowerTokens(query).filter(t => t.length >= 3 && !KB_STOPWORDS.has(t));
+  if (toks.length === 0) return true;
+  return toks.every(t => MENU_LISTING_TOKEN_SET.has(t));
+}
+
+/** True when the query names a specific item (e.g. keratin) rather than only menu-browsing words. */
+export function isFocusedEntityServiceQuery(query: string): boolean {
+  const toks = lowerTokens(query).filter(t => t.length >= 4 && !KB_STOPWORDS.has(t));
+  if (toks.length === 0) return false;
+  return toks.some(t => !MENU_LISTING_TOKEN_SET.has(t));
 }
 
 function lowerTokens(s: string): string[] {
@@ -187,6 +425,12 @@ function detectIntentsFromText(text: string): KbIntentSynonymHit[] {
       intent: g.intent,
       expandedTokens: g.expand.slice(),
       sectionTitleHints: g.titleHints.slice(),
+      ...(g.menuListingPrimaryHints
+        ? {
+            menuListingPrimaryHints: g.menuListingPrimaryHints.slice(),
+            menuListingSecondaryHints: (g.menuListingSecondaryHints ?? []).slice(),
+          }
+        : {}),
     });
   }
   return hits;
@@ -219,6 +463,12 @@ export function expandKbQueryWithIntent(query: string, intentHint?: string): Exp
           intent,
           expandedTokens: g.expand.slice(),
           sectionTitleHints: g.titleHints.slice(),
+          ...(g.menuListingPrimaryHints
+            ? {
+                menuListingPrimaryHints: g.menuListingPrimaryHints.slice(),
+                menuListingSecondaryHints: (g.menuListingSecondaryHints ?? []).slice(),
+              }
+            : {}),
         });
       }
     }
@@ -235,9 +485,23 @@ export function expandKbQueryWithIntent(query: string, intentHint?: string): Exp
     for (const s of h.sectionTitleHints) sectionTitleHints.add(s);
   }
 
+  const menuListingPrimaryHints = new Set<string>();
+  const menuListingSecondaryHints = new Set<string>();
+  for (const h of [...fromQuery, ...fromHint]) {
+    for (const s of h.menuListingPrimaryHints ?? []) menuListingPrimaryHints.add(s);
+    for (const s of h.menuListingSecondaryHints ?? []) menuListingSecondaryHints.add(s);
+  }
+
+  const broadMenuListingQuery = computeBroadMenuListingQuery(query, intents);
+  const aftercareIntent = detectAftercareIntentForSearch(query, intentHint);
+
   return {
     tokens: [...baseTokens].filter(t => t.length >= 2),
     intents,
     sectionTitleHints: [...sectionTitleHints],
+    menuListingPrimaryHints: [...menuListingPrimaryHints],
+    menuListingSecondaryHints: [...menuListingSecondaryHints],
+    broadMenuListingQuery,
+    aftercareIntent,
   };
 }

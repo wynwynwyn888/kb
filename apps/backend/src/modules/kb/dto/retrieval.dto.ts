@@ -17,11 +17,14 @@ export interface RetrievalQuery {
 /**
  * Single hit from KB search UI / diagnostics (not the full chunk body).
  */
+export type KbSearchRelevanceLabel = 'HIGH' | 'MEDIUM' | 'LOW' | 'BEST_EFFORT';
+
 export interface KbSearchHit {
   documentId: string;
   documentTitle: string;
   sectionTitle: string | null;
   snippet: string;
+  /** 0–1 relative score (legacy); prefer `scorePercent` + `relevanceLabel` in UI. */
   score: number;
   /** True when the result was returned by the best-effort fallback (no strict match). */
   bestEffort?: boolean;
@@ -30,6 +33,10 @@ export interface KbSearchHit {
   kind?: string | null;
   /** Document updated_at when known (used for recency tie-breaks in UI). */
   updatedAt?: string | null;
+  /** Human-readable match strength for the search preview UI. */
+  relevanceLabel?: KbSearchRelevanceLabel;
+  /** 0–100 display score — strong matches only approach 100 when signals warrant it. */
+  scorePercent?: number;
 }
 
 export interface KbSearchResponse {

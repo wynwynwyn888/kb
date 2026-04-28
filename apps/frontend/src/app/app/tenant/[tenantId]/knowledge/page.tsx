@@ -78,6 +78,18 @@ function relativeTimeLabel(iso?: string | null): string {
   return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
+function kbSearchRelevanceLabelDisplay(h: KbSearchHit): string {
+  const m: Record<string, string> = {
+    HIGH: 'High',
+    MEDIUM: 'Medium',
+    LOW: 'Low',
+    BEST_EFFORT: 'Best match',
+  };
+  if (h.relevanceLabel) return m[h.relevanceLabel] ?? h.relevanceLabel;
+  if (h.bestEffort) return 'Best match';
+  return 'Related';
+}
+
 function statusPillTone(status: string): 'ok' | 'neutral' | 'warn' | 'bad' {
   const u = status.toUpperCase();
   if (u === 'READY' || u === 'ACTIVE') return 'ok';
@@ -1446,7 +1458,7 @@ export default function SubaccountKnowledgePage() {
     setSearching(true);
     setSearchHits(null);
     try {
-      const r = await searchKb(token, { tenantId: subId, query: q, topK: 8 });
+      const r = await searchKb(token, { tenantId: subId, query: q, topK: 12 });
       setSearchHits(Array.isArray(r.hits) ? r.hits : []);
     } catch (er) {
       const raw = er instanceof Error ? er.message : 'Search failed';
@@ -1877,29 +1889,81 @@ export default function SubaccountKnowledgePage() {
                   </form>
                   {searchErr ? <p style={{ color: '#b91c1c', fontSize: '0.85rem', marginTop: '0.65rem' }}>{searchErr}</p> : null}
                   {searchHits && (
-                    <ol style={{ margin: '0.85rem 0 0', paddingLeft: '1.15rem', fontSize: '0.875rem', color: '#334155' }}>
-                      {searchHits.length === 0 ? (
-                        <li>No matching knowledge found</li>
-                      ) : (
-                        searchHits.slice(0, 8).map(h => (
-                          <li key={h.chunkId} style={{ marginBottom: '0.65rem' }}>
-                            <div style={{ fontWeight: 600, color: '#0f172a' }}>{h.documentTitle}</div>
-                            {h.sectionTitle ? (
-                              <div style={{ fontSize: '0.78rem', color: '#64748b', marginTop: 2 }}>{h.sectionTitle}</div>
-                            ) : null}
-                            <div style={{ marginTop: 6, whiteSpace: 'pre-wrap', lineHeight: 1.45 }}>
-                              {stripModelThinking(h.snippet)}
-                            </div>
-                            <div style={{ fontSize: '0.72rem', color: '#94a3b8', marginTop: 4 }}>
-                              {h.bestEffort
-                                ? `best-effort · chunk ${h.chunkId.slice(0, 8)}…`
-                                : `score ${(h.score * 100).toFixed(0)}% · chunk ${h.chunkId.slice(0, 8)}…`}
-                              {h.kind ? ` · ${h.kind}` : ''}
-                            </div>
-                          </li>
-                        ))
-                      )}
-                    </ol>
+                    <div style={{ margin: '0.85rem 0 0' }}>
+                      <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>
+                        {searchHits.length === 0 ? (
+                          <li style={{ fontSize: '0.875rem', color: '#64748b' }}>No matching knowledge found</li>
+                        ) : (
+                          searchHits.slice(0, 3).map(h => (
+                            <li
+                              key={h.chunkId}
+                              style={{
+                                marginBottom: '0.9rem',
+                                padding: '0.85rem 1rem',
+                                borderRadius: 12,
+                                border: '1px solid #e2e8f0',
+                                background: 'rgba(248, 250, 252, 0.95)',
+                              }}
+                            >
+                              <div
+                                style={{
+                                  fontSize: '0.65rem',
+                                  fontWeight: 700,
+                                  color: '#94a3b8',
+                                  textTransform: 'uppercase',
+                                  letterSpacing: '0.06em',
+                                }}
+                              >
+                                Section
+                              </div>
+                              <div style={{ fontWeight: 700, color: '#0f172a', marginTop: 2, fontSize: '0.95rem' }}>
+                                {h.sectionTitle ?? '(intro)'}
+                              </div>
+                              <div
+                                style={{
+                                  fontSize: '0.65rem',
+                                  fontWeight: 700,
+                                  color: '#94a3b8',
+                                  textTransform: 'uppercase',
+                                  letterSpacing: '0.06em',
+                                  marginTop: '0.65rem',
+                                }}
+                              >
+                                Snippet
+                              </div>
+                              <div
+                                style={{
+                                  marginTop: 4,
+                                  whiteSpace: 'pre-wrap',
+                                  lineHeight: 1.5,
+                                  fontSize: '0.8125rem',
+                                  color: '#334155',
+                                  maxHeight: '6.2em',
+                                  overflow: 'hidden',
+                                }}
+                              >
+                                {stripModelThinking(h.snippet)}
+                              </div>
+                              <div style={{ fontSize: '0.78rem', color: '#475569', marginTop: '0.65rem' }}>
+                                Relevance:{' '}
+                                <span style={{ fontWeight: 600 }}>{kbSearchRelevanceLabelDisplay(h)}</span>
+                                {typeof h.scorePercent === 'number' ? (
+                                  <span style={{ color: '#94a3b8', marginLeft: 8 }}>({h.scorePercent}%)</span>
+                                ) : null}
+                              </div>
+                              <div style={{ fontSize: '0.65rem', color: '#cbd5e1', marginTop: 6 }} title="Chunk id (debug)">
+                                {h.chunkId.slice(0, 8)}… · {h.documentTitle}
+                              </div>
+                            </li>
+                          ))
+                        )}
+                      </ul>
+                      {searchHits.length > 3 ? (
+                        <p style={{ fontSize: '0.72rem', color: '#94a3b8', margin: '0.45rem 0 0' }}>
+                          Showing top 3 of {searchHits.length} matches
+                        </p>
+                      ) : null}
+                    </div>
                   )}
                 </section>
               </>

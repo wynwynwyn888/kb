@@ -2,9 +2,11 @@ import { describe, it, expect } from '@jest/globals';
 import { expandKbQueryWithIntent } from './kb-intent-synonyms';
 import {
   buildSnippetAroundQuery,
+  computeKbSearchHitPresentation,
   normalizeKbSearchScores,
   rankChunksForKbSearch,
   scoreChunkForQuery,
+  sectionHeadingStrength,
   type ScorableChunk,
 } from './kb-retrieval-score';
 
@@ -37,6 +39,19 @@ describe('expandKbQueryWithIntent', () => {
   it('"menu" → INTENT_MENU; "refund" → INTENT_COMPLAINT', () => {
     expect(expandKbQueryWithIntent('menu').intents).toContain('INTENT_MENU');
     expect(expandKbQueryWithIntent('refund please').intents).toContain('INTENT_COMPLAINT');
+  });
+
+  it('"menu" / "services" → broadMenuListingQuery; "keratin" → not broad', () => {
+    expect(expandKbQueryWithIntent('menu').broadMenuListingQuery).toBe(true);
+    expect(expandKbQueryWithIntent('services').broadMenuListingQuery).toBe(true);
+    expect(expandKbQueryWithIntent('what do you offer').broadMenuListingQuery).toBe(true);
+    expect(expandKbQueryWithIntent('keratin').broadMenuListingQuery).toBe(false);
+  });
+
+  it('aftercareIntent for post-care phrasing', () => {
+    expect(expandKbQueryWithIntent('after keratin').aftercareIntent).toBe(true);
+    expect(expandKbQueryWithIntent('aftercare guide').aftercareIntent).toBe(true);
+    expect(expandKbQueryWithIntent('keratin').aftercareIntent).toBe(false);
   });
 
   it('intentHint enum names map to the right intent group', () => {
@@ -140,6 +155,102 @@ describe('rankChunksForKbSearch (acceptance)', () => {
 
   it('"balayage" → COLOUR SERVICES', () => {
     expect(rankChunksForKbSearch('balayage', chunks, { topK: 3 })[0]!.chunk.id).toBe('col');
+  });
+});
+
+describe('rankChunksForKbSearch (menu vs categories)', () => {
+  const chunks: ScorableChunk[] = [
+    chunk({
+      id: 'svc',
+      content: 'We offer a curated set of services.\nCut from $40',
+      metadata: { sectionTitle: 'SERVICE MENU', chunkType: 'section', sectionIndex: 2 },
+    }),
+    chunk({
+      id: 'col',
+      content: 'Balayage from $260',
+      metadata: { sectionTitle: 'COLOUR SERVICES', chunkType: 'section', sectionIndex: 4 },
+    }),
+    chunk({
+      id: 'hair',
+      content: 'Ladies cut from $80',
+      metadata: { sectionTitle: 'HAIRCUT AND STYLING SERVICES', chunkType: 'section', sectionIndex: 3 },
+    }),
+  ];
+
+  it('"menu" ranks SERVICE MENU above category service sections', () => {
+    expect(rankChunksForKbSearch('menu', chunks, { topK: 3 })[0]!.chunk.id).toBe('svc');
+  });
+});
+
+describe('rankChunksForKbSearch (keratin vs aftercare)', () => {
+  const chunks: ScorableChunk[] = [
+    chunk({
+      id: 'treat',
+      content: 'Keratin Smooth Treatment\nFrom $220',
+      metadata: { sectionTitle: 'HAIR AND SCALP TREATMENTS', chunkType: 'section', sectionIndex: 1 },
+    }),
+    chunk({
+      id: 'after',
+      content: 'After keratin treatment, avoid sulfates for 72 hours.',
+      metadata: { sectionTitle: 'AFTERCARE', chunkType: 'section', sectionIndex: 2 },
+    }),
+  ];
+
+  it('"keratin" prefers treatment section over aftercare', () => {
+    expect(rankChunksForKbSearch('keratin', chunks, { topK: 2 })[0]!.chunk.id).toBe('treat');
+  });
+
+  it('"after keratin" prefers aftercare section', () => {
+    expect(rankChunksForKbSearch('after keratin', chunks, { topK: 2 })[0]!.chunk.id).toBe('after');
+  });
+});
+
+describe('sectionHeadingStrength (weak vs strong)', () => {
+  it('penalises sentence-like headings', () => {
+    expect(sectionHeadingStrength('ADDRESS')).toBe(1);
+    expect(sectionHeadingStrength('The salon offers these main service categories')).toBeLessThan(0.75);
+  });
+
+  it('"location" ranks ADDRESS above a weak helper heading without address hints', () => {
+    const weak = chunk({
+      id: 'w',
+      content: '88 Example Road\nSingapore',
+      metadata: { sectionTitle: 'The nearest MRT station', chunkType: 'section', sectionIndex: 1 },
+    });
+    const strong = chunk({
+      id: 's',
+      content: '88 Example Road\nSingapore',
+      metadata: { sectionTitle: 'ADDRESS', chunkType: 'section', sectionIndex: 2 },
+    });
+    expect(scoreChunkForQuery('location', strong)).toBeGreaterThan(scoreChunkForQuery('location', weak));
+  });
+});
+
+describe('computeKbSearchHitPresentation', () => {
+  it('does not assign 100% for weak token-only matches', () => {
+    const c = chunk({
+      content: 'Unrelated prose without the raretoken.',
+      metadata: { sectionTitle: 'MISC SECTION', chunkType: 'section', sectionIndex: 0 },
+    });
+    const out = computeKbSearchHitPresentation({
+      query: 'zqxxyz123',
+      chunk: c,
+      normalizedScore: 1,
+      bestEffort: false,
+    });
+    expect(out.scorePercent).toBeLessThan(100);
+  });
+
+  it('marks best-effort with low scorePercent', () => {
+    const c = chunk({ content: 'x', metadata: { sectionTitle: 'Y' } });
+    const out = computeKbSearchHitPresentation({
+      query: 'zzz',
+      chunk: c,
+      normalizedScore: 0.15,
+      bestEffort: true,
+    });
+    expect(out.relevanceLabel).toBe('BEST_EFFORT');
+    expect(out.scorePercent).toBeLessThanOrEqual(28);
   });
 });
 

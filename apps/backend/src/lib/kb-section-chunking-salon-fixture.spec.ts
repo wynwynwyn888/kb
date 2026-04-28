@@ -81,6 +81,7 @@ FIRST-TIME GUEST NOTES
 Arrive 10 minutes early so we can complete a quick consultation.
 
 AFTERCARE
+After keratin treatment, avoid sulfates for 72 hours.
 Wait 48 hours before washing colour-treated hair.
 
 ALLERGY AND SENSITIVITY GUIDANCE
@@ -209,6 +210,9 @@ describe('section chunking on a realistic multi-section note (universal)', () =>
     expect(
       rankChunksForKbSearch('keratin', chunks, { topK: 3 })[0]?.chunk.metadata['sectionTitle'],
     ).toMatch(/HAIR & SCALP TREATMENTS/i);
+    expect(
+      rankChunksForKbSearch('after keratin', chunks, { topK: 3 })[0]?.chunk.metadata['sectionTitle'],
+    ).toMatch(/AFTERCARE/i);
     const refundTop = rankChunksForKbSearch('refund', chunks, { topK: 3 })[0]?.chunk.metadata[
       'sectionTitle'
     ];

@@ -19,6 +19,7 @@ import {
   updateKbRichText,
   uploadKbFile,
   type KbDocumentRow,
+  type KbRichNoteSource,
   type KbRichTextDocumentPayload,
   type KbSearchHit,
 } from '@/lib/api';
@@ -78,6 +79,30 @@ function kbSearchRelevanceLabelDisplay(h: KbSearchHit): string {
   if (h.bestEffort) return 'Best match';
   return 'Related';
 }
+
+function kbSearchHitKindLabel(kind: string | null | undefined): string {
+  const k = (kind ?? '').trim().toLowerCase();
+  if (k === 'faq') return 'FAQ';
+  if (k === 'rich_text') return 'Note';
+  if (k === 'file') return 'Uploaded file';
+  if (k.includes('/')) return 'Uploaded file';
+  return kind?.trim() ? kind : 'Knowledge';
+}
+
+function kbSearchHitTargetTab(hit: KbSearchHit): 'faq' | 'rich' | 'files' {
+  const k = (hit.kind ?? '').trim().toLowerCase();
+  if (k === 'faq') return 'faq';
+  if (k === 'file' || k.includes('/')) return 'files';
+  return 'rich';
+}
+
+type KbSearchTraceView =
+  | { mode: 'rich'; title: string; rich: KbRichNoteSource }
+  | {
+      mode: 'chunks';
+      title: string;
+      chunks: Array<{ id: string; content: string; tokenCount?: number; metadata?: Record<string, unknown> }>;
+    };
 
 function statusPillTone(status: string): 'ok' | 'neutral' | 'warn' | 'bad' {
   const u = status.toUpperCase();
@@ -1299,6 +1324,10 @@ export default function SubaccountKnowledgePage() {
   const [searching, setSearching] = useState(false);
   const [searchErr, setSearchErr] = useState('');
   const [searchHits, setSearchHits] = useState<KbSearchHit[] | null>(null);
+  const [searchTraceHit, setSearchTraceHit] = useState<KbSearchHit | null>(null);
+  const [searchTraceLoading, setSearchTraceLoading] = useState(false);
+  const [searchTraceErr, setSearchTraceErr] = useState('');
+  const [searchTraceView, setSearchTraceView] = useState<KbSearchTraceView | null>(null);
 
   const load = useCallback(async () => {
     if (!token || !subId) return;
@@ -1457,6 +1486,45 @@ export default function SubaccountKnowledgePage() {
       setSearching(false);
     }
   };
+
+  const closeSearchTraceModal = () => {
+    setSearchTraceHit(null);
+    setSearchTraceView(null);
+    setSearchTraceErr('');
+    setSearchTraceLoading(false);
+  };
+
+  const openSearchTraceModal = useCallback(
+    async (hit: KbSearchHit) => {
+      if (!token) return;
+      setSearchTraceHit(hit);
+      setSearchTraceErr('');
+      setSearchTraceView(null);
+      setSearchTraceLoading(true);
+      const kind = (hit.kind ?? '').trim().toLowerCase();
+      const treatAsFile = kind === 'file' || kind.includes('/');
+      const isFaq = kind === 'faq';
+
+      try {
+        if (!isFaq && !treatAsFile) {
+          try {
+            const rich = await getKbRichNoteSource(token, subId, hit.documentId);
+            setSearchTraceView({ mode: 'rich', title: rich.title, rich });
+            return;
+          } catch {
+            // Notes that only exist as chunks, or legacy rows — fall through.
+          }
+        }
+        const chunks = await getKbDocumentChunks(token, subId, hit.documentId);
+        setSearchTraceView({ mode: 'chunks', title: hit.documentTitle, chunks });
+      } catch (e) {
+        setSearchTraceErr(e instanceof Error ? e.message : 'Could not load source');
+      } finally {
+        setSearchTraceLoading(false);
+      }
+    },
+    [token, subId],
+  );
 
   const tabUnderline = (active: boolean): CSSProperties => ({
     fontSize: '0.875rem',
@@ -1905,15 +1973,15 @@ export default function SubaccountKnowledgePage() {
                         {searchHits.length === 0 ? (
                           <li style={{ fontSize: '0.875rem', color: '#64748b' }}>No matching knowledge found</li>
                         ) : (
-                          searchHits.slice(0, 3).map(h => (
+                          searchHits.slice(0, 8).map(h => (
                             <li
                               key={h.chunkId}
                               style={{
                                 marginBottom: '0.9rem',
                                 padding: '0.85rem 1rem',
                                 borderRadius: 12,
-                                border: '1px solid #e2e8f0',
-                                background: 'rgba(248, 250, 252, 0.95)',
+                                border: '1px solid var(--aisbp-border, #e2e8f0)',
+                                background: 'var(--aisbp-stat-tile-bg, rgba(248, 250, 252, 0.95))',
                               }}
                             >
                               <div
@@ -1927,7 +1995,7 @@ export default function SubaccountKnowledgePage() {
                               >
                                 Section
                               </div>
-                              <div style={{ fontWeight: 700, color: '#0f172a', marginTop: 2, fontSize: '0.95rem' }}>
+                              <div style={{ fontWeight: 700, color: 'var(--aisbp-text-heading, #0f172a)', marginTop: 2, fontSize: '0.95rem' }}>
                                 {h.sectionTitle ?? '(intro)'}
                               </div>
                               <div
@@ -1948,30 +2016,50 @@ export default function SubaccountKnowledgePage() {
                                   whiteSpace: 'pre-wrap',
                                   lineHeight: 1.5,
                                   fontSize: '0.8125rem',
-                                  color: '#334155',
+                                  color: 'var(--aisbp-text-secondary, #334155)',
                                   maxHeight: '6.2em',
                                   overflow: 'hidden',
                                 }}
                               >
                                 {stripModelThinking(h.snippet)}
                               </div>
-                              <div style={{ fontSize: '0.78rem', color: '#475569', marginTop: '0.65rem' }}>
+                              <div style={{ fontSize: '0.78rem', color: 'var(--aisbp-text-secondary, #475569)', marginTop: '0.65rem' }}>
                                 Relevance:{' '}
                                 <span style={{ fontWeight: 600 }}>{kbSearchRelevanceLabelDisplay(h)}</span>
                                 {typeof h.scorePercent === 'number' ? (
                                   <span style={{ color: '#94a3b8', marginLeft: 8 }}>({h.scorePercent}%)</span>
                                 ) : null}
                               </div>
-                              <div style={{ fontSize: '0.65rem', color: '#cbd5e1', marginTop: 6 }} title="Chunk id (debug)">
-                                {h.chunkId.slice(0, 8)}… · {h.documentTitle}
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center', marginTop: '0.55rem' }}>
+                                <button
+                                  type="button"
+                                  onClick={() => void openSearchTraceModal(h)}
+                                  style={{
+                                    ...mvpSecondaryButtonStyle,
+                                    fontSize: '0.8125rem',
+                                    padding: '0.35rem 0.75rem',
+                                    borderRadius: 8,
+                                  }}
+                                >
+                                  View full source
+                                </button>
+                                <span style={{ fontSize: '0.68rem', color: 'var(--aisbp-muted, #94a3b8)' }}>
+                                  {kbSearchHitKindLabel(h.kind)} · {h.documentTitle}
+                                </span>
+                              </div>
+                              <div
+                                style={{ fontSize: '0.65rem', color: 'var(--aisbp-muted, #cbd5e1)', marginTop: 6 }}
+                                title="Chunk id (support)"
+                              >
+                                Chunk {h.chunkId.slice(0, 8)}…
                               </div>
                             </li>
                           ))
                         )}
                       </ul>
-                      {searchHits.length > 3 ? (
+                      {searchHits.length > 8 ? (
                         <p style={{ fontSize: '0.72rem', color: '#94a3b8', margin: '0.45rem 0 0' }}>
-                          Showing top 3 of {searchHits.length} matches
+                          Showing top 8 of {searchHits.length} matches — refine your search to narrow results.
                         </p>
                       ) : null}
                     </div>
@@ -1998,6 +2086,153 @@ export default function SubaccountKnowledgePage() {
           ) : null}
         </div>
       </div>
+
+      {searchTraceHit ? (
+        <KbModal
+          wide
+          title={searchTraceHit.documentTitle}
+          onClose={closeSearchTraceModal}
+          footer={
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', justifyContent: 'flex-end', alignItems: 'center' }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setTab(kbSearchHitTargetTab(searchTraceHit));
+                  closeSearchTraceModal();
+                }}
+                style={mvpSecondaryButtonStyle}
+              >
+                {kbSearchHitTargetTab(searchTraceHit) === 'faq'
+                  ? 'Open FAQs tab'
+                  : kbSearchHitTargetTab(searchTraceHit) === 'files'
+                    ? 'Open Files tab'
+                    : 'Open Notes tab'}
+              </button>
+              <button type="button" onClick={closeSearchTraceModal} style={mvpPrimaryButtonStyle}>
+                Close
+              </button>
+            </div>
+          }
+        >
+          <dl
+            style={{
+              margin: '0 0 1rem',
+              display: 'grid',
+              gridTemplateColumns: 'auto 1fr',
+              gap: '0.35rem 0.85rem',
+              fontSize: '0.8125rem',
+              color: 'var(--aisbp-text-secondary, #334155)',
+            }}
+          >
+            <dt style={{ color: 'var(--aisbp-muted, #94a3b8)', fontWeight: 600 }}>Type</dt>
+            <dd style={{ margin: 0 }}>{kbSearchHitKindLabel(searchTraceHit.kind)}</dd>
+            <dt style={{ color: 'var(--aisbp-muted, #94a3b8)', fontWeight: 600 }}>Section</dt>
+            <dd style={{ margin: 0 }}>{searchTraceHit.sectionTitle?.trim() ? searchTraceHit.sectionTitle : '(intro)'}</dd>
+            <dt style={{ color: 'var(--aisbp-muted, #94a3b8)', fontWeight: 600 }}>Matched chunk</dt>
+            <dd style={{ margin: 0, fontFamily: 'ui-monospace, monospace', fontSize: '0.78rem', wordBreak: 'break-all' }}>
+              {searchTraceHit.chunkId}
+            </dd>
+            <dt style={{ color: 'var(--aisbp-muted, #94a3b8)', fontWeight: 600 }}>Document id</dt>
+            <dd style={{ margin: 0, fontFamily: 'ui-monospace, monospace', fontSize: '0.78rem', wordBreak: 'break-all' }}>
+              {searchTraceHit.documentId}
+            </dd>
+            {searchTraceHit.updatedAt ? (
+              <>
+                <dt style={{ color: 'var(--aisbp-muted, #94a3b8)', fontWeight: 600 }}>Last updated</dt>
+                <dd style={{ margin: 0 }}>{relativeTimeLabel(searchTraceHit.updatedAt)}</dd>
+              </>
+            ) : null}
+          </dl>
+
+          {searchTraceLoading ? <LoadingBlock message="Loading source…" /> : null}
+          {searchTraceErr ? <ErrorBanner message={searchTraceErr} /> : null}
+
+          {!searchTraceLoading && !searchTraceErr && searchTraceView?.mode === 'rich' ? (
+            <div>
+              <p style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 0.5rem', lineHeight: 1.45 }}>
+                Full note text stored for this workspace (same as the Notes editor).
+              </p>
+              <pre
+                style={{
+                  margin: 0,
+                  padding: '0.75rem 0.85rem',
+                  borderRadius: 10,
+                  border: '1px solid var(--aisbp-border, #e2e8f0)',
+                  background: 'var(--aisbp-stat-tile-bg, #f8fafc)',
+                  fontFamily: 'inherit',
+                  fontSize: '0.875rem',
+                  lineHeight: 1.55,
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                  color: 'var(--aisbp-text, #1e293b)',
+                  maxHeight: 'min(58vh, 560px)',
+                  overflow: 'auto',
+                }}
+              >
+                {stripModelThinking(searchTraceView.rich.content)}
+              </pre>
+            </div>
+          ) : null}
+
+          {!searchTraceLoading && !searchTraceErr && searchTraceView?.mode === 'chunks' ? (
+            <div>
+              <p style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 0.65rem', lineHeight: 1.45 }}>
+                All indexed chunks for this document. The chunk from your search is highlighted.
+              </p>
+              {searchTraceView.chunks.length === 0 ? (
+                <p style={{ margin: 0, fontSize: '0.875rem', color: 'var(--aisbp-muted, #64748b)' }}>No chunks on file.</p>
+              ) : (
+                searchTraceView.chunks.map((ch, idx) => {
+                  const isMatch = ch.id === searchTraceHit.chunkId;
+                  const meta =
+                    ch.metadata && typeof ch.metadata === 'object' && !Array.isArray(ch.metadata)
+                      ? (ch.metadata as Record<string, unknown>)
+                      : {};
+                  const sec = typeof meta['sectionTitle'] === 'string' && meta['sectionTitle'].trim() ? meta['sectionTitle'] : null;
+                  return (
+                    <div
+                      key={ch.id}
+                      style={{
+                        marginBottom: '0.85rem',
+                        padding: '0.75rem 0.85rem',
+                        borderRadius: 10,
+                        border: isMatch ? `2px solid ${PRIMARY}` : '1px solid var(--aisbp-border, #e2e8f0)',
+                        background: isMatch ? 'rgba(15, 98, 254, 0.06)' : 'var(--aisbp-surface, #fafafa)',
+                      }}
+                    >
+                      {isMatch ? (
+                        <div style={{ fontSize: '0.72rem', fontWeight: 700, color: PRIMARY, marginBottom: 6 }}>Search matched this chunk</div>
+                      ) : null}
+                      <div style={{ fontSize: '0.68rem', color: 'var(--aisbp-muted, #94a3b8)', marginBottom: 4 }}>
+                        Part {idx + 1} · <span style={{ fontFamily: 'ui-monospace, monospace' }}>{ch.id}</span>
+                        {typeof ch.tokenCount === 'number' ? ` · ~${ch.tokenCount} tokens` : null}
+                      </div>
+                      {sec ? (
+                        <div style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--aisbp-text-heading, #0f172a)', marginBottom: 6 }}>
+                          {sec}
+                        </div>
+                      ) : null}
+                      <pre
+                        style={{
+                          margin: 0,
+                          fontFamily: 'inherit',
+                          fontSize: '0.84rem',
+                          lineHeight: 1.55,
+                          whiteSpace: 'pre-wrap',
+                          wordBreak: 'break-word',
+                          color: 'var(--aisbp-text-secondary, #334155)',
+                        }}
+                      >
+                        {stripModelThinking(ch.content)}
+                      </pre>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          ) : null}
+        </KbModal>
+      ) : null}
     </div>
   );
 }

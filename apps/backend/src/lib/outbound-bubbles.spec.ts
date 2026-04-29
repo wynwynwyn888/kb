@@ -4,13 +4,13 @@ import {
 } from './outbound-bubbles';
 
 describe('outbound-bubbles', () => {
-  describe('normalizeShortMultilineBody', () => {
-    it('joins short option lines separated by blank lines (universal labels)', () => {
+  describe('normalizeShortMultilineBody (alias of prepareCustomerFacingPlainTextForOutboundSplit)', () => {
+    it('preserves blank lines between option lines and the closing question', () => {
       const raw =
         'Happy to help.\n\nA) Service Menu\n\nB) Address\n\nC) Hours\n\nWhich would you like?';
       const out = normalizeShortMultilineBody(raw);
-      expect(out).toContain('A) Service Menu\nB) Address');
-      expect(out.startsWith('Happy to help')).toBe(true);
+      expect(out).toMatch(/Hours\n\nWhich would you like/);
+      expect(out).toContain('A) Service Menu');
     });
   });
 

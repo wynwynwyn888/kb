@@ -41,6 +41,8 @@ import { resolveOperatingHoursConflictsAmongChunks } from '../../lib/kb-operatin
 import { prepareCustomerFacingMenuKb, shouldCurateMenuKbContext } from '../../lib/menu-kb-curator';
 import { detectOldDemoTermsInText } from '../../lib/old-demo-terms';
 import { getBusinessLocalNow, resolveAppTimeZone } from '../../lib/business-time';
+import { summarizeInboundTextBatch } from '../../lib/inbound-batch-intent';
+import { detectRepeatedCustomerUserLines } from '../../lib/repeated-customer-message';
 
 @Injectable()
 export class ConversationOrchestrationService {
@@ -96,7 +98,13 @@ export class ConversationOrchestrationService {
       const memory = await this.memoryLoader.loadMemory(conversationId);
 
       const latestMsg = (input.incomingMessage.messageContent ?? '').trim();
+      const batch =
+        input.recentInboundBatch && input.recentInboundBatch.length > 0
+          ? input.recentInboundBatch.map(m => String(m).trim()).filter(Boolean)
+          : [latestMsg].filter(Boolean);
+      const batchSummary = summarizeInboundTextBatch(batch);
       const latestIntent = classifyConversationIntent(latestMsg);
+      const repeatMeta = detectRepeatedCustomerUserLines(memory.entries);
 
       const policyStatePre = this.conversationPolicy.parseState(input.conversation?.metadata);
       let retrieveQuery = latestMsg;
@@ -115,14 +123,37 @@ export class ConversationOrchestrationService {
             `Resolved selection for KB query: label=${sel.selectedLabel} text=${JSON.stringify(sel.selectedText.slice(0, 60))} source=${sel.source}`,
           );
         }
+      } else if (batch.length > 1) {
+        retrieveQuery = batchSummary.combinedText;
       }
+
+      const usePermissiveKbFilter =
+        batch.length > 1 && !(latestIntent === 'SHORT_SELECTION' && Boolean(menuKbAnchor));
+
+      this.logger.log(
+        `Inbound batch summary: inboundBatchCount=${batch.length} uniqueProviderMessageCount=${new Set(batch).size} ` +
+          `combinedIntentCount=${batchSummary.combinedIntentCount} primaryIntent=${batchSummary.primaryIntent} ` +
+          `secondaryIntents=${JSON.stringify(batchSummary.secondaryIntents)} ` +
+          `batchOrderedMessages=${JSON.stringify(batchSummary.orderedMessages.map(s => s.slice(0, 120)))} ` +
+          `intentsPerMessage=${JSON.stringify(batchSummary.intentsPerMessage)} ` +
+          `conflictingIntents=${batchSummary.conflictingIntents} ` +
+          `repeatedHumanTextDetected=${repeatMeta.repeatedHumanTextDetected} ` +
+          `repeatedHumanTextAction=${repeatMeta.repeatedHumanTextAction}`,
+      );
 
       // Step 3: Retrieve KB + intent-aware filter (query may expand for menu category selection)
       const { chunks: kbAfterRetrieve, meta: retrievalMeta } = await this.retrieveKbContext(
         input,
         conversationId,
         latestIntent,
-        { retrieveQuery, menuKbAnchor },
+        {
+          retrieveQuery,
+          menuKbAnchor,
+          kbFilterIntent: usePermissiveKbFilter ? 'UNKNOWN' : latestIntent,
+          kbFilterUserMessage: usePermissiveKbFilter
+            ? batchSummary.combinedText
+            : (input.incomingMessage.messageContent ?? '').trim(),
+        },
       );
 
       const policyState = policyStatePre;
@@ -170,13 +201,27 @@ export class ConversationOrchestrationService {
       });
       const kbChunks = policyOutcome.kbChunks;
 
+      this.logger.log(
+        `kbSelectedForReply: selectedContextCount=${kbChunks.length} ` +
+          `retrievedDocumentIds=${JSON.stringify([...new Set(kbChunks.map(c => c.documentId))])} ` +
+          `retrievedSectionTitles=${JSON.stringify(
+            kbChunks.map(c => {
+              const st = c.metadata['sectionTitle'];
+              return typeof st === 'string' && st.trim() ? st.trim() : '';
+            }),
+          )} ` +
+          `topScores=${JSON.stringify(kbChunks.map(c => c.relevanceScore))}`,
+      );
+
       // Step 4: Build AI routing request (includes KB context)
       const systemPrompt = this.buildSystemPromptWithRuntimeGreeting(input);
+      const routingInbound = batch.length > 1 ? batchSummary.combinedText : latestMsg;
       const routingRequest = this.buildRoutingRequest(
         input,
         memory,
         systemPrompt,
         kbChunks,
+        routingInbound,
       );
 
       // Step 5: Call AI router placeholder
@@ -201,12 +246,18 @@ export class ConversationOrchestrationService {
           policyReplyKind: policyOutcome.policyReplyKind,
           menuSelectionActive: policyOutcome.menuSelectionActive,
           latestUserMessage: latestMsg,
+          combinedHumanMessagesText: batch.length > 1 ? batchSummary.combinedText : undefined,
+          inboundBatchCount: batch.length,
+          batchPrimaryIntent: batchSummary.primaryIntent,
+          batchSecondaryIntents: batchSummary.secondaryIntents,
+          repeatedHumanTextDetected: repeatMeta.repeatedHumanTextDetected,
+          repeatedHumanTextAction: repeatMeta.repeatedHumanTextAction,
         },
       });
 
       // Inspect the planned reply bubbles for option lists (A/B/C, 1./2., bullets) and capture
       // them into option memory so the next user reply ("A") can be resolved against them.
-      const assistantText = replyPlan.bubbles.map(b => b.text).join('\n');
+      const assistantText = replyPlan.bubbles.map(b => b.text).join('\n\n');
       const stateAfterOptions = this.conversationPolicy.recordAssistantOptions(
         policyOutcome.nextPolicyState,
         assistantText,
@@ -240,9 +291,10 @@ export class ConversationOrchestrationService {
           (replyPlan.draftFallbackReason
             ? `, draftFallbackReason=${replyPlan.draftFallbackReason}`
             : '') +
-          (input.recentInboundBatch?.length
-            ? `, inboundBatchCount=${input.recentInboundBatch.length}`
-            : ''),
+          `, inboundBatchCount=${batch.length} combinedIntentCount=${batchSummary.combinedIntentCount} ` +
+          `primaryIntent=${batchSummary.primaryIntent} secondaryIntents=${JSON.stringify(batchSummary.secondaryIntents)} ` +
+          `intentsPerMessage=${JSON.stringify(batchSummary.intentsPerMessage)} ` +
+          `replyAnsweredIntentCount=na unansweredIntentReasons=${JSON.stringify([])}`,
       );
 
       // Step 7: Persist orchestration log
@@ -439,7 +491,12 @@ export class ConversationOrchestrationService {
     input: OrchestrationInput,
     conversationId: string,
     latestIntent: ConversationIntent,
-    opts?: { retrieveQuery?: string; menuKbAnchor?: string },
+    opts?: {
+      retrieveQuery?: string;
+      menuKbAnchor?: string;
+      kbFilterIntent?: ConversationIntent;
+      kbFilterUserMessage?: string;
+    },
   ): Promise<{ chunks: RetrievalChunk[]; meta: RetrievalMeta | null }> {
     try {
       const retrieveQuery =
@@ -454,9 +511,12 @@ export class ConversationOrchestrationService {
         intentHint: latestIntent !== 'UNKNOWN' ? latestIntent : undefined,
       });
 
+      const filterIntent = opts?.kbFilterIntent ?? latestIntent;
+      const filterUserMessage = (opts?.kbFilterUserMessage ?? input.incomingMessage.messageContent ?? '').trim();
+
       const { chunks: filteredChunks, rejections } = filterKbChunksForPolicy(
-        latestIntent,
-        (input.incomingMessage.messageContent ?? '').trim(),
+        filterIntent,
+        filterUserMessage,
         result.chunks,
         { menuKbAnchor: opts?.menuKbAnchor },
       );
@@ -485,9 +545,9 @@ export class ConversationOrchestrationService {
       };
 
       this.logger.log(
-        `KB context retrieved: kbQuery=${JSON.stringify(retrieveQuery)} retrievedChunkCount=${filteredChunks.length} ` +
+        `KB context retrieved: kbQuery=${JSON.stringify(retrieveQuery.slice(0, 240))} selectedContextCount=${filteredChunks.length} retrievedChunkCount=${filteredChunks.length} ` +
           `retrievedSectionTitles=${JSON.stringify(retrievedSectionTitles)} topScores=${JSON.stringify(topScores)} ` +
-          `documentIds=${JSON.stringify(documentIds)}`,
+          `retrievedDocumentIds=${JSON.stringify(documentIds)}`,
       );
 
       return { chunks: filteredChunks, meta };
@@ -536,8 +596,9 @@ export class ConversationOrchestrationService {
     memory: { entries: MemoryEntry[] },
     systemPrompt: string,
     kbChunks: RetrievalChunk[],
+    routingInboundMessage: string,
   ): RoutingRequest {
-    const incomingMessage = input.incomingMessage.messageContent;
+    const incomingMessage = routingInboundMessage;
     const incomingMessageType = input.incomingMessage.messageType;
 
     const bookingKeywords = ['book', 'schedule', 'appointment', 'reservation', 'when', 'available'];

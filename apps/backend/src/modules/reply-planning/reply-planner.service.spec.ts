@@ -3,6 +3,7 @@ import { jest as jestGlobal } from '@jest/globals';
 import { ReplyPlannerService } from './reply-planner.service';
 import { MENU_PROMPT_NO_KB } from '../conversation-policy/policy-menu-copy';
 import { GenerationService } from '../generation/generation.service';
+import { stripLiveCustomerMarkdownForOutbound } from '../../lib/customer-facing-live-format';
 
 // Mock GenerationService to always return null → forces deterministic fallback
 jestGlobal.mock('../generation/generation.service', () => ({
@@ -62,6 +63,7 @@ describe('ReplyPlannerService', () => {
       expect(bubbles.length).toBe(1);
       expect(bubbles[0]!.text).toContain('A) Service Menu');
       expect(bubbles[0]!.text).toContain('Reply with the letter.');
+      expect(bubbles[0]!.text).toMatch(/Opening Hours\n\nReply with the letter/);
     });
 
     it('strips customer-facing Source lines before bubbling', () => {
@@ -318,13 +320,23 @@ describe('ReplyPlannerService', () => {
     });
   });
 
-  describe('stripMarkdown', () => {
-    const strip = (text: string) => (service as never)['stripMarkdown'](text);
+  describe('stripLiveCustomerMarkdownForOutbound', () => {
+    const strip = stripLiveCustomerMarkdownForOutbound;
 
-    it('removes bold', () => { expect(strip('**hello**')).toBe('hello'); });
-    it('removes italic', () => { expect(strip('*hello*')).toBe('hello'); });
-    it('removes strikethrough', () => { expect(strip('~~hello~~')).toBe('hello'); });
-    it('removes headings', () => { expect(strip('# Heading')).toBe('Heading'); });
-    it('collapses multiple blank lines', () => { expect(strip('hello\n\n\n\nworld')).toBe('hello\n\nworld'); });
+    it('removes bold', () => {
+      expect(strip('**hello**')).toBe('hello');
+    });
+    it('removes italic', () => {
+      expect(strip('*hello*')).toBe('hello');
+    });
+    it('removes strikethrough', () => {
+      expect(strip('~~hello~~')).toBe('hello');
+    });
+    it('removes headings', () => {
+      expect(strip('# Heading')).toBe('Heading');
+    });
+    it('preserves a single paragraph break (only excessive blank lines are collapsed in prepare step)', () => {
+      expect(strip('hello\n\nworld')).toBe('hello\n\nworld');
+    });
   });
 });

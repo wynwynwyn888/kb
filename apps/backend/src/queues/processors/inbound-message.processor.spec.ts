@@ -278,7 +278,7 @@ describe('InboundMessageProcessor', () => {
           insert: () => ({ error: null }),
           select: () =>
             resolvedQuery({
-              data: [{ content: 'Menu?' }, { content: 'Actually mains' }],
+              data: [{ content: 'Actually mains' }, { content: 'Menu?' }],
               error: null,
             }),
         };

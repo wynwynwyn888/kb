@@ -81,7 +81,9 @@ export class WebhooksController {
       const result = await this.webhooksService.handleGhlWebhook(payload, { smokeImmediate });
 
       if (result.duplicate) {
-        this.logger.debug(`Duplicate event acknowledged: ${result.eventId}`);
+        this.logger.log(
+          `duplicateWebhookSkipped=true duplicateReason=${result.duplicateReason ?? 'n/a'} eventId=${result.eventId ?? 'n/a'}`,
+        );
       }
 
       return {

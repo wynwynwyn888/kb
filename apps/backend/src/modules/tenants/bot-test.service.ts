@@ -8,6 +8,7 @@ import { AgencyAiConfigService } from '../agency-ai-config/agency-ai-config.serv
 import { TenantsService } from './tenants.service';
 import type { MemoryEntry } from '../orchestration/dto/memory-entry';
 import type { RetrievalChunk } from '../kb/dto/retrieval.dto';
+import { formatLiveCustomerDraftForPreview } from '../../lib/live-outbound-preview';
 
 function buildStackedSystemPrompt(
   agencyPrompt: string | null | undefined,
@@ -172,7 +173,7 @@ export class BotTestService {
     }
 
     return {
-      reply: gen.content,
+      reply: gen.content ? formatLiveCustomerDraftForPreview(gen.content) : null,
       skipReason: gen.skipReason,
       usedFallbackProvider: gen.usedFallbackProvider,
       activeProvider,

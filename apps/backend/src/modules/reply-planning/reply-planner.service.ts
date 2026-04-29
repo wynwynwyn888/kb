@@ -5,10 +5,21 @@
 // for text shape on the real queue → GHL send path (orchestration enqueues `ReplyDecision`
 // produced here). `FormatterService` (HTTP `/formatter`) is a separate optional/tooling path —
 // not invoked during send-bubble execution. Do not assume parity; see drift note on FormatterService.
+//
+// Parity: `formatLiveCustomerDraftForPreview` mirrors this pipeline **and** the outbound
+// coalescing step (`maybeCoalesceOutboundBubbles`) so Bot Test matches WhatsApp single-send
+// spacing (see live-outbound-preview.ts).
 
 import { Injectable, Logger } from '@nestjs/common';
 import { stripCustomerFacingMeta, stripModelThinking } from '@aisbp/formatter';
 import { packPlainTextIntoOutboundBubbles } from '../../lib/outbound-bubbles';
+import { maybeCoalesceOutboundBubbles } from '../../lib/outbound-coalesce';
+import {
+  newlineDebugMetrics,
+  prepareCustomerFacingPlainTextForOutboundSplit,
+  previewWithVisibleNewlines,
+  stripLiveCustomerMarkdownForOutbound,
+} from '../../lib/customer-facing-live-format';
 import { polishKbSnippetForCustomer } from '../../lib/kb-faq-customer-text';
 import { applyBusinessHoursGroundingGuard } from '../../lib/business-hours-grounding-guard';
 import { applyMenuKbGroundingGuard } from '../../lib/menu-kb-grounding-guard';
@@ -37,6 +48,13 @@ export interface ReplyPlanPolicyContext {
   menuSelectionActive: boolean;
   /** Latest inbound customer text (for hours/meal grounding). */
   latestUserMessage?: string;
+  /** Debounced batch: blank-line joined lines for one model user turn (live only). */
+  combinedHumanMessagesText?: string;
+  inboundBatchCount?: number;
+  batchPrimaryIntent?: ConversationIntent;
+  batchSecondaryIntents?: ConversationIntent[];
+  repeatedHumanTextDetected?: boolean;
+  repeatedHumanTextAction?: 'none' | 'answer_again' | 'concise_confirm';
 }
 
 @Injectable()
@@ -105,6 +123,13 @@ export class ReplyPlannerService {
       });
       const afterKbLeak = sanitizeOutboundInternalKbLeak(afterHours, policyContext!.latestIntent, kbChunks);
       const bubbles = this.formatIntoBubbles(afterKbLeak);
+      this.logLiveWhitespaceDebug({
+        rawDraft: afterKbLeak,
+        bubbles,
+        latestUserMessage: policyContext?.latestUserMessage,
+        combinedHumanMessagesText: policyContext?.combinedHumanMessagesText,
+        inboundBatchCount: policyContext?.inboundBatchCount,
+      });
       const suggestedActions = this.suggestActions(routing, kbChunks);
       return {
         planStatus: 'PLANNED',
@@ -155,6 +180,13 @@ export class ReplyPlannerService {
       kbChunks,
     );
     const bubbles = this.formatIntoBubbles(afterKbLeak);
+    this.logLiveWhitespaceDebug({
+      rawDraft: afterKbLeak,
+      bubbles,
+      latestUserMessage: policyContext?.latestUserMessage,
+      combinedHumanMessagesText: policyContext?.combinedHumanMessagesText,
+      inboundBatchCount: policyContext?.inboundBatchCount,
+    });
 
     // ---------- Suggest actions ----------
     const suggestedActions = this.suggestActions(routing, kbChunks);
@@ -248,15 +280,31 @@ export class ReplyPlannerService {
     fallbackUsed?: boolean;
   }> {
     const lastUser = [...memory].reverse().find(m => m.role === 'user');
-    const incomingMessage = lastUser?.content?.trim() ?? '';
+    const lastLine = lastUser?.content?.trim() ?? '';
+    const combined = policyContext?.combinedHumanMessagesText?.trim();
+    const batchCount = policyContext?.inboundBatchCount ?? 0;
+    let incomingForGen = combined && combined.length > 0 ? combined : lastLine;
+    if (batchCount > 1 && (!incomingForGen || incomingForGen === lastLine)) {
+      const users = [...memory].reverse().filter(m => m.role === 'user').slice(0, batchCount).reverse();
+      const stitched = users.map(u => (u.content ?? '').trim()).filter(Boolean).join('\n\n');
+      if (stitched.length > 0) incomingForGen = stitched;
+    }
+
+    const handling: 'none' | 'concise_repeat' | 'confirm_echo' =
+      policyContext?.repeatedHumanTextAction === 'concise_confirm'
+        ? 'confirm_echo'
+        : policyContext?.repeatedHumanTextAction === 'answer_again'
+          ? 'concise_repeat'
+          : 'none';
 
     const liveDraft = await this.generationService.generateDraft({
       tenantId,
-      incomingMessage,
+      incomingMessage: incomingForGen,
       systemPrompt,
       memory,
       kbContext: kbChunks,
       routingRecommendedModel: routing.recommendedModel ?? '',
+      ...(batchCount > 1 ? { inboundBatchUserLineCount: batchCount } : {}),
       ...(subaccountTemperature != null && Number.isFinite(subaccountTemperature)
         ? { temperature: subaccountTemperature }
         : {}),
@@ -270,6 +318,8 @@ export class ReplyPlannerService {
               resolvedSelection: policyContext.resolvedSelection,
               conversationStateSummary: policyContext.conversationStateSummary,
               menuSelectionActive: policyContext.menuSelectionActive,
+              ...(batchCount > 1 ? { combinedInboundMessageCount: batchCount } : {}),
+              ...(handling !== 'none' ? { repeatedCustomerMessageHandling: handling } : {}),
             },
           }
         : {}),
@@ -353,31 +403,51 @@ export class ReplyPlannerService {
    * Canonical outbound bubble shaping for live sends: this is what enqueue → GHL uses.
    * Rules:
    * - `stripModelThinking` + `stripCustomerFacingMeta` (no citation/debug lines to customers)
-   * - Local `stripMarkdown` (regex-based)
-   * - `packPlainTextIntoOutboundBubbles`: ≤500 chars → one bubble; longer → pack sections
-   *   up to ~520 chars each, at most 3 bubbles (sentence split only when needed)
+   * - `stripLiveCustomerMarkdownForOutbound` (regex-based; preserves paragraph breaks)
+   * - `prepareCustomerFacingPlainTextForOutboundSplit` then `packPlainTextIntoOutboundBubbles`
    * Not the same as `FormatterService` / `@aisbp/formatter` (see FormatterService drift doc).
    */
   private formatIntoBubbles(text: string): ReplyBubbleDraft[] {
-    const stripped = this.stripMarkdown(
+    const stripped = stripLiveCustomerMarkdownForOutbound(
       stripCustomerFacingMeta(stripModelThinking(text)),
     );
-    return packPlainTextIntoOutboundBubbles(stripped);
+    const prepared = prepareCustomerFacingPlainTextForOutboundSplit(stripped);
+    return packPlainTextIntoOutboundBubbles(prepared);
   }
 
-  private stripMarkdown(text: string): string {
-    return text
-      .replace(/\*\*(.+?)\*\*/g, '$1')  // bold
-      .replace(/\*(.+?)\*/g, '$1')       // italic
-      .replace(/__(.+?)__/g, '$1')       // underline
-      .replace(/~~(.+?)~~/g, '$1')       // strikethrough
-      .replace(/#{1,6}\s+(.+)/g, '$1')  // headings
-      .replace(/`(.+?)`/g, '$1')         // inline code
-      .replace(/\[(.+?)\]\(.+?\)/g, '$1') // links
-      .replace(/^\s*[-*+]\s+/gm, '')      // list bullets
-      .replace(/^\s*\d+\.\s+/gm, '')     // ordered list numbers
-      .replace(/\n{3,}/g, '\n\n')        // collapse multiple blank lines
-      .trim();
+  private logLiveWhitespaceDebug(opts: {
+    rawDraft: string;
+    bubbles: ReplyBubbleDraft[];
+    latestUserMessage?: string;
+    combinedHumanMessagesText?: string;
+    inboundBatchCount?: number;
+  }): void {
+    const rawM = newlineDebugMetrics(opts.rawDraft);
+    const joined = opts.bubbles.map(b => b.text).join('\n\n');
+    const planM = newlineDebugMetrics(joined);
+    const physical = maybeCoalesceOutboundBubbles(opts.bubbles.map(b => ({ index: b.index, text: b.text })));
+    const phyJoined = physical.map(b => b.text).join('\n\n');
+    const phyM = newlineDebugMetrics(phyJoined);
+    const probeText = `${opts.combinedHumanMessagesText ?? ''}\n${opts.latestUserMessage ?? ''}`;
+    const menuish = /\bmenu\b/i.test(probeText);
+    const preview = previewWithVisibleNewlines(phyJoined, 420);
+    const line =
+      `liveOutboundWhitespace: rawDraftNewlines=${rawM.newlineCount} rawDraftDoubleNl=${rawM.doubleNewlineSeqCount} ` +
+      `plannedBubbleNewlines=${planM.newlineCount} plannedBubbleDoubleNl=${planM.doubleNewlineSeqCount} ` +
+      `plannedPhysicalOutboundNewlines=${phyM.newlineCount} plannedPhysicalOutboundDoubleNl=${phyM.doubleNewlineSeqCount} ` +
+      `logicalBubbleCount=${opts.bubbles.length} physicalOutboundPlanCount=${physical.length} inboundBatchCount=${opts.inboundBatchCount ?? 1} ` +
+      `menuishProbe=${menuish} ` +
+      `finalOutboundPreview=${JSON.stringify(preview)}`;
+    const forceLog =
+      menuish ||
+      opts.bubbles.length > 1 ||
+      physical.length < opts.bubbles.length ||
+      (opts.inboundBatchCount ?? 0) > 1;
+    if (forceLog) {
+      this.logger.log(line);
+    } else {
+      this.logger.debug(line);
+    }
   }
 
   private suggestActions(

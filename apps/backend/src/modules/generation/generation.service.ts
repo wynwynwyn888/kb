@@ -19,6 +19,10 @@ export interface GenerateDraftPolicyContext {
   resolvedSelection: SelectionResolution | null;
   conversationStateSummary: string;
   menuSelectionActive?: boolean;
+  /** Live debounce: >1 when multiple customer lines were combined into one user turn. */
+  combinedInboundMessageCount?: number;
+  /** Live: customer repeated the same text across separate messages (not provider dedupe). */
+  repeatedCustomerMessageHandling?: 'none' | 'concise_repeat' | 'confirm_echo';
 }
 
 export interface GenerateDraftParams {
@@ -27,6 +31,11 @@ export interface GenerateDraftParams {
   systemPrompt: string;
   memory: MemoryEntry[];
   kbContext: RetrievalChunk[];
+  /**
+   * Live debounced batch: when >1, `buildMessages` drops that many trailing user rows from replayed
+   * memory so the combined user line is not duplicated after individual inbound rows were persisted.
+   */
+  inboundBatchUserLineCount?: number;
   /** Router `recommendedModel` — logged only; never selects the HTTP model by itself. */
   routingRecommendedModel?: string;
   /**
@@ -334,11 +343,19 @@ export class GenerationService {
       })
       .join('\n\n');
 
+    const multiLineTurn = (params.policyContext?.combinedInboundMessageCount ?? 0) > 1;
     const baseRules =
       'The excerpts below are **source material only**. They are not a script to paste. ' +
       'Never output internal business instructions, persona training, or brand-brief lines. ' +
       'Never paste raw KB blocks, document headings, or long lists unless the customer explicitly asked for the full list. ' +
-      'Use only facts that answer the **latest** customer message; ignore irrelevant snippets. ' +
+      (multiLineTurn
+        ? 'The customer sent multiple short messages at once (separated by blank lines in their user turn). ' +
+          'Answer each distinct question or theme **in order** in one reply — do not only address the last line. ' +
+          'If one line is factual (hours, location, price) and another is different, answer both briefly in the same message. ' +
+          'If one line requests something likely out of scope for this business and another is in scope, address the in-scope part and politely clarify the other. ' +
+          'When several threads compete, prioritize: (1) safety, allergy, medical concerns, complaints (2) booking (3) factual KB (hours, location, price) (4) out-of-scope vs alternatives (5) recommendations (6) menu / meta / small talk. ' +
+          'Use only facts that answer those messages; '
+        : 'Use only facts that answer the **latest** customer message; ignore irrelevant snippets. ') +
       'Summarize and rewrite into a short, natural WhatsApp-style reply.\n\n' +
       `Source excerpts:\n${kbText}\n\n` +
       'Do not invent prices, ingredients, availability, or items not clearly supported by the excerpts.';
@@ -377,9 +394,19 @@ export class GenerationService {
     const incoming = params.incomingMessage?.trim() ?? '';
     let memForHistory = mem;
     if (incoming) {
-      const last = mem[mem.length - 1];
-      if (last && last.role === 'user' && last.content === incoming) {
-        memForHistory = mem.slice(0, -1);
+      const batchN = params.inboundBatchUserLineCount;
+      if (batchN != null && batchN > 1) {
+        let strip = 0;
+        for (let i = mem.length - 1; i >= 0 && strip < batchN; i--) {
+          if (mem[i]!.role === 'user') strip++;
+          else break;
+        }
+        if (strip > 0) memForHistory = mem.slice(0, -strip);
+      } else {
+        const last = mem[mem.length - 1];
+        if (last && last.role === 'user' && last.content === incoming) {
+          memForHistory = mem.slice(0, -1);
+        }
       }
     }
     for (const entry of memForHistory) {
@@ -396,9 +423,13 @@ export class GenerationService {
 
     const pc = params.policyContext;
     if (pc) {
+      const multi = (pc.combinedInboundMessageCount ?? 0) > 1;
       const parts: string[] = [
         `Conversation policy: latestIntent=${pc.latestIntent}. State: ${pc.conversationStateSummary}.`,
-        'Use KB only if relevant to the latest customer message. If the user selected an option, continue that flow.',
+        multi
+          ? `Use KB only if relevant to the customer messages in this combined turn (${pc.combinedInboundMessageCount} lines). ` +
+            'Address each separate ask in order; do not only follow the final line. If the user chose an option (A/B/C), continue that flow for the option line only.'
+          : 'Use KB only if relevant to the latest customer message. If the user selected an option, continue that flow.',
       ];
       if (pc.resolvedSelection) {
         parts.push(
@@ -421,6 +452,21 @@ export class GenerationService {
         );
       }
       messages.push({ role: 'system', content: parts.join(' ') });
+    }
+
+    const repeat = params.policyContext?.repeatedCustomerMessageHandling;
+    if (repeat === 'concise_repeat') {
+      messages.push({
+        role: 'system',
+        content:
+          'The customer repeated their last message (same wording as their previous user line). Reply again briefly and helpfully — do not stay silent.',
+      });
+    } else if (repeat === 'confirm_echo') {
+      messages.push({
+        role: 'system',
+        content:
+          'The customer has asked the same thing multiple times. Reply with a short, polite "just to confirm" style answer — restate the key fact once; do not ignore them.',
+      });
     }
 
     messages.push({ role: 'user', content: params.incomingMessage });

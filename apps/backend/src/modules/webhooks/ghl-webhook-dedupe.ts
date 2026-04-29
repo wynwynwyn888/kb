@@ -1,66 +1,50 @@
 import { createHash } from 'crypto';
 import type { GhlWebhookPayload } from './dto/ghl-webhook.payload';
 
-/** Fingerprint inbound body so tier-2 keys differ when GHL omits message id but reuses timestamp. */
-export function fingerprintInboundMessage(message: string | undefined): string {
-  const m = (message ?? '').trim();
-  if (!m) return 'nomsg';
-  return createHash('sha256').update(m, 'utf8').digest('hex').slice(0, 20);
+/** How duplicate detection was derived (for logs only). */
+export type GhlInboundDedupeReason = 'provider_event_id' | 'provider_payload_hash';
+
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== 'object') {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map(v => stableStringify(v)).join(',')}]`;
+  }
+  const o = value as Record<string, unknown>;
+  const keys = Object.keys(o).sort();
+  return `{${keys.map(k => `${JSON.stringify(k)}:${stableStringify(o[k])}`).join(',')}}`;
+}
+
+function hashPayload(payload: GhlWebhookPayload): string {
+  return createHash('sha256').update(stableStringify(payload), 'utf8').digest('hex').slice(0, 40);
 }
 
 /**
- * Tier 1: data.id (GHL message id).
- * Tier 2: location + conversation/contact + event + timestamp + **message fingerprint** (fixes workflow duplicate false positives).
- * Tier 3: hash of sparse fields (unchanged shape, message already in hash).
+ * Tier 1: `data.id` (GHL message id) — duplicate **provider delivery** of the same message.
+ * Tier 2+: stable hash of the **entire** normalized webhook JSON — identical byte-level replay
+ * dedupes; same human text at a different time (different timestamp / envelope) is **not**
+ * deduped. Never dedupe on message body alone.
  */
 export function extractGhlInboundDedupeKeys(payload: GhlWebhookPayload): {
   externalEventId: string;
   dedupeKey: string;
+  dedupeReason: GhlInboundDedupeReason;
 } {
   const data = payload.data || {};
-  const msgFp = fingerprintInboundMessage(data.message);
 
   if (data.id) {
     return {
       externalEventId: data.id,
       dedupeKey: `tier1:${data.id}`,
+      dedupeReason: 'provider_event_id',
     };
   }
 
-  const locationId = payload.locationId;
-  const conversationId = data.conversationId;
-  const contactId = data.contactId;
-  const eventType = payload.event;
-  const timestamp = payload.timestamp;
-
-  if (conversationId) {
-    const tier2Key = `GHL|${locationId}|${conversationId}|${eventType}|${timestamp}|${msgFp}`;
-    return {
-      externalEventId: tier2Key,
-      dedupeKey: `tier2:${tier2Key}`,
-    };
-  }
-
-  if (contactId) {
-    const tier2Key = `GHL|${locationId}|${contactId}|${eventType}|${timestamp}|${msgFp}`;
-    return {
-      externalEventId: tier2Key,
-      dedupeKey: `tier2:${tier2Key}`,
-    };
-  }
-
-  const components = [
-    locationId,
-    conversationId || '',
-    data.message || '',
-    data.messageType || '',
-    timestamp,
-  ].join('|');
-
-  const hash = createHash('sha256').update(components, 'utf8').digest('hex').substring(0, 32);
-
+  const h = hashPayload(payload);
   return {
-    externalEventId: hash,
-    dedupeKey: `tier3:${hash}`,
+    externalEventId: `GHL|payload|${h}`,
+    dedupeKey: `tier2:${h}`,
+    dedupeReason: 'provider_payload_hash',
   };
 }

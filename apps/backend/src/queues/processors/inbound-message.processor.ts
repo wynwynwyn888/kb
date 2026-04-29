@@ -15,6 +15,10 @@ import type { NormalizedWebhookPayload } from '../../modules/webhooks/dto/ghl-we
 import { bumpInboundDebounceMeta, shouldSkipStaleDebounceJob } from '../../lib/inbound-debounce';
 import { classifyConversationIntent } from '../../modules/conversation-policy/conversation-intent';
 import { deriveConversationIdentity } from '../../lib/conversation-identity';
+import {
+  INBOUND_DEBOUNCE_MS,
+  filterInboundRowsToBurstWindow,
+} from '../../lib/inbound-burst-batch';
 
 export interface InboundMessageJobData {
   locationId: string;
@@ -38,7 +42,7 @@ export interface OrchestrateDebouncedJobData {
   webhookEventId?: string;
 }
 
-const DEBOUNCE_MS = 5000;
+const DEBOUNCE_MS = INBOUND_DEBOUNCE_MS;
 
 @Processor(QUEUES.INBOUND_MESSAGE_PROCESSOR)
 @Injectable()
@@ -200,11 +204,12 @@ export class InboundMessageProcessor extends WorkerHost {
     const latestText = recentBatch.length ? recentBatch[recentBatch.length - 1]! : '';
 
     const latestIntent = latestText ? classifyConversationIntent(latestText) : 'UNKNOWN';
-    const combinedText = recentBatch.join(' ').trim();
+    const combinedText = recentBatch.join('\n\n').trim();
     this.logger.log(
-      `Debounce processing batch: conversationId=${conversationId}, messageCount=${recentBatch.length}, ` +
-        `latestIntent=${latestIntent}, combinedTextPreviewLen=${combinedText.length}, ` +
-        `inboundBatchCount=${recentBatch.length}`,
+      `Debounce processing batch: conversationId=${conversationId}, inboundBatchCount=${recentBatch.length}, ` +
+        `uniqueProviderMessageCount=${new Set(recentBatch).size}, latestIntent=${latestIntent}, ` +
+        `orderedMessagesPreview=${JSON.stringify(recentBatch.map(t => t.slice(0, 100)))} ` +
+        `combinedTextPreviewLen=${combinedText.length}`,
     );
 
     await this.executeOrchestrationPipeline({
@@ -307,10 +312,10 @@ export class InboundMessageProcessor extends WorkerHost {
       .eq('conversation_id', conversationId)
       .eq('direction', 'INBOUND')
       .eq('sender', 'CONTACT')
-      .order('created_at', { ascending: true })
-      .limit(25);
+      .order('created_at', { ascending: false })
+      .limit(50);
     if (error || !data?.length) return [];
-    return data.map(r => String(r.content ?? '').trim()).filter(Boolean);
+    return filterInboundRowsToBurstWindow(data as { created_at: string; content?: string | null }[]);
   }
 
   private async findTenantByLocationId(locationId: string): Promise<{ id: string } | null> {

@@ -35,7 +35,13 @@ export class WebhooksService {
   async handleGhlWebhook(
     payload: GhlWebhookPayload,
     opts?: { smokeImmediate?: boolean },
-  ): Promise<{ success: boolean; eventId?: string; duplicate?: boolean }> {
+  ): Promise<{
+    success: boolean;
+    eventId?: string;
+    duplicate?: boolean;
+    /** When duplicate=true: why the skip matched (never `text_only` — body-only dedupe is not used). */
+    duplicateReason?: 'provider_event_id' | 'provider_payload_hash';
+  }> {
     // Validate required top-level fields
     if (!payload.locationId || !payload.event) {
       throw new BadRequestException(
@@ -43,8 +49,7 @@ export class WebhooksService {
       );
     }
 
-    // Extract dedupe key (Tier 1 → 2 → 3); tier-2 includes message fingerprint when id is missing
-    const { externalEventId, dedupeKey } = extractGhlInboundDedupeKeys(payload);
+    const { externalEventId, dedupeKey, dedupeReason } = extractGhlInboundDedupeKeys(payload);
 
     // Identify tenant and verify active connection
     const tenantConnection = await this.findTenantByLocationId(
@@ -66,10 +71,15 @@ export class WebhooksService {
     );
 
     if (existingEvent) {
-      this.logger.debug(
-        `Duplicate webhook event detected: ${externalEventId}`,
+      this.logger.log(
+        `duplicateWebhookSkipped=true duplicateReason=${dedupeReason} externalEventId=${JSON.stringify(String(externalEventId).slice(0, 120))}`,
       );
-      return { success: true, eventId: existingEvent.id, duplicate: true };
+      return {
+        success: true,
+        eventId: existingEvent.id,
+        duplicate: true,
+        duplicateReason: dedupeReason,
+      };
     }
 
     // Normalize payload to internal shape

@@ -3,52 +3,15 @@
  * Used by ReplyPlannerService (orchestration → queue → GHL).
  */
 
+import { prepareCustomerFacingPlainTextForOutboundSplit } from './customer-facing-live-format';
+
 const ONE_BUBBLE_UNDER = 500;
 const BUBBLE_PACK_TARGET = 520;
 const MAX_OUTBOUND_BUBBLES = 3;
 const HARD_BUBBLE_CAP = 3600;
 
-/**
- * Collapse excessive paragraph breaks for short bodies so list items stay in one message.
- */
-export function normalizeShortMultilineBody(text: string): string {
-  const trimmed = text.trim();
-  if (!trimmed) return '';
-
-  const paragraphs = trimmed
-    .split(/\n\s*\n/)
-    .map(p => p.trim())
-    .filter(p => p.length > 0);
-
-  if (paragraphs.length <= 1) return trimmed;
-
-  const joinedLen =
-    paragraphs.reduce((acc, p) => acc + p.length, 0) + (paragraphs.length - 1) * 2;
-  if (joinedLen > ONE_BUBBLE_UNDER + 120) return trimmed;
-
-  const listLike = (p: string) =>
-    /^[A-Za-z]\)\s/.test(p) || /^\d+[\).]\s/.test(p) || /^[-•*]\s/.test(p);
-
-  if (paragraphs.every(listLike)) {
-    return paragraphs.join('\n');
-  }
-
-  const [first, ...rest] = paragraphs;
-  if (
-    rest.length > 0 &&
-    rest.every(listLike) &&
-    first != null &&
-    !listLike(first)
-  ) {
-    return `${first}\n\n${rest.join('\n')}`;
-  }
-
-  if (paragraphs.every(p => p.length <= 140)) {
-    return paragraphs.join('\n');
-  }
-
-  return trimmed;
-}
+/** @deprecated Prefer `prepareCustomerFacingPlainTextForOutboundSplit` — kept for existing imports/tests. */
+export const normalizeShortMultilineBody = prepareCustomerFacingPlainTextForOutboundSplit;
 
 function chunkByChar(text: string, maxChars: number): string[] {
   const chunks: string[] = [];
@@ -110,7 +73,7 @@ function mergeDownToMaxBubbles(parts: string[], maxBubbles: number): string[] {
  * Greedy-pack sections into bubbles ≤ BUBBLE_PACK_TARGET; at most MAX_OUTBOUND_BUBBLES.
  */
 export function packPlainTextIntoOutboundBubbles(text: string): Array<{ index: number; text: string }> {
-  const body = normalizeShortMultilineBody(text);
+  const body = prepareCustomerFacingPlainTextForOutboundSplit(text);
   if (!body) return [];
 
   if (body.length <= ONE_BUBBLE_UNDER) {

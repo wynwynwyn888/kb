@@ -11,7 +11,9 @@ import { formatPostgrestError } from '../../lib/format-postgrest-error';
 import { getSupabaseService } from '../../lib/supabase';
 import { createGhlClient } from '@aisbp/ghl-client';
 import { sanitizeOutboundCustomerText } from '../../lib/outbound-customer-text';
-import { decrypt, safeLog } from '../../lib/encryption';
+import { maybeCoalesceOutboundBubbles } from '../../lib/outbound-coalesce';
+import { newlineDebugMetrics, previewWithVisibleNewlines } from '../../lib/customer-facing-live-format';
+import { decrypt } from '../../lib/encryption';
 import type { ReplyDecision, ReplyBubbleDraft } from '../reply-planning/dto';
 
 export interface BubbleSendResult {
@@ -118,25 +120,41 @@ export class OutboundSendService {
       };
     }
 
-    // Send bubbles sequentially
+    const logicalBubbleCount = replyPlan.bubbles.length;
+    const sanitizedBubbles = replyPlan.bubbles.map(b => ({
+      index: b.index,
+      text: sanitizeOutboundCustomerText(b.text),
+    }));
+    const physicalBubbles = maybeCoalesceOutboundBubbles(sanitizedBubbles);
+    const coalesced = physicalBubbles.length < logicalBubbleCount;
+
+    const payloadJoined = physicalBubbles.map(b => b.text).join('\n\n');
+    const payM = newlineDebugMetrics(payloadJoined);
+    this.logger.log(
+      `liveOutboundWhitespace: logicalBubbleCount=${logicalBubbleCount} physicalOutboundBubbleCount=${physicalBubbles.length} ` +
+        `outboundCoalesced=${coalesced} outboundPayloadNewlines=${payM.newlineCount} outboundPayloadDoubleNl=${payM.doubleNewlineSeqCount} ` +
+        `finalOutboundPreview=${JSON.stringify(previewWithVisibleNewlines(payloadJoined, 500))} ` +
+        `conversationId=${conversationId}`,
+    );
+
+    const ghlClient = createGhlClient(credentials.token, ghlLocationId);
     const bubbleResults: BubbleSendResult[] = [];
     let succeeded = 0;
     let failed = 0;
-    const ghlClient = createGhlClient(credentials.token, ghlLocationId);
 
-    for (const bubble of replyPlan.bubbles) {
-      const outboundText = sanitizeOutboundCustomerText(bubble.text);
+    for (let i = 0; i < physicalBubbles.length; i++) {
+      const bubble = physicalBubbles[i]!;
+      const outboundText = bubble.text;
       const result = await this.sendSingleBubble(ghlClient, {
         locationId: ghlLocationId,
         contactId,
-        bubble: { ...bubble, text: outboundText },
+        bubble: { index: bubble.index, text: outboundText },
       });
 
       bubbleResults.push(result);
 
       if (result.success) {
         succeeded++;
-        // Persist outbound message record
         await this.persistOutboundMessage({
           conversationId,
           tenantId,
@@ -145,30 +163,40 @@ export class OutboundSendService {
           contentType: 'TEXT',
           ghlMessageId: result.ghlMessageId,
         });
-        // Debit quota for this bubble
-        await this.debitQuota(tenantId, 1, conversationId);
+        if (!coalesced) {
+          await this.debitQuota(tenantId, 1, conversationId);
+        }
       } else {
         failed++;
         this.logger.warn(
-          `Bubble[${bubble.index}] send failed for conversation=${conversationId}: ${result.error}`,
+          `Outbound bubble[${bubble.index}] send failed for conversation=${conversationId}: ${result.error}`,
         );
-        // Do NOT persist failed sends or debit quota for them
       }
     }
 
+    let quotaDebited = 0;
+    if (coalesced) {
+      if (succeeded === physicalBubbles.length && physicalBubbles.length > 0) {
+        await this.debitQuota(tenantId, logicalBubbleCount, conversationId);
+        quotaDebited = logicalBubbleCount;
+      }
+    } else {
+      quotaDebited = succeeded;
+    }
+
     this.logger.log(
-      `Outbound send completed: conversationId=${conversationId}, total=${replyPlan.bubbles.length}, ` +
-      `succeeded=${succeeded}, failed=${failed}`,
+      `Outbound send completed: conversationId=${conversationId}, logicalBubbles=${logicalBubbleCount}, ` +
+        `physicalSends=${physicalBubbles.length}, succeeded=${succeeded}, failed=${failed}, quotaDebited=${quotaDebited}`,
     );
 
     return {
       conversationId,
       tenantId,
-      totalBubbles: replyPlan.bubbles.length,
+      totalBubbles: logicalBubbleCount,
       succeeded,
       failed,
       bubbleResults,
-      quotaDebited: succeeded, // 1 unit per bubble sent
+      quotaDebited,
     };
   }
 

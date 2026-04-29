@@ -123,6 +123,8 @@ export class ConversationsController {
       source: 'dashboard',
     });
 
+    await this.conversationResetService.clearHandoverAfterAllowedReset(conversation.id, conversation.tenantId);
+
     const plan = this.conversationResetService.buildConfirmationReplyPlan();
     await this.sendBubbleQueue.add('send-bubble', {
       conversationId: conversation.id,

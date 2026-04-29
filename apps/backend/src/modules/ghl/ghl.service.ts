@@ -12,7 +12,7 @@ import { randomUUID } from 'node:crypto';
 import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { getSupabaseService } from '../../lib/supabase';
 import { decrypt, encrypt, maskToken, safeLog } from '../../lib/encryption';
-import { createGhlClient, GhlConnectionStatus } from '@aisbp/ghl-client';
+import { createGhlClient, GhlConnectionStatus, type GhlClient } from '@aisbp/ghl-client';
 
 export interface SaveConnectionDto {
   ghlLocationId: string;
@@ -326,6 +326,44 @@ export class GhlService {
     if (error) {
       throw new BadRequestException('Failed to delete connection');
     }
+  }
+
+  /**
+   * Ensure the profile may access the tenant (tenant user or same-agency user). Throws 403 if not.
+   */
+  async ensureTenantAccessOrThrow(tenantId: string, profileId: string): Promise<void> {
+    const ok = await this.checkTenantAccess(tenantId, profileId);
+    if (!ok) {
+      throw new ForbiddenException('Access denied to this tenant');
+    }
+  }
+
+  /**
+   * Authenticated GHL client for subaccount automation (calendars, tags).
+   * Requires a CONNECTED tenant_ghl_connections row and a decryptable token.
+   */
+  async createGhlClientForConnectedTenantOrThrow(
+    tenantId: string,
+    profileId: string,
+  ): Promise<{ client: GhlClient; ghlLocationId: string }> {
+    await this.ensureTenantAccessOrThrow(tenantId, profileId);
+
+    const { data: existing, error } = await this.supabase
+      .from('tenant_ghl_connections')
+      .select('*')
+      .eq('tenant_id', tenantId)
+      .single();
+
+    if (error || !existing) {
+      throw new BadRequestException('No GHL connection found for this tenant');
+    }
+    if (existing.status !== 'CONNECTED') {
+      throw new BadRequestException('GHL integration is not connected');
+    }
+
+    const plaintextToken = this.decryptGhlTokenOrThrow(String(existing.private_token_encrypted));
+    const client = createGhlClient(plaintextToken, existing.ghl_location_id);
+    return { client, ghlLocationId: existing.ghl_location_id };
   }
 
   /**

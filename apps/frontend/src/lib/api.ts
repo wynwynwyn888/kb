@@ -373,6 +373,112 @@ export async function deleteGhlConnection(token: string, tenantId: string): Prom
   await apiRequest<void>(`/tenants/${tenantId}/ghl/connection`, { token, method: 'DELETE' });
 }
 
+// Subaccount automation — booking + intent tags (Milestone 1)
+export type TenantBookingMode = 'COLLECT_DETAILS_ONLY' | 'CHECK_AVAILABILITY' | 'BOOK_AFTER_CONFIRMATION';
+
+export interface TenantBookingSettings {
+  enabled: boolean;
+  bookingMode: TenantBookingMode;
+  defaultGhlCalendarId: string | null;
+  defaultGhlCalendarName: string | null;
+  requiredFieldsJson: string[];
+}
+
+export interface GhlCalendarOption {
+  id: string;
+  name: string;
+}
+
+export interface IntentTagRule {
+  intentKey: string;
+  tagName: string;
+  enabled: boolean;
+  triggerMode: 'AUTO' | 'OFF';
+}
+
+export async function getTenantBookingSettings(token: string, tenantId: string): Promise<TenantBookingSettings> {
+  return apiRequest<TenantBookingSettings>(`/tenants/${tenantId}/booking-settings`, { token });
+}
+
+export async function patchTenantBookingSettings(
+  token: string,
+  tenantId: string,
+  patch: Partial<{
+    enabled: boolean;
+    bookingMode: TenantBookingMode;
+    defaultGhlCalendarId: string | null;
+    defaultGhlCalendarName: string | null;
+    requiredFieldsJson: string[];
+  }>,
+): Promise<TenantBookingSettings> {
+  return apiRequest<TenantBookingSettings>(`/tenants/${tenantId}/booking-settings`, {
+    token,
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  });
+}
+
+export async function syncTenantCalendars(
+  token: string,
+  tenantId: string,
+): Promise<{ calendars: GhlCalendarOption[]; syncedAt: string; error?: string }> {
+  return apiRequest(`/tenants/${tenantId}/booking-settings/sync-calendars`, { token, method: 'POST' });
+}
+
+export async function testTenantBookingCalendar(
+  token: string,
+  tenantId: string,
+): Promise<{ ok: boolean; calendarId: string | null; message: string; calendars?: GhlCalendarOption[] }> {
+  return apiRequest(`/tenants/${tenantId}/booking-settings/test-calendar`, { token, method: 'POST' });
+}
+
+export async function testTenantBookingSlots(
+  token: string,
+  tenantId: string,
+  body?: { startDate?: string; endDate?: string; timezone?: string },
+): Promise<{ slots: { startTime: string; endTime: string }[]; calendarId: string | null; error?: string }> {
+  return apiRequest(`/tenants/${tenantId}/booking-settings/test-slots`, {
+    token,
+    method: 'POST',
+    body: body ? JSON.stringify(body) : JSON.stringify({}),
+  });
+}
+
+export async function getIntentTagRules(token: string, tenantId: string): Promise<{ rules: IntentTagRule[] }> {
+  return apiRequest(`/tenants/${tenantId}/intent-tag-rules`, { token });
+}
+
+export async function patchIntentTagRules(
+  token: string,
+  tenantId: string,
+  rules: IntentTagRule[],
+): Promise<{ rules: IntentTagRule[] }> {
+  return apiRequest(`/tenants/${tenantId}/intent-tag-rules`, {
+    token,
+    method: 'PATCH',
+    body: JSON.stringify({ rules }),
+  });
+}
+
+export async function syncTenantGhlTags(
+  token: string,
+  tenantId: string,
+): Promise<{ tags: { id?: string; name: string }[]; syncedAt: string; error?: string }> {
+  return apiRequest(`/tenants/${tenantId}/intent-tag-rules/sync-tags`, { token, method: 'POST' });
+}
+
+export async function testIntentTagOnContact(
+  token: string,
+  tenantId: string,
+  body: { contactId: string; tagName: string },
+): Promise<{ success: boolean; message?: string; error?: string }> {
+  return apiRequest(`/tenants/${tenantId}/intent-tag-rules/test-tag`, {
+    token,
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
 // Conversations
 export async function getConversations(
   token: string,

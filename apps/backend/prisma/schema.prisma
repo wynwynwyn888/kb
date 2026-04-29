@@ -111,10 +111,57 @@ model Tenant {
   webhookEvents  WebhookEvent[]
   orchestrationLogs OrchestrationLog[]
   quotaAuditLogs    QuotaAuditLog[]
+  bookingSettings   TenantBookingSettings?
+  intentTagRules    TenantIntentTagRule[]
 
   @@unique([ghlLocationId])
   @@index([agencyId])
   @@map("tenants")
+}
+
+enum BookingMode {
+  COLLECT_DETAILS_ONLY
+  CHECK_AVAILABILITY
+  BOOK_AFTER_CONFIRMATION
+}
+
+enum IntentTagTriggerMode {
+  AUTO
+  OFF
+}
+
+/// Subaccount automation: default GHL calendar + required booking fields (Milestone 1 — settings only).
+model TenantBookingSettings {
+  tenantId               String      @id @map("tenant_id")
+  enabled                Boolean     @default(false)
+  bookingMode            BookingMode @default(COLLECT_DETAILS_ONLY) @map("booking_mode")
+  defaultGhlCalendarId   String?    @map("default_ghl_calendar_id")
+  defaultGhlCalendarName   String?    @map("default_ghl_calendar_name")
+  requiredFieldsJson     Json        @default("[]") @map("required_fields_json")
+  createdAt              DateTime    @default(now()) @map("created_at")
+  updatedAt              DateTime    @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("tenant_booking_settings")
+}
+
+/// MVP intent → GHL tag mapping; executor uses enabled AUTO rules only (later milestones).
+model TenantIntentTagRule {
+  id           String               @id @default(uuid())
+  tenantId     String               @map("tenant_id")
+  intentKey    String               @map("intent_key")
+  tagName      String               @map("tag_name")
+  enabled      Boolean              @default(false)
+  triggerMode  IntentTagTriggerMode @default(OFF) @map("trigger_mode")
+  createdAt    DateTime             @default(now()) @map("created_at")
+  updatedAt    DateTime             @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, intentKey])
+  @@index([tenantId])
+  @@map("tenant_intent_tag_rules")
 }
 
 // Tenant user roles

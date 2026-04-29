@@ -15,6 +15,7 @@ import {
   type ChatResetAllowDeniedReason,
 } from '../../lib/chat-reset-tenant-policy';
 import type { ReplyDecision } from '../reply-planning/dto';
+import { ConversationsService } from './conversations.service';
 
 export interface ChatResetEligibilitySnapshot {
   allowed: boolean;
@@ -49,7 +50,10 @@ export class ConversationResetService implements OnModuleInit {
   private readonly logger = new Logger(ConversationResetService.name);
   private readonly supabase = getSupabaseService();
 
-  constructor(private readonly config: ConfigService) {}
+  constructor(
+    private readonly config: ConfigService,
+    private readonly conversationsService: ConversationsService,
+  ) {}
 
   onModuleInit(): void {
     const rawContacts = readEnvChatResetAllowedContacts(this.config);
@@ -177,5 +181,25 @@ export class ConversationResetService implements OnModuleInit {
       resetVersion: nextPolicy.resetVersion ?? 0,
       clearedKeys: BOT_RESET_CLEARED_POLICY_KEYS,
     };
+  }
+
+  /**
+   * Allowed chat reset commands and dashboard reset-state clear conversation handover so QA can continue.
+   */
+  async clearHandoverAfterAllowedReset(conversationId: string, tenantId: string): Promise<void> {
+    const result = await this.conversationsService.resolveActiveHandoversForAllowedChatReset(
+      conversationId,
+      tenantId,
+    );
+    this.logger.log(
+      `chatResetHandoverCleared: ${JSON.stringify({
+        conversationId,
+        tenantId,
+        activeHandoverFound: result.activeHandoverFound,
+        handoverEventsResolved: result.handoverEventsResolved,
+        handoverPausedBefore: result.handoverPausedBefore,
+        handoverPausedAfter: result.handoverPausedAfter,
+      })}`,
+    );
   }
 }

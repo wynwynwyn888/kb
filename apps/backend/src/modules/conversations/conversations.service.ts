@@ -141,4 +141,70 @@ export class ConversationsService {
       throw new Error(`Failed to update conversation status: ${error.message}`);
     }
   }
+
+  /**
+   * After an allowed `/new`-style or dashboard reset, resume AI for this conversation by
+   * resolving ACTIVE handover events and restoring conversation status to ACTIVE.
+   */
+  async resolveActiveHandoversForAllowedChatReset(
+    conversationId: string,
+    tenantId: string,
+  ): Promise<{
+    activeHandoverFound: boolean;
+    handoverEventsResolved: number;
+    handoverPausedBefore: boolean;
+    handoverPausedAfter: boolean;
+  }> {
+    const { data: t0, error: te0 } = await this.supabase
+      .from('tenants')
+      .select('handover_paused')
+      .eq('id', tenantId)
+      .single();
+    if (te0) {
+      throw new Error(`Failed to read tenant: ${te0.message}`);
+    }
+    const handoverPausedBefore = Boolean(t0?.['handover_paused']);
+
+    const { data: activeRows, error: heErr } = await this.supabase
+      .from('handover_events')
+      .select('id')
+      .eq('conversation_id', conversationId)
+      .eq('status', 'ACTIVE');
+
+    if (heErr) {
+      throw new Error(`Failed to list handover events: ${heErr.message}`);
+    }
+
+    const ids = (activeRows ?? []).map((r: { id: string }) => r.id).filter(Boolean);
+    const now = new Date().toISOString();
+
+    if (ids.length > 0) {
+      const { error: upErr } = await this.supabase
+        .from('handover_events')
+        .update({ status: 'RESUMED', resumed_at: now })
+        .in('id', ids);
+      if (upErr) {
+        throw new Error(`Failed to resolve handover events: ${upErr.message}`);
+      }
+    }
+
+    await this.updateConversationStatus(conversationId, 'ACTIVE');
+
+    const { data: t1, error: te1 } = await this.supabase
+      .from('tenants')
+      .select('handover_paused')
+      .eq('id', tenantId)
+      .single();
+    if (te1) {
+      throw new Error(`Failed to read tenant after reset: ${te1.message}`);
+    }
+    const handoverPausedAfter = Boolean(t1?.['handover_paused']);
+
+    return {
+      activeHandoverFound: ids.length > 0,
+      handoverEventsResolved: ids.length,
+      handoverPausedBefore,
+      handoverPausedAfter,
+    };
+  }
 }

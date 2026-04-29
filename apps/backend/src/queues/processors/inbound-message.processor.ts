@@ -380,6 +380,8 @@ export class InboundMessageProcessor extends WorkerHost {
       resetCommand: cmd,
     });
 
+    await this.conversationResetService.clearHandoverAfterAllowedReset(params.conversationId, params.tenantId);
+
     const plan = this.conversationResetService.buildConfirmationReplyPlan();
     await this.sendBubbleQueue.add('send-bubble', {
       conversationId: params.conversationId,

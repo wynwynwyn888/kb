@@ -48,6 +48,7 @@ export default function TenantConversationsReadonlyPage() {
   const [msgLoading, setMsgLoading] = useState(false);
   const [resetBusy, setResetBusy] = useState(false);
   const [resetBanner, setResetBanner] = useState('');
+  const [msgErr, setMsgErr] = useState('');
 
   useEffect(() => {
     if (!token || !tenantId) {

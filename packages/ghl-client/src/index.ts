@@ -184,6 +184,22 @@ export interface TagContactRequest {
 }
 
 // Booking / appointment types
+export interface GhlCalendarSummary {
+  id: string;
+  name: string;
+}
+
+/** Slot interval returned by free-slots APIs (shape varies — normalized here). */
+export interface GhlFreeSlot {
+  startTime: string;
+  endTime: string;
+}
+
+export interface GhlTagSummary {
+  id?: string;
+  name: string;
+}
+
 export interface BookSlotRequest {
   locationId: string;
   calendarId: string;
@@ -519,6 +535,174 @@ export class GhlClient {
       return { success: false, error: ghlMessage || error.message || 'Booking failed' };
     }
     return { success: false, error: 'Unknown error during booking' };
+  }
+
+  /**
+   * List calendars for the client's location.
+   *
+   * NOT YET LIVE-VERIFIED — endpoint shape follows LeadConnector `/calendars` docs.
+   * Typical: `GET /calendars?locationId={locationId}` → `{ calendars: [...] }` or array.
+   */
+  async listCalendars(): Promise<{ calendars: GhlCalendarSummary[]; error?: string }> {
+    try {
+      const response = await this.client.get<unknown>('/calendars', {
+        params: { locationId: this.locationId },
+      });
+      const raw = response.data;
+      const calendars: GhlCalendarSummary[] = [];
+      const pushCal = (o: Record<string, unknown>) => {
+        const id = typeof o['id'] === 'string' ? o['id'] : '';
+        const name =
+          typeof o['name'] === 'string'
+            ? o['name']
+            : typeof o['title'] === 'string'
+              ? o['title']
+              : '';
+        if (id) calendars.push({ id, name: name || id });
+      };
+      if (Array.isArray(raw)) {
+        for (const x of raw) {
+          if (isRecord(x)) pushCal(x);
+        }
+      } else if (isRecord(raw)) {
+        const list =
+          raw['calendars'] ??
+          raw['data'] ??
+          raw['items'];
+        if (Array.isArray(list)) {
+          for (const x of list) {
+            if (isRecord(x)) pushCal(x);
+          }
+        }
+      }
+      return { calendars };
+    } catch (error) {
+      const msg = this.extractGhlErrorMessage(error) ?? (error instanceof Error ? error.message : 'listCalendars failed');
+      return { calendars: [], error: msg };
+    }
+  }
+
+  /**
+   * Fetch free bookable slots for a calendar in a date range.
+   *
+   * NOT YET LIVE-VERIFIED — GHL may use `/calendars/:id/free-slots` or `/free-slots` with calendarId.
+   * Params use ISO date strings (start of day / end of day acceptable).
+   */
+  async getFreeSlots(params: {
+    calendarId: string;
+    startDate: string;
+    endDate: string;
+    timezone?: string;
+  }): Promise<{ slots: GhlFreeSlot[]; error?: string }> {
+    try {
+      const query: Record<string, string> = {
+        startDate: params.startDate,
+        endDate: params.endDate,
+      };
+      if (params.timezone?.trim()) query['timezone'] = params.timezone.trim();
+
+      const response = await this.client.get<unknown>(
+        `/calendars/${encodeURIComponent(params.calendarId)}/free-slots`,
+        { params: query },
+      );
+      const raw = response.data;
+      const slots: GhlFreeSlot[] = [];
+      const pushSlot = (o: Record<string, unknown>) => {
+        const start =
+          typeof o['startTime'] === 'string'
+            ? o['startTime']
+            : typeof o['start'] === 'string'
+              ? o['start']
+              : typeof o['slotStart'] === 'string'
+                ? o['slotStart']
+                : '';
+        const end =
+          typeof o['endTime'] === 'string'
+            ? o['endTime']
+            : typeof o['end'] === 'string'
+              ? o['end']
+              : typeof o['slotEnd'] === 'string'
+                ? o['slotEnd']
+                : '';
+        if (start && end) slots.push({ startTime: start, endTime: end });
+      };
+      if (Array.isArray(raw)) {
+        for (const x of raw) {
+          if (isRecord(x)) pushSlot(x);
+        }
+      } else if (isRecord(raw)) {
+        const list = raw['slots'] ?? raw['data'] ?? raw['events'] ?? raw['freeSlots'];
+        if (Array.isArray(list)) {
+          for (const x of list) {
+            if (isRecord(x)) pushSlot(x);
+          }
+        }
+      }
+      return { slots };
+    } catch (error) {
+      const msg = this.extractGhlErrorMessage(error) ?? (error instanceof Error ? error.message : 'getFreeSlots failed');
+      return { slots: [], error: msg };
+    }
+  }
+
+  /**
+   * List tags available for the location (for dropdowns / validation).
+   *
+   * NOT YET LIVE-VERIFIED — common pattern: `GET /locations/:locationId/tags`.
+   */
+  async listTags(): Promise<{ tags: GhlTagSummary[]; error?: string }> {
+    try {
+      const response = await this.client.get<unknown>(`/locations/${encodeURIComponent(this.locationId)}/tags`);
+      const raw = response.data;
+      const tags: GhlTagSummary[] = [];
+      const pushTag = (o: Record<string, unknown>) => {
+        const name = typeof o['name'] === 'string' ? o['name'] : '';
+        const id = typeof o['id'] === 'string' ? o['id'] : undefined;
+        if (name) tags.push({ id, name });
+      };
+      if (Array.isArray(raw)) {
+        for (const x of raw) {
+          if (isRecord(x)) pushTag(x);
+        }
+      } else if (isRecord(raw)) {
+        const list = raw['tags'] ?? raw['data'];
+        if (Array.isArray(list)) {
+          for (const x of list) {
+            if (isRecord(x)) pushTag(x);
+          }
+        }
+      }
+      return { tags };
+    } catch (error) {
+      const msg = this.extractGhlErrorMessage(error) ?? (error instanceof Error ? error.message : 'listTags failed');
+      return { tags: [], error: msg };
+    }
+  }
+
+  /**
+   * Create a tag on the location (if API permits).
+   *
+   * NOT YET LIVE-VERIFIED — typical: `POST /locations/:locationId/tags` with `{ name }`.
+   */
+  async createTag(name: string): Promise<{ success: boolean; tag?: GhlTagSummary; error?: string }> {
+    const trimmed = name.trim();
+    if (!trimmed) return { success: false, error: 'Tag name is required' };
+    try {
+      const response = await this.client.post<unknown>(
+        `/locations/${encodeURIComponent(this.locationId)}/tags`,
+        { name: trimmed },
+      );
+      const raw = response.data;
+      if (isRecord(raw)) {
+        const n = typeof raw['name'] === 'string' ? raw['name'] : trimmed;
+        const id = typeof raw['id'] === 'string' ? raw['id'] : undefined;
+        return { success: true, tag: { id, name: n } };
+      }
+      return { success: true, tag: { name: trimmed } };
+    } catch (error) {
+      const msg = this.extractGhlErrorMessage(error) ?? (error instanceof Error ? error.message : 'createTag failed');
+      return { success: false, error: msg };
+    }
   }
 
   /**

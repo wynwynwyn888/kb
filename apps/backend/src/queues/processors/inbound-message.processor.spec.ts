@@ -46,6 +46,7 @@ const mockResetService = {
     resetVersion: 1,
     clearedKeys: ['activeTopic'] as const,
   })),
+  clearHandoverAfterAllowedReset: jestGlobal.fn(async () => {}),
   buildConfirmationReplyPlan: jestGlobal.fn(() => ({
     planStatus: 'PLANNED',
     responseMode: 'standard',
@@ -385,6 +386,7 @@ describe('InboundMessageProcessor', () => {
         resetCommand: '/new',
       }),
     );
+    expect(mockResetService.clearHandoverAfterAllowedReset).toHaveBeenCalledWith(CONV_ID, 'tenant-1');
     expect(orchestrate).not.toHaveBeenCalled();
     expect(mockSendBubbleQueueAdd).toHaveBeenCalled();
   });
@@ -435,6 +437,7 @@ describe('InboundMessageProcessor', () => {
     );
 
     expect(mockResetService.performBotStateReset).not.toHaveBeenCalled();
+    expect(mockResetService.clearHandoverAfterAllowedReset).not.toHaveBeenCalled();
     expect(orchestrate).toHaveBeenCalled();
   });
 
@@ -484,6 +487,7 @@ describe('InboundMessageProcessor', () => {
     );
 
     expect(mockResetService.performBotStateReset).not.toHaveBeenCalled();
+    expect(mockResetService.clearHandoverAfterAllowedReset).not.toHaveBeenCalled();
     expect(orchestrate).toHaveBeenCalled();
   });
 
@@ -538,6 +542,7 @@ describe('InboundMessageProcessor', () => {
     expect(mockResetService.performBotStateReset).toHaveBeenCalledWith(
       expect.objectContaining({ resetCommand: '/new' }),
     );
+    expect(mockResetService.clearHandoverAfterAllowedReset).toHaveBeenCalledWith(CONV_ID, 'tenant-1');
     expect(orchestrate).not.toHaveBeenCalled();
   });
 });

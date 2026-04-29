@@ -18,7 +18,8 @@ export function isAdvancedPath(pathname: string, tenantId: string): boolean {
     pathname === `${base}/advanced` ||
     pathname.startsWith(`${base}/ghl-status`) ||
     pathname.startsWith(`${base}/diagnostics`) ||
-    pathname.startsWith(`${base}/conversations`)
+    pathname.startsWith(`${base}/conversations`) ||
+    pathname.startsWith(`${base}/automation`)
   );
 }
 

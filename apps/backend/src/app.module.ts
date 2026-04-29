@@ -28,6 +28,8 @@ import { QueuesModule } from './queues/queues.module';
 import { ActionIntentsModule } from './modules/action-intents/action-intents.module';
 import { AgencyAiConfigModule } from './modules/agency-ai-config/agency-ai-config.module';
 import { DebugModule } from './modules/debug/debug.module';
+import { BookingSettingsModule } from './modules/booking-settings/booking-settings.module';
+import { IntentTagsModule } from './modules/intent-tags/intent-tags.module';
 
 @Module({
   imports: [
@@ -105,6 +107,8 @@ import { DebugModule } from './modules/debug/debug.module';
     ActionIntentsModule,
     AgencyAiConfigModule,
     DebugModule,
+    BookingSettingsModule,
+    IntentTagsModule,
   ],
   providers: [
     // Global rate limit guard

@@ -5,6 +5,7 @@ import { SendBubbleProcessor } from '../queues/processors/send-bubble.processor'
 import { ConversationsService } from '../modules/conversations/conversations.service';
 import { ActionGatingService } from '../modules/action-gating/action-gating.service';
 import { ActionIntentExecutorService } from '../modules/action-execution/action-intent-executor.service';
+import { OutboundSafetyGovernorService } from '../modules/outbound/outbound-safety-governor.service';
 import { createMockSupabase } from '../test/mock-supabase';
 
 const mockSupabase = createMockSupabase();
@@ -49,11 +50,13 @@ describe('Handover Active → No Outbound Reply', () => {
     conversationsService = new ConversationsService();
     actionGatingService = new ActionGatingService();
     actionExecutor = new ActionIntentExecutorService();
+    const outboundGovernor = new OutboundSafetyGovernorService();
     sendBubbleProcessor = new SendBubbleProcessor(
       outboundService,
       conversationsService,
       actionGatingService,
       actionExecutor,
+      outboundGovernor,
     );
   });
 

@@ -10,17 +10,57 @@ export function parseEnvBoolean(raw: string | undefined): boolean | undefined {
   return undefined;
 }
 
+export type ChatResetAllowDeniedReason =
+  | 'tenant_disabled'
+  | 'env_disabled'
+  | 'implicit_production_deny'
+  | 'whitelist_blocked';
+
+/** Full allow/deny breakdown for logging and inbound reset gate (no whitelist — contact gate separately). */
+export function evaluateAllowChatResetCommands(params: {
+  nodeEnv: string;
+  envAllow?: string;
+  tenantSettings?: Record<string, unknown> | null;
+}): {
+  allowed: boolean;
+  deniedReason?: Exclude<ChatResetAllowDeniedReason, 'whitelist_blocked'>;
+  tenantSettingValue: unknown;
+} {
+  const ts = params.tenantSettings?.['allowChatResetCommands'];
+  if (ts === false) {
+    return { allowed: false, deniedReason: 'tenant_disabled', tenantSettingValue: false };
+  }
+  if (ts === true) {
+    return { allowed: true, tenantSettingValue: true };
+  }
+  const envParsed = parseEnvBoolean(params.envAllow);
+  if (envParsed === false) {
+    return {
+      allowed: false,
+      deniedReason: 'env_disabled',
+      tenantSettingValue: ts,
+    };
+  }
+  if (envParsed === true) {
+    return { allowed: true, tenantSettingValue: ts };
+  }
+  const defaultAllow = params.nodeEnv !== 'production';
+  if (!defaultAllow) {
+    return {
+      allowed: false,
+      deniedReason: 'implicit_production_deny',
+      tenantSettingValue: ts,
+    };
+  }
+  return { allowed: true, tenantSettingValue: ts };
+}
+
 export function resolveAllowChatResetCommands(params: {
   nodeEnv: string;
   envAllow?: string;
   tenantSettings?: Record<string, unknown> | null;
 }): boolean {
-  const ts = params.tenantSettings?.['allowChatResetCommands'];
-  if (ts === false) return false;
-  if (ts === true) return true;
-  const envParsed = parseEnvBoolean(params.envAllow);
-  if (envParsed !== undefined) return envParsed;
-  return params.nodeEnv !== 'production';
+  return evaluateAllowChatResetCommands(params).allowed;
 }
 
 export function buildChatResetContactWhitelist(params: {

@@ -1,0 +1,156 @@
+/**
+ * Outbound safety / conversation governor — pure helpers for pre-send checks.
+ * Blocks unsafe booking claims, menu noise, and supports complaint/scope detection in orchestration.
+ */
+
+import type { ConversationIntent } from '../modules/conversation-policy/conversation-intent';
+
+export const SAFE_PENDING_BOOKING_REPLY =
+  "I've noted those details. Our team will confirm the appointment availability with you before anything is locked in.";
+
+const BOOKING_CLAIM_PATTERNS: RegExp[] = [
+  /\bconfirmed\b/i,
+  /\bappointment\s+is\s+confirmed\b/i,
+  /\bbooking\s+is\s+confirmed\b/i,
+  /\b(i['’]ve|i\s+have)\s+booked\b/i,
+  /\bi\s+booked\b/i,
+  /\breserved\b/i,
+  /(?:booking|appointment|reservation)\s+finalized\b/i,
+  /\bfinalize[ds]?\s+(?:your\s+)?(?:booking|appointment|reservation)\b/i,
+  /\bi['’]ll\s+proceed\s+with\s+booking\b/i,
+  /\bplease\s+arrive\s+for\s+your\s+appointment\b/i,
+  /\byour\s+.*\b(appointment|booking)\b.*\b(is\s+)?(set|booked|confirmed|reserved)\b/i,
+];
+
+export function textClaimsBookingConfirmed(text: string): boolean {
+  const t = text.trim();
+  if (!t) return false;
+  return BOOKING_CLAIM_PATTERNS.some(p => p.test(t));
+}
+
+export type ComplaintServiceIssue = {
+  triggered: boolean;
+  reason: string;
+  colourRelated: boolean;
+  /** Tag names to queue for GHL (lowercase, snake_case) */
+  tags: string[];
+};
+
+const COMPLAINT_PATTERNS: { re: RegExp; reason: string; colour: boolean }[] = [
+  { re: /\buneven\b/i, reason: 'uneven_result', colour: true },
+  { re: /\bunhappy\s+with\s+(my\s+)?(colour|color|results?)\b/i, reason: 'unhappy_with_colour', colour: true },
+  { re: /\b(colou?r|results?)\s+looks?\s+wrong\b/i, reason: 'colour_looks_wrong', colour: true },
+  { re: /\bhaircut\s+too\s+short\b/i, reason: 'haircut_too_short', colour: false },
+  { re: /\b(damaged|breaking)\s+after\s+(the\s+)?(treatment|service|colour|color)\b/i, reason: 'damaged_after_service', colour: true },
+  { re: /\bcomplaint\b/i, reason: 'complaint_keyword', colour: false },
+  { re: /\brefund\b/i, reason: 'refund', colour: false },
+  { re: /\bfix\s+my\s+hair\b/i, reason: 'fix_my_hair', colour: false },
+  { re: /\bnot\s+happy\s+with\s+(the\s+)?(result|service|colour|color)\b/i, reason: 'not_happy_with_result', colour: true },
+  { re: /\ballergic\s+reaction\s+after\s+(the\s+)?(service|treatment|colour|color)\b/i, reason: 'allergic_after_service', colour: true },
+  { re: /\b(result|colour|color)\s+looks?\s+uneven\b/i, reason: 'result_uneven', colour: true },
+];
+
+export function detectComplaintServiceIssue(raw: string): ComplaintServiceIssue {
+  const t = raw.trim();
+  if (!t) {
+    return { triggered: false, reason: 'none', colourRelated: false, tags: [] };
+  }
+  for (const p of COMPLAINT_PATTERNS) {
+    if (p.re.test(t)) {
+      const tags = ['needs_human_review', 'complaint_service_issue'];
+      if (p.colour) tags.push('complaint_colour');
+      return { triggered: true, reason: p.reason, colourRelated: p.colour, tags: [...new Set(tags)] };
+    }
+  }
+  return { triggered: false, reason: 'none', colourRelated: false, tags: [] };
+}
+
+/** Non-hair / out-of-salon-scope questions where prior colour topic should not drive recommendations. */
+const OUT_OF_SCOPE_SALON: RegExp[] = [
+  /\bneck\s+massage\b/i,
+  /\b(do\s+you\s+do|do\s+you\s+offer)\s+([a-z]+\s+){0,3}massage\b/i,
+  /\bfull[\s-]*body\s+massage\b/i,
+  /\bmanicure\b/i,
+  /\bpedi(cure)?\b/i,
+  /\beyebrow(s)?\s+(tattoo|microblad)\b/i,
+];
+
+export function isUnsupportedSalonScopeQuery(raw: string): boolean {
+  const t = raw.trim();
+  if (!t) return false;
+  return OUT_OF_SCOPE_SALON.some(r => r.test(t));
+}
+
+const MENU_ASK = /\b(menu|categories|category|options?|what\s+do\s+you\s+offer|list\s+of\s+services|book\s+from\s+the\s+menu)\b/i;
+const ALTERNATIVE_ASK =
+  /\b(any\s+other|what\s+else|alternatives?|other\s+options?|something\s+else|instead|recommend(ation)?s?\s+for\s+colou?r|other\s+colou?r\s+options?)\b/i;
+
+export function userAskedForMenuOrOptions(latestInbound: string, latestIntent: ConversationIntent): boolean {
+  if (latestIntent === 'MENU' || latestIntent === 'SHORT_SELECTION') return true;
+  const t = latestInbound.trim();
+  if (!t) return false;
+  if (MENU_ASK.test(t)) return true;
+  return false;
+}
+
+export function userAskedForColourAlternatives(latestInbound: string): boolean {
+  return ALTERNATIVE_ASK.test(latestInbound.trim());
+}
+
+/**
+ * Heuristic: multiple bullet/numbered lines or long multi-section list looks like a menu dump.
+ */
+export function looksLikeMenuCategoryBlock(text: string): boolean {
+  const lines = text.split(/\n/).map(l => l.trim()).filter(Boolean);
+  if (lines.length < 4) return false;
+  const bulletLines = lines.filter(
+    l => /^\s*[-•*●]+\s+/.test(l) || /^\s*\d+[.)]\s+/.test(l) || /^\s*[A-Da-d][.)]\s+/.test(l),
+  );
+  if (bulletLines.length >= 3) return true;
+  const sectiony =
+    /\b(categories?|our\s+services|choose\s+from|colour|color|treatment|styling|cuts?)\b/i.test(text) &&
+    lines.length >= 6;
+  return sectiony;
+}
+
+const CONCERN_HINTS = /\b(oily|greasy|dry|scalp|ends|frizz|damage|dull|itchy|flaky|split)\b/i;
+
+export function shouldRewriteUnrequestedMenuRepetition(params: {
+  replyText: string;
+  latestInboundText: string;
+  latestIntent: ConversationIntent;
+}): boolean {
+  const { replyText, latestInboundText, latestIntent } = params;
+  if (userAskedForMenuOrOptions(latestInboundText, latestIntent)) return false;
+  if (!CONCERN_HINTS.test(latestInboundText)) return false;
+  return looksLikeMenuCategoryBlock(replyText);
+}
+
+export const UNREQUESTED_MENU_FALLBACK_REPLY =
+  'Thanks for the detail — for oily roots with dry ends, we usually focus on balancing/cleansing at the scalp while adding moisture and repair from mid-lengths through ends (without weighing hair down). ' +
+  'If you can share how quickly your roots get oily after washing and whether your ends feel brittle or mainly dry, I can narrow the best next step.';
+
+export const COMPLAINT_ESCALATION_REPLY =
+  "Thanks for telling us — I'm sorry you're dealing with that.\n\n" +
+  'To help the team review this properly, please share:\n' +
+  '- A clear photo of the area you are concerned about\n' +
+  '- Your appointment date and stylist name (if you recall)\n' +
+  '- What looks uneven or wrong to you\n' +
+  '- The best way to reach you (WhatsApp / call)\n\n' +
+  "I'll pass this to the team for review.";
+
+export function buildGovernorCapabilityAppendix(params: {
+  bookingCapability: string;
+  handoverCapability: string;
+}): string {
+  return (
+    `\n---\n` +
+    `Backend capability constraints (must follow — do not contradict):\n` +
+    `- bookingCapability: ${params.bookingCapability}\n` +
+    `- handoverCapability: ${params.handoverCapability}\n` +
+    `Rules:\n` +
+    `- You may collect booking details, but you must NOT state that an appointment is confirmed, booked, reserved, or finalized unless the backend has already recorded a successful calendar booking action for this conversation.\n` +
+    `- If bookingCapability is collect_details_only, use pending / team-will-confirm language instead.\n` +
+    `- For complaints or service recovery, you may ask for details and rely on tag/handover flows — do not claim a callback was arranged unless those backend actions succeeded.\n`
+  );
+}

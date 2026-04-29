@@ -12,6 +12,7 @@ import { ConversationMemoryLoader } from './conversation-memory-loader';
 import { AiRouterService } from '../ai-router/ai-router.service';
 import { KbService } from '../kb/kb.service';
 import { ReplyPlannerService } from '../reply-planning/reply-planner.service';
+import { ConversationsService } from '../conversations/conversations.service';
 import type {
   OrchestrationInput,
   OrchestrationResult,
@@ -33,6 +34,8 @@ import { ConversationPolicyEngineService } from '../conversation-policy/conversa
 import {
   mergePolicyIntoConversationMetadata,
   parseAisbpPolicyState,
+  emptyPolicyState,
+  clearAwaitingState,
   type AisbpPolicyStateV1,
 } from '../conversation-policy/conversation-policy-state';
 import { resolveShortSelection } from '../conversation-policy/option-resolver';
@@ -44,6 +47,12 @@ import { detectOldDemoTermsInText } from '../../lib/old-demo-terms';
 import { getBusinessLocalNow, resolveAppTimeZone } from '../../lib/business-time';
 import { summarizeInboundTextBatch } from '../../lib/inbound-batch-intent';
 import { detectRepeatedCustomerUserLines } from '../../lib/repeated-customer-message';
+import {
+  buildGovernorCapabilityAppendix,
+  COMPLAINT_ESCALATION_REPLY,
+  detectComplaintServiceIssue,
+  isUnsupportedSalonScopeQuery,
+} from '../../lib/outbound-safety-governor';
 
 @Injectable()
 export class ConversationOrchestrationService {
@@ -57,6 +66,7 @@ export class ConversationOrchestrationService {
     private readonly kbService: KbService,
     private readonly replyPlanner: ReplyPlannerService,
     private readonly conversationPolicy: ConversationPolicyEngineService,
+    private readonly conversationsService: ConversationsService,
   ) {}
 
   /**
@@ -112,7 +122,22 @@ export class ConversationOrchestrationService {
       const latestIntent = classifyConversationIntent(latestMsg);
       const repeatMeta = detectRepeatedCustomerUserLines(memory.entries);
 
-      const policyStatePre = this.conversationPolicy.parseState(input.conversation?.metadata);
+      const policyStatePreInit = this.conversationPolicy.parseState(input.conversation?.metadata);
+      let policyStatePre = policyStatePreInit;
+      if (isUnsupportedSalonScopeQuery(latestMsg)) {
+        const cleared = clearAwaitingState(policyStatePreInit);
+        policyStatePre = {
+          ...cleared,
+          activeTopic: null,
+          options: undefined,
+          lastAssistantOptions: undefined,
+          optionsUpdatedAt: null,
+          optionsSource: null,
+          optionsDerivedFromChunkIds: null,
+          optionsTenantId: null,
+          updatedAt: new Date().toISOString(),
+        };
+      }
       let retrieveQuery = latestMsg;
       let menuKbAnchor: string | undefined;
       // Universal: if user replied with a short selection AND we have option memory, expand the
@@ -146,6 +171,94 @@ export class ConversationOrchestrationService {
           `repeatedHumanTextDetected=${repeatMeta.repeatedHumanTextDetected} ` +
           `repeatedHumanTextAction=${repeatMeta.repeatedHumanTextAction}`,
       );
+
+      const complaintDet = detectComplaintServiceIssue(latestMsg);
+      if (complaintDet.triggered) {
+        try {
+          await this.conversationsService.pauseForHandover(
+            conversationId,
+            'REQUEST',
+            'AI',
+            `service_complaint:${complaintDet.reason}`,
+          );
+        } catch (e) {
+          this.logger.warn(
+            `complaint handover pause failed: ${e instanceof Error ? e.message : String(e)}`,
+          );
+        }
+
+        this.logger.log(
+          `complaintHandoverTriggered: ${JSON.stringify({
+            conversationId,
+            tenantId: input.tenantId,
+            contactId: input.conversation?.contactId ?? null,
+            reason: complaintDet.reason,
+            tagsQueued: complaintDet.tags,
+            handoverPaused: true,
+          })}`,
+        );
+
+        const complaintPolicyState: AisbpPolicyStateV1 = {
+          ...emptyPolicyState(),
+          activeTopic: 'complaint',
+          memoryResetAt: policyForMemory.memoryResetAt ?? null,
+          resetVersion: policyForMemory.resetVersion ?? 0,
+          updatedAt: new Date().toISOString(),
+        };
+
+        await this.persistConversationPolicyMetadata(
+          conversationId,
+          (input.conversation?.metadata as Record<string, unknown>) ?? {},
+          complaintPolicyState,
+        );
+
+        const complaintReplyPlan: ReplyDecision = {
+          planStatus: 'PLANNED',
+          responseMode: 'standard',
+          handoverRecommended: false,
+          confidence: 0.95,
+          rationale: `complaint_service_issue:${complaintDet.reason}`,
+          bubbles: [{ index: 0, text: COMPLAINT_ESCALATION_REPLY }],
+          suggestedActions: [
+            {
+              type: 'TAG_CONTACT',
+              params: { tags: complaintDet.tags },
+              reason: `complaint escalation (${complaintDet.reason})`,
+            },
+          ],
+          draftProvenance: 'policy_reply',
+        };
+
+        const routingComplaint: RoutingResponse = {
+          recommendedModel: 'n/a',
+          responseMode: 'standard',
+          draftReply: null,
+          handoverRecommended: false,
+          bookingIntentDetected: false,
+          tagsSuggested: [],
+          confidence: 1,
+          reasoning: 'complaint_handover_short_circuit',
+        };
+
+        const logId = await this.persistOrchestrationLog(
+          input,
+          guardOutcome,
+          routingComplaint,
+          null,
+          complaintReplyPlan,
+        );
+
+        return {
+          success: true,
+          outcome: 'PROCEED',
+          conversationId,
+          webhookEventId,
+          guards: guardOutcome,
+          routing: routingComplaint,
+          replyPlan: complaintReplyPlan,
+          logId,
+        };
+      }
 
       // Step 3: Retrieve KB + intent-aware filter (query may expand for menu category selection)
       const { chunks: kbAfterRetrieve, meta: retrievalMeta } = await this.retrieveKbContext(
@@ -258,6 +371,11 @@ export class ConversationOrchestrationService {
           batchSecondaryIntents: batchSummary.secondaryIntents,
           repeatedHumanTextDetected: repeatMeta.repeatedHumanTextDetected,
           repeatedHumanTextAction: repeatMeta.repeatedHumanTextAction,
+          suppressColourRecommendations: isUnsupportedSalonScopeQuery(latestMsg),
+          bookingCapability: 'collect_details_only',
+          handoverCapability: input.tenant?.ghlLocationId?.trim()
+            ? 'tag_and_notify'
+            : 'collect_details_only',
         },
       });
 
@@ -594,7 +712,11 @@ export class ConversationOrchestrationService {
       `- businessTimezone: ${businessTimezone}\n` +
       `- localDayPeriod: ${snap.dayPeriod}\n` +
       `- greetingLabel: ${snap.greetingLabel}\n`;
-    return `${base}\n\n${block}`;
+    const caps = buildGovernorCapabilityAppendix({
+      bookingCapability: 'collect_details_only',
+      handoverCapability: input.tenant?.ghlLocationId ? 'tag_and_notify' : 'collect_details_only',
+    });
+    return `${base}\n\n${block}${caps}`;
   }
 
   private buildRoutingRequest(

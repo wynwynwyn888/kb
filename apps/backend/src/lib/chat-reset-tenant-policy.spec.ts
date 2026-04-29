@@ -1,5 +1,6 @@
 import {
   buildChatResetContactWhitelist,
+  evaluateAllowChatResetCommands,
   isContactAllowedForChatReset,
   resolveAllowChatResetCommands,
 } from './chat-reset-tenant-policy';
@@ -12,6 +13,36 @@ describe('chat-reset-tenant-policy', () => {
     expect(
       resolveAllowChatResetCommands({ nodeEnv: 'production', envAllow: undefined, tenantSettings: {} }),
     ).toBe(false);
+  });
+
+  it('evaluateAllowChatResetCommands: tenant explicit false → tenant_disabled', () => {
+    const r = evaluateAllowChatResetCommands({
+      nodeEnv: 'production',
+      envAllow: 'true',
+      tenantSettings: { allowChatResetCommands: false },
+    });
+    expect(r.allowed).toBe(false);
+    expect(r.deniedReason).toBe('tenant_disabled');
+  });
+
+  it('evaluateAllowChatResetCommands: tenant missing + env true → allowed', () => {
+    const r = evaluateAllowChatResetCommands({
+      nodeEnv: 'production',
+      envAllow: 'true',
+      tenantSettings: {},
+    });
+    expect(r.allowed).toBe(true);
+    expect(r.deniedReason).toBeUndefined();
+  });
+
+  it('evaluateAllowChatResetCommands: ALLOW false in production → env_disabled', () => {
+    const r = evaluateAllowChatResetCommands({
+      nodeEnv: 'production',
+      envAllow: 'false',
+      tenantSettings: {},
+    });
+    expect(r.allowed).toBe(false);
+    expect(r.deniedReason).toBe('env_disabled');
   });
 
   it('tenant false overrides env true', () => {

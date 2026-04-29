@@ -1,0 +1,162 @@
+// Pre-send safety: booking-language guard, menu repetition rewrite — runs before GHL outbound.
+
+import { Injectable, Logger } from '@nestjs/common';
+import { classifyConversationIntent } from '../conversation-policy/conversation-intent';
+import type { ReplyDecision } from '../reply-planning/dto';
+import { formatPostgrestError } from '../../lib/format-postgrest-error';
+import { getSupabaseService } from '../../lib/supabase';
+import {
+  SAFE_PENDING_BOOKING_REPLY,
+  UNREQUESTED_MENU_FALLBACK_REPLY,
+  shouldRewriteUnrequestedMenuRepetition,
+  textClaimsBookingConfirmed,
+} from '../../lib/outbound-safety-governor';
+
+export interface OutboundGovernorContext {
+  conversationId: string;
+  tenantId: string;
+  contactId: string;
+}
+
+@Injectable()
+export class OutboundSafetyGovernorService {
+  private readonly logger = new Logger(OutboundSafetyGovernorService.name);
+  private readonly supabase = getSupabaseService();
+
+  /**
+   * Allow confirmation wording only when a real booking intent already executed **before** we send
+   * this outbound **and** the execution plausibly belongs to the current customer thread:
+   * - Booking ran after the latest inbound timestamp (previous pipeline cycle completed), or
+   * - Latest inbound is a short acknowledgment after a recent successful booking.
+   */
+  async hasEligibleBookingConfirmationLanguage(conversationId: string): Promise<boolean> {
+    const inbound = await this.getLatestInbound(conversationId);
+    if (!inbound?.created_at) return false;
+
+    const { data, error } = await this.supabase
+      .from('action_intents')
+      .select('id, executed_at, params')
+      .eq('conversation_id', conversationId)
+      .eq('action_type', 'UPDATE_CALENDAR')
+      .eq('status', 'EXECUTED')
+      .contains('params', { bookSlotIntent: true })
+      .order('executed_at', { ascending: false })
+      .limit(5);
+
+    if (error || !data?.length) {
+      if (error) {
+        this.logger.warn(`booking eligibility query: ${formatPostgrestError(error)}`);
+      }
+      return false;
+    }
+
+    const inboundMs = Date.parse(String(inbound.created_at));
+    if (!Number.isFinite(inboundMs)) return false;
+
+    const ackOnly = /^(thanks|thank\s+you|ok+|okay|great|perfect)\b[!?.\s]*$/i.test(inbound.content.trim());
+
+    for (const row of data) {
+      const params = row.params as Record<string, unknown> | null | undefined;
+      if (!params?.['calendarId'] || typeof params['calendarId'] !== 'string') continue;
+      const execAtRaw = row.executed_at;
+      if (!execAtRaw) continue;
+      const em = Date.parse(String(execAtRaw));
+      if (!Number.isFinite(em)) continue;
+
+      if (em >= inboundMs - 3000) {
+        return true;
+      }
+      if (ackOnly && em < inboundMs && inboundMs - em < 14 * 24 * 3600 * 1000) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private async getLatestInbound(conversationId: string): Promise<{ content: string; created_at: string } | null> {
+    const { data, error } = await this.supabase
+      .from('messages')
+      .select('content, created_at')
+      .eq('conversation_id', conversationId)
+      .eq('direction', 'INBOUND')
+      .eq('sender', 'CONTACT')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error || !data) return null;
+    return {
+      content: String(data.content ?? ''),
+      created_at: String(data.created_at ?? ''),
+    };
+  }
+
+  async applyOutboundGovernor(plan: ReplyDecision, ctx: OutboundGovernorContext): Promise<ReplyDecision> {
+    if (plan.planStatus !== 'PLANNED' || plan.bubbles.length === 0) {
+      return plan;
+    }
+
+    let next = plan;
+
+    next = await this.applyBookingClaimGuard(next, ctx.conversationId);
+    next = await this.applyMenuRepetitionGuard(next, ctx.conversationId);
+
+    return next;
+  }
+
+  private async applyBookingClaimGuard(plan: ReplyDecision, conversationId: string): Promise<ReplyDecision> {
+    const joined = plan.bubbles.map(b => b.text).join('\n\n');
+    if (!textClaimsBookingConfirmed(joined)) {
+      return plan;
+    }
+
+    const ok = await this.hasEligibleBookingConfirmationLanguage(conversationId);
+    if (ok) {
+      return plan;
+    }
+
+    this.logger.log(
+      `outboundSafetyRewrite: ${JSON.stringify({
+        reason: 'booking_confirmation_without_booking_action',
+        conversationId,
+      })}`,
+    );
+
+    return {
+      ...plan,
+      bubbles: [{ index: 0, text: SAFE_PENDING_BOOKING_REPLY }],
+      rationale: `${plan.rationale}; outboundSafetyRewrite=booking_confirmation_without_booking_action`,
+    };
+  }
+
+  private async applyMenuRepetitionGuard(plan: ReplyDecision, conversationId: string): Promise<ReplyDecision> {
+    const inbound = await this.getLatestInbound(conversationId);
+    if (!inbound) return plan;
+
+    const joined = plan.bubbles.map(b => b.text).join('\n\n');
+    const intent = classifyConversationIntent(inbound.content.trim());
+
+    if (
+      !shouldRewriteUnrequestedMenuRepetition({
+        replyText: joined,
+        latestInboundText: inbound.content,
+        latestIntent: intent,
+      })
+    ) {
+      return plan;
+    }
+
+    this.logger.log(
+      `outboundSafetyRewrite: ${JSON.stringify({
+        reason: 'unrequested_menu_repetition',
+        conversationId,
+      })}`,
+    );
+
+    return {
+      ...plan,
+      bubbles: [{ index: 0, text: UNREQUESTED_MENU_FALLBACK_REPLY }],
+      rationale: `${plan.rationale}; outboundSafetyRewrite=unrequested_menu_repetition`,
+    };
+  }
+}

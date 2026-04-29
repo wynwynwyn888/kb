@@ -248,7 +248,16 @@ export class InboundMessageProcessor extends WorkerHost {
       recentInboundBatch,
     } = ctx;
 
-    if (await this.tryHandleChatResetCommand({ tenantId, conversationId, locationId, ghlContactId, latestInboundText })) {
+    if (
+      await this.tryHandleChatResetCommand({
+        tenantId,
+        conversationId,
+        locationId,
+        ghlContactId,
+        latestInboundText,
+        recentInboundBatch,
+      })
+    ) {
       this.logger.log(`Orchestration skipped (chat reset command): conversationId=${conversationId}`);
       return;
     }
@@ -315,6 +324,7 @@ export class InboundMessageProcessor extends WorkerHost {
 
   /**
    * Exact `/new` (etc.) commands: clear policy state + memory anchor; enqueue confirmation only (no AI).
+   * Uses the latest message in the debounced ordered batch (trimmed), not AI classification.
    */
   private async tryHandleChatResetCommand(params: {
     tenantId: string;
@@ -322,14 +332,46 @@ export class InboundMessageProcessor extends WorkerHost {
     locationId: string;
     ghlContactId: string;
     latestInboundText: string;
+    recentInboundBatch?: string[];
   }): Promise<boolean> {
-    const cmd = matchChatResetCommand(params.latestInboundText);
+    const latestTrimmed =
+      params.recentInboundBatch && params.recentInboundBatch.length > 0
+        ? String(params.recentInboundBatch[params.recentInboundBatch.length - 1] ?? '').trim()
+        : String(params.latestInboundText ?? '').trim();
+
+    const cmd = matchChatResetCommand(latestTrimmed);
     if (!cmd) return false;
-    const allowed = await this.conversationResetService.isChatResetAllowedForContact(
+
+    const eligibility = await this.conversationResetService.evaluateChatResetEligibility(
       params.tenantId,
       params.ghlContactId,
     );
-    if (!allowed) return false;
+
+    this.logger.log(
+      `chatResetCommandDetected: ${JSON.stringify({
+        conversationId: params.conversationId,
+        tenantId: params.tenantId,
+        command: cmd,
+        allowEnvValue: eligibility.allowEnvValue ?? null,
+        tenantSettingValue: eligibility.tenantSettingValue,
+        whitelistConfigured: eligibility.whitelistConfigured,
+        contactMatchedWhitelist: eligibility.contactMatchedWhitelist,
+        allowed: eligibility.allowed,
+        deniedReason: eligibility.deniedReason ?? null,
+      })}`,
+    );
+
+    if (!eligibility.allowed) {
+      this.logger.log(
+        `chatResetCommandDenied: ${JSON.stringify({
+          conversationId: params.conversationId,
+          tenantId: params.tenantId,
+          command: cmd,
+          deniedReason: eligibility.deniedReason ?? 'unknown',
+        })}`,
+      );
+      return false;
+    }
 
     await this.conversationResetService.performBotStateReset({
       conversationId: params.conversationId,
@@ -348,8 +390,12 @@ export class InboundMessageProcessor extends WorkerHost {
     });
 
     this.logger.log(
-      `chatResetCommandHandled: conversationId=${params.conversationId} tenantId=${params.tenantId} ` +
-        `resetSource=chat_command resetCommand=${cmd}`,
+      `chatResetCommandHandled: ${JSON.stringify({
+        conversationId: params.conversationId,
+        tenantId: params.tenantId,
+        command: cmd,
+        resetSource: 'chat_command',
+      })}`,
     );
     return true;
   }

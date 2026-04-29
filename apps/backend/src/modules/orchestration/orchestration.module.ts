@@ -9,9 +9,16 @@ import { AiRouterModule } from '../ai-router/ai-router.module';
 import { KbModule } from '../kb/kb.module';
 import { ReplyPlanningModule } from '../reply-planning/reply-planning.module';
 import { ConversationPolicyModule } from '../conversation-policy/conversation-policy.module';
+import { ConversationsModule } from '../conversations/conversations.module';
 
 @Module({
-  imports: [AiRouterModule, KbModule, ReplyPlanningModule, ConversationPolicyModule],
+  imports: [
+    AiRouterModule,
+    KbModule,
+    ReplyPlanningModule,
+    ConversationPolicyModule,
+    ConversationsModule,
+  ],
   providers: [
     ConversationOrchestrationService,
     OrchestrationGuards,

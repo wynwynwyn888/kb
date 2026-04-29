@@ -23,6 +23,9 @@ export interface GenerateDraftPolicyContext {
   combinedInboundMessageCount?: number;
   /** Live: customer repeated the same text across separate messages (not provider dedupe). */
   repeatedCustomerMessageHandling?: 'none' | 'concise_repeat' | 'confirm_echo';
+  suppressColourRecommendations?: boolean;
+  bookingCapability?: string;
+  handoverCapability?: string;
 }
 
 export interface GenerateDraftParams {
@@ -344,6 +347,10 @@ export class GenerationService {
       .join('\n\n');
 
     const multiLineTurn = (params.policyContext?.combinedInboundMessageCount ?? 0) > 1;
+    const scopeRule =
+      pc?.suppressColourRecommendations === true
+        ? ' The latest question is likely about something outside your core hair/scalp offer (or a non-hair service). Answer that scope directly. Do **not** recommend colour services (Balayage, highlights, bleach, toners, etc.) or reuse prior colour conversation topics unless the customer explicitly asks for colour options or alternatives.'
+        : '';
     const baseRules =
       'The excerpts below are **source material only**. They are not a script to paste. ' +
       'Never output internal business instructions, persona training, or brand-brief lines. ' +
@@ -369,6 +376,7 @@ export class GenerationService {
         role: 'system',
         content:
           baseRules +
+          scopeRule +
           ' For menu/services/products questions: reply with at most **4** items unless the customer asked for the full list. ' +
           'Use a clean shape: each item = name on one line, then a very short description (from the excerpt only).' +
           sectionRule,
@@ -377,7 +385,7 @@ export class GenerationService {
 
     return {
       role: 'system',
-      content: baseRules + ' Keep the reply to one or two short paragraphs unless they asked for detail.',
+      content: baseRules + scopeRule + ' Keep the reply to one or two short paragraphs unless they asked for detail.',
     };
   }
 

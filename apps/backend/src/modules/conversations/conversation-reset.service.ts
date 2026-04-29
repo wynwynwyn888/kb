@@ -1,5 +1,5 @@
 import { ConfigService } from '@nestjs/config';
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { formatPostgrestError } from '../../lib/format-postgrest-error';
 import { getSupabaseService } from '../../lib/supabase';
 import {
@@ -10,10 +10,34 @@ import {
 } from '../conversation-policy/conversation-policy-state';
 import {
   buildChatResetContactWhitelist,
+  evaluateAllowChatResetCommands,
   isContactAllowedForChatReset,
-  resolveAllowChatResetCommands,
+  type ChatResetAllowDeniedReason,
 } from '../../lib/chat-reset-tenant-policy';
 import type { ReplyDecision } from '../reply-planning/dto';
+
+export interface ChatResetEligibilitySnapshot {
+  allowed: boolean;
+  deniedReason?: ChatResetAllowDeniedReason;
+  allowEnvValue: string | undefined;
+  tenantSettingValue: unknown;
+  whitelistConfigured: boolean;
+  contactMatchedWhitelist: boolean;
+}
+
+function readEnvAllowChatResetCommands(config: ConfigService): string | undefined {
+  const v = config.get<string>('ALLOW_CHAT_RESET_COMMANDS') ?? process.env['ALLOW_CHAT_RESET_COMMANDS'];
+  if (v === undefined || v === null) return undefined;
+  const s = String(v).trim();
+  return s === '' ? undefined : s;
+}
+
+function readEnvChatResetAllowedContacts(config: ConfigService): string | undefined {
+  const v = config.get<string>('CHAT_RESET_ALLOWED_CONTACTS') ?? process.env['CHAT_RESET_ALLOWED_CONTACTS'];
+  if (v === undefined || v === null) return undefined;
+  const s = String(v).trim();
+  return s === '' ? undefined : s;
+}
 
 const RESET_CONFIRMATION_TEXT =
   'Started a fresh chat for this conversation.\n\nYou can test from here.';
@@ -21,11 +45,22 @@ const RESET_CONFIRMATION_TEXT =
 export type BotResetSource = 'chat_command' | 'dashboard';
 
 @Injectable()
-export class ConversationResetService {
+export class ConversationResetService implements OnModuleInit {
   private readonly logger = new Logger(ConversationResetService.name);
   private readonly supabase = getSupabaseService();
 
   constructor(private readonly config: ConfigService) {}
+
+  onModuleInit(): void {
+    const rawContacts = readEnvChatResetAllowedContacts(this.config);
+    this.logger.log(
+      `chatResetRuntimeConfig: ${JSON.stringify({
+        NODE_ENV: this.config.get<string>('NODE_ENV', 'development'),
+        ALLOW_CHAT_RESET_COMMANDS: readEnvAllowChatResetCommands(this.config) ?? null,
+        CHAT_RESET_ALLOWED_CONTACTS_configured: Boolean(rawContacts),
+      })}`,
+    );
+  }
 
   buildConfirmationReplyPlan(): ReplyDecision {
     return {
@@ -40,20 +75,54 @@ export class ConversationResetService {
     };
   }
 
-  async isChatResetAllowedForContact(tenantId: string, ghlContactId: string | null | undefined): Promise<boolean> {
+  /**
+   * Policy + optional contact whitelist for inbound `/new`-style commands.
+   * Uses `ALLOW_CHAT_RESET_COMMANDS` / `CHAT_RESET_ALLOWED_CONTACTS` from ConfigService with `process.env` fallback
+   * so workers always see container env even if Nest config hydration differs.
+   */
+  async evaluateChatResetEligibility(
+    tenantId: string,
+    ghlContactId: string | null | undefined,
+  ): Promise<ChatResetEligibilitySnapshot> {
     const { data } = await this.supabase.from('tenants').select('settings').eq('id', tenantId).single();
     const settings = (data?.settings as Record<string, unknown> | undefined) ?? undefined;
-    const allow = resolveAllowChatResetCommands({
+    const envAllowRaw = readEnvAllowChatResetCommands(this.config);
+    const envContactsRaw = readEnvChatResetAllowedContacts(this.config);
+
+    const policy = evaluateAllowChatResetCommands({
       nodeEnv: this.config.get<string>('NODE_ENV', 'development'),
-      envAllow: this.config.get<string>('ALLOW_CHAT_RESET_COMMANDS'),
+      envAllow: envAllowRaw,
       tenantSettings: settings ?? null,
     });
-    if (!allow) return false;
+
     const whitelist = buildChatResetContactWhitelist({
-      envContacts: this.config.get<string>('CHAT_RESET_ALLOWED_CONTACTS'),
+      envContacts: envContactsRaw,
       tenantSettings: settings ?? null,
     });
-    return isContactAllowedForChatReset(ghlContactId ?? null, whitelist);
+    const whitelistConfigured = whitelist.length > 0;
+    const contactMatchedWhitelist = isContactAllowedForChatReset(ghlContactId ?? null, whitelist);
+
+    let allowed = policy.allowed;
+    let deniedReason: ChatResetAllowDeniedReason | undefined = policy.deniedReason;
+
+    if (allowed && !contactMatchedWhitelist) {
+      allowed = false;
+      deniedReason = 'whitelist_blocked';
+    }
+
+    return {
+      allowed,
+      deniedReason,
+      allowEnvValue: envAllowRaw,
+      tenantSettingValue: settings?.['allowChatResetCommands'],
+      whitelistConfigured,
+      contactMatchedWhitelist,
+    };
+  }
+
+  async isChatResetAllowedForContact(tenantId: string, ghlContactId: string | null | undefined): Promise<boolean> {
+    const snap = await this.evaluateChatResetEligibility(tenantId, ghlContactId);
+    return snap.allowed;
   }
 
   /**

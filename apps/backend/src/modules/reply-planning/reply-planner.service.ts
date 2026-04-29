@@ -55,6 +55,10 @@ export interface ReplyPlanPolicyContext {
   batchSecondaryIntents?: ConversationIntent[];
   repeatedHumanTextDetected?: boolean;
   repeatedHumanTextAction?: 'none' | 'answer_again' | 'concise_confirm';
+  /** Hair-salon: prior colour topic must not drive recommendations for out-of-scope questions. */
+  suppressColourRecommendations?: boolean;
+  bookingCapability?: string;
+  handoverCapability?: string;
 }
 
 @Injectable()
@@ -320,6 +324,15 @@ export class ReplyPlannerService {
               menuSelectionActive: policyContext.menuSelectionActive,
               ...(batchCount > 1 ? { combinedInboundMessageCount: batchCount } : {}),
               ...(handling !== 'none' ? { repeatedCustomerMessageHandling: handling } : {}),
+              ...(policyContext.suppressColourRecommendations === true
+                ? { suppressColourRecommendations: true }
+                : {}),
+              ...(policyContext.bookingCapability
+                ? { bookingCapability: policyContext.bookingCapability }
+                : {}),
+              ...(policyContext.handoverCapability
+                ? { handoverCapability: policyContext.handoverCapability }
+                : {}),
             },
           }
         : {}),

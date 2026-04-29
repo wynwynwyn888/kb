@@ -9,6 +9,7 @@ import { OutboundSendService, SendSummary } from '../../modules/outbound/outboun
 import { ConversationsService } from '../../modules/conversations/conversations.service';
 import { ActionGatingService } from '../../modules/action-gating/action-gating.service';
 import { ActionIntentExecutorService } from '../../modules/action-execution/action-intent-executor.service';
+import { OutboundSafetyGovernorService } from '../../modules/outbound/outbound-safety-governor.service';
 
 export interface SendBubbleJobData {
   conversationId: string;
@@ -28,6 +29,7 @@ export class SendBubbleProcessor extends WorkerHost {
     private readonly conversationsService: ConversationsService,
     private readonly actionGatingService: ActionGatingService,
     private readonly actionExecutor: ActionIntentExecutorService,
+    private readonly outboundSafetyGovernor: OutboundSafetyGovernorService,
   ) {
     super();
   }
@@ -50,6 +52,12 @@ export class SendBubbleProcessor extends WorkerHost {
       );
       throw new Error(`Failed to parse reply plan JSON: ${message}`);
     }
+
+    replyPlan = await this.outboundSafetyGovernor.applyOutboundGovernor(replyPlan, {
+      conversationId,
+      tenantId,
+      contactId,
+    });
 
     const summary = await this.outboundSend.sendReply({
       tenantId,

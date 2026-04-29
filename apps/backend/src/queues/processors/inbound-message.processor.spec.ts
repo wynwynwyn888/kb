@@ -33,7 +33,14 @@ const mockOrchestration = {
 };
 
 const mockResetService = {
-  isChatResetAllowedForContact: jestGlobal.fn(async () => false),
+  evaluateChatResetEligibility: jestGlobal.fn(async () => ({
+    allowed: false,
+    deniedReason: 'env_disabled' as const,
+    allowEnvValue: undefined as string | undefined,
+    tenantSettingValue: undefined,
+    whitelistConfigured: false,
+    contactMatchedWhitelist: true,
+  })),
   performBotStateReset: jestGlobal.fn(async () => ({
     memoryResetAt: '2026-01-01T00:00:00.000Z',
     resetVersion: 1,
@@ -327,7 +334,13 @@ describe('InboundMessageProcessor', () => {
   });
 
   it('orchestrate: exact /new triggers reset service and skips AI orchestration', async () => {
-    mockResetService.isChatResetAllowedForContact.mockResolvedValue(true);
+    mockResetService.evaluateChatResetEligibility.mockResolvedValue({
+      allowed: true,
+      allowEnvValue: 'true',
+      tenantSettingValue: undefined,
+      whitelistConfigured: false,
+      contactMatchedWhitelist: true,
+    });
     mockSupabase.from.mockImplementation((table: string) => {
       if (table === 'conversations') {
         return {
@@ -377,7 +390,14 @@ describe('InboundMessageProcessor', () => {
   });
 
   it('orchestrate: /new when reset disabled falls through to normal orchestration', async () => {
-    mockResetService.isChatResetAllowedForContact.mockResolvedValue(false);
+    mockResetService.evaluateChatResetEligibility.mockResolvedValue({
+      allowed: false,
+      deniedReason: 'env_disabled',
+      allowEnvValue: 'false',
+      tenantSettingValue: undefined,
+      whitelistConfigured: false,
+      contactMatchedWhitelist: true,
+    });
     mockSupabase.from.mockImplementation((table: string) => {
       if (table === 'conversations') {
         return {
@@ -416,5 +436,108 @@ describe('InboundMessageProcessor', () => {
 
     expect(mockResetService.performBotStateReset).not.toHaveBeenCalled();
     expect(orchestrate).toHaveBeenCalled();
+  });
+
+  it('orchestrate: /new denied when tenant_disabled still runs normal orchestration', async () => {
+    mockResetService.evaluateChatResetEligibility.mockResolvedValue({
+      allowed: false,
+      deniedReason: 'tenant_disabled',
+      allowEnvValue: 'true',
+      tenantSettingValue: false,
+      whitelistConfigured: false,
+      contactMatchedWhitelist: true,
+    });
+    mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'conversations') {
+        return {
+          select: () => ({
+            eq: () => ({
+              single: async () => ({
+                data: { metadata: { inboundDebounce: { pendingVersion: 4 } } },
+                error: null,
+              }),
+            }),
+          }),
+        };
+      }
+      if (table === 'messages') {
+        return {
+          select: () =>
+            resolvedQuery({
+              data: [{ content: '/new', created_at: '2026-01-01T00:00:02.000Z' }],
+              error: null,
+            }),
+        };
+      }
+      return {} as never;
+    });
+
+    await processor.process(
+      makeJob('orchestrate', {
+        tenantId: 'tenant-1',
+        conversationId: CONV_ID,
+        locationId: 'loc_1',
+        ghlContactId: 'ct_1',
+        ghlConversationId: 'ghl_conv_1',
+        debounceVersion: 4,
+      }),
+    );
+
+    expect(mockResetService.performBotStateReset).not.toHaveBeenCalled();
+    expect(orchestrate).toHaveBeenCalled();
+  });
+
+  it('orchestrate: uses last batch message for command (multi-line batch)', async () => {
+    mockResetService.evaluateChatResetEligibility.mockResolvedValue({
+      allowed: true,
+      allowEnvValue: 'true',
+      tenantSettingValue: undefined,
+      whitelistConfigured: false,
+      contactMatchedWhitelist: true,
+    });
+    mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'conversations') {
+        return {
+          select: () => ({
+            eq: () => ({
+              single: async () => ({
+                data: { metadata: { inboundDebounce: { pendingVersion: 4 } } },
+                error: null,
+              }),
+            }),
+          }),
+        };
+      }
+      if (table === 'messages') {
+        return {
+          select: () =>
+            resolvedQuery({
+              // DB returns newest-first; burst batch is oldest→newest so last = latest inbound.
+              data: [
+                { content: '/new', created_at: '2026-01-01T00:00:02.000Z' },
+                { content: 'menu pls', created_at: '2026-01-01T00:00:01.000Z' },
+              ],
+              error: null,
+            }),
+        };
+      }
+      return {} as never;
+    });
+
+    await processor.process(
+      makeJob('orchestrate', {
+        tenantId: 'tenant-1',
+        conversationId: CONV_ID,
+        locationId: 'loc_1',
+        ghlContactId: 'ct_1',
+        ghlConversationId: 'ghl_conv_1',
+        debounceVersion: 4,
+      }),
+    );
+
+    expect(mockResetService.performBotStateReset).toHaveBeenCalledWith(
+      expect.objectContaining({ resetCommand: '/new' }),
+    );
+    expect(orchestrate).not.toHaveBeenCalled();
   });
 });

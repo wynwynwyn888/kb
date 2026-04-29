@@ -34,11 +34,11 @@ const textareaStyle = {
 };
 
 const sectionCard = {
-  border: '1px solid #e2e8f0',
+  border: '1px solid var(--aisbp-border, #e2e8f0)',
   borderRadius: '10px',
   padding: '1rem 1.1rem',
   marginBottom: '0.85rem',
-  background: '#fff',
+  background: 'var(--aisbp-surface, #fff)',
 };
 
 const TEMP_PRESETS = { precise: 0.35, balanced: 0.7, creative: 1.2 } as const;
@@ -280,7 +280,7 @@ export function TenantGoalsPanel() {
   return (
     <div>
       <PageHeader title="Bot Instructions" eyebrow="Client workspace" />
-      <p style={{ fontSize: '0.88rem', color: '#64748b', margin: '0 0 1rem', lineHeight: 1.5, maxWidth: '640px' }}>
+      <p style={{ fontSize: '0.88rem', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 1rem', lineHeight: 1.5, maxWidth: '640px' }}>
         Define how this workspace’s bot should sound, what it should achieve, and what it must know.
       </p>
 
@@ -297,8 +297,8 @@ export function TenantGoalsPanel() {
               marginTop: '0.5rem',
               padding: '0.4rem 0.75rem',
               borderRadius: '6px',
-              border: '1px solid #ccc',
-              background: '#fff',
+              border: '1px solid var(--aisbp-border-strong, #ccc)',
+              background: 'var(--aisbp-surface, #fff)',
               cursor: 'pointer',
               fontSize: '0.85rem',
             }}
@@ -314,8 +314,8 @@ export function TenantGoalsPanel() {
       {!loading && !err ? (
         <form onSubmit={onSavePrompt}>
           <div style={sectionCard}>
-            <h2 style={{ fontSize: '0.95rem', fontWeight: 800, margin: '0 0 0.5rem', color: '#0f172a' }}>Persona</h2>
-            <p style={{ fontSize: '0.8rem', color: '#64748b', margin: '0 0 0.5rem' }}>Identity, tone, and how the bot should sound.</p>
+            <h2 style={{ fontSize: '0.95rem', fontWeight: 800, margin: '0 0 0.5rem', color: 'var(--aisbp-text-heading, #0f172a)' }}>Persona</h2>
+            <p style={{ fontSize: '0.8rem', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 0.5rem' }}>Identity, tone, and how the bot should sound.</p>
             <textarea
               style={textareaStyle}
               value={persona}
@@ -324,13 +324,13 @@ export function TenantGoalsPanel() {
             />
           </div>
           <div style={sectionCard}>
-            <h2 style={{ fontSize: '0.95rem', fontWeight: 800, margin: '0 0 0.5rem', color: '#0f172a' }}>Conversation goals</h2>
-            <p style={{ fontSize: '0.8rem', color: '#64748b', margin: '0 0 0.5rem' }}>Outcomes, priorities, and what success looks like.</p>
+            <h2 style={{ fontSize: '0.95rem', fontWeight: 800, margin: '0 0 0.5rem', color: 'var(--aisbp-text-heading, #0f172a)' }}>Conversation goals</h2>
+            <p style={{ fontSize: '0.8rem', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 0.5rem' }}>Outcomes, priorities, and what success looks like.</p>
             <textarea style={textareaStyle} value={goals} onChange={e => setGoals(e.target.value)} aria-label="Conversation goals" />
           </div>
           <div style={sectionCard}>
-            <h2 style={{ fontSize: '0.95rem', fontWeight: 800, margin: '0 0 0.5rem', color: '#0f172a' }}>Business notes</h2>
-            <p style={{ fontSize: '0.8rem', color: '#64748b', margin: '0 0 0.5rem' }}>
+            <h2 style={{ fontSize: '0.95rem', fontWeight: 800, margin: '0 0 0.5rem', color: 'var(--aisbp-text-heading, #0f172a)' }}>Business notes</h2>
+            <p style={{ fontSize: '0.8rem', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 0.5rem' }}>
               Guardrails, hours, products, or anything else the bot should know.
             </p>
             <textarea
@@ -414,7 +414,7 @@ export function TenantGoalsPanel() {
           </div>
 
           <details style={{ marginBottom: '0.75rem' }}>
-            <summary style={{ cursor: 'pointer', fontSize: '0.82rem', fontWeight: 600, color: '#64748b' }}>Advanced details</summary>
+            <summary style={{ cursor: 'pointer', fontSize: '0.82rem', fontWeight: 600, color: 'var(--aisbp-muted, #64748b)' }}>Advanced details</summary>
             <div style={{ marginTop: '0.65rem' }}>
               <label style={mvpLabelStyle}>Profile name</label>
               <input

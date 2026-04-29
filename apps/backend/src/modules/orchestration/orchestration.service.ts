@@ -40,6 +40,7 @@ import { interpretRetrievalChunks } from '../../lib/kb-chunk-interpretation';
 import { resolveOperatingHoursConflictsAmongChunks } from '../../lib/kb-operating-hours-conflict';
 import { prepareCustomerFacingMenuKb, shouldCurateMenuKbContext } from '../../lib/menu-kb-curator';
 import { detectOldDemoTermsInText } from '../../lib/old-demo-terms';
+import { getBusinessLocalNow, resolveAppTimeZone } from '../../lib/business-time';
 
 @Injectable()
 export class ConversationOrchestrationService {
@@ -170,7 +171,7 @@ export class ConversationOrchestrationService {
       const kbChunks = policyOutcome.kbChunks;
 
       // Step 4: Build AI routing request (includes KB context)
-      const systemPrompt = this.buildSystemPrompt(input);
+      const systemPrompt = this.buildSystemPromptWithRuntimeGreeting(input);
       const routingRequest = this.buildRoutingRequest(
         input,
         memory,
@@ -508,6 +509,26 @@ export class ConversationOrchestrationService {
     if (agencyPrompt) return agencyPrompt;
 
     return 'You are a helpful AI assistant.';
+  }
+
+  /**
+   * Appends backend-computed local time context so the model greets with the correct period
+   * (e.g. Good evening at 21:00 Singapore) instead of guessing from model training cut-off.
+   */
+  private buildSystemPromptWithRuntimeGreeting(input: OrchestrationInput): string {
+    const base = this.buildSystemPrompt(input);
+    const tenantTz = input.tenant?.timeZone?.trim();
+    const businessTimezone = tenantTz || resolveAppTimeZone();
+    const snap = getBusinessLocalNow(businessTimezone);
+    this.logger.log(
+      `Runtime greeting context: resolvedTimeZone=${snap.timeZone} localDayPeriod=${snap.dayPeriod} greetingLabel=${snap.greetingLabel}`,
+    );
+    const block =
+      `---\nCurrent local time context (use for greetings when appropriate; do not contradict):\n` +
+      `- businessTimezone: ${businessTimezone}\n` +
+      `- localDayPeriod: ${snap.dayPeriod}\n` +
+      `- greetingLabel: ${snap.greetingLabel}\n`;
+    return `${base}\n\n${block}`;
   }
 
   private buildRoutingRequest(

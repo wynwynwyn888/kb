@@ -13,3 +13,81 @@ details > summary {
 details > summary::-webkit-details-marker {
   display: none;
 }
+
+/* --- Theme (light default; `html.dark` toggled by ThemeToggle + inline boot script) --- */
+:root {
+  color-scheme: light;
+  --aisbp-bg: #f8fafc;
+  --aisbp-main-bg: #f8fafc;
+  --aisbp-shell-bg: #f8fafc;
+  --aisbp-surface: #ffffff;
+  --aisbp-surface-muted: #f8fafc;
+  --aisbp-text: #0f172a;
+  --aisbp-text-heading: #0f172a;
+  --aisbp-text-secondary: #334155;
+  --aisbp-muted: #64748b;
+  --aisbp-border: #e2e8f0;
+  --aisbp-border-strong: #cbd5e1;
+  --aisbp-input-bg: #ffffff;
+  --aisbp-card-subtle: #f8f9fb;
+  --aisbp-sidebar-tenant-bg: rgba(255, 255, 255, 0.98);
+  --aisbp-nav-active-bg: #ffffff;
+  --aisbp-nav-text: #475569;
+  --aisbp-nav-active-text: #0f172a;
+  --aisbp-tenant-nav-active-bg: rgba(15, 98, 254, 0.1);
+  --aisbp-tenant-nav-active-text: #0f62fe;
+  --aisbp-glass-bg: rgba(255, 255, 255, 0.88);
+  --aisbp-glass-border: rgba(226, 232, 240, 0.95);
+  --aisbp-card-gradient-top: #ffffff;
+  --aisbp-card-gradient-bottom: #fafbfc;
+  --aisbp-bento-bg: rgba(255, 255, 255, 0.9);
+  --aisbp-bento-border: rgba(255, 255, 255, 1);
+  --aisbp-modal-bg: #ffffff;
+  --aisbp-modal-border: #e2e8f0;
+  --aisbp-modal-divider: #f1f5f9;
+  --aisbp-modal-close-bg: #f1f5f9;
+  --aisbp-overlay: rgba(15, 23, 42, 0.48);
+  --aisbp-page-bg: #f8fafc;
+  --aisbp-warn-bg: #fff8f0;
+}
+
+html.dark {
+  color-scheme: dark;
+  --aisbp-bg: #0b1220;
+  --aisbp-main-bg: #0b1220;
+  --aisbp-shell-bg: #0b1220;
+  --aisbp-surface: #111827;
+  --aisbp-surface-muted: #0f172a;
+  --aisbp-text: #f1f5f9;
+  --aisbp-text-heading: #f8fafc;
+  --aisbp-text-secondary: #e2e8f0;
+  --aisbp-muted: #94a3b8;
+  --aisbp-border: #334155;
+  --aisbp-border-strong: #475569;
+  --aisbp-input-bg: #0f172a;
+  --aisbp-card-subtle: #1e293b;
+  --aisbp-sidebar-tenant-bg: rgba(17, 24, 39, 0.96);
+  --aisbp-nav-active-bg: #1e293b;
+  --aisbp-nav-text: #94a3b8;
+  --aisbp-nav-active-text: #f1f5f9;
+  --aisbp-tenant-nav-active-bg: rgba(15, 98, 254, 0.2);
+  --aisbp-tenant-nav-active-text: #93c5fd;
+  --aisbp-glass-bg: rgba(30, 41, 59, 0.92);
+  --aisbp-glass-border: rgba(51, 65, 85, 0.85);
+  --aisbp-card-gradient-top: #1e293b;
+  --aisbp-card-gradient-bottom: #111827;
+  --aisbp-bento-bg: rgba(30, 41, 59, 0.85);
+  --aisbp-bento-border: rgba(51, 65, 85, 0.9);
+  --aisbp-modal-bg: #111827;
+  --aisbp-modal-border: #334155;
+  --aisbp-modal-divider: #1e293b;
+  --aisbp-modal-close-bg: #1e293b;
+  --aisbp-overlay: rgba(2, 6, 23, 0.75);
+  --aisbp-page-bg: #0b1220;
+  --aisbp-warn-bg: #2a1810;
+}
+
+html.dark body {
+  background-color: var(--aisbp-bg);
+  color: var(--aisbp-text);
+}

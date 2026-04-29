@@ -3,6 +3,7 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { resolveAndApplyProcessTimeZone } from './lib/business-time.js';
 
 function applyEnvFile(path: string, override: boolean): void {
   if (!existsSync(path)) return;
@@ -40,8 +41,5 @@ applyEnvFile(resolve(cwd, '.env.local'), true);
 applyEnvFile(resolve(cwd, '..', '.env.local'), true);
 applyEnvFile(resolve(cwd, 'apps', 'backend', '.env.local'), true);
 
-/** Default log / Date locale timezone (IANA). Node uses `TZ` for timestamps in Nest logs. Override in `.env`. */
-const tz = process.env['TZ'];
-if (tz == null || String(tz).trim() === '') {
-  process.env['TZ'] = 'Asia/Singapore';
-}
+/** APP_TIMEZONE → TZ → Asia/Singapore; sets `process.env["TZ"]` for Node (logs, local Date formatting). */
+resolveAndApplyProcessTimeZone();

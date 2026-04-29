@@ -1,12 +1,13 @@
 'use client';
 
 import type { CSSProperties, ReactNode } from 'react';
+import { DEFAULT_DISPLAY_TIMEZONE } from '@/lib/datetime-display';
 
 const cardStyle: CSSProperties = {
-  border: '1px solid #e2e8f0',
+  border: '1px solid var(--aisbp-border, #e2e8f0)',
   borderRadius: '12px',
   padding: '1.15rem',
-  background: '#fff',
+  background: 'var(--aisbp-surface, #fff)',
   boxShadow: '0 1px 2px rgba(15, 23, 42, 0.03)',
 };
 
@@ -22,7 +23,11 @@ export function SectionCard({
   accent?: 'default' | 'muted' | 'warn';
 }) {
   const bg =
-    accent === 'muted' ? '#fafafa' : accent === 'warn' ? '#fff8f0' : '#fff';
+    accent === 'muted'
+      ? 'var(--aisbp-card-subtle, #fafafa)'
+      : accent === 'warn'
+        ? 'var(--aisbp-warn-bg, #fff8f0)'
+        : 'var(--aisbp-surface, #fff)';
   return (
     <section
       style={{
@@ -31,9 +36,9 @@ export function SectionCard({
         marginBottom: '1rem',
       }}
     >
-      <h2 style={{ fontSize: '1rem', fontWeight: 700, margin: '0 0 0.25rem', color: '#0f172a' }}>{title}</h2>
+      <h2 style={{ fontSize: '1rem', fontWeight: 700, margin: '0 0 0.25rem', color: 'var(--aisbp-text-heading, #0f172a)' }}>{title}</h2>
       {subtitle && (
-        <p style={{ fontSize: '0.84rem', color: '#64748b', margin: '0 0 0.85rem', lineHeight: 1.45 }}>{subtitle}</p>
+        <p style={{ fontSize: '0.84rem', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 0.85rem', lineHeight: 1.45 }}>{subtitle}</p>
       )}
       {children}
     </section>
@@ -58,7 +63,7 @@ export function KeyValueRows({
             alignItems: 'baseline',
           }}
         >
-      <dt style={{ color: '#64748b', fontWeight: 600 }}>{label}</dt>
+      <dt style={{ color: 'var(--aisbp-muted, #64748b)', fontWeight: 600 }}>{label}</dt>
           <dd
             style={{
               margin: 0,
@@ -84,7 +89,11 @@ export function StatusPill({
 }) {
   const colors = {
     ok: { bg: '#ecfdf5', fg: '#047857', border: '#bbf7d0' },
-    neutral: { bg: '#f8fafc', fg: '#475569', border: '#e2e8f0' },
+    neutral: {
+      bg: 'var(--aisbp-nav-active-bg, #f8fafc)',
+      fg: 'var(--aisbp-nav-text, #475569)',
+      border: 'var(--aisbp-border, #e2e8f0)',
+    },
     warn: { bg: '#fffbeb', fg: '#b45309', border: '#fde68a' },
     bad: { bg: '#fef2f2', fg: '#b91c1c', border: '#fecaca' },
   }[tone];
@@ -108,7 +117,7 @@ export function StatusPill({
 
 export function LoadingBlock({ message = 'Loading…' }: { message?: string }) {
   return (
-    <p style={{ color: '#555', fontSize: '0.9rem', margin: '0.5rem 0' }}>{message}</p>
+    <p style={{ color: 'var(--aisbp-muted, #555)', fontSize: '0.9rem', margin: '0.5rem 0' }}>{message}</p>
   );
 }
 
@@ -152,7 +161,7 @@ export function SuccessBanner({ message }: { message: string }) {
 
 export const mvpFieldHint: CSSProperties = {
   fontSize: '0.8rem',
-  color: '#64748b',
+  color: 'var(--aisbp-muted, #64748b)',
   marginTop: '0.35rem',
   lineHeight: 1.45,
 };
@@ -161,7 +170,7 @@ export const mvpLabelStyle: CSSProperties = {
   display: 'block',
   fontWeight: 650,
   fontSize: '0.88rem',
-  color: '#334155',
+  color: 'var(--aisbp-text-secondary, #334155)',
 };
 
 export const mvpInputStyle: CSSProperties = {
@@ -170,28 +179,29 @@ export const mvpInputStyle: CSSProperties = {
   marginTop: '0.35rem',
   padding: '0.55rem 0.7rem',
   borderRadius: '8px',
-  border: '1px solid #cbd5e1',
+  border: '1px solid var(--aisbp-border-strong, #cbd5e1)',
   fontSize: '0.9rem',
   boxSizing: 'border-box',
-  backgroundColor: '#fff',
+  backgroundColor: 'var(--aisbp-input-bg, #fff)',
+  color: 'var(--aisbp-text, #0f172a)',
 };
 
 /** Selects and multi-line controls — same shell as inputs, pointer cursor for dropdowns. */
 export const mvpSelectStyle: CSSProperties = {
   ...mvpInputStyle,
   cursor: 'pointer',
-  backgroundColor: '#fff',
+  backgroundColor: 'var(--aisbp-input-bg, #fff)',
 };
 
 export const mvpButtonStyle: CSSProperties = {
   padding: '0.5rem 0.9rem',
   borderRadius: '8px',
-  border: '1px solid #cbd5e1',
-  background: '#fff',
+  border: '1px solid var(--aisbp-border-strong, #cbd5e1)',
+  background: 'var(--aisbp-surface, #fff)',
   cursor: 'pointer',
   fontSize: '0.88rem',
   fontWeight: 650,
-  color: '#334155',
+  color: 'var(--aisbp-text-secondary, #334155)',
 };
 
 export const mvpPrimaryButtonStyle: CSSProperties = {
@@ -204,16 +214,16 @@ export const mvpPrimaryButtonStyle: CSSProperties = {
 
 export const mvpSecondaryButtonStyle: CSSProperties = {
   ...mvpButtonStyle,
-  background: '#fff',
-  borderColor: '#cbd5e1',
-  color: '#334155',
+  background: 'var(--aisbp-surface, #fff)',
+  borderColor: 'var(--aisbp-border-strong, #cbd5e1)',
+  color: 'var(--aisbp-text-secondary, #334155)',
 };
 
 export const mvpDangerButtonStyle: CSSProperties = {
   ...mvpButtonStyle,
   borderColor: '#fecaca',
   color: '#b91c1c',
-  background: '#fff',
+  background: 'var(--aisbp-surface, #fff)',
 };
 
 /** In-app navigation: pill + soft shadow, no underline (use on `Link` or `button`). */
@@ -224,12 +234,12 @@ export const appFloatingSecondaryButtonStyle: CSSProperties = {
   gap: '0.35rem',
   padding: '0.5rem 0.95rem',
   borderRadius: '10px',
-  border: '1px solid #e2e8f0',
-  background: '#fff',
+  border: '1px solid var(--aisbp-border, #e2e8f0)',
+  background: 'var(--aisbp-surface, #fff)',
   boxShadow: '0 4px 16px rgba(15, 23, 42, 0.07)',
   fontSize: '0.8125rem',
   fontWeight: 650,
-  color: '#0f172a',
+  color: 'var(--aisbp-text-heading, #0f172a)',
   textDecoration: 'none',
   cursor: 'pointer',
 };
@@ -257,14 +267,14 @@ export function EmptyState({
       style={{
         padding: compact ? '0.75rem 0.85rem' : '1rem',
         borderRadius: '10px',
-        background: '#f8f9fb',
-        border: '1px solid #e2e8f0',
+        background: 'var(--aisbp-card-subtle, #f8f9fb)',
+        border: '1px solid var(--aisbp-border, #e2e8f0)',
         fontSize: compact ? '0.84rem' : '0.88rem',
-        color: '#555',
+        color: 'var(--aisbp-text-secondary, #555)',
         lineHeight: 1.45,
       }}
     >
-      <strong style={{ display: 'block', marginBottom: detail ? '0.35rem' : 0, color: '#0f172a' }}>{title}</strong>
+      <strong style={{ display: 'block', marginBottom: detail ? '0.35rem' : 0, color: 'var(--aisbp-text-heading, #0f172a)' }}>{title}</strong>
       {detail ? <span>{detail}</span> : null}
     </div>
   );
@@ -286,7 +296,7 @@ export function PageHeader({
             fontSize: '0.72rem',
             textTransform: 'uppercase',
             letterSpacing: '0.06em',
-            color: '#64748b',
+            color: 'var(--aisbp-muted, #64748b)',
             margin: '0 0 0.4rem',
             fontWeight: 600,
           }}
@@ -294,7 +304,18 @@ export function PageHeader({
           {eyebrow}
         </p>
       ) : null}
-      <h1 style={{ fontSize: '1.75rem', fontWeight: 800, margin: 0, lineHeight: 1.2, color: '#0f172a', letterSpacing: '-0.025em' }}>{title}</h1>
+      <h1
+        style={{
+          fontSize: '1.75rem',
+          fontWeight: 800,
+          margin: 0,
+          lineHeight: 1.2,
+          color: 'var(--aisbp-text-heading, #0f172a)',
+          letterSpacing: '-0.025em',
+        }}
+      >
+        {title}
+      </h1>
     </header>
   );
 }
@@ -304,7 +325,11 @@ export function formatDateTime(iso: string | null | undefined): string {
   try {
     const d = new Date(iso);
     if (Number.isNaN(d.getTime())) return String(iso);
-    return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+    return d.toLocaleString('en-SG', {
+      timeZone: DEFAULT_DISPLAY_TIMEZONE,
+      dateStyle: 'medium',
+      timeStyle: 'short',
+    });
   } catch {
     return String(iso);
   }

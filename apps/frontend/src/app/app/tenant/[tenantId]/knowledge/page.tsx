@@ -34,18 +34,19 @@ import {
   mvpLabelStyle,
 } from '@/components/app/mvp-ui';
 import { BotTestPanel } from '@/components/app/bot-test/BotTestPanel';
+import { relativeTimeLabel } from '@/lib/datetime-display';
 
 const PRIMARY = '#0F62FE';
-const PAGE_BG = '#F8FAFC';
+const PAGE_BG = 'var(--aisbp-page-bg, #F8FAFC)';
 
 const glassSection: CSSProperties = {
   borderRadius: 16,
   padding: '1.15rem 1.2rem',
   marginBottom: '1.1rem',
-  background: 'rgba(255, 255, 255, 0.88)',
+  background: 'var(--aisbp-glass-bg, rgba(255, 255, 255, 0.88))',
   backdropFilter: 'blur(18px)',
   WebkitBackdropFilter: 'blur(18px)',
-  border: '1px solid rgba(226, 232, 240, 0.95)',
+  border: '1px solid var(--aisbp-glass-border, rgba(226, 232, 240, 0.95))',
   boxShadow: '0 12px 40px rgba(15, 23, 42, 0.04)',
 };
 
@@ -56,27 +57,15 @@ const bentoBtn: CSSProperties = {
   flexDirection: 'column',
   alignItems: 'center',
   gap: 10,
-  background: 'rgba(255, 255, 255, 0.9)',
+  background: 'var(--aisbp-bento-bg, rgba(255, 255, 255, 0.9))',
   backdropFilter: 'blur(14px)',
   WebkitBackdropFilter: 'blur(14px)',
-  border: '1px solid rgba(255, 255, 255, 1)',
+  border: '1px solid var(--aisbp-bento-border, rgba(255, 255, 255, 1))',
   boxShadow: '0 12px 40px rgba(15, 23, 42, 0.05)',
   cursor: 'pointer',
   font: 'inherit',
-  color: '#0f172a',
+  color: 'var(--aisbp-text-heading, #0f172a)',
 };
-
-function relativeTimeLabel(iso?: string | null): string {
-  if (!iso) return '—';
-  const t = new Date(iso).getTime();
-  if (Number.isNaN(t)) return '—';
-  const sec = Math.floor((Date.now() - t) / 1000);
-  if (sec < 45) return 'just now';
-  if (sec < 3600) return `${Math.max(1, Math.floor(sec / 60))}m ago`;
-  if (sec < 86400) return `${Math.max(1, Math.floor(sec / 3600))}h ago`;
-  if (sec < 86400 * 14) return `${Math.max(1, Math.floor(sec / 86400))}d ago`;
-  return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-}
 
 function kbSearchRelevanceLabelDisplay(h: KbSearchHit): string {
   const m: Record<string, string> = {
@@ -101,7 +90,7 @@ function statusPillTone(status: string): 'ok' | 'neutral' | 'warn' | 'bad' {
 const modalOverlay: CSSProperties = {
   position: 'fixed',
   inset: 0,
-  background: 'rgba(15, 23, 42, 0.48)',
+  background: 'var(--aisbp-overlay, rgba(15, 23, 42, 0.48))',
   zIndex: 60,
   display: 'flex',
   alignItems: 'center',
@@ -110,7 +99,7 @@ const modalOverlay: CSSProperties = {
 };
 
 const modalPanel: CSSProperties = {
-  background: '#fff',
+  background: 'var(--aisbp-modal-bg, #fff)',
   borderRadius: 16,
   width: 'min(720px, 100%)',
   maxHeight: 'min(82vh, 760px)',
@@ -118,7 +107,7 @@ const modalPanel: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
   boxShadow: '0 24px 48px rgba(15, 23, 42, 0.2)',
-  border: '1px solid #e2e8f0',
+  border: '1px solid var(--aisbp-modal-border, #e2e8f0)',
 };
 
 const modalPanelWide: CSSProperties = {
@@ -155,8 +144,8 @@ function KbModal({
         aria-labelledby="kb-modal-title"
         onClick={e => e.stopPropagation()}
       >
-        <div style={{ padding: '1rem 1.15rem', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', gap: 12 }}>
-          <h2 id="kb-modal-title" style={{ fontSize: '1.05rem', fontWeight: 700, margin: 0, flex: 1, minWidth: 0, color: '#0f172a' }}>
+        <div style={{ padding: '1rem 1.15rem', borderBottom: '1px solid var(--aisbp-modal-divider, #f1f5f9)', display: 'flex', alignItems: 'center', gap: 12 }}>
+          <h2 id="kb-modal-title" style={{ fontSize: '1.05rem', fontWeight: 700, margin: 0, flex: 1, minWidth: 0, color: 'var(--aisbp-text-heading, #0f172a)' }}>
             {title}
           </h2>
           <button
@@ -164,14 +153,14 @@ function KbModal({
             onClick={onClose}
             style={{
               border: 'none',
-              background: '#f1f5f9',
+              background: 'var(--aisbp-modal-close-bg, #f1f5f9)',
               borderRadius: 8,
               width: 36,
               height: 36,
               cursor: 'pointer',
               fontSize: '1.1rem',
               lineHeight: 1,
-              color: '#475569',
+              color: 'var(--aisbp-muted, #475569)',
             }}
             aria-label="Close"
           >
@@ -179,7 +168,7 @@ function KbModal({
           </button>
         </div>
         <div style={{ padding: '1rem 1.15rem', overflowY: 'auto', flex: 1, minHeight: 0 }}>{children}</div>
-        {footer ? <div style={{ padding: '0.75rem 1.15rem', borderTop: '1px solid #f1f5f9' }}>{footer}</div> : null}
+        {footer ? <div style={{ padding: '0.75rem 1.15rem', borderTop: '1px solid var(--aisbp-modal-divider, #f1f5f9)' }}>{footer}</div> : null}
       </div>
     </div>
   );
@@ -263,8 +252,8 @@ const faqCardShell: CSSProperties = {
   borderRadius: 16,
   padding: '1.15rem 1.25rem',
   marginBottom: 14,
-  background: 'linear-gradient(180deg, #ffffff 0%, #fafbfc 100%)',
-  border: '1px solid #e2e8f0',
+  background: 'linear-gradient(180deg, var(--aisbp-card-gradient-top, #ffffff) 0%, var(--aisbp-card-gradient-bottom, #fafbfc) 100%)',
+  border: '1px solid var(--aisbp-border, #e2e8f0)',
   boxShadow: '0 4px 24px rgba(15, 23, 42, 0.055)',
 };
 
@@ -507,7 +496,7 @@ function FaqKnowledgeCard({
           gap: '12px 16px',
           marginTop: '1.1rem',
           paddingTop: '0.85rem',
-          borderTop: '1px solid #f1f5f9',
+          borderTop: '1px solid var(--aisbp-modal-divider, #f1f5f9)',
         }}
       >
         <span style={{ fontSize: '0.68rem', fontWeight: 600, letterSpacing: '0.04em', color: '#94a3b8' }}>
@@ -665,6 +654,7 @@ function NoteKnowledgeCard({
       const { document: patched } = await updateKbRichText(token, doc.id, { tenantId: subId, title: t, content: c });
       setSaveOk('Note saved.');
       onPatchedDocument?.(patched);
+      setEditorFacts({ updatedAt: patched.updatedAt, chunkCount: patched.chunkCount });
       setModalOpen(false);
     } catch (er) {
       const raw = isApiHttpError(er) ? er.message : er instanceof Error ? er.message : 'Save failed';
@@ -782,7 +772,7 @@ function NoteKnowledgeCard({
             gap: '12px 16px',
             marginTop: '1.1rem',
             paddingTop: '0.85rem',
-            borderTop: '1px solid #f1f5f9',
+            borderTop: '1px solid var(--aisbp-modal-divider, #f1f5f9)',
           }}
         >
           <span style={{ fontSize: '0.68rem', fontWeight: 600, letterSpacing: '0.04em', color: '#94a3b8' }}>
@@ -1150,7 +1140,7 @@ function FileKnowledgeCard({
             gap: '0.5rem',
             marginTop: '1.05rem',
             paddingTop: '0.85rem',
-            borderTop: '1px solid #f1f5f9',
+            borderTop: '1px solid var(--aisbp-modal-divider, #f1f5f9)',
           }}
         >
           <button
@@ -1789,7 +1779,7 @@ export default function SubaccountKnowledgePage() {
                                         ...x,
                                         title: patch.title,
                                         status: patch.status,
-                                        updatedAt: patch.updatedAt || new Date().toISOString(),
+                                        updatedAt: patch.updatedAt?.trim() ? patch.updatedAt : new Date().toISOString(),
                                         chunkCount: patch.chunkCount,
                                         answerPreview: patch.answerPreview,
                                       }

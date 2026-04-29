@@ -373,15 +373,27 @@ export async function deleteGhlConnection(token: string, tenantId: string): Prom
   await apiRequest<void>(`/tenants/${tenantId}/ghl/connection`, { token, method: 'DELETE' });
 }
 
-// Subaccount automation — booking + intent tags (Milestone 1)
+// Subaccount automation — booking, tagging, follow-up
 export type TenantBookingMode = 'COLLECT_DETAILS_ONLY' | 'CHECK_AVAILABILITY' | 'BOOK_AFTER_CONFIRMATION';
+
+export interface CustomBookingField {
+  id: string;
+  label: string;
+  helpText?: string;
+  fieldType: string;
+  options?: string[];
+  required: boolean;
+  displayOrder: number;
+}
 
 export interface TenantBookingSettings {
   enabled: boolean;
   bookingMode: TenantBookingMode;
   defaultGhlCalendarId: string | null;
   defaultGhlCalendarName: string | null;
-  requiredFieldsJson: string[];
+  coreRequiredFieldsJson: string[];
+  customFieldsJson: CustomBookingField[];
+  maxBookingsPerSlot: number;
 }
 
 export interface GhlCalendarOption {
@@ -389,11 +401,64 @@ export interface GhlCalendarOption {
   name: string;
 }
 
-export interface IntentTagRule {
-  intentKey: string;
-  tagName: string;
+export interface TenantTaggingSettings {
+  automaticTaggingEnabled: boolean;
+}
+
+export type TagMatchMode = 'AI' | 'KEYWORD' | 'HYBRID';
+export type TagConfidenceThreshold = 'LOW' | 'NORMAL' | 'HIGH';
+
+export interface TenantTagRule {
+  id: string;
+  tenantId: string;
   enabled: boolean;
-  triggerMode: 'AUTO' | 'OFF';
+  autoApply: boolean;
+  ruleName: string;
+  ruleDescription: string;
+  crmTagId: string | null;
+  crmTagName: string;
+  matchMode: TagMatchMode;
+  confidenceThreshold: TagConfidenceThreshold;
+  priority: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TagRuleMatchHit {
+  ruleId: string;
+  ruleName: string;
+  crmTagName: string;
+  matchMode: TagMatchMode;
+  confidence: number;
+  confidenceLabel: TagConfidenceThreshold;
+  passesThreshold: boolean;
+  source: 'keyword' | 'ai';
+}
+
+export interface TagRuleTestMatchResult {
+  hits: TagRuleMatchHit[];
+  tagsToApply: string[];
+}
+
+export interface FollowUpStepSetting {
+  stepNumber: number;
+  delayAmount: number;
+  delayUnit: 'minutes' | 'hours' | 'days';
+  mode: 'fixed' | 'ai';
+  fixedMessage?: string;
+  aiInstruction?: string;
+  enabled: boolean;
+}
+
+export interface TenantFollowUpSettings {
+  enabled: boolean;
+  maxFollowUps: number;
+  stopOnCustomerReply: boolean;
+  stopOnBookingCompleted: boolean;
+  stopOnEscalated: boolean;
+  stopOnOptOut: boolean;
+  businessHoursOnly: boolean;
+  steps: FollowUpStepSetting[];
 }
 
 export async function getTenantBookingSettings(token: string, tenantId: string): Promise<TenantBookingSettings> {
@@ -408,7 +473,9 @@ export async function patchTenantBookingSettings(
     bookingMode: TenantBookingMode;
     defaultGhlCalendarId: string | null;
     defaultGhlCalendarName: string | null;
-    requiredFieldsJson: string[];
+    coreRequiredFieldsJson: string[];
+    customFieldsJson: CustomBookingField[];
+    maxBookingsPerSlot: number;
   }>,
 ): Promise<TenantBookingSettings> {
   return apiRequest<TenantBookingSettings>(`/tenants/${tenantId}/booking-settings`, {
@@ -444,27 +511,70 @@ export async function testTenantBookingSlots(
   });
 }
 
-export async function getIntentTagRules(token: string, tenantId: string): Promise<{ rules: IntentTagRule[] }> {
-  return apiRequest(`/tenants/${tenantId}/intent-tag-rules`, { token });
+export async function getTenantTaggingSettings(token: string, tenantId: string): Promise<TenantTaggingSettings> {
+  return apiRequest(`/tenants/${tenantId}/tagging-settings`, { token });
 }
 
-export async function patchIntentTagRules(
+export async function patchTenantTaggingSettings(
   token: string,
   tenantId: string,
-  rules: IntentTagRule[],
-): Promise<{ rules: IntentTagRule[] }> {
-  return apiRequest(`/tenants/${tenantId}/intent-tag-rules`, {
+  patch: Partial<{ automaticTaggingEnabled: boolean }>,
+): Promise<TenantTaggingSettings> {
+  return apiRequest(`/tenants/${tenantId}/tagging-settings`, {
     token,
     method: 'PATCH',
-    body: JSON.stringify({ rules }),
+    body: JSON.stringify(patch),
   });
+}
+
+export async function getTenantTagRules(token: string, tenantId: string): Promise<{ rules: TenantTagRule[] }> {
+  return apiRequest(`/tenants/${tenantId}/tag-rules`, { token });
+}
+
+export async function createTenantTagRule(
+  token: string,
+  tenantId: string,
+  body: Partial<TenantTagRule> & { ruleName: string; ruleDescription: string; crmTagName: string },
+): Promise<{ rule: TenantTagRule }> {
+  return apiRequest(`/tenants/${tenantId}/tag-rules`, {
+    token,
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function patchTenantTagRule(
+  token: string,
+  tenantId: string,
+  ruleId: string,
+  patch: Partial<{
+    enabled: boolean;
+    autoApply: boolean;
+    ruleName: string;
+    ruleDescription: string;
+    crmTagId: string | null;
+    crmTagName: string;
+    matchMode: TagMatchMode;
+    confidenceThreshold: TagConfidenceThreshold;
+    priority: number;
+  }>,
+): Promise<{ rule: TenantTagRule }> {
+  return apiRequest(`/tenants/${tenantId}/tag-rules/${ruleId}`, {
+    token,
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  });
+}
+
+export async function deleteTenantTagRule(token: string, tenantId: string, ruleId: string): Promise<{ ok: boolean }> {
+  return apiRequest(`/tenants/${tenantId}/tag-rules/${ruleId}`, { token, method: 'DELETE' });
 }
 
 export async function syncTenantGhlTags(
   token: string,
   tenantId: string,
 ): Promise<{ tags: { id?: string; name: string }[]; syncedAt: string; error?: string }> {
-  return apiRequest(`/tenants/${tenantId}/intent-tag-rules/sync-tags`, { token, method: 'POST' });
+  return apiRequest(`/tenants/${tenantId}/tag-rules/sync-tags`, { token, method: 'POST' });
 }
 
 export async function testIntentTagOnContact(
@@ -472,10 +582,38 @@ export async function testIntentTagOnContact(
   tenantId: string,
   body: { contactId: string; tagName: string },
 ): Promise<{ success: boolean; message?: string; error?: string }> {
-  return apiRequest(`/tenants/${tenantId}/intent-tag-rules/test-tag`, {
+  return apiRequest(`/tenants/${tenantId}/tag-rules/test-tag`, {
     token,
     method: 'POST',
     body: JSON.stringify(body),
+  });
+}
+
+export async function testTenantTagRulesMatch(
+  token: string,
+  tenantId: string,
+  body: { message: string; ruleIds?: string[] },
+): Promise<TagRuleTestMatchResult> {
+  return apiRequest(`/tenants/${tenantId}/tag-rules/test-match`, {
+    token,
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function getTenantFollowUpSettings(token: string, tenantId: string): Promise<TenantFollowUpSettings> {
+  return apiRequest(`/tenants/${tenantId}/follow-up-settings`, { token });
+}
+
+export async function patchTenantFollowUpSettings(
+  token: string,
+  tenantId: string,
+  patch: Partial<TenantFollowUpSettings>,
+): Promise<TenantFollowUpSettings> {
+  return apiRequest(`/tenants/${tenantId}/follow-up-settings`, {
+    token,
+    method: 'PATCH',
+    body: JSON.stringify(patch),
   });
 }
 

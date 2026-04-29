@@ -3,9 +3,10 @@ import { getSupabaseService } from '../../lib/supabase';
 import { GhlService } from '../ghl/ghl.service';
 import type { GhlCalendarSummary, GhlFreeSlot } from '@aisbp/ghl-client';
 import {
-  assertAllowedRequiredFieldKeys,
   parseBookingMode,
-  parseRequiredFieldsJson,
+  parseCoreRequiredFieldsJson,
+  parseCustomFieldsJson,
+  type CustomBookingFieldDto,
 } from '../../lib/tenant-automation-validation';
 import type { BookingMode } from '../../lib/tenant-automation-constants';
 
@@ -14,7 +15,9 @@ export interface TenantBookingSettingsDto {
   bookingMode: BookingMode;
   defaultGhlCalendarId: string | null;
   defaultGhlCalendarName: string | null;
-  requiredFieldsJson: string[];
+  coreRequiredFieldsJson: string[];
+  customFieldsJson: CustomBookingFieldDto[];
+  maxBookingsPerSlot: number;
 }
 
 const DEFAULT_SETTINGS: TenantBookingSettingsDto = {
@@ -22,18 +25,33 @@ const DEFAULT_SETTINGS: TenantBookingSettingsDto = {
   bookingMode: 'COLLECT_DETAILS_ONLY',
   defaultGhlCalendarId: null,
   defaultGhlCalendarName: null,
-  requiredFieldsJson: [],
+  coreRequiredFieldsJson: [],
+  customFieldsJson: [],
+  maxBookingsPerSlot: 1,
 };
 
 function rowToDto(row: Record<string, unknown>): TenantBookingSettingsDto {
-  const rf = row['required_fields_json'];
-  let requiredFieldsJson: string[] = [];
+  const coreRaw = row['core_required_fields_json'];
+  let coreRequiredFieldsJson: string[] = [];
   try {
-    requiredFieldsJson =
-      rf === undefined || rf === null ? [] : parseRequiredFieldsJson(rf as unknown);
+    coreRequiredFieldsJson =
+      coreRaw === undefined || coreRaw === null ? [] : parseCoreRequiredFieldsJson(coreRaw as unknown);
   } catch {
-    requiredFieldsJson = [];
+    coreRequiredFieldsJson = [];
   }
+
+  const custRaw = row['custom_fields_json'];
+  let customFieldsJson: CustomBookingFieldDto[] = [];
+  try {
+    customFieldsJson =
+      custRaw === undefined || custRaw === null ? [] : parseCustomFieldsJson(custRaw as unknown);
+  } catch {
+    customFieldsJson = [];
+  }
+
+  const cap = Number(row['max_bookings_per_slot'] ?? 1);
+  const maxBookingsPerSlot = Number.isFinite(cap) && cap >= 1 ? Math.floor(cap) : 1;
+
   return {
     enabled: Boolean(row['enabled']),
     bookingMode: String(row['booking_mode'] ?? 'COLLECT_DETAILS_ONLY') as BookingMode,
@@ -45,7 +63,9 @@ function rowToDto(row: Record<string, unknown>): TenantBookingSettingsDto {
       row['default_ghl_calendar_name'] === null || row['default_ghl_calendar_name'] === undefined
         ? null
         : String(row['default_ghl_calendar_name']),
-    requiredFieldsJson,
+    coreRequiredFieldsJson,
+    customFieldsJson,
+    maxBookingsPerSlot,
   };
 }
 
@@ -78,7 +98,9 @@ export class BookingSettingsService {
       bookingMode: unknown;
       defaultGhlCalendarId: string | null;
       defaultGhlCalendarName: string | null;
-      requiredFieldsJson: unknown;
+      coreRequiredFieldsJson: unknown;
+      customFieldsJson: unknown;
+      maxBookingsPerSlot: unknown;
     }>,
   ): Promise<TenantBookingSettingsDto> {
     const current = await this.getBookingSettings(tenantId);
@@ -88,10 +110,21 @@ export class BookingSettingsService {
       bookingMode = parseBookingMode(patch.bookingMode);
     }
 
-    let requiredFieldsJson = current.requiredFieldsJson;
-    if (patch.requiredFieldsJson !== undefined) {
-      requiredFieldsJson = parseRequiredFieldsJson(patch.requiredFieldsJson);
-      assertAllowedRequiredFieldKeys(requiredFieldsJson);
+    let coreRequiredFieldsJson = current.coreRequiredFieldsJson;
+    if (patch.coreRequiredFieldsJson !== undefined) {
+      coreRequiredFieldsJson = parseCoreRequiredFieldsJson(patch.coreRequiredFieldsJson);
+    }
+
+    let customFieldsJson = current.customFieldsJson;
+    if (patch.customFieldsJson !== undefined) {
+      customFieldsJson = parseCustomFieldsJson(patch.customFieldsJson);
+    }
+
+    let maxBookingsPerSlot = current.maxBookingsPerSlot;
+    if (patch.maxBookingsPerSlot !== undefined) {
+      const n = Number(patch.maxBookingsPerSlot);
+      if (!Number.isFinite(n) || n < 1) throw new BadRequestException('maxBookingsPerSlot must be >= 1');
+      maxBookingsPerSlot = Math.floor(n);
     }
 
     const enabled = patch.enabled !== undefined ? Boolean(patch.enabled) : current.enabled;
@@ -116,7 +149,9 @@ export class BookingSettingsService {
       booking_mode: bookingMode,
       default_ghl_calendar_id: defaultGhlCalendarId,
       default_ghl_calendar_name: defaultGhlCalendarName,
-      required_fields_json: requiredFieldsJson,
+      core_required_fields_json: coreRequiredFieldsJson,
+      custom_fields_json: customFieldsJson,
+      max_bookings_per_slot: maxBookingsPerSlot,
       updated_at: now,
     };
 

@@ -111,8 +111,10 @@ model Tenant {
   webhookEvents  WebhookEvent[]
   orchestrationLogs OrchestrationLog[]
   quotaAuditLogs    QuotaAuditLog[]
-  bookingSettings   TenantBookingSettings?
-  intentTagRules    TenantIntentTagRule[]
+  bookingSettings    TenantBookingSettings?
+  taggingSettings    TenantTaggingSettings?
+  tagRules           TenantTagRule[]
+  followUpSettings   TenantFollowUpSettings?
 
   @@unique([ghlLocationId])
   @@index([agencyId])
@@ -125,43 +127,87 @@ enum BookingMode {
   BOOK_AFTER_CONFIRMATION
 }
 
-enum IntentTagTriggerMode {
-  AUTO
-  OFF
+/// Master toggle for CRM automatic tagging (subaccount).
+model TenantTaggingSettings {
+  tenantId                  String   @id @map("tenant_id")
+  automaticTaggingEnabled   Boolean  @default(false) @map("automatic_tagging_enabled")
+  createdAt                 DateTime @default(now()) @map("created_at")
+  updatedAt                 DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("tenant_tagging_settings")
 }
 
-/// Subaccount automation: default GHL calendar + required booking fields (Milestone 1 — settings only).
+enum TagMatchMode {
+  AI
+  KEYWORD
+  HYBRID
+}
+
+enum ConfidenceThreshold {
+  LOW
+  NORMAL
+  HIGH
+}
+
+/// Configurable CRM tag rules (AI/classifier matches rule IDs only; never invent tags).
+model TenantTagRule {
+  id                      String               @id @default(uuid())
+  tenantId                String               @map("tenant_id")
+  enabled                 Boolean              @default(true)
+  autoApply               Boolean              @default(false) @map("auto_apply")
+  ruleName                String               @map("rule_name")
+  ruleDescription         String               @map("rule_description") @db.Text
+  crmTagId                String?              @map("crm_tag_id")
+  crmTagName              String               @map("crm_tag_name")
+  matchMode               TagMatchMode         @default(AI) @map("match_mode")
+  confidenceThreshold     ConfidenceThreshold  @default(NORMAL) @map("confidence_threshold")
+  priority                Int                  @default(0)
+  createdAt               DateTime             @default(now()) @map("created_at")
+  updatedAt               DateTime             @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("tenant_tag_rules")
+}
+
+/// Subaccount automation: CRM calendar + booking field configuration (settings only until flows ship).
 model TenantBookingSettings {
-  tenantId               String      @id @map("tenant_id")
-  enabled                Boolean     @default(false)
-  bookingMode            BookingMode @default(COLLECT_DETAILS_ONLY) @map("booking_mode")
-  defaultGhlCalendarId   String?    @map("default_ghl_calendar_id")
-  defaultGhlCalendarName   String?    @map("default_ghl_calendar_name")
-  requiredFieldsJson     Json        @default("[]") @map("required_fields_json")
-  createdAt              DateTime    @default(now()) @map("created_at")
-  updatedAt              DateTime    @updatedAt @map("updated_at")
+  tenantId                 String      @id @map("tenant_id")
+  enabled                  Boolean     @default(false)
+  bookingMode              BookingMode @default(COLLECT_DETAILS_ONLY) @map("booking_mode")
+  defaultGhlCalendarId     String?     @map("default_ghl_calendar_id")
+  defaultGhlCalendarName   String?     @map("default_ghl_calendar_name")
+  coreRequiredFieldsJson   Json        @default("[]") @map("core_required_fields_json")
+  customFieldsJson         Json        @default("[]") @map("custom_fields_json")
+  maxBookingsPerSlot       Int         @default(1) @map("max_bookings_per_slot")
+  createdAt                DateTime    @default(now()) @map("created_at")
+  updatedAt                DateTime    @updatedAt @map("updated_at")
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@map("tenant_booking_settings")
 }
 
-/// MVP intent → GHL tag mapping; executor uses enabled AUTO rules only (later milestones).
-model TenantIntentTagRule {
-  id           String               @id @default(uuid())
-  tenantId     String               @map("tenant_id")
-  intentKey    String               @map("intent_key")
-  tagName      String               @map("tag_name")
-  enabled      Boolean              @default(false)
-  triggerMode  IntentTagTriggerMode @default(OFF) @map("trigger_mode")
-  createdAt    DateTime             @default(now()) @map("created_at")
-  updatedAt    DateTime             @updatedAt @map("updated_at")
+/// Follow-up automation settings (stored only; scheduler in a later milestone).
+model TenantFollowUpSettings {
+  tenantId                  String   @id @map("tenant_id")
+  enabled                   Boolean  @default(false)
+  maxFollowUps              Int      @default(3) @map("max_follow_ups")
+  stopOnCustomerReply       Boolean  @default(true) @map("stop_on_customer_reply")
+  stopOnBookingCompleted    Boolean  @default(true) @map("stop_on_booking_completed")
+  stopOnEscalated           Boolean  @default(true) @map("stop_on_escalated")
+  stopOnOptOut              Boolean  @default(true) @map("stop_on_opt_out")
+  businessHoursOnly         Boolean  @default(false) @map("business_hours_only")
+  stepsJson                 Json     @default("[]") @map("steps_json")
+  createdAt                 DateTime @default(now()) @map("created_at")
+  updatedAt                 DateTime @updatedAt @map("updated_at")
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
-  @@unique([tenantId, intentKey])
-  @@index([tenantId])
-  @@map("tenant_intent_tag_rules")
+  @@map("tenant_follow_up_settings")
 }
 
 // Tenant user roles

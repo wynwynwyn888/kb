@@ -1,34 +1,70 @@
-import { enabledAutoTagRulesForExecutor, type IntentTagRuleDto } from './intent-tags.service';
+import { enabledAutoTagRulesForExecutor, type TagRuleDto } from './tag-rules.service';
 
 describe('enabledAutoTagRulesForExecutor', () => {
-  it('returns only enabled AUTO rules with a tag name', () => {
-    const rules: IntentTagRuleDto[] = [
+  it('returns only enabled rules with autoApply and CRM tag name', () => {
+    const rules: TagRuleDto[] = [
       {
-        intentKey: 'booking_interest',
-        tagName: 'Book',
+        id: 'a',
+        tenantId: 't',
         enabled: true,
-        triggerMode: 'AUTO',
+        autoApply: true,
+        ruleName: 'Book',
+        ruleDescription: 'desc',
+        crmTagId: null,
+        crmTagName: 'book_tag',
+        matchMode: 'AI',
+        confidenceThreshold: 'NORMAL',
+        priority: 0,
+        createdAt: '',
+        updatedAt: '',
       },
       {
-        intentKey: 'price_question',
-        tagName: '',
+        id: 'b',
+        tenantId: 't',
         enabled: true,
-        triggerMode: 'AUTO',
+        autoApply: true,
+        ruleName: 'Price',
+        ruleDescription: 'desc',
+        crmTagId: null,
+        crmTagName: '',
+        matchMode: 'KEYWORD',
+        confidenceThreshold: 'NORMAL',
+        priority: 0,
+        createdAt: '',
+        updatedAt: '',
       },
       {
-        intentKey: 'hot_lead',
-        tagName: 'Hot',
+        id: 'c',
+        tenantId: 't',
         enabled: false,
-        triggerMode: 'AUTO',
+        autoApply: true,
+        ruleName: 'Hot',
+        ruleDescription: 'desc',
+        crmTagId: null,
+        crmTagName: 'hot',
+        matchMode: 'AI',
+        confidenceThreshold: 'NORMAL',
+        priority: 0,
+        createdAt: '',
+        updatedAt: '',
       },
       {
-        intentKey: 'colour_interest',
-        tagName: 'Colour',
+        id: 'd',
+        tenantId: 't',
         enabled: true,
-        triggerMode: 'OFF',
+        autoApply: false,
+        ruleName: 'Colour',
+        ruleDescription: 'desc',
+        crmTagId: null,
+        crmTagName: 'colour',
+        matchMode: 'AI',
+        confidenceThreshold: 'NORMAL',
+        priority: 0,
+        createdAt: '',
+        updatedAt: '',
       },
     ];
     const auto = enabledAutoTagRulesForExecutor(rules);
-    expect(auto.map((r) => r.intentKey)).toEqual(['booking_interest']);
+    expect(auto.map((r) => r.id)).toEqual(['a']);
   });
 });

@@ -34,7 +34,9 @@ export class BookingSettingsController {
       bookingMode: unknown;
       defaultGhlCalendarId: string | null;
       defaultGhlCalendarName: string | null;
-      requiredFieldsJson: unknown;
+      coreRequiredFieldsJson: unknown;
+      customFieldsJson: unknown;
+      maxBookingsPerSlot: unknown;
     }>,
   ) {
     await this.ghlService.ensureTenantAccessOrThrow(tenantId, user.id);

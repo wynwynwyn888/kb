@@ -30,6 +30,7 @@ import { AgencyAiConfigModule } from './modules/agency-ai-config/agency-ai-confi
 import { DebugModule } from './modules/debug/debug.module';
 import { BookingSettingsModule } from './modules/booking-settings/booking-settings.module';
 import { IntentTagsModule } from './modules/intent-tags/intent-tags.module';
+import { FollowUpSettingsModule } from './modules/follow-up-settings/follow-up-settings.module';
 
 @Module({
   imports: [
@@ -109,6 +110,7 @@ import { IntentTagsModule } from './modules/intent-tags/intent-tags.module';
     DebugModule,
     BookingSettingsModule,
     IntentTagsModule,
+    FollowUpSettingsModule,
   ],
   providers: [
     // Global rate limit guard

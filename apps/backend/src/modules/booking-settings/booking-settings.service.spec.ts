@@ -58,7 +58,9 @@ describe('BookingSettingsService', () => {
       bookingMode: 'CHECK_AVAILABILITY',
       defaultGhlCalendarId: 'cal_9',
       defaultGhlCalendarName: 'Main',
-      requiredFieldsJson: [],
+      coreRequiredFieldsJson: [],
+      customFieldsJson: [],
+      maxBookingsPerSlot: 1,
     });
 
     const r = await svc.testSlots('tenant-1', 'profile-1', {});

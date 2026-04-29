@@ -55,13 +55,6 @@ export function TenantWorkspaceChrome({ tenantId, children }: { tenantId: string
             CRM
           </Link>
           <Link
-            href={`${base}/automation`}
-            style={advSubStyle(pathname.startsWith(`${base}/automation`))}
-            aria-current={pathname.startsWith(`${base}/automation`) ? 'page' : undefined}
-          >
-            Automation
-          </Link>
-          <Link
             href={`${base}/conversations`}
             style={advSubStyle(pathname.startsWith(`${base}/conversations`))}
             aria-current={pathname.startsWith(`${base}/conversations`) ? 'page' : undefined}

@@ -18,15 +18,14 @@ export function isAdvancedPath(pathname: string, tenantId: string): boolean {
     pathname === `${base}/advanced` ||
     pathname.startsWith(`${base}/ghl-status`) ||
     pathname.startsWith(`${base}/diagnostics`) ||
-    pathname.startsWith(`${base}/conversations`) ||
-    pathname.startsWith(`${base}/automation`)
+    pathname.startsWith(`${base}/conversations`)
   );
 }
 
 export function buildTenantNavItems(tenantId: string): TenantNavItem[] {
   const base = tenantBasePath(tenantId);
   return [
-    { href: `${base}/settings`, label: 'Settings', icon: 'settings', match: p => p === `${base}/settings` },
+    { href: `${base}/settings`, label: 'Settings', icon: 'settings', match: p => p === `${base}/settings` || p.startsWith(`${base}/settings/`) },
     { href: `${base}/knowledge`, label: 'Knowledge', icon: 'book', match: p => p === `${base}/knowledge` },
     {
       href: `${base}/goals`,

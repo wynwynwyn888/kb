@@ -1,7 +1,5 @@
-'use client';
+import { TenantSettingsGeneralContent } from '@/components/app/tenant-workspace/TenantSettingsGeneralContent';
 
-import { TenantSettingsPanel } from '@/components/app/tenant-workspace/TenantSettingsPanel';
-
-export default function TenantSettingsPage() {
-  return <TenantSettingsPanel />;
+export default function TenantSettingsGeneralPage() {
+  return <TenantSettingsGeneralContent />;
 }

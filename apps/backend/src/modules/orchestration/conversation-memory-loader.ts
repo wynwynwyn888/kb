@@ -17,11 +17,14 @@ export class ConversationMemoryLoader {
    * Load last MAX_TURNS user turns from the conversation, ordered oldest→newest.
    * Returns normalized MemoryEntry[] for AI context building.
    *
-   * TODO: 24-hour session reset — if a gap of >24h exists between messages,
-   * start a new session and do not include the older messages in the context.
-   * For now, this is TODO-only; the loader returns all available history.
+   * When `memoryResetAfterIso` is set (from `metadata.aisbp_policy.memoryResetAt`), only messages
+   * with `created_at` **strictly after** that instant are included — chat `/new` resets without
+   * deleting DB rows.
    */
-  async loadMemory(conversationId: string): Promise<ConversationMemory> {
+  async loadMemory(
+    conversationId: string,
+    opts?: { memoryResetAfterIso?: string | null },
+  ): Promise<ConversationMemory> {
     // Load messages ordered oldest→newest (ascending created_at)
     // Limit to last MAX_TURNS inbound user messages plus their AI responses
     const { data, error } = await this.supabase
@@ -42,8 +45,13 @@ export class ConversationMemoryLoader {
       };
     }
 
+    const resetAfter = opts?.memoryResetAfterIso?.trim() ?? '';
+    const scoped = resetAfter
+      ? data.filter(m => String(m.created_at ?? '') > resetAfter)
+      : data;
+
     // Filter to last N user turns and their responses
-    const userMessages = data.filter(m => m.direction === 'INBOUND');
+    const userMessages = scoped.filter(m => m.direction === 'INBOUND');
     const recentUserMessages = userMessages.slice(-MAX_TURNS);
 
     if (recentUserMessages.length === 0) {
@@ -56,11 +64,11 @@ export class ConversationMemoryLoader {
     }
 
     // Get the index range to include responses after each user turn
-    const lastUserIndex = data.findIndex(
+    const lastUserIndex = scoped.findIndex(
       m => m.id === recentUserMessages[recentUserMessages.length - 1]!.id,
     );
-    const slice = data.slice(
-      data.findIndex(m => m.id === recentUserMessages[0]!.id),
+    const slice = scoped.slice(
+      scoped.findIndex(m => m.id === recentUserMessages[0]!.id),
       lastUserIndex + 1,
     );
 

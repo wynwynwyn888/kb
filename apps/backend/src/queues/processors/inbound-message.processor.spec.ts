@@ -32,6 +32,25 @@ const mockOrchestration = {
   loadConversation: jestGlobal.fn(async () => ({})),
 };
 
+const mockResetService = {
+  isChatResetAllowedForContact: jestGlobal.fn(async () => false),
+  performBotStateReset: jestGlobal.fn(async () => ({
+    memoryResetAt: '2026-01-01T00:00:00.000Z',
+    resetVersion: 1,
+    clearedKeys: ['activeTopic'] as const,
+  })),
+  buildConfirmationReplyPlan: jestGlobal.fn(() => ({
+    planStatus: 'PLANNED',
+    responseMode: 'standard',
+    handoverRecommended: false,
+    confidence: 1,
+    rationale: 'x',
+    bubbles: [{ index: 0, text: 'ok' }],
+    suggestedActions: [],
+    draftProvenance: 'policy_reply' as const,
+  })),
+};
+
 const mockSupabase = {
   from: jestGlobal.fn(),
 };
@@ -99,6 +118,7 @@ describe('InboundMessageProcessor', () => {
     orchestrate.mockResolvedValue({ outcome: 'SKIP' });
     processor = new InboundMessageProcessor(
       mockOrchestration as never,
+      mockResetService as never,
       { add: mockSendBubbleQueueAdd } as never,
       { add: mockInboundQueueAdd } as never,
     );
@@ -278,7 +298,10 @@ describe('InboundMessageProcessor', () => {
           insert: () => ({ error: null }),
           select: () =>
             resolvedQuery({
-              data: [{ content: 'Actually mains' }, { content: 'Menu?' }],
+              data: [
+                { content: 'Actually mains', created_at: '2026-01-01T00:00:02.000Z' },
+                { content: 'Menu?', created_at: '2026-01-01T00:00:01.000Z' },
+              ],
               error: null,
             }),
         };
@@ -301,5 +324,97 @@ describe('InboundMessageProcessor', () => {
     const arg = orchestrate.mock.calls[0]![0] as { recentInboundBatch?: string[]; incomingMessage?: { messageContent?: string } };
     expect(arg.recentInboundBatch).toEqual(['Menu?', 'Actually mains']);
     expect(arg.incomingMessage?.messageContent).toBe('Actually mains');
+  });
+
+  it('orchestrate: exact /new triggers reset service and skips AI orchestration', async () => {
+    mockResetService.isChatResetAllowedForContact.mockResolvedValue(true);
+    mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'conversations') {
+        return {
+          select: () => ({
+            eq: () => ({
+              single: async () => ({
+                data: { metadata: { inboundDebounce: { pendingVersion: 4 } } },
+                error: null,
+              }),
+            }),
+          }),
+        };
+      }
+      if (table === 'messages') {
+        return {
+          select: () =>
+            resolvedQuery({
+              data: [{ content: '/new', created_at: '2026-01-01T00:00:02.000Z' }],
+              error: null,
+            }),
+        };
+      }
+      return {} as never;
+    });
+
+    await processor.process(
+      makeJob('orchestrate', {
+        tenantId: 'tenant-1',
+        conversationId: CONV_ID,
+        locationId: 'loc_1',
+        ghlContactId: 'ct_1',
+        ghlConversationId: 'ghl_conv_1',
+        debounceVersion: 4,
+      }),
+    );
+
+    expect(mockResetService.performBotStateReset).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversationId: CONV_ID,
+        tenantId: 'tenant-1',
+        source: 'chat_command',
+        resetCommand: '/new',
+      }),
+    );
+    expect(orchestrate).not.toHaveBeenCalled();
+    expect(mockSendBubbleQueueAdd).toHaveBeenCalled();
+  });
+
+  it('orchestrate: /new when reset disabled falls through to normal orchestration', async () => {
+    mockResetService.isChatResetAllowedForContact.mockResolvedValue(false);
+    mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'conversations') {
+        return {
+          select: () => ({
+            eq: () => ({
+              single: async () => ({
+                data: { metadata: { inboundDebounce: { pendingVersion: 4 } } },
+                error: null,
+              }),
+            }),
+          }),
+        };
+      }
+      if (table === 'messages') {
+        return {
+          select: () =>
+            resolvedQuery({
+              data: [{ content: '/new', created_at: '2026-01-01T00:00:02.000Z' }],
+              error: null,
+            }),
+        };
+      }
+      return {} as never;
+    });
+
+    await processor.process(
+      makeJob('orchestrate', {
+        tenantId: 'tenant-1',
+        conversationId: CONV_ID,
+        locationId: 'loc_1',
+        ghlContactId: 'ct_1',
+        ghlConversationId: 'ghl_conv_1',
+        debounceVersion: 4,
+      }),
+    );
+
+    expect(mockResetService.performBotStateReset).not.toHaveBeenCalled();
+    expect(orchestrate).toHaveBeenCalled();
   });
 });

@@ -11,8 +11,11 @@ const baseState = (): AisbpPolicyStateV1 => ({
   optionsUpdatedAt: null,
   optionsSource: null,
   optionsDerivedFromChunkIds: null,
+  optionsTenantId: null,
   expiresAt: null,
   updatedAt: null,
+  memoryResetAt: null,
+  resetVersion: 0,
 });
 
 describe('option-resolver — generic parsing', () => {

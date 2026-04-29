@@ -1,9 +1,24 @@
 // Conversations controller - list and inspect conversations with messages
 
-import { Controller, Get, Param, Query, NotFoundException, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Param,
+  Query,
+  NotFoundException,
+  UseGuards,
+  BadRequestException,
+  HttpCode,
+  HttpStatus,
+} from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
+import type { Queue } from 'bullmq';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { ConversationsService } from './conversations.service';
 import { ConversationsControllerService } from './conversations-controller.service';
+import { ConversationResetService } from './conversation-reset.service';
+import { QUEUES } from '../../queues/queue.constants';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentTenantId, CurrentAgencyId, CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { SessionUser } from '../../lib/supabase';
@@ -16,6 +31,8 @@ export class ConversationsController {
   constructor(
     private readonly conversationsService: ConversationsService,
     private readonly controllerService: ConversationsControllerService,
+    private readonly conversationResetService: ConversationResetService,
+    @InjectQueue(QUEUES.SEND_BUBBLE) private readonly sendBubbleQueue: Queue,
   ) {}
 
   @Get()
@@ -81,5 +98,45 @@ export class ConversationsController {
     }
 
     return this.controllerService.getMessages(id, limit, before);
+  }
+
+  @Post(':id/reset-state')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Reset bot policy state and memory anchor (keeps message history)' })
+  async resetBotState(@Param('id') id: string, @CurrentUser() user: SessionUser) {
+    const conversation = await this.controllerService.findOne(id);
+    if (!conversation) {
+      throw new NotFoundException('Conversation not found');
+    }
+    if (user.tenantId && user.tenantId !== conversation.tenantId) {
+      throw new NotFoundException('Conversation not found');
+    }
+
+    const ghlLocationId = await this.controllerService.getTenantGhlLocationId(conversation.tenantId);
+    if (!ghlLocationId) {
+      throw new BadRequestException('Tenant has no GHL location configured');
+    }
+
+    const result = await this.conversationResetService.performBotStateReset({
+      conversationId: conversation.id,
+      tenantId: conversation.tenantId,
+      source: 'dashboard',
+    });
+
+    const plan = this.conversationResetService.buildConfirmationReplyPlan();
+    await this.sendBubbleQueue.add('send-bubble', {
+      conversationId: conversation.id,
+      tenantId: conversation.tenantId,
+      contactId: conversation.contactId,
+      ghlLocationId,
+      replyPlanJson: JSON.stringify(plan),
+    });
+
+    return {
+      ok: true,
+      memoryResetAt: result.memoryResetAt,
+      resetVersion: result.resetVersion,
+      clearedKeys: [...result.clearedKeys],
+    };
   }
 }

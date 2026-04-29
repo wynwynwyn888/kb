@@ -100,4 +100,16 @@ export class ConversationsControllerService {
 
     return data ?? [];
   }
+
+  /** GHL location id for outbound sends (tenant-scoped). */
+  async getTenantGhlLocationId(tenantId: string): Promise<string | null> {
+    const { data, error } = await this.supabase
+      .from('tenants')
+      .select('ghl_location_id')
+      .eq('id', tenantId)
+      .single();
+    if (error || !data) return null;
+    const id = (data as { ghl_location_id?: string | null }).ghl_location_id;
+    return id && String(id).trim() ? String(id).trim() : null;
+  }
 }

@@ -471,6 +471,17 @@ export async function getConversationMessages(
   return apiRequest<unknown[]>(`/conversations/${conversationId}/messages?${params}`, { token });
 }
 
+/** Clears bot policy / option memory anchor; keeps DB messages. Queues a short confirmation to the contact. */
+export async function resetConversationBotState(
+  token: string,
+  conversationId: string,
+): Promise<{ ok: boolean; memoryResetAt: string; resetVersion: number; clearedKeys: string[] }> {
+  return apiRequest(`/conversations/${conversationId}/reset-state`, {
+    token,
+    method: 'POST',
+  });
+}
+
 // Handover
 export async function getActiveHandovers(token: string, tenantId: string) {
   return apiRequest<unknown[]>(`/handover/active?tenantId=${tenantId}`, { token });

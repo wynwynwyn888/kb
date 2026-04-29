@@ -32,6 +32,7 @@ import {
 import { ConversationPolicyEngineService } from '../conversation-policy/conversation-policy-engine.service';
 import {
   mergePolicyIntoConversationMetadata,
+  parseAisbpPolicyState,
   type AisbpPolicyStateV1,
 } from '../conversation-policy/conversation-policy-state';
 import { resolveShortSelection } from '../conversation-policy/option-resolver';
@@ -95,7 +96,12 @@ export class ConversationOrchestrationService {
       }
 
       // Step 2: Load conversation memory
-      const memory = await this.memoryLoader.loadMemory(conversationId);
+      const policyForMemory = parseAisbpPolicyState(
+        input.conversation?.metadata as Record<string, unknown> | undefined,
+      );
+      const memory = await this.memoryLoader.loadMemory(conversationId, {
+        memoryResetAfterIso: policyForMemory.memoryResetAt ?? null,
+      });
 
       const latestMsg = (input.incomingMessage.messageContent ?? '').trim();
       const batch =

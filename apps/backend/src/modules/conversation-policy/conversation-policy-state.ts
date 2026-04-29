@@ -39,6 +39,10 @@ export interface AisbpPolicyStateV1 {
   optionsTenantId?: string | null;
   expiresAt?: string | null;
   updatedAt?: string | null;
+  /** ISO time — memory loader only includes messages with created_at strictly after this. */
+  memoryResetAt?: string | null;
+  /** Incremented on each bot state reset (chat command or dashboard). */
+  resetVersion?: number;
 }
 
 export function emptyPolicyState(): AisbpPolicyStateV1 {
@@ -54,6 +58,44 @@ export function emptyPolicyState(): AisbpPolicyStateV1 {
     optionsTenantId: null,
     expiresAt: null,
     updatedAt: null,
+    memoryResetAt: null,
+    resetVersion: 0,
+  };
+}
+
+/** Keys cleared from policy JSON on `/new`-style reset (for logs / audits). */
+export const BOT_RESET_CLEARED_POLICY_KEYS = [
+  'activeTopic',
+  'awaiting',
+  'options',
+  'lastAssistantOptions',
+  'optionsUpdatedAt',
+  'optionsSource',
+  'optionsDerivedFromChunkIds',
+  'optionsTenantId',
+  'expiresAt',
+] as const;
+
+/**
+ * Replace flow-bearing policy fields while bumping reset counters.
+ * Preserves `v`; sets fresh option/awaiting state and memoryResetAt.
+ */
+export function policyStateAfterBotReset(prev: AisbpPolicyStateV1, resetAtIso: string): AisbpPolicyStateV1 {
+  const nextVersion = (prev.resetVersion ?? 0) + 1;
+  return {
+    v: 1,
+    activeTopic: null,
+    awaiting: null,
+    options: undefined,
+    lastAssistantOptions: undefined,
+    optionsUpdatedAt: null,
+    optionsSource: null,
+    optionsDerivedFromChunkIds: null,
+    optionsTenantId: null,
+    expiresAt: null,
+    updatedAt: resetAtIso,
+    memoryResetAt: resetAtIso,
+    resetVersion: nextVersion,
   };
 }
 
@@ -104,6 +146,11 @@ export function parseAisbpPolicyState(metadata: Record<string, unknown> | undefi
     optionsTenantId: typeof tenantIdRaw === 'string' && tenantIdRaw ? tenantIdRaw : null,
     expiresAt: typeof o['expiresAt'] === 'string' ? o['expiresAt'] : null,
     updatedAt: typeof o['updatedAt'] === 'string' ? o['updatedAt'] : null,
+    memoryResetAt: typeof o['memoryResetAt'] === 'string' && o['memoryResetAt'] ? (o['memoryResetAt'] as string) : null,
+    resetVersion:
+      typeof o['resetVersion'] === 'number' && Number.isFinite(o['resetVersion'])
+        ? (o['resetVersion'] as number)
+        : undefined,
   };
 }
 

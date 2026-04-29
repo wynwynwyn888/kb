@@ -19,6 +19,8 @@ import {
   INBOUND_DEBOUNCE_MS,
   filterInboundRowsToBurstWindow,
 } from '../../lib/inbound-burst-batch';
+import { matchChatResetCommand } from '../../lib/chat-reset-command';
+import { ConversationResetService } from '../../modules/conversations/conversation-reset.service';
 
 export interface InboundMessageJobData {
   locationId: string;
@@ -52,6 +54,7 @@ export class InboundMessageProcessor extends WorkerHost {
 
   constructor(
     private readonly orchestrationService: ConversationOrchestrationService,
+    private readonly conversationResetService: ConversationResetService,
     @InjectQueue(QUEUES.SEND_BUBBLE) private readonly sendBubbleQueue: Queue,
     @InjectQueue(QUEUES.INBOUND_MESSAGE_PROCESSOR) private readonly inboundQueue: Queue,
   ) {
@@ -245,6 +248,11 @@ export class InboundMessageProcessor extends WorkerHost {
       recentInboundBatch,
     } = ctx;
 
+    if (await this.tryHandleChatResetCommand({ tenantId, conversationId, locationId, ghlContactId, latestInboundText })) {
+      this.logger.log(`Orchestration skipped (chat reset command): conversationId=${conversationId}`);
+      return;
+    }
+
     const normalizedPayload: NormalizedWebhookPayload = {
       ghlLocationId: locationId,
       ghlConversationId,
@@ -303,6 +311,47 @@ export class InboundMessageProcessor extends WorkerHost {
         `routingRecommendedModel=${result.routing?.recommendedModel ?? 'n/a'}, ` +
         `generationModelActuallyUsed=${result.replyPlan?.generationModelActuallyUsed ?? result.replyPlan?.generationModel ?? 'n/a'}`,
     );
+  }
+
+  /**
+   * Exact `/new` (etc.) commands: clear policy state + memory anchor; enqueue confirmation only (no AI).
+   */
+  private async tryHandleChatResetCommand(params: {
+    tenantId: string;
+    conversationId: string;
+    locationId: string;
+    ghlContactId: string;
+    latestInboundText: string;
+  }): Promise<boolean> {
+    const cmd = matchChatResetCommand(params.latestInboundText);
+    if (!cmd) return false;
+    const allowed = await this.conversationResetService.isChatResetAllowedForContact(
+      params.tenantId,
+      params.ghlContactId,
+    );
+    if (!allowed) return false;
+
+    await this.conversationResetService.performBotStateReset({
+      conversationId: params.conversationId,
+      tenantId: params.tenantId,
+      source: 'chat_command',
+      resetCommand: cmd,
+    });
+
+    const plan = this.conversationResetService.buildConfirmationReplyPlan();
+    await this.sendBubbleQueue.add('send-bubble', {
+      conversationId: params.conversationId,
+      tenantId: params.tenantId,
+      contactId: params.ghlContactId,
+      ghlLocationId: params.locationId,
+      replyPlanJson: JSON.stringify(plan),
+    });
+
+    this.logger.log(
+      `chatResetCommandHandled: conversationId=${params.conversationId} tenantId=${params.tenantId} ` +
+        `resetSource=chat_command resetCommand=${cmd}`,
+    );
+    return true;
   }
 
   private async fetchRecentInboundBatch(conversationId: string): Promise<string[]> {

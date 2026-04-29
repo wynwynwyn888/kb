@@ -3,7 +3,7 @@
 import { useParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { getConversations, getConversationMessages } from '@/lib/api';
+import { getConversations, getConversationMessages, resetConversationBotState } from '@/lib/api';
 import {
   EmptyState,
   ErrorBanner,
@@ -46,7 +46,8 @@ export default function TenantConversationsReadonlyPage() {
   const [sel, setSel] = useState<string | null>(null);
   const [messages, setMessages] = useState<MessageRow[]>([]);
   const [msgLoading, setMsgLoading] = useState(false);
-  const [msgErr, setMsgErr] = useState('');
+  const [resetBusy, setResetBusy] = useState(false);
+  const [resetBanner, setResetBanner] = useState('');
 
   useEffect(() => {
     if (!token || !tenantId) {
@@ -211,15 +212,63 @@ export default function TenantConversationsReadonlyPage() {
               borderBottom: '1px solid #e5e5e5',
               fontWeight: 600,
               fontSize: '0.85rem',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '0.5rem',
+              flexWrap: 'wrap',
             }}
           >
-            Messages
+            <div>
+              Messages
+              {selected ? (
+                <span style={{ fontWeight: 400, color: '#666', marginLeft: '0.5rem', fontSize: '0.8rem' }}>
+                  · Contact {selected.contact_id ? shortId(selected.contact_id, 12) : '—'}
+                </span>
+              ) : null}
+            </div>
             {selected ? (
-              <span style={{ fontWeight: 400, color: '#666', marginLeft: '0.5rem', fontSize: '0.8rem' }}>
-                · Contact {selected.contact_id ? shortId(selected.contact_id, 12) : '—'}
-              </span>
+              <button
+                type="button"
+                disabled={resetBusy || !token}
+                onClick={async () => {
+                  setResetBanner('');
+                  setResetBusy(true);
+                  try {
+                    await resetConversationBotState(token!, sel!);
+                    setResetBanner('Bot state cleared for this thread. A short confirmation is queued to the contact.');
+                  } catch (e) {
+                    setResetBanner(e instanceof Error ? e.message : 'Reset failed');
+                  } finally {
+                    setResetBusy(false);
+                  }
+                }}
+                style={{
+                  fontSize: '0.75rem',
+                  padding: '0.35rem 0.65rem',
+                  borderRadius: '6px',
+                  border: '1px solid #cbd5e1',
+                  background: '#f8fafc',
+                  cursor: resetBusy ? 'wait' : 'pointer',
+                }}
+              >
+                {resetBusy ? 'Resetting…' : 'Reset bot state'}
+              </button>
             ) : null}
           </div>
+          {resetBanner ? (
+            <div
+              style={{
+                padding: '0.5rem 0.85rem',
+                fontSize: '0.78rem',
+                color: resetBanner.includes('fail') || resetBanner.includes('HTTP') ? '#b91c1c' : '#0f766e',
+                background: '#f0fdf4',
+                borderBottom: '1px solid #e5e5e5',
+              }}
+            >
+              {resetBanner}
+            </div>
+          ) : null}
           <div style={{ flex: 1, overflow: 'auto', padding: '0.75rem' }}>
             {!sel ? (
               <EmptyState title="Select a thread" detail="Choose a conversation on the left to load its messages." />

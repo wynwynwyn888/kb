@@ -108,7 +108,7 @@ export default function TenantConversationsReadonlyPage() {
     <div>
       <PageHeader title="Activity" eyebrow="Advanced" />
       <p style={{ fontSize: '0.88rem', color: '#64748b', margin: '0 0 1rem', lineHeight: 1.5, maxWidth: '640px' }}>
-        Read synced threads here. Sending replies still happens in GoHighLevel (or your production stack)—there is no
+        Read synced threads here. Sending replies still happens in CRM (or your production stack)—there is no
         send box in this panel.
       </p>
       {listErr && <ErrorBanner message={listErr} />}

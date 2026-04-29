@@ -126,7 +126,7 @@ function AgencyGhlConnectionsInner() {
         ghlLocationId: loc.trim(),
         privateIntegrationToken: pit.trim(),
       });
-      setMsg('HighLevel connection saved.');
+      setMsg('CRM connection saved.');
       setPit('');
       await refreshConn();
     } catch (er) {
@@ -148,7 +148,7 @@ function AgencyGhlConnectionsInner() {
         setMsg('Connection verified.');
       } else {
         setMsg('');
-        setErr(s.lastError?.trim() || 'HighLevel did not accept the saved token. Paste a new private integration token and save.');
+        setErr(s.lastError?.trim() || 'CRM did not accept the saved token. Paste a new private integration token and save.');
       }
     } catch (er) {
       setErr(er instanceof Error ? er.message : 'Verify failed');
@@ -180,7 +180,7 @@ function AgencyGhlConnectionsInner() {
 
   const onDisconnect = async () => {
     if (!token || !tenantId) return;
-    if (!confirm('Disconnect HighLevel for this workspace?')) return;
+    if (!confirm('Disconnect CRM for this workspace?')) return;
     setErr('');
     setMsg('');
     setDisconnecting(true);
@@ -200,9 +200,9 @@ function AgencyGhlConnectionsInner() {
 
   return (
     <div>
-      <PageHeader title="HighLevel Connection" eyebrow="Agency account" />
+      <PageHeader title="CRM connection" eyebrow="Agency account" />
       <p style={{ fontSize: '0.8rem', color: '#64748b', margin: '0 0 1rem', maxWidth: '32rem' }}>
-        Connect one client workspace to HighLevel so AISBP can read and send conversation data.
+        Connect one client workspace to CRM so AISBP can read and send conversation data.
       </p>
 
       {err && <ErrorBanner message={err} />}
@@ -211,7 +211,7 @@ function AgencyGhlConnectionsInner() {
       {tenantsLoading ? <LoadingBlock message="Loading workspaces…" /> : null}
       {!tenantsLoading && tenantsErr ? <ErrorBanner message={tenantsErr} /> : null}
       {!tenantsLoading && !tenantsErr && tenants.length === 0 ? (
-        <EmptyState title="No workspaces" detail="Create a client workspace first, then connect HighLevel." />
+        <EmptyState title="No workspaces" detail="Create a client workspace first, then connect CRM." />
       ) : null}
 
       {unknownTenant ? <ErrorBanner message="That workspace is not in this agency. Choose another workspace." /> : null}
@@ -219,7 +219,7 @@ function AgencyGhlConnectionsInner() {
       {!tenantsLoading && !tenantId && tenants.length > 0 ? (
         <EmptyState
           title="No workspace selected"
-          detail="Choose a workspace from the workspace switcher to connect HighLevel."
+          detail="Choose a workspace from the workspace switcher to connect CRM."
         />
       ) : null}
 
@@ -233,12 +233,12 @@ function AgencyGhlConnectionsInner() {
             background: '#f8fafc',
           }}
         >
-          <p style={{ margin: 0, fontSize: '0.82rem', color: '#64748b' }}>Configuring HighLevel for</p>
+          <p style={{ margin: 0, fontSize: '0.82rem', color: '#64748b' }}>Configuring CRM for</p>
           <p style={{ margin: '0.2rem 0 0', fontSize: '1.05rem', fontWeight: 800, color: '#0f172a' }}>{selected.name}</p>
           <p style={{ margin: '0.4rem 0 0', display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
             <StatusPill label={selected.status} tone="neutral" />
             {selected.ghlLocationId ? (
-              <span style={{ fontSize: '0.78rem', color: '#64748b' }}>HighLevel location saved</span>
+              <span style={{ fontSize: '0.78rem', color: '#64748b' }}>CRM location saved</span>
             ) : null}
             <Link href={`/app/tenant/${selected.id}/goals`} style={{ fontSize: '0.8rem', fontWeight: 600, color: '#2563eb' }}>
               Open workspace →
@@ -251,25 +251,25 @@ function AgencyGhlConnectionsInner() {
         <>
           <SectionCard
             title="Connection details"
-            subtitle="Location ID and private integration token from HighLevel."
+            subtitle="Location ID and private integration token from your CRM."
           >
             <form onSubmit={onSave} style={{ maxWidth: '520px', display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
               <div>
                 <label style={mvpLabelStyle}>
-                  HighLevel location ID
+                  CRM location ID
                   <input
                     value={loc}
                     onChange={e => setLoc(e.target.value)}
-                    placeholder="From HighLevel location settings"
+                    placeholder="From CRM location settings"
                     autoComplete="off"
                     style={mvpInputStyle}
                   />
                 </label>
-                <p style={mvpFieldHint}>Found in HighLevel under the workspace’s location settings.</p>
+                <p style={mvpFieldHint}>Found in CRM under the workspace’s location settings.</p>
               </div>
               <div>
                 <label style={mvpLabelStyle}>
-                  HighLevel private integration token
+                  CRM private integration token
                   <input
                     type="password"
                     value={pit}
@@ -407,7 +407,7 @@ export default function AgencyGhlConnectionsPage() {
     <Suspense
       fallback={
         <div>
-          <PageHeader title="Integrations" eyebrow="GoHighLevel" />
+          <PageHeader title="Integrations" eyebrow="CRM" />
           <LoadingBlock message="Loading page…" />
         </div>
       }

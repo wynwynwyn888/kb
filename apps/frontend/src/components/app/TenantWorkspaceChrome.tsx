@@ -52,7 +52,7 @@ export function TenantWorkspaceChrome({ tenantId, children }: { tenantId: string
             style={advSubStyle(pathname.startsWith(`${base}/ghl-status`))}
             aria-current={pathname.startsWith(`${base}/ghl-status`) ? 'page' : undefined}
           >
-            HighLevel
+            CRM
           </Link>
           <Link
             href={`${base}/conversations`}

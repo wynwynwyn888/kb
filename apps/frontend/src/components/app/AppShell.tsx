@@ -7,7 +7,6 @@ import { Suspense, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { WorkspaceSwitcher } from '@/components/app/WorkspaceSwitcher';
 import { BrandLogo } from '@/components/app/BrandLogo';
-import { AgencyRecentActivity } from '@/components/app/AgencyRecentActivity';
 import { TenantNavIcon } from '@/components/app/TenantNavIcon';
 import { buildTenantNavItems } from '@/lib/tenant-workspace-nav';
 import { appFloatingSecondaryButtonStyle } from '@/components/app/mvp-ui';
@@ -221,7 +220,10 @@ export function AppShell({ children }: { children: ReactNode }) {
                     Client Workspaces
                   </Link>
                   <Link href="/app/agency/settings/ghl" style={linkStyle(pathname === '/app/agency/settings/ghl')}>
-                    HighLevel
+                    CRM
+                  </Link>
+                  <Link href="/app/agency/log" style={linkStyle(pathname.startsWith('/app/agency/log'))}>
+                    Log
                   </Link>
                   <Link href="/app/agency/settings/ai" style={linkStyle(pathname === '/app/agency/settings/ai')}>
                     AI Provider
@@ -238,7 +240,6 @@ export function AppShell({ children }: { children: ReactNode }) {
                 </nav>
               )}
 
-              {showAgencyNav ? <AgencyRecentActivity /> : null}
             </>
           )}
         </div>

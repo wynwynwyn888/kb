@@ -86,7 +86,7 @@ export function TenantSettingsPanel() {
         const [tenant, g] = await Promise.all([
           getTenantById(token, tenantId),
           getGhlConnection(token, tenantId).catch(e => {
-            if (!cancelled) setGhlLoadErr(e instanceof Error ? e.message : 'HighLevel connection could not be loaded');
+            if (!cancelled) setGhlLoadErr(e instanceof Error ? e.message : 'CRM connection could not be loaded');
             return null;
           }),
         ]);
@@ -200,13 +200,13 @@ export function TenantSettingsPanel() {
                 <div style={{ fontSize: '1.45rem', fontWeight: 800, margin: '0.25rem 0 0', lineHeight: 1.2 }}>{tenantName ?? 'Workspace'}</div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.45rem', marginTop: '0.65rem' }}>
                   {ghl && !ghlLoadErr && ghl.status === 'CONNECTED' ? (
-                    <StatusPill label="HighLevel connected" tone="ok" />
+                    <StatusPill label="CRM connected" tone="ok" />
                   ) : (
                     <>
                       {tenantStatus ? <StatusPill label={tenantStatus} tone="neutral" /> : null}
                       {ghl && !ghlLoadErr ? (
                         <StatusPill
-                          label={`HighLevel ${ghl.status === 'DISCONNECTED' ? 'needs setup' : 'needs review'}`}
+                          label={`CRM ${ghl.status === 'DISCONNECTED' ? 'needs setup' : 'needs review'}`}
                           tone={ghl.status === 'DISCONNECTED' ? 'neutral' : 'warn'}
                         />
                       ) : null}
@@ -224,7 +224,7 @@ export function TenantSettingsPanel() {
                   Open bot instructions
                 </Link>
                 <Link href={`${base}/ghl-status`} style={{ ...appFloatingSecondaryButtonStyle, background: 'rgba(255,255,255,0.12)', borderColor: 'rgba(255,255,255,0.25)', color: '#f8fafc', boxShadow: 'none' }}>
-                  HighLevel connection
+                  CRM connection
                 </Link>
               </div>
             </div>
@@ -245,7 +245,7 @@ export function TenantSettingsPanel() {
               ) : null}
             </div>
             <div style={{ flex: '1 1 280px', minWidth: 0 }}>
-              <SectionCard title="HighLevel connection" subtitle="Whether this workspace is connected to HighLevel." accent="muted">
+              <SectionCard title="CRM connection" subtitle="Connection status and saved location for this workspace’s CRM." accent="muted">
                 {ghlLoadErr ? (
                   <p style={{ fontSize: '0.84rem', color: '#b91c1c', margin: 0 }}>{ghlLoadErr}</p>
                 ) : ghl ? (
@@ -269,12 +269,12 @@ export function TenantSettingsPanel() {
                     />
                     <div style={{ marginTop: '0.85rem' }}>
                       <Link href={`${base}/ghl-status`} style={appFloatingSecondaryButtonStyle}>
-                        Manage HighLevel
+                        Manage CRM
                       </Link>
                     </div>
                   </div>
                 ) : (
-                  <p style={{ fontSize: '0.84rem', color: 'var(--aisbp-muted, #64748b)', margin: 0 }}>HighLevel is not connected yet.</p>
+                  <p style={{ fontSize: '0.84rem', color: 'var(--aisbp-muted, #64748b)', margin: 0 }}>CRM is not connected yet.</p>
                 )}
               </SectionCard>
             </div>
@@ -417,13 +417,13 @@ export function TenantSettingsPanel() {
             <ControlSection
               title="Booking"
               subtitle="Calendars & availability"
-              body="Managed in HighLevel for now. Connect HighLevel before using booking-related workflows."
-              links={[{ href: `${base}/ghl-status`, label: 'Open HighLevel' }]}
+              body="Managed in your CRM for now. Connect it before using booking-related workflows."
+              links={[{ href: `${base}/ghl-status`, label: 'Open CRM' }]}
             />
             <ControlSection
               title="Tags"
               subtitle="Segments & labels"
-              body="Managed in HighLevel for now. Knowledge and Activity show what AISBP can use today."
+              body="Managed in your CRM for now. Knowledge and Activity show what AISBP can use today."
               links={[
                 { href: `${base}/knowledge`, label: 'Open knowledge' },
                 { href: `${base}/conversations`, label: 'Open activity' },
@@ -435,7 +435,7 @@ export function TenantSettingsPanel() {
               body="Coming soon. Use Bot Instructions for tone and Diagnostics for support checks."
               links={[
                 { href: `${base}/goals`, label: 'Open bot instructions' },
-                { href: `${base}/ghl-status`, label: 'Open HighLevel' },
+                { href: `${base}/ghl-status`, label: 'Open CRM' },
                 { href: `${base}/diagnostics`, label: 'Open diagnostics' },
               ]}
             />

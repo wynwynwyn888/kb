@@ -34,7 +34,7 @@ export default function WorkspaceChooserPage() {
         Your account can access the agency account and a client workspace. Pick where you want to work; you can switch anytime
         from the sidebar.
       </p>
-      <SectionCard title="Agency account" subtitle="Control Center, client workspaces, HighLevel, AI provider, credits, Global Prompt, and team.">
+      <SectionCard title="Agency account" subtitle="Control Center, client workspaces, CRM, AI provider, credits, Global Prompt, and team.">
         <Link href="/app/agency" style={appFloatingPrimaryButtonStyle}>
           Open agency account
         </Link>

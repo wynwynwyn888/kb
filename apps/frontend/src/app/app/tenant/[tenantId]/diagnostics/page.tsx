@@ -6,7 +6,6 @@ import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
 import { stripModelThinking } from '@aisbp/formatter';
 import {
-  getActionIntents,
   getActiveHandovers,
   probeAiRouterRoute,
   type AiRouterRouteResult,
@@ -34,29 +33,10 @@ type ActiveHandoverRow = {
   createdAt: string;
 };
 
-type IntentRow = Record<string, unknown>;
-
 function previewDraftReply(value: unknown): string {
   if (value === null || value === undefined) return 'None (normal for this probe)';
   if (typeof value === 'object') return JSON.stringify(value);
   return stripModelThinking(String(value));
-}
-
-function intentField(row: IntentRow, ...keys: string[]): unknown {
-  for (const k of keys) {
-    if (k in row && row[k] !== undefined && row[k] !== null) return row[k];
-  }
-  return undefined;
-}
-
-function formatParams(p: unknown): string {
-  if (p === null || p === undefined) return '—';
-  if (typeof p === 'string') return p;
-  try {
-    return JSON.stringify(p);
-  } catch {
-    return String(p);
-  }
 }
 
 export default function TenantDiagnosticsPage() {
@@ -64,11 +44,8 @@ export default function TenantDiagnosticsPage() {
   const tenantId = params['tenantId'] as string;
   const { token } = useAuth();
   const [handovers, setHandovers] = useState<ActiveHandoverRow[] | null>(null);
-  const [intents, setIntents] = useState<{ items: IntentRow[]; total: number } | null>(null);
   const [hLoading, setHLoading] = useState(true);
-  const [iLoading, setILoading] = useState(true);
   const [hErr, setHErr] = useState('');
-  const [iErr, setIErr] = useState('');
 
   const [probeConversationId, setProbeConversationId] = useState('');
   const [probeMessage, setProbeMessage] = useState('');
@@ -105,24 +82,6 @@ export default function TenantDiagnosticsPage() {
         }
       } finally {
         if (!cancelled) setHLoading(false);
-      }
-    })();
-
-    (async () => {
-      setILoading(true);
-      setIErr('');
-      try {
-        const i = await getActionIntents(token, tenantId, { limit: 20 });
-        if (cancelled) return;
-        const raw = i.intents ?? [];
-        setIntents({ items: raw as IntentRow[], total: i.total ?? raw.length });
-      } catch (e) {
-        if (!cancelled) {
-          setIErr(e instanceof Error ? e.message : String(e));
-          setIntents(null);
-        }
-      } finally {
-        if (!cancelled) setILoading(false);
       }
     })();
 
@@ -344,7 +303,7 @@ export default function TenantDiagnosticsPage() {
                       ),
                     },
                     { label: 'Conversation ID', value: h.conversationId, mono: true },
-                    { label: 'HighLevel conversation ID', value: h.ghlConversationId, mono: true },
+                    { label: 'CRM conversation ID', value: h.ghlConversationId, mono: true },
                     { label: 'Contact', value: h.contactId, mono: true },
                     { label: 'Initiated by', value: h.initiatedBy, mono: true },
                     { label: 'Started', value: formatDateTime(h.createdAt) },
@@ -360,90 +319,27 @@ export default function TenantDiagnosticsPage() {
         ) : null}
       </SectionCard>
 
-      <SectionCard
-        title="Recent action checks"
-        subtitle="Automated actions the system considered or ran (read-only audit trail)."
-      >
-        {iLoading ? <LoadingBlock message="Loading intents…" /> : null}
-        {iErr ? <ErrorBanner message={iErr} /> : null}
-        {!iLoading && !iErr && intents && intents.items.length === 0 ? (
-          <EmptyState title="No action checks yet" detail="When the system logs possible actions for this workspace, they will show here." />
-        ) : null}
-        {!iLoading && !iErr && intents && intents.items.length > 0 ? (
-          <>
-            <p style={{ fontSize: '0.82rem', color: '#666', marginTop: 0, marginBottom: '0.75rem' }}>
-              Showing {intents.items.length} of {intents.total} total
-            </p>
-            <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-              {intents.items.map((row, idx) => {
-                const id = String(intentField(row, 'id') ?? idx);
-                const actionType = String(intentField(row, 'action_type', 'actionType') ?? '—');
-                const source = String(intentField(row, 'source') ?? '—');
-                const status = String(intentField(row, 'status') ?? '—');
-                const reason = intentField(row, 'reason');
-                const gating = intentField(row, 'gating_note', 'gatingNote');
-                const convId = String(intentField(row, 'conversation_id', 'conversationId') ?? '—');
-                const created = intentField(row, 'created_at', 'createdAt');
-                const executed = intentField(row, 'executed_at', 'executedAt');
-                const params = intentField(row, 'params');
-                const statusTone =
-                  status === 'EXECUTED' || status === 'COMPLETED'
-                    ? 'ok'
-                    : status === 'FAILED' || status === 'REJECTED'
-                      ? 'bad'
-                      : 'neutral';
-
-                return (
-                  <li
-                    key={id}
-                    style={{
-                      border: '1px solid #e5e5e5',
-                      borderRadius: '8px',
-                      padding: '0.75rem',
-                      background: '#fff',
-                    }}
-                  >
-                    <div style={{ marginBottom: '0.5rem', display: 'flex', flexWrap: 'wrap', gap: '0.35rem', alignItems: 'center' }}>
-                      <StatusPill label={status} tone={statusTone} />
-                      <span style={{ fontSize: '0.78rem', color: '#555', fontFamily: 'inherit' }}>{actionType}</span>
-                    </div>
-                    <KeyValueRows
-                      rows={[
-                        { label: 'ID', value: id, mono: true },
-                        { label: 'Source', value: source },
-                        { label: 'Conversation', value: convId, mono: true },
-                        {
-                          label: 'Created',
-                          value: typeof created === 'string' ? formatDateTime(created) : '—',
-                        },
-                        {
-                          label: 'Executed',
-                          value: typeof executed === 'string' ? formatDateTime(executed) : '—',
-                        },
-                        {
-                          label: 'Reason',
-                          value: typeof reason === 'string' && reason.trim() ? reason : '—',
-                        },
-                        {
-                          label: 'Review note',
-                          value: typeof gating === 'string' && gating.trim() ? gating : '—',
-                        },
-                        {
-                          label: 'Details',
-                          value: (
-                            <span style={{ fontFamily: 'inherit', fontSize: '0.78rem' }}>
-                              {formatParams(params)}
-                            </span>
-                          ),
-                        },
-                      ]}
-                    />
-                  </li>
-                );
-              })}
-            </ul>
-          </>
-        ) : null}
+      <SectionCard title="Action audit" subtitle="Detailed automated action checks live under Log (better for day-to-day review).">
+        <p style={{ fontSize: '0.84rem', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 0.75rem', lineHeight: 1.5 }}>
+          The full read-only list of action intents (IDs, parameters, execution status) is kept out of this diagnostics view.
+        </p>
+        <Link
+          href={`/app/tenant/${tenantId}/log`}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            padding: '0.45rem 0.85rem',
+            borderRadius: '8px',
+            border: '1px solid var(--aisbp-border-strong, #cbd5e1)',
+            background: 'var(--aisbp-surface, #fff)',
+            color: 'var(--aisbp-text-heading, #0f172a)',
+            fontSize: '0.85rem',
+            fontWeight: 600,
+            textDecoration: 'none',
+          }}
+        >
+          Open Log
+        </Link>
       </SectionCard>
     </div>
   );

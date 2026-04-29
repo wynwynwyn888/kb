@@ -5,7 +5,7 @@ import type { WorkspaceBotMode } from '@/lib/api';
 
 const options: { id: WorkspaceBotMode; label: string; line: string }[] = [
   { id: 'off', label: 'Off', line: 'Stops automatic AI replies' },
-  { id: 'suggestive', label: 'Suggestive', line: 'Builds replies without auto-sending to HighLevel' },
+  { id: 'suggestive', label: 'Suggestive', line: 'Builds replies without auto-sending to CRM' },
   { id: 'autopilot', label: 'Auto', line: 'Sends replies to the conversation automatically' },
 ];
 
@@ -63,7 +63,7 @@ export function WorkspaceBotModeSection(props: {
             maxWidth: '36rem',
           }}
         >
-          Choose how this workspace uses AI for incoming conversations. Requires a connected HighLevel account for live
+          Choose how this workspace uses AI for incoming conversations. Requires a connected CRM account for live
           delivery.
         </p>
       </div>

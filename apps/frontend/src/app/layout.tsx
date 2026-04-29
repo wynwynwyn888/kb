@@ -15,7 +15,7 @@ const themeBoot = `(function(){try{var k='aisbp-theme';var v=localStorage.getIte
 
 export const metadata: Metadata = {
   title: 'AISBP',
-  description: 'Agency and subaccount AI conversation layer for GoHighLevel',
+  description: 'Agency and subaccount AI conversation layer for CRM',
   icons: {
     icon: [{ url: '/favicon.jpg', type: 'image/jpeg' }],
     shortcut: '/favicon.jpg',

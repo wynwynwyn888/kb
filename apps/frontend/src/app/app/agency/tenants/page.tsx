@@ -142,12 +142,12 @@ export default function AgencyTenantDirectoryPage() {
         <p style={{ fontSize: '0.86rem', color: '#166534', margin: '0 0 0.75rem', fontWeight: 600 }}>{deleteOk}</p>
       ) : null}
       <p style={{ fontSize: '0.83rem', color: '#64748b', margin: '0 0 0.75rem', lineHeight: 1.45, maxWidth: '40rem' }}>
-        Create and manage the client workspaces connected to HighLevel.
+        Create and manage the client workspaces connected to CRM.
       </p>
 
       <SectionCard
         title="Create workspace"
-        subtitle="Start with a workspace name. You can connect HighLevel now or later."
+        subtitle="Start with a workspace name. You can connect CRM now or later."
       >
         {createOk ? (
           <p style={{ fontSize: '0.86rem', color: '#166534', margin: '0 0 0.75rem', fontWeight: 600 }}>{createOk}</p>
@@ -176,7 +176,7 @@ export default function AgencyTenantDirectoryPage() {
           </div>
           <div>
             <label style={{ fontSize: '0.75rem', color: '#64748b', display: 'block', marginBottom: '0.25rem' }}>
-              HighLevel location ID (optional)
+              CRM location ID (optional)
             </label>
             <input
               value={newGhlLocationId}
@@ -184,10 +184,10 @@ export default function AgencyTenantDirectoryPage() {
                 setNewGhlLocationId(e.target.value);
                 setCreateOk('');
               }}
-              placeholder="Location ID from HighLevel"
+              placeholder="Location ID from CRM"
               style={{ ...mvpInputStyle, maxWidth: '100%' }}
               autoComplete="off"
-              aria-label="Optional HighLevel location ID for new workspace"
+              aria-label="Optional CRM location ID for new workspace"
             />
           </div>
         </div>
@@ -242,7 +242,7 @@ export default function AgencyTenantDirectoryPage() {
                   <tr style={{ textAlign: 'left', borderBottom: '1px solid #e5e5e5' }}>
                     <th style={{ padding: '0.6rem 0.5rem', fontWeight: 600, color: '#444' }}>Workspace</th>
                     <th style={{ padding: '0.6rem 0.5rem', fontWeight: 600, color: '#444' }}>Status</th>
-                    <th style={{ padding: '0.6rem 0.5rem', fontWeight: 600, color: '#444' }}>HighLevel</th>
+                    <th style={{ padding: '0.6rem 0.5rem', fontWeight: 600, color: '#444' }}>CRM</th>
                     <th style={{ padding: '0.6rem 0.5rem', fontWeight: 600, color: '#444' }}>AI setup</th>
                     <th style={{ padding: '0.6rem 0.5rem', fontWeight: 600, color: '#444' }}>Actions</th>
                   </tr>
@@ -401,7 +401,7 @@ function TenantNameRow({
           <details>
             <summary style={{ cursor: 'pointer', fontSize: '0.72rem', color: '#64748b' }}>Support details</summary>
             <p style={{ margin: '0.35rem 0 0', fontFamily: 'inherit', fontSize: '0.72rem', color: '#64748b', wordBreak: 'break-all' }}>
-              HighLevel location ID: {t.ghlLocationId && String(t.ghlLocationId).trim() ? t.ghlLocationId : '—'}
+              CRM location ID: {t.ghlLocationId && String(t.ghlLocationId).trim() ? t.ghlLocationId : '—'}
               <br />
               Token: {ghl?.maskToken ?? '—'}
             </p>
@@ -440,7 +440,7 @@ function TenantNameRow({
               fontSize: '0.82rem',
             }}
           >
-            Connect HighLevel
+            Connect CRM
           </Link>
           <button
             type="button"

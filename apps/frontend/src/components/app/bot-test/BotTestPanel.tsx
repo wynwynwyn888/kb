@@ -338,11 +338,12 @@ export function BotTestPanel(props: { token: string; subaccountId: string }) {
         {sending ? (
           <div
             style={{
+              marginBottom: '1rem',
               display: 'flex',
-              alignItems: 'center',
+              flexDirection: 'row' as const,
+              justifyContent: 'flex-start',
+              alignItems: 'flex-start',
               gap: 10,
-              alignSelf: 'flex-start',
-              marginLeft: 42,
             }}
           >
             {botAvatar}

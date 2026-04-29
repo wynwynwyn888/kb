@@ -76,18 +76,18 @@ export default function TenantGhlStatusPage() {
 
   return (
     <div>
-      <PageHeader title="HighLevel connection" eyebrow="Advanced" />
+      <PageHeader title="CRM connection" eyebrow="Advanced" />
       <p style={{ fontSize: '0.88rem', color: '#64748b', margin: '0 0 0.85rem', lineHeight: 1.5, maxWidth: '560px' }}>
         Read-only status for this workspace. To change credentials, ask an agency admin to open{' '}
         <Link href={`/app/agency/settings/ghl?subaccount=${tenantId}`} style={{ color: '#2563eb', fontWeight: 600 }}>
-          HighLevel
+          CRM
         </Link>
         .
       </p>
       {err && <ErrorBanner message={err} />}
 
       <p style={{ fontSize: '0.82rem', color: '#64748b', marginBottom: '0.85rem' }}>
-        Connection check confirms AISBP can reach HighLevel with the saved token. Refresh loads the latest stored status.
+        Connection check confirms AISBP can reach CRM with the saved token. Refresh loads the latest stored status.
       </p>
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '1rem' }}>
@@ -158,7 +158,7 @@ export default function TenantGhlStatusPage() {
         ) : (
           <EmptyState
             title="No connection on file"
-            detail="Once an agency admin saves HighLevel credentials for this workspace, status will appear here."
+            detail="Once an agency admin saves CRM credentials for this workspace, status will appear here."
           />
         )}
       </SectionCard>

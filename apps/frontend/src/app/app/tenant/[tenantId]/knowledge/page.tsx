@@ -1467,7 +1467,7 @@ export default function SubaccountKnowledgePage() {
     border: 'none',
     background: 'none',
     cursor: 'pointer',
-    color: active ? PRIMARY : '#64748b',
+    color: active ? PRIMARY : 'var(--aisbp-muted, #64748b)',
     borderBottom: active ? `2px solid ${PRIMARY}` : '2px solid transparent',
   });
 
@@ -1487,10 +1487,27 @@ export default function SubaccountKnowledgePage() {
     <div style={{ background: PAGE_BG, padding: '0 0 1.75rem', minHeight: '100%' }}>
       <div style={{ maxWidth: 1200, margin: '0 auto' }}>
         <header style={{ marginBottom: '1.35rem' }}>
-          <h1 style={{ fontSize: '1.875rem', fontWeight: 800, margin: 0, lineHeight: 1.2, color: '#0f172a', letterSpacing: '-0.03em' }}>
+          <h1
+            style={{
+              fontSize: '1.875rem',
+              fontWeight: 800,
+              margin: 0,
+              lineHeight: 1.2,
+              color: 'var(--aisbp-text-heading, #0f172a)',
+              letterSpacing: '-0.03em',
+            }}
+          >
             Knowledge
           </h1>
-          <p style={{ fontSize: '0.875rem', color: '#64748b', margin: '0.5rem 0 0', maxWidth: '36rem', lineHeight: 1.55 }}>
+          <p
+            style={{
+              fontSize: '0.875rem',
+              color: 'var(--aisbp-muted, #64748b)',
+              margin: '0.5rem 0 0',
+              maxWidth: '36rem',
+              lineHeight: 1.55,
+            }}
+          >
             Manage the information your bot uses to answer customer questions.
           </p>
         </header>
@@ -1574,14 +1591,14 @@ export default function SubaccountKnowledgePage() {
                   accept=".txt,.pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
                 />
                 {saving ? (
-                  <p style={{ fontSize: '0.75rem', color: '#64748b', margin: '0 0 1rem' }}>Working…</p>
+                  <p style={{ fontSize: '0.75rem', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 1rem' }}>Working…</p>
                 ) : null}
 
                 <div
                   style={{
                     display: 'flex',
                     gap: '1.5rem',
-                    borderBottom: '1px solid #e2e8f0',
+                    borderBottom: '1px solid var(--aisbp-border, #e2e8f0)',
                     marginBottom: '1.1rem',
                   }}
                   role="tablist"
@@ -1627,8 +1644,10 @@ export default function SubaccountKnowledgePage() {
 
                 {tab === 'faq' ? (
                   <section style={glassSection}>
-                    <h2 style={{ fontSize: '1rem', fontWeight: 700, margin: '0 0 0.2rem', color: '#0f172a' }}>Approved FAQ</h2>
-                    <p style={{ fontSize: '0.8125rem', color: '#64748b', margin: '0 0 1rem', lineHeight: 1.45 }}>
+                    <h2 style={{ fontSize: '1rem', fontWeight: 700, margin: '0 0 0.2rem', color: 'var(--aisbp-text-heading, #0f172a)' }}>
+                      Approved FAQ
+                    </h2>
+                    <p style={{ fontSize: '0.8125rem', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 1rem', lineHeight: 1.45 }}>
                       Add approved answers your bot can use when replying.
                     </p>
                     <form onSubmit={onFaqSave} style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxWidth: 520, marginBottom: '1.25rem' }}>
@@ -1853,7 +1872,9 @@ export default function SubaccountKnowledgePage() {
                 ) : null}
 
                 <section style={glassSection}>
-                  <h2 style={{ fontSize: '1rem', fontWeight: 700, margin: '0 0 0.2rem', color: '#0f172a' }}>Search knowledge</h2>
+                  <h2 style={{ fontSize: '1rem', fontWeight: 700, margin: '0 0 0.2rem', color: 'var(--aisbp-text-heading, #0f172a)' }}>
+                    Search knowledge
+                  </h2>
                   <p style={{ fontSize: '0.8125rem', color: '#64748b', margin: '0 0 0.85rem', lineHeight: 1.45 }}>
                     Check what the bot can retrieve from this workspace.
                   </p>

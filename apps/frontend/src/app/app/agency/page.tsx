@@ -9,7 +9,6 @@ import {
   getAgencyById,
   getCurrentUser,
   getGhlConnection,
-  getQuotaAuditLog,
   getTenantQuota,
   getTenantsByAgency,
 } from '@/lib/api';
@@ -25,50 +24,6 @@ import {
 
 function fmtCompact(n: number) {
   return n.toLocaleString();
-}
-
-function formatAuditDescription(
-  row: {
-    action: string;
-    previous_total: number | null;
-    new_total: number | null;
-    delta?: number;
-    metadata?: unknown;
-  },
-): string {
-  const m = (row.metadata ?? null) as Record<string, unknown> | null;
-  const a = row.action;
-  if (a === 'subaccount.create' && m?.['name']) {
-    return `Workspace created: ${String(m['name'])}`;
-  }
-  if (a === 'subaccount.renamed' && m?.['previousName'] && m?.['newName']) {
-    return `Workspace renamed: ${String(m['previousName'])} → ${String(m['newName'])}`;
-  }
-  if (a === 'subaccount.deleted' && m?.['name']) {
-    return `Workspace removed: ${String(m['name'])}`;
-  }
-  if (a === 'agency.ai_settings' && m) {
-    const p = m['provider'];
-    const k = m['keyRotated'];
-    const sa = m['setAsActive'];
-    const am = m['defaultModel'];
-    return `AI provider updated: ${p ?? '—'}${am ? `, model ${am}` : ''}${
-      sa ? ', set as live provider' : ''
-    }${k ? ', API key updated' : ''}`;
-  }
-  if (a === 'agency.active_provider' && m?.['newActiveProvider']) {
-    return `Live AI provider changed: ${String(m['previousActiveProvider'] ?? '—')} → ${String(m['newActiveProvider'])}`;
-  }
-  if (a === 'agency.reply_policy') {
-    return 'Workspace reply limits updated';
-  }
-  if (a === 'agency.default_quota') {
-    return `Default credits: ${row.previous_total ?? '—'} → ${row.new_total ?? '—'}`;
-  }
-  if (a === 'subaccount.topup') {
-    return `Workspace credits topped up (${row.previous_total ?? '—'} → ${row.new_total ?? '—'})`;
-  }
-  return 'Activity recorded';
 }
 
 type GhlBreakdown = {
@@ -107,20 +62,6 @@ export default function AgencyHomePage() {
   const [snapshotLoading, setSnapshotLoading] = useState(false);
   const [err, setErr] = useState('');
   const [lowQuota, setLowQuota] = useState<Array<{ id: string; name: string; remaining: number; total: number }>>([]);
-  const [recentAudit, setRecentAudit] = useState<
-    Array<{
-      id: string;
-      action: string;
-      created_at: string;
-      actorEmail?: string | null;
-      previous_total: number | null;
-      new_total: number | null;
-      delta?: number;
-      tenant_id: string | null;
-      metadata?: unknown;
-    }>
-  >([]);
-
   useEffect(() => {
     const agencyId = user?.agencyId;
     if (!token || !agencyId) return;
@@ -129,12 +70,11 @@ export default function AgencyHomePage() {
       setSnapshotLoading(true);
       setErr('');
       try {
-        const [me, agency, tenants, ai, audit] = await Promise.all([
+        const [me, agency, tenants, ai] = await Promise.all([
           getCurrentUser(token),
           getAgencyById(token, agencyId),
           getTenantsByAgency(token, agencyId),
           getAgencyAiConfig(token).catch(() => null),
-          getQuotaAuditLog(token, { limit: 12 }).catch(() => []),
         ]);
         if (cancelled) return;
         setRole(me.agencyRole ?? null);
@@ -164,7 +104,6 @@ export default function AgencyHomePage() {
         } else {
           setAiSnap(null);
         }
-        setRecentAudit(audit);
 
         if (tlist.length === 0) {
           setGhlBreakdown({ connected: 0, invalid: 0, error: 0, disconnected: 0, fetchFailed: 0 });
@@ -261,14 +200,14 @@ export default function AgencyHomePage() {
       });
     if (ghlBreakdown) {
       if (ghlBreakdown.invalid > 0)
-        flags.push({ text: `${ghlBreakdown.invalid} HighLevel connection(s) need a new token or location check.`, tone: 'warn' });
-      if (ghlBreakdown.error > 0) flags.push({ text: `${ghlBreakdown.error} HighLevel connection(s) need review.`, tone: 'warn' });
+        flags.push({ text: `${ghlBreakdown.invalid} CRM connection(s) need a new token or location check.`, tone: 'warn' });
+      if (ghlBreakdown.error > 0) flags.push({ text: `${ghlBreakdown.error} CRM connection(s) need review.`, tone: 'warn' });
       if (ghlBreakdown.fetchFailed > 0)
-        flags.push({ text: `${ghlBreakdown.fetchFailed} HighLevel status check(s) could not be loaded.`, tone: 'warn' });
+        flags.push({ text: `${ghlBreakdown.fetchFailed} CRM status check(s) could not be loaded.`, tone: 'warn' });
     }
     if (withoutLocationId != null && withoutLocationId > 0)
       flags.push({
-        text: `${withoutLocationId} workspace(s) need a HighLevel location ID before routing can work.`,
+        text: `${withoutLocationId} workspace(s) need a CRM location ID before routing can work.`,
         tone: 'warn',
       });
     if (flags.length === 0 && !snapshotLoading && !err) {
@@ -291,10 +230,12 @@ export default function AgencyHomePage() {
     <div>
       <PageHeader title="Control Center" eyebrow="Agency account" />
       {agencyName ? (
-        <p style={{ fontSize: '0.9rem', fontWeight: 700, color: '#0f172a', margin: '0 0 0.6rem' }}>{agencyName}</p>
+        <p style={{ fontSize: '0.9rem', fontWeight: 700, color: 'var(--aisbp-text-heading, #0f172a)', margin: '0 0 0.6rem' }}>
+          {agencyName}
+        </p>
       ) : null}
-      <p style={{ fontSize: '0.9rem', color: '#64748b', margin: '0 0 1.1rem', lineHeight: 1.5, maxWidth: '42rem' }}>
-        Monitor client workspaces, HighLevel connections, AI provider status, credits, and recent activity.
+      <p style={{ fontSize: '0.9rem', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 1.1rem', lineHeight: 1.5, maxWidth: '42rem' }}>
+        Monitor client workspaces, CRM connections, AI provider status, credits, and the agency log.
       </p>
       {err && (
         <div style={{ marginBottom: '1rem' }}>
@@ -335,7 +276,7 @@ export default function AgencyHomePage() {
             <KeyValueRows
               rows={[
                 { label: 'Total workspaces', value: String(tenantCount ?? '—') },
-                { label: 'HighLevel IDs saved', value: `${withGhlLocationId ?? '—'} / ${tenantCount ?? '—'}` },
+                { label: 'CRM location IDs saved', value: `${withGhlLocationId ?? '—'} / ${tenantCount ?? '—'}` },
                 {
                   label: 'Needs setup',
                   value:
@@ -350,9 +291,9 @@ export default function AgencyHomePage() {
           )}
         </SectionCard>
 
-        <SectionCard title="HighLevel Connections" subtitle="Connection health across client workspaces.">
+        <SectionCard title="CRM connections" subtitle="Connection health across client workspaces.">
           {snapshotLoading && ghlBreakdown === null ? (
-            <LoadingBlock message="Loading HighLevel…" />
+            <LoadingBlock message="Loading CRM…" />
           ) : ghlBreakdown && tenantCount != null && tenantCount > 0 ? (
             <KeyValueRows
               rows={[
@@ -476,39 +417,6 @@ export default function AgencyHomePage() {
         </SectionCard>
       ) : null}
 
-      <SectionCard title="Recent activity" subtitle="Recent setup and credit changes for this agency.">
-        {recentAudit.length === 0 ? (
-          <p style={{ fontSize: '0.85rem', color: '#64748b', margin: 0 }}>No activity yet.</p>
-        ) : (
-          <ul style={{ margin: 0, paddingLeft: '1rem', fontSize: '0.82rem', lineHeight: 1.55, color: '#334155' }}>
-            {recentAudit.map(row => (
-              <li key={row.id} style={{ marginBottom: '0.35rem' }}>
-                <span style={{ color: '#94a3b8' }}>
-                  {row.created_at ? new Date(row.created_at).toLocaleString() : '—'}
-                </span>
-                {` — ${formatAuditDescription(row)}`}
-                {row.actorEmail ? <span style={{ color: '#64748b' }}> — {row.actorEmail}</span> : null}
-                {row.action === 'subaccount.topup' && row.tenant_id ? (
-                  <span style={{ color: '#94a3b8' }}> (workspace event)</span>
-                ) : null}
-              </li>
-            ))}
-          </ul>
-        )}
-        <details style={{ marginTop: '0.7rem' }}>
-          <summary style={{ cursor: 'pointer', fontSize: '0.78rem', color: '#64748b', fontWeight: 600 }}>Support details</summary>
-          <p style={{ fontSize: '0.75rem', color: '#94a3b8', lineHeight: 1.5, margin: '0.5rem 0 0' }}>
-            This activity list currently includes workspace create / rename / remove, default credits, credit top-ups, AI provider
-            settings, live provider changes, and workspace reply limits.
-          </p>
-        </details>
-        <div style={{ margin: '0.75rem 0 0' }}>
-          <Link href="/app/agency/settings/quotas" style={appFloatingSecondaryButtonStyle}>
-            View credits activity
-          </Link>
-        </div>
-      </SectionCard>
-
       <SectionCard title="Needs attention" subtitle="Recommended next steps from the latest snapshot.">
         <ul style={{ margin: 0, paddingLeft: '1.1rem', fontSize: '0.86rem', lineHeight: 1.6, color: '#334155' }}>
           {operationalFlags.map((f, i) => (
@@ -533,7 +441,10 @@ export default function AgencyHomePage() {
               Credits
             </Link>
             <Link href="/app/agency/settings/ghl" style={appFloatingSecondaryButtonStyle}>
-              HighLevel
+              CRM
+            </Link>
+            <Link href="/app/agency/log" style={appFloatingSecondaryButtonStyle}>
+              Log
             </Link>
             <Link href="/app/agency/settings/policies" style={appFloatingSecondaryButtonStyle}>
               Global Prompt

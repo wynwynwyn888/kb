@@ -42,6 +42,12 @@ export function TenantNavIcon({ icon }: { icon: TenantNavItem['icon'] }) {
           <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
         </svg>
       );
+    case 'scroll':
+      return (
+        <svg {...s} aria-hidden>
+          <path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" />
+        </svg>
+      );
     case 'sliders':
       return (
         <svg {...s} aria-hidden>

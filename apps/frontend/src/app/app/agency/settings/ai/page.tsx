@@ -323,7 +323,7 @@ export default function AgencyAiSettingsPage() {
         <>
           <div style={strip}>
             <span>
-              <span style={{ color: '#94a3b8', fontWeight: 600 }}>Live provider</span> {activeProvider}
+              <span style={{ color: '#94a3b8', fontWeight: 600 }}>Primary (live)</span> {activeProvider}
             </span>
             <span>
               <span style={{ color: '#94a3b8', fontWeight: 600 }}>Default model</span> <span>{activeModel}</span>
@@ -340,7 +340,21 @@ export default function AgencyAiSettingsPage() {
             </span>
           </div>
 
-          <SectionCard title="Provider" subtitle="Save the AI provider and default model used for live replies.">
+          <p
+            style={{
+              fontSize: '0.78rem',
+              color: 'var(--aisbp-muted, #64748b)',
+              margin: '0 0 0.85rem',
+              lineHeight: 1.45,
+              maxWidth: '40rem',
+            }}
+          >
+            <strong style={{ color: 'var(--aisbp-text-secondary, #475569)' }}>Primary vs fallback:</strong> check
+            &quot;Primary&quot; below for the provider that handles live generation. If that provider is not OpenAI and a reply
+            fails, AISBP retries once with OpenAI when a valid OpenAI API key is saved.
+          </p>
+
+          <SectionCard title="AI provider" subtitle="Credentials, default model, and API health for the live stack.">
             {err ? <ErrorBanner message={err} /> : null}
             {ok ? <SuccessBanner message={ok} /> : null}
             <form
@@ -391,7 +405,7 @@ export default function AgencyAiSettingsPage() {
                   onChange={e => setSetAsActive(e.target.checked)}
                   disabled={!hasLiveGeneration(selectedProvider)}
                 />
-                Use this provider for live replies after saving
+                Use as primary for live replies after saving
                 {!hasLiveGeneration(selectedProvider) ? (
                   <span style={{ color: '#94a3b8', fontSize: '0.75rem' }}>— not available</span>
                 ) : null}
@@ -498,72 +512,70 @@ export default function AgencyAiSettingsPage() {
                     opacity: testing || !hasKeyThis ? 0.7 : 1,
                   }}
                 >
-                  {testing ? 'Testing…' : 'Test selected model'}
+                  {testing ? 'Testing…' : 'Run health check'}
                 </button>
               </div>
               {!hasKeyThis ? <p style={{ ...mvpFieldHint, marginTop: 0 }}>Save an API key before running a health check.</p> : null}
               {testErr ? <ErrorBanner message={testErr} /> : null}
               {testOk ? <SuccessBanner message={testOk} /> : null}
             </form>
-          </SectionCard>
 
-          <SectionCard title="Model health" subtitle="Last check against the provider API (uses your saved key only).">
-            {!healthSnap ? (
-              <p style={{ fontSize: '0.85rem', color: '#64748b', margin: 0 }}>No health check recorded yet.</p>
-            ) : (
-              <dl
-                style={{
-                  margin: 0,
-                  display: 'grid',
-                  gridTemplateColumns: 'auto 1fr',
-                  gap: '0.35rem 1rem',
-                  fontSize: '0.85rem',
-                  color: '#334155',
-                }}
-              >
-                <dt style={{ color: '#94a3b8', fontWeight: 600 }}>Status</dt>
-                <dd style={{ margin: 0 }}>{healthLabel}</dd>
-                <dt style={{ color: '#94a3b8', fontWeight: 600 }}>Checked</dt>
-                <dd style={{ margin: 0 }}>{new Date(healthSnap.lastHealthCheckedAt).toLocaleString()}</dd>
-                <dt style={{ color: '#94a3b8', fontWeight: 600 }}>Latency</dt>
-                <dd style={{ margin: 0 }}>
-                  {healthSnap.lastHealthLatencyMs != null ? `${healthSnap.lastHealthLatencyMs} ms` : '—'}
-                </dd>
-                <dt style={{ color: '#94a3b8', fontWeight: 600 }}>Tested provider / model</dt>
-                <dd style={{ margin: 0 }}>
-                  {healthSnap.lastHealthProvider} / {healthSnap.lastHealthModel}
-                </dd>
-                {healthSnap.lastHealthErrorSummary ? (
-                  <>
-                    <dt style={{ color: '#94a3b8', fontWeight: 600 }}>Error</dt>
-                    <dd style={{ margin: 0, color: '#b91c1c' }}>{healthSnap.lastHealthErrorSummary}</dd>
-                  </>
-                ) : null}
-              </dl>
-            )}
-            {!healthForForm && healthSnap ? (
-              <p style={{ fontSize: '0.78rem', color: '#94a3b8', margin: '0.75rem 0 0' }}>
-                Last run was for a different provider or model than you have selected above. Run &quot;Test selected model&quot;
-                to refresh for your current selection.
-              </p>
-            ) : null}
-            <button
-              type="button"
-              disabled={testing || !hasKeyThis}
-              onClick={onTestModel}
+            <div
               style={{
-                marginTop: '0.75rem',
-                padding: '0.45rem 0.85rem',
-                borderRadius: '6px',
-                border: '1px solid #cbd5e1',
-                background: '#fff',
-                cursor: testing || !hasKeyThis ? 'not-allowed' : 'pointer',
-                fontSize: '0.85rem',
-                fontWeight: 600,
+                marginTop: '1.25rem',
+                paddingTop: '1.1rem',
+                borderTop: '1px solid var(--aisbp-border, #e2e8f0)',
               }}
             >
-              {testing ? 'Testing…' : 'Test selected model'}
-            </button>
+              <p
+                style={{
+                  fontSize: '0.82rem',
+                  fontWeight: 700,
+                  margin: '0 0 0.35rem',
+                  color: 'var(--aisbp-text-heading, #0f172a)',
+                }}
+              >
+                Last health check
+              </p>
+              {!healthSnap ? (
+                <p style={{ fontSize: '0.85rem', color: 'var(--aisbp-muted, #64748b)', margin: 0 }}>No health check recorded yet.</p>
+              ) : (
+                <dl
+                  style={{
+                    margin: 0,
+                    display: 'grid',
+                    gridTemplateColumns: 'auto 1fr',
+                    gap: '0.35rem 1rem',
+                    fontSize: '0.85rem',
+                    color: 'var(--aisbp-text-secondary, #334155)',
+                  }}
+                >
+                  <dt style={{ color: 'var(--aisbp-muted, #94a3b8)', fontWeight: 600 }}>Status</dt>
+                  <dd style={{ margin: 0 }}>{healthLabel}</dd>
+                  <dt style={{ color: 'var(--aisbp-muted, #94a3b8)', fontWeight: 600 }}>Checked</dt>
+                  <dd style={{ margin: 0 }}>{new Date(healthSnap.lastHealthCheckedAt).toLocaleString()}</dd>
+                  <dt style={{ color: 'var(--aisbp-muted, #94a3b8)', fontWeight: 600 }}>Latency</dt>
+                  <dd style={{ margin: 0 }}>
+                    {healthSnap.lastHealthLatencyMs != null ? `${healthSnap.lastHealthLatencyMs} ms` : '—'}
+                  </dd>
+                  <dt style={{ color: 'var(--aisbp-muted, #94a3b8)', fontWeight: 600 }}>Tested provider / model</dt>
+                  <dd style={{ margin: 0 }}>
+                    {healthSnap.lastHealthProvider} / {healthSnap.lastHealthModel}
+                  </dd>
+                  {healthSnap.lastHealthErrorSummary ? (
+                    <>
+                      <dt style={{ color: 'var(--aisbp-muted, #94a3b8)', fontWeight: 600 }}>Error</dt>
+                      <dd style={{ margin: 0, color: '#b91c1c' }}>{healthSnap.lastHealthErrorSummary}</dd>
+                    </>
+                  ) : null}
+                </dl>
+              )}
+              {!healthForForm && healthSnap ? (
+                <p style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted, #94a3b8)', margin: '0.65rem 0 0', lineHeight: 1.45 }}>
+                  Stored result is for a different provider or model than selected above — run <strong>Run health check</strong> to refresh.
+                </p>
+              ) : null}
+            </div>
           </SectionCard>
 
           <SectionCard

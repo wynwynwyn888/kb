@@ -13,7 +13,7 @@ export default function TenantAdvancedHubPage() {
       <SectionCard title="What lives here" subtitle="Use these when you need deeper troubleshooting.">
         <ul style={{ margin: 0, paddingLeft: '1.1rem', fontSize: '0.86rem', color: '#475569', lineHeight: 1.55 }}>
           <li>
-            <strong>HighLevel connection</strong> — read-only status and connection checks for the HighLevel link (same data as the dedicated
+            <strong>CRM connection</strong> — read-only status and connection checks for the CRM link (same data as the dedicated
             URL).
           </li>
           <li style={{ marginTop: '0.5rem' }}>

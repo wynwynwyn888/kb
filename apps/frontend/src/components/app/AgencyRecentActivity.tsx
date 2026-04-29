@@ -1,10 +1,9 @@
 'use client';
 
-import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { getQuotaAuditLog } from '@/lib/api';
 import { useAuth } from '@/contexts/AuthContext';
-import { appFloatingSecondaryButtonStyle } from '@/components/app/mvp-ui';
+import { DEFAULT_DISPLAY_TIMEZONE } from '@/lib/datetime-display';
 
 function oneLine(
   action: string,
@@ -32,9 +31,21 @@ function oneLine(
   return 'Activity recorded';
 }
 
-/**
- * Compact audit strip for the agency sidebar (real rows only; no mock data).
- */
+function formatActivityWhen(iso: string): string {
+  try {
+    return new Date(iso).toLocaleString('en-SG', {
+      timeZone: DEFAULT_DISPLAY_TIMEZONE,
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } catch {
+    return '—';
+  }
+}
+
+/** Agency quota / setup audit list (use inside Log page `SectionCard`). */
 export function AgencyRecentActivity() {
   const { token, user } = useAuth();
   const [rows, setRows] = useState<
@@ -54,7 +65,7 @@ export function AgencyRecentActivity() {
     let cancelled = false;
     (async () => {
       try {
-        const r = await getQuotaAuditLog(token, { limit: 5 });
+        const r = await getQuotaAuditLog(token, { limit: 20 });
         if (!cancelled) setRows(Array.isArray(r) ? r : []);
       } catch {
         if (!cancelled) setRows([]);
@@ -67,32 +78,31 @@ export function AgencyRecentActivity() {
 
   if (rows.length === 0) {
     return (
-      <div style={{ marginTop: '1rem' }}>
-        <p style={{ fontSize: '0.68rem', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 0.35rem' }}>Recent activity</p>
-        <p style={{ fontSize: '0.72rem', color: '#94a3b8', lineHeight: 1.4, margin: 0 }}>No events yet.</p>
-        <p style={{ fontSize: '0.68rem', color: '#cbd5e1', lineHeight: 1.4, margin: '0.35rem 0 0' }}>Setup changes will appear here.</p>
-      </div>
+      <p style={{ fontSize: '0.875rem', color: 'var(--aisbp-muted, #94a3b8)', lineHeight: 1.45, margin: 0 }}>
+        No events yet. Setup and quota changes will appear here.
+      </p>
     );
   }
 
   return (
-    <div style={{ marginTop: '1rem' }}>
-      <p style={{ fontSize: '0.68rem', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.06em', margin: '0 0 0.35rem' }}>Recent activity</p>
-      <ul style={{ listStyle: 'none', margin: 0, padding: 0, fontSize: '0.72rem', lineHeight: 1.45, color: '#64748b' }}>
-        {rows.map(r => (
-          <li key={r.id} style={{ marginBottom: '0.4rem' }}>
-            <span style={{ color: '#94a3b8' }}>{r.created_at ? new Date(r.created_at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—'}</span>
-            <br />
+    <ul style={{ listStyle: 'none', margin: 0, padding: 0, fontSize: '0.875rem', lineHeight: 1.5, color: 'var(--aisbp-text, #334155)' }}>
+      {rows.map(r => (
+        <li
+          key={r.id}
+          style={{
+            marginBottom: '0.65rem',
+            paddingBottom: '0.65rem',
+            borderBottom: '1px solid var(--aisbp-border, #e2e8f0)',
+          }}
+        >
+          <span style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted, #94a3b8)', fontWeight: 600 }}>
+            {r.created_at ? formatActivityWhen(r.created_at) : '—'}
+          </span>
+          <div style={{ marginTop: '0.25rem', color: 'var(--aisbp-text-secondary, #475569)' }}>
             {oneLine(r.action, r.metadata, r.previous_total, r.new_total)}
-          </li>
-        ))}
-      </ul>
-      <Link
-        href="/app/agency"
-        style={{ ...appFloatingSecondaryButtonStyle, fontSize: '0.75rem', marginTop: '0.55rem' }}
-      >
-        View activity
-      </Link>
-    </div>
+          </div>
+        </li>
+      ))}
+    </ul>
   );
 }

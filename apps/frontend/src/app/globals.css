@@ -49,6 +49,7 @@ details > summary::-webkit-details-marker {
   --aisbp-overlay: rgba(15, 23, 42, 0.48);
   --aisbp-page-bg: #f8fafc;
   --aisbp-warn-bg: #fff8f0;
+  --aisbp-stat-tile-bg: #f8fafc;
 }
 
 html.dark {
@@ -85,6 +86,7 @@ html.dark {
   --aisbp-overlay: rgba(2, 6, 23, 0.75);
   --aisbp-page-bg: #0b1220;
   --aisbp-warn-bg: #2a1810;
+  --aisbp-stat-tile-bg: #1e293b;
 }
 
 html.dark body {

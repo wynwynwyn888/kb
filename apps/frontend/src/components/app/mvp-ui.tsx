@@ -34,6 +34,7 @@ export function SectionCard({
         ...cardStyle,
         background: bg,
         marginBottom: '1rem',
+        color: 'var(--aisbp-text, #0f172a)',
       }}
     >
       <h2 style={{ fontSize: '1rem', fontWeight: 700, margin: '0 0 0.25rem', color: 'var(--aisbp-text-heading, #0f172a)' }}>{title}</h2>
@@ -70,6 +71,7 @@ export function KeyValueRows({
               wordBreak: 'break-word',
               fontFamily: 'inherit',
               fontSize: mono ? '0.82rem' : undefined,
+              color: 'var(--aisbp-text, #0f172a)',
             }}
           >
             {value === null || value === undefined || value === '' ? '—' : value}

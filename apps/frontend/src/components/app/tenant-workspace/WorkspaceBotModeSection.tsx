@@ -35,10 +35,11 @@ export function WorkspaceBotModeSection(props: {
     <div
       style={{
         borderRadius: '12px',
-        border: '1px solid #e2e8f0',
-        background: '#fff',
+        border: '1px solid var(--aisbp-border, #e2e8f0)',
+        background: 'var(--aisbp-surface, #fff)',
         padding: '1rem 1.1rem 1.1rem',
         marginBottom: '1.1rem',
+        color: 'var(--aisbp-text, #0f172a)',
       }}
     >
       <div style={{ marginBottom: '0.75rem' }}>
@@ -47,13 +48,21 @@ export function WorkspaceBotModeSection(props: {
             margin: 0,
             fontSize: '0.95rem',
             fontWeight: 700,
-            color: '#0f172a',
+            color: 'var(--aisbp-text-heading, #0f172a)',
             letterSpacing: '-0.02em',
           }}
         >
           Bot mode
         </h2>
-        <p style={{ margin: '0.3rem 0 0', fontSize: '0.8rem', color: '#64748b', lineHeight: 1.45, maxWidth: '36rem' }}>
+        <p
+          style={{
+            margin: '0.3rem 0 0',
+            fontSize: '0.8rem',
+            color: 'var(--aisbp-muted, #64748b)',
+            lineHeight: 1.45,
+            maxWidth: '36rem',
+          }}
+        >
           Choose how this workspace uses AI for incoming conversations. Requires a connected HighLevel account for live
           delivery.
         </p>
@@ -87,8 +96,8 @@ export function WorkspaceBotModeSection(props: {
               style={{
                 textAlign: 'left' as const,
                 borderRadius: '10px',
-                border: selected ? '2px solid #0f62fe' : '1px solid #e2e8f0',
-                background: selected ? 'rgba(15, 98, 254, 0.06)' : '#f8fafc',
+                border: selected ? '2px solid #0f62fe' : '1px solid var(--aisbp-border, #e2e8f0)',
+                background: selected ? 'rgba(15, 98, 254, 0.12)' : 'var(--aisbp-stat-tile-bg, #f8fafc)',
                 padding: '0.65rem 0.7rem',
                 cursor: saving || disabled ? 'not-allowed' : 'pointer',
                 opacity: disabled ? 0.5 : 1,
@@ -103,17 +112,17 @@ export function WorkspaceBotModeSection(props: {
                 style={{
                   fontSize: '0.82rem',
                   fontWeight: 700,
-                  color: selected ? '#0f62fe' : '#0f172a',
+                  color: selected ? '#0f62fe' : 'var(--aisbp-text-heading, #0f172a)',
                 }}
               >
                 {o.label}
               </span>
-              <span style={{ fontSize: '0.7rem', color: '#64748b', lineHeight: 1.4 }}>{o.line}</span>
+              <span style={{ fontSize: '0.7rem', color: 'var(--aisbp-muted, #64748b)', lineHeight: 1.4 }}>{o.line}</span>
             </button>
           );
         })}
       </div>
-      {saving ? <p style={{ margin: '0.55rem 0 0', fontSize: '0.72rem', color: '#94a3b8' }}>Saving…</p> : null}
+      {saving ? <p style={{ margin: '0.55rem 0 0', fontSize: '0.72rem', color: 'var(--aisbp-muted, #94a3b8)' }}>Saving…</p> : null}
     </div>
   );
 }

@@ -21,11 +21,11 @@ const triggerBtn: CSSProperties = {
   gap: '0.5rem',
   padding: '0.5rem 0.65rem',
   borderRadius: '8px',
-  border: '1px solid #d1d5db',
-  background: '#fff',
+  border: '1px solid var(--aisbp-border-strong, #d1d5db)',
+  background: 'var(--aisbp-surface, #fff)',
   fontSize: '0.82rem',
   fontWeight: 600,
-  color: '#0f172a',
+  color: 'var(--aisbp-text-heading, #0f172a)',
   cursor: 'pointer',
   textAlign: 'left' as const,
   boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
@@ -39,12 +39,13 @@ const panelBoxStyle = (top: number, left: number): CSSProperties => ({
   maxHeight: 'min(420px, calc(100dvh - 16px))',
   display: 'flex',
   flexDirection: 'column',
-  background: '#fff',
-  border: '1px solid #e2e8f0',
+  background: 'var(--aisbp-surface, #fff)',
+  border: '1px solid var(--aisbp-border, #e2e8f0)',
   borderRadius: '10px',
   boxShadow: '0 12px 32px rgba(15, 23, 42, 0.12), 0 4px 8px rgba(15, 23, 42, 0.06)',
   zIndex: 9999,
   overflow: 'hidden',
+  color: 'var(--aisbp-text, #0f172a)',
 });
 
 const agencyViewBtn: CSSProperties = {
@@ -67,7 +68,9 @@ const searchInp: CSSProperties = {
   boxSizing: 'border-box',
   padding: '0.4rem 0.55rem',
   borderRadius: '6px',
-  border: '1px solid #d1d5db',
+  border: '1px solid var(--aisbp-border-strong, #d1d5db)',
+  background: 'var(--aisbp-input-bg, #fff)',
+  color: 'var(--aisbp-text, #0f172a)',
   fontSize: '0.8rem',
   margin: '0 0.5rem 0.45rem',
   maxWidth: 'calc(100% - 1rem)',
@@ -286,7 +289,7 @@ export function WorkspaceSwitcher() {
           style={{
             fontSize: '0.7rem',
             fontWeight: 700,
-            color: '#94a3b8',
+            color: 'var(--aisbp-muted, #94a3b8)',
             textTransform: 'uppercase' as const,
             letterSpacing: '0.08em',
             margin: '0.4rem 0.75rem 0',
@@ -315,7 +318,7 @@ export function WorkspaceSwitcher() {
         }}
       >
         {filtered.length === 0 ? (
-          <li style={{ fontSize: '0.8rem', color: '#94a3b8', padding: '0.5rem 0.4rem' }}>No matches</li>
+          <li style={{ fontSize: '0.8rem', color: 'var(--aisbp-muted, #94a3b8)', padding: '0.5rem 0.4rem' }}>No matches</li>
         ) : (
           filtered.map(s => {
             const isSel = listSelectedId === s.id;
@@ -331,7 +334,7 @@ export function WorkspaceSwitcher() {
                     border: '1px solid',
                     borderColor: isSel ? '#0f62fe' : 'transparent',
                     background: isSel ? 'rgba(15, 98, 254, 0.08)' : 'transparent',
-                    color: '#0f172a',
+                    color: 'var(--aisbp-text-heading, #0f172a)',
                     borderRadius: '6px',
                     fontSize: '0.8rem',
                     fontWeight: isSel ? 700 : 500,
@@ -351,7 +354,7 @@ export function WorkspaceSwitcher() {
 
   return (
     <div ref={rootRef} style={{ position: 'relative', marginBottom: '0.85rem', zIndex: 5 }}>
-      <p style={{ fontSize: '0.62rem', textTransform: 'uppercase' as const, letterSpacing: '0.1em', color: '#94a3b8', fontWeight: 800, margin: '0 0 0.35rem' }}>Workspace</p>
+      <p style={{ fontSize: '0.62rem', textTransform: 'uppercase' as const, letterSpacing: '0.1em', color: 'var(--aisbp-muted, #94a3b8)', fontWeight: 800, margin: '0 0 0.35rem' }}>Workspace</p>
       <button
         ref={buttonRef}
         type="button"
@@ -368,7 +371,7 @@ export function WorkspaceSwitcher() {
                 display: 'block',
                 fontSize: '0.62rem',
                 fontWeight: 700,
-                color: '#64748b',
+                color: 'var(--aisbp-muted, #64748b)',
                 letterSpacing: '0.04em',
                 textTransform: 'uppercase' as const,
                 lineHeight: 1.2,
@@ -382,7 +385,7 @@ export function WorkspaceSwitcher() {
                 marginTop: 2,
                 fontSize: '0.84rem',
                 fontWeight: 700,
-                color: '#0f172a',
+                color: 'var(--aisbp-text-heading, #0f172a)',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap' as const,
@@ -394,7 +397,7 @@ export function WorkspaceSwitcher() {
         ) : (
           <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>{triggerLabel}</span>
         )}
-        <span style={{ color: '#64748b', fontSize: '0.7rem', flexShrink: 0 }} aria-hidden>
+        <span style={{ color: 'var(--aisbp-muted, #64748b)', fontSize: '0.7rem', flexShrink: 0 }} aria-hidden>
           ▾
         </span>
       </button>

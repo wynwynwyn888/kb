@@ -12,9 +12,9 @@ const advSubWrap: CSSProperties = {
   gap: '0.4rem',
   marginBottom: '1.1rem',
   padding: '0.5rem 0.55rem',
-  background: 'rgba(248, 250, 252, 0.95)',
+  background: 'var(--aisbp-glass-bg, rgba(248, 250, 252, 0.95))',
   borderRadius: '12px',
-  border: '1px solid #e2e8f0',
+  border: '1px solid var(--aisbp-border, #e2e8f0)',
   boxShadow: '0 2px 10px rgba(15, 23, 42, 0.04)',
 };
 
@@ -25,9 +25,9 @@ function advSubStyle(active: boolean): CSSProperties {
     textDecoration: 'none',
     fontSize: '0.8rem',
     fontWeight: active ? 700 : 600,
-    color: active ? '#0f172a' : '#64748b',
-    background: active ? '#fff' : 'transparent',
-    border: active ? '1px solid #e2e8f0' : '1px solid transparent',
+    color: active ? 'var(--aisbp-text-heading, #0f172a)' : 'var(--aisbp-muted, #64748b)',
+    background: active ? 'var(--aisbp-surface, #fff)' : 'transparent',
+    border: active ? '1px solid var(--aisbp-border, #e2e8f0)' : '1px solid transparent',
     boxShadow: active ? '0 4px 12px rgba(15, 23, 42, 0.06)' : 'none',
   };
 }

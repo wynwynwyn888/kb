@@ -27,7 +27,7 @@ type FootLink = { href: string; label: string };
 function ControlSection({ title, subtitle, body, links }: { title: string; subtitle: string; body: string; links: FootLink[] }) {
   return (
     <SectionCard title={title} subtitle={subtitle} accent="muted">
-      <p style={{ fontSize: '0.84rem', color: '#475569', lineHeight: 1.55, margin: 0 }}>{body}</p>
+      <p style={{ fontSize: '0.84rem', color: 'var(--aisbp-text-secondary, #475569)', lineHeight: 1.55, margin: 0 }}>{body}</p>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '0.85rem' }}>
         {links.map(f => (
           <Link key={f.href} href={f.href} style={appFloatingSecondaryButtonStyle}>
@@ -42,8 +42,8 @@ function ControlSection({ title, subtitle, body, links }: { title: string; subti
 const statTile: CSSProperties = {
   padding: '0.55rem 0.75rem',
   borderRadius: 12,
-  background: '#f8fafc',
-  border: '1px solid #e2e8f0',
+  background: 'var(--aisbp-stat-tile-bg, #f8fafc)',
+  border: '1px solid var(--aisbp-border, #e2e8f0)',
   minWidth: '6.5rem',
 };
 
@@ -131,14 +131,32 @@ export function TenantSettingsPanel() {
             fontSize: '0.62rem',
             fontWeight: 800,
             letterSpacing: '0.14em',
-            color: '#94a3b8',
+            color: 'var(--aisbp-muted, #94a3b8)',
             margin: '0 0 0.35rem',
           }}
         >
           Workspace overview
         </p>
-        <h1 style={{ fontSize: '1.75rem', fontWeight: 800, margin: 0, color: '#0f172a', letterSpacing: '-0.03em' }}>Workspace Settings</h1>
-        <p style={{ fontSize: '0.875rem', color: '#64748b', margin: '0.45rem 0 0', lineHeight: 1.55, maxWidth: '40rem' }}>
+        <h1
+          style={{
+            fontSize: '1.75rem',
+            fontWeight: 800,
+            margin: 0,
+            color: 'var(--aisbp-text-heading, #0f172a)',
+            letterSpacing: '-0.03em',
+          }}
+        >
+          Workspace Settings
+        </h1>
+        <p
+          style={{
+            fontSize: '0.875rem',
+            color: 'var(--aisbp-muted, #64748b)',
+            margin: '0.45rem 0 0',
+            lineHeight: 1.55,
+            maxWidth: '40rem',
+          }}
+        >
           Review setup, connection status, and routing options for this workspace.
         </p>
       </header>
@@ -256,7 +274,7 @@ export function TenantSettingsPanel() {
                     </div>
                   </div>
                 ) : (
-                  <p style={{ fontSize: '0.84rem', color: '#64748b', margin: 0 }}>HighLevel is not connected yet.</p>
+                  <p style={{ fontSize: '0.84rem', color: 'var(--aisbp-muted, #64748b)', margin: 0 }}>HighLevel is not connected yet.</p>
                 )}
               </SectionCard>
             </div>
@@ -317,24 +335,24 @@ export function TenantSettingsPanel() {
           <SectionCard title="Bot status" subtitle="Current bot instructions and reply settings for this workspace." accent="default">
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.55rem', marginBottom: '1rem' }}>
               <div style={statTile}>
-                <span style={{ fontSize: '0.65rem', fontWeight: 700, color: '#94a3b8', letterSpacing: '0.06em' }}>AI MODE</span>
-                <span style={{ display: 'block', marginTop: 6, fontSize: '0.9rem', fontWeight: 700, color: '#0f172a' }}>{aiModeLabel}</span>
+                <span style={{ fontSize: '0.65rem', fontWeight: 700, color: 'var(--aisbp-muted, #94a3b8)', letterSpacing: '0.06em' }}>AI MODE</span>
+                <span style={{ display: 'block', marginTop: 6, fontSize: '0.9rem', fontWeight: 700, color: 'var(--aisbp-text-heading, #0f172a)' }}>{aiModeLabel}</span>
               </div>
               <div style={statTile}>
-                <span style={{ fontSize: '0.65rem', fontWeight: 700, color: '#94a3b8', letterSpacing: '0.06em' }}>INSTRUCTIONS</span>
-                <span style={{ display: 'block', marginTop: 6, fontSize: '0.9rem', fontWeight: 700, color: '#0f172a' }}>
+                <span style={{ fontSize: '0.65rem', fontWeight: 700, color: 'var(--aisbp-muted, #94a3b8)', letterSpacing: '0.06em' }}>INSTRUCTIONS</span>
+                <span style={{ display: 'block', marginTop: 6, fontSize: '0.9rem', fontWeight: 700, color: 'var(--aisbp-text-heading, #0f172a)' }}>
                   {promptConfigSnap ? (promptConfigSnap.isActive ? 'Active' : 'Inactive') : '—'}
                 </span>
               </div>
               <div style={statTile}>
-                <span style={{ fontSize: '0.65rem', fontWeight: 700, color: '#94a3b8', letterSpacing: '0.06em' }}>REPLY STYLE</span>
-                <span style={{ display: 'block', marginTop: 6, fontSize: '0.9rem', fontWeight: 700, color: '#0f172a' }}>
+                <span style={{ fontSize: '0.65rem', fontWeight: 700, color: 'var(--aisbp-muted, #94a3b8)', letterSpacing: '0.06em' }}>REPLY STYLE</span>
+                <span style={{ display: 'block', marginTop: 6, fontSize: '0.9rem', fontWeight: 700, color: 'var(--aisbp-text-heading, #0f172a)' }}>
                   {promptConfigSnap != null ? String(promptConfigSnap.temperature) : '—'}
                 </span>
               </div>
               <div style={statTile}>
-                <span style={{ fontSize: '0.65rem', fontWeight: 700, color: '#94a3b8', letterSpacing: '0.06em' }}>MODEL</span>
-                <span style={{ display: 'block', marginTop: 6, fontSize: '0.9rem', fontWeight: 700, color: '#0f172a' }}>
+                <span style={{ fontSize: '0.65rem', fontWeight: 700, color: 'var(--aisbp-muted, #94a3b8)', letterSpacing: '0.06em' }}>MODEL</span>
+                <span style={{ display: 'block', marginTop: 6, fontSize: '0.9rem', fontWeight: 700, color: 'var(--aisbp-text-heading, #0f172a)' }}>
                   {promptConfigSnap?.modelOverride?.trim() || '—'}
                 </span>
               </div>

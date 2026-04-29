@@ -114,8 +114,8 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   if (loading || !user || !token) {
     return (
-      <div style={{ padding: '2rem' }}>
-        <p>Loading your account…</p>
+      <div style={{ padding: '2rem', background: 'var(--aisbp-bg, #f8fafc)', minHeight: '100vh' }}>
+        <p style={{ color: 'var(--aisbp-text, #0f172a)', margin: 0 }}>Loading your account…</p>
       </div>
     );
   }

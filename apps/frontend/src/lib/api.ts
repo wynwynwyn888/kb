@@ -526,6 +526,24 @@ export interface TenantBookingScheduleDiagnostics {
   warningCodes: string[];
 }
 
+export interface TenantBookingRulesDiagnostics {
+  slotDuration: number | null;
+  slotInterval: number | null;
+  appointmentsPerSlot: number | null;
+  bufferSummary: string;
+  minNoticeSummary: string;
+  bookingWindowSummary: string;
+  meetingLocationPresent: boolean;
+  meetingLocationType: string | null;
+  conflictCheckSummary: string;
+  formAttached: boolean;
+  consentRequired: boolean;
+  paymentRequired: boolean;
+  servicesIncompleteHint: boolean;
+  warnings: string[];
+  warningCodes: string[];
+}
+
 export async function testTenantBookingCalendar(
   token: string,
   tenantId: string,
@@ -536,6 +554,7 @@ export async function testTenantBookingCalendar(
   message: string;
   calendars?: GhlCalendarOption[];
   scheduleDiagnostics?: TenantBookingScheduleDiagnostics;
+  bookingRulesDiagnostics?: TenantBookingRulesDiagnostics;
 }> {
   return apiRequest(`/tenants/${tenantId}/booking-settings/test-calendar`, {
     token,
@@ -562,6 +581,7 @@ export async function testTenantBookingSlots(
   emptyWithoutError?: boolean;
   retriedWithUserId?: string | null;
   scheduleDiagnostics?: TenantBookingScheduleDiagnostics;
+  bookingRulesDiagnostics?: TenantBookingRulesDiagnostics;
 }> {
   return apiRequest(`/tenants/${tenantId}/booking-settings/test-slots`, {
     token,

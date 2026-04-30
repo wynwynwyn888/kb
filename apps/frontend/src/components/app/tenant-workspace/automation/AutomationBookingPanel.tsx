@@ -14,6 +14,7 @@ import {
   testTenantBookingSlots,
   type CustomBookingField,
   type TenantBookingMode,
+  type TenantBookingRulesDiagnostics,
   type TenantBookingScheduleDiagnostics,
   type TenantBookingSettings,
 } from '@/lib/api';
@@ -68,8 +69,13 @@ const CUSTOM_FIELD_TYPE_LABELS: Record<(typeof CUSTOM_TYPES)[number], string> = 
 
 const AVAILABILITY_ZERO_MAIN =
   'No available slots were returned for this calendar and time range.';
-const AVAILABILITY_ZERO_HINT =
-  'Check the CRM calendar’s availability hours, assigned staff, service settings, and timezone. Some CRM service calendars may require a staff/user assignment before slots appear.';
+/** Secondary guidance — wording depends on whether the availability schedule includes this calendar. */
+function availabilityZeroHint(scheduleDiag: TenantBookingScheduleDiagnostics | null): string {
+  if (scheduleDiag?.selectedCalendarInSchedule) {
+    return 'Calendar schedule is associated correctly, but CRM still returned no bookable slots. Check Booking rules, meeting location, buffers, minimum notice, date range, and external calendar conflicts.';
+  }
+  return 'CRM returned no bookable slots. Check availability schedules, Booking rules, meeting location, buffers, minimum notice, date range, and external calendar conflicts.';
+}
 const AVAILABILITY_EXTRA_WHEN_TEST_OK =
   'Calendar is reachable, but no availability was returned. This usually means availability/staff/service settings need checking inside CRM.';
 
@@ -145,7 +151,13 @@ function scheduleDiagBoxStyle(): CSSProperties {
   };
 }
 
-function ScheduleDiagnosticsPanel({ d }: { d: TenantBookingScheduleDiagnostics }) {
+function ScheduleDiagnosticsPanel({
+  schedule: d,
+  rules,
+}: {
+  schedule: TenantBookingScheduleDiagnostics;
+  rules?: TenantBookingRulesDiagnostics | null;
+}) {
   const row = (label: string, value: string | number | boolean) => (
     <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap', fontSize: '0.76rem', marginBottom: '0.2rem' }}>
       <span style={{ color: 'var(--aisbp-muted)', minWidth: 140 }}>{label}</span>
@@ -156,6 +168,7 @@ function ScheduleDiagnosticsPanel({ d }: { d: TenantBookingScheduleDiagnostics }
     d.scheduleAssociatedCalendarIds.length <= 2
       ? d.scheduleAssociatedCalendarIds.join(', ') || '—'
       : `${d.scheduleAssociatedCalendarIds.slice(0, 2).join(', ')} +${d.scheduleAssociatedCalendarIds.length - 2}`;
+  const devPayload = { schedule: d, rules: rules ?? null };
   return (
     <div style={scheduleDiagBoxStyle()} role="region" aria-label="Schedule diagnostics">
       <div style={{ fontSize: '0.78rem', fontWeight: 700, marginBottom: '0.45rem', color: '#92400e' }}>
@@ -186,6 +199,58 @@ function ScheduleDiagnosticsPanel({ d }: { d: TenantBookingScheduleDiagnostics }
         What to fix in CRM: Open CRM → Calendars → selected calendar → Availability. Create or apply an availability schedule,
         assign staff, and save.
       </p>
+
+      {rules ? (
+        <>
+          <hr style={{ margin: '0.75rem 0', border: 'none', borderTop: '1px solid rgba(234, 179, 8, 0.35)' }} />
+          <div style={{ fontSize: '0.78rem', fontWeight: 700, marginBottom: '0.45rem', color: '#92400e' }}>
+            Booking rules diagnostics
+          </div>
+          {row('Slot duration (min)', rules.slotDuration ?? '—')}
+          {row('Slot interval (min)', rules.slotInterval ?? '—')}
+          {row('Capacity / appointments per slot', rules.appointmentsPerSlot ?? '—')}
+          {row('Buffer', rules.bufferSummary)}
+          {row('Minimum notice', rules.minNoticeSummary)}
+          {row('Booking window / date range', rules.bookingWindowSummary)}
+          {row('Meeting location present', rules.meetingLocationPresent ? 'Yes' : 'No')}
+          {row('Meeting location type', rules.meetingLocationType?.trim() ? rules.meetingLocationType : '—')}
+          {row('Conflict checking', rules.conflictCheckSummary)}
+          {row('Form attached', rules.formAttached ? 'Yes' : 'No')}
+          {row('Consent required', rules.consentRequired ? 'Yes' : 'No')}
+          {row('Payment required', rules.paymentRequired ? 'Yes' : 'No')}
+          {row('Services incomplete hint', rules.servicesIncompleteHint ? 'Yes' : 'No')}
+          {rules.warnings.length > 0 ? (
+            <ul style={{ margin: '0.5rem 0 0', paddingLeft: '1.1rem', fontSize: '0.74rem', color: '#92400e', lineHeight: 1.45 }}>
+              {rules.warnings.map((w, i) => (
+                <li key={`r-${i}`}>{w}</li>
+              ))}
+            </ul>
+          ) : null}
+        </>
+      ) : null}
+
+      {process.env.NODE_ENV === 'development' ? (
+        <details style={{ marginTop: '0.65rem' }}>
+          <summary style={{ cursor: 'pointer', fontSize: '0.72rem', color: 'var(--aisbp-muted)', userSelect: 'none' }}>
+            Show CRM diagnostic summary
+          </summary>
+          <pre
+            style={{
+              marginTop: '0.45rem',
+              padding: '0.5rem',
+              fontSize: '0.65rem',
+              lineHeight: 1.35,
+              overflow: 'auto',
+              maxHeight: 280,
+              background: 'rgba(0,0,0,0.06)',
+              borderRadius: 6,
+              color: 'var(--aisbp-text-secondary)',
+            }}
+          >
+            {JSON.stringify(devPayload, null, 2)}
+          </pre>
+        </details>
+      ) : null}
     </div>
   );
 }
@@ -238,7 +303,9 @@ export function AutomationBookingPanel() {
   const [calendarForTest, setCalendarForTest] = useState('');
   const [testConnectionOk, setTestConnectionOk] = useState(false);
   const [calendarScheduleDiag, setCalendarScheduleDiag] = useState<TenantBookingScheduleDiagnostics | null>(null);
+  const [calendarRulesDiag, setCalendarRulesDiag] = useState<TenantBookingRulesDiagnostics | null>(null);
   const [slotsScheduleDiag, setSlotsScheduleDiag] = useState<TenantBookingScheduleDiagnostics | null>(null);
+  const [slotsRulesDiag, setSlotsRulesDiag] = useState<TenantBookingRulesDiagnostics | null>(null);
   const didInitTestCalendar = useRef(false);
 
   const loadBooking = useCallback(async () => {
@@ -344,16 +411,19 @@ export function AutomationBookingPanel() {
     setBusy('test-cal');
     setTestCalendarStatus('');
     setCalendarScheduleDiag(null);
+    setCalendarRulesDiag(null);
     try {
       const r = await testTenantBookingCalendar(token, tenantId, { calendarId: calendarForTest.trim() });
       setTestConnectionOk(r.ok);
       setTestCalendarStatus(r.ok ? r.message : r.message);
       setCalendarScheduleDiag(r.scheduleDiagnostics ?? null);
+      setCalendarRulesDiag(r.bookingRulesDiagnostics ?? null);
       if (r.calendars?.length) setCalendars(r.calendars);
     } catch (e) {
       setTestConnectionOk(false);
       setTestCalendarStatus(formatHttpErrorDetail(e));
       setCalendarScheduleDiag(null);
+      setCalendarRulesDiag(null);
     } finally {
       setBusy(null);
     }
@@ -388,6 +458,7 @@ export function AutomationBookingPanel() {
     setAvailabilityHint('');
     setAvailabilityExtra('');
     setSlotsScheduleDiag(null);
+    setSlotsRulesDiag(null);
     try {
       const r = await testTenantBookingSlots(token, tenantId, payload);
       const rawCount = (r.slots ?? []).length;
@@ -398,16 +469,19 @@ export function AutomationBookingPanel() {
       const n = rows.length;
       if (r.error) {
         setSlotsScheduleDiag(null);
+        setSlotsRulesDiag(null);
         setAvailabilityMain(
           `GHL: ${r.error}${n > 0 ? ` — still showing ${n} parsed slot(s).` : ''}`,
         );
         return;
       }
       if (n === 0) {
-        setSlotsScheduleDiag(r.scheduleDiagnostics ?? calendarScheduleDiag ?? null);
+        const schedDiag = r.scheduleDiagnostics ?? calendarScheduleDiag ?? null;
+        setSlotsScheduleDiag(schedDiag);
+        setSlotsRulesDiag(r.bookingRulesDiagnostics ?? calendarRulesDiag ?? null);
         if (rawCount === 0) {
           setAvailabilityMain(AVAILABILITY_ZERO_MAIN);
-          setAvailabilityHint(AVAILABILITY_ZERO_HINT);
+          setAvailabilityHint(availabilityZeroHint(schedDiag));
           if (testConnectionOk && r.emptyWithoutError) {
             setAvailabilityExtra(AVAILABILITY_EXTRA_WHEN_TEST_OK);
           }
@@ -415,11 +489,12 @@ export function AutomationBookingPanel() {
           setAvailabilityMain(
             `No slots matched your starting time after filtering — the CRM returned ${rawCount} slot(s) for this date range. Try clearing the time field or choosing an earlier or later start.`,
           );
-          setAvailabilityHint(AVAILABILITY_ZERO_HINT);
+          setAvailabilityHint(availabilityZeroHint(schedDiag));
         }
         return;
       }
       setSlotsScheduleDiag(null);
+      setSlotsRulesDiag(null);
       let msg = `Returned ${n} slot(s) for ${dateStr}${slotTime.trim() ? ` from ${slotTime} (local filter)` : ''}. Not a booking confirmation.`;
       if (r.retriedWithUserId) {
         msg += ` (CRM returned slots when querying staff user ${r.retriedWithUserId}.)`;
@@ -427,6 +502,7 @@ export function AutomationBookingPanel() {
       setAvailabilityMain(msg);
     } catch (e) {
       setSlotsScheduleDiag(null);
+      setSlotsRulesDiag(null);
       setAvailabilityMain(`Could not check availability: ${formatHttpErrorDetail(e)}`);
     } finally {
       setBusy(null);
@@ -550,7 +626,9 @@ export function AutomationBookingPanel() {
                   {testCalendarStatus}
                 </p>
               ) : null}
-              {calendarScheduleDiag ? <ScheduleDiagnosticsPanel d={calendarScheduleDiag} /> : null}
+              {calendarScheduleDiag ? (
+                <ScheduleDiagnosticsPanel schedule={calendarScheduleDiag} rules={calendarRulesDiag} />
+              ) : null}
             </div>
 
             <div style={cardStyle()}>
@@ -598,7 +676,9 @@ export function AutomationBookingPanel() {
               ) : null}
               {availabilityHint ? <p style={availabilityHintStyle()}>{availabilityHint}</p> : null}
               {availabilityExtra ? <p style={availabilityHintStyle()}>{availabilityExtra}</p> : null}
-              {slotsScheduleDiag ? <ScheduleDiagnosticsPanel d={slotsScheduleDiag} /> : null}
+              {slotsScheduleDiag ? (
+                <ScheduleDiagnosticsPanel schedule={slotsScheduleDiag} rules={slotsRulesDiag} />
+              ) : null}
             </div>
           </SectionCard>
 

@@ -10,6 +10,10 @@ import {
   type GhlFreeSlot,
 } from '@aisbp/ghl-client';
 import {
+  computeBookingRulesDiagnostics,
+  type BookingRulesDiagnosticsDto,
+} from './booking-rules-diagnostics';
+import {
   computeBookingScheduleDiagnostics,
   SCHED_WARN_FREE_SLOTS_EMPTY_RETRY,
   type BookingScheduleDiagnosticsDto,
@@ -320,6 +324,7 @@ export class BookingSettingsService {
     calendars?: GhlCalendarSummary[];
     calendarDetail?: GhlCalendarDetailSummary;
     scheduleDiagnostics?: BookingScheduleDiagnosticsDto;
+    bookingRulesDiagnostics?: BookingRulesDiagnosticsDto;
   }> {
     const settings = await this.getBookingSettings(tenantId);
     const calendarId = body?.calendarId?.trim() || settings.defaultGhlCalendarId?.trim() || null;
@@ -387,6 +392,24 @@ export class BookingSettingsService {
       })}`,
     );
 
+    const bookingRulesDiagnostics = computeBookingRulesDiagnostics(detail.summary, undefined);
+    this.logger.log(
+      `bookingCalendarRulesDiagnostic ${JSON.stringify({
+        tenantId,
+        calendarId,
+        calendarType: detail.summary?.calendarType ?? detail.summary?.typeRaw ?? null,
+        slotDuration: bookingRulesDiagnostics.slotDuration,
+        slotInterval: bookingRulesDiagnostics.slotInterval,
+        appointmentPerSlot: bookingRulesDiagnostics.appointmentsPerSlot,
+        bufferSummary: bookingRulesDiagnostics.bufferSummary,
+        minNoticeSummary: bookingRulesDiagnostics.minNoticeSummary,
+        bookingWindowSummary: bookingRulesDiagnostics.bookingWindowSummary,
+        meetingLocationPresent: bookingRulesDiagnostics.meetingLocationPresent,
+        conflictCheckSummary: bookingRulesDiagnostics.conflictCheckSummary,
+        warningCodes: bookingRulesDiagnostics.warningCodes,
+      })}`,
+    );
+
     return {
       ok: true,
       calendarId,
@@ -394,6 +417,7 @@ export class BookingSettingsService {
       calendars: listed.calendars,
       calendarDetail: detail.summary,
       scheduleDiagnostics,
+      bookingRulesDiagnostics,
     };
   }
 
@@ -415,6 +439,7 @@ export class BookingSettingsService {
     emptyWithoutError?: boolean;
     retriedWithUserId?: string | null;
     scheduleDiagnostics?: BookingScheduleDiagnosticsDto;
+    bookingRulesDiagnostics?: BookingRulesDiagnosticsDto;
   }> {
     const settings = await this.getBookingSettings(tenantId);
     const calendarId = body.calendarId?.trim() || settings.defaultGhlCalendarId?.trim() || null;
@@ -465,10 +490,11 @@ export class BookingSettingsService {
     });
 
     let retriedWithUserId: string | null = null;
+    let calWhenEmpty: { summary?: GhlCalendarDetailSummary } | undefined;
 
     if (!r.error && r.slots.length === 0) {
-      const calD = await client.getCalendar(calendarId);
-      const userIds = calD.summary?.teamMemberUserIds;
+      calWhenEmpty = await client.getCalendar(calendarId);
+      const userIds = calWhenEmpty.summary?.teamMemberUserIds;
       if (userIds && userIds.length > 0) {
         const uid = userIds[0]!;
         const r2 = await client.getFreeSlots({
@@ -531,8 +557,9 @@ export class BookingSettingsService {
     }
 
     let scheduleDiagnostics: BookingScheduleDiagnosticsDto | undefined;
+    let bookingRulesDiagnostics: BookingRulesDiagnosticsDto | undefined;
     if (!r.error && r.slots.length === 0) {
-      const calSnap = await client.getCalendar(calendarId);
+      const calSnap = calWhenEmpty ?? (await client.getCalendar(calendarId));
       const extraCodes = retriedWithUserId ? [SCHED_WARN_FREE_SLOTS_EMPTY_RETRY] : [];
       const extraWarnings = retriedWithUserId
         ? ['CRM returned no bookable slots even after staff-specific retry.']
@@ -544,6 +571,12 @@ export class BookingSettingsService {
         calSnap.summary,
         { extraWarnings, extraCodes },
       );
+      bookingRulesDiagnostics = computeBookingRulesDiagnostics(calSnap.summary, {
+        selectedDate: range.selectedDate,
+        selectedTime: range.selectedTime,
+        rangeStartMs: startMs,
+        zeroSlots: true,
+      });
       this.logger.log(
         `bookingCalendarScheduleDiagnostic ${JSON.stringify({
           tenantId,
@@ -558,6 +591,22 @@ export class BookingSettingsService {
           warningCodes: scheduleDiagnostics.warningCodes,
         })}`,
       );
+      this.logger.log(
+        `bookingCalendarRulesDiagnostic ${JSON.stringify({
+          tenantId,
+          calendarId,
+          calendarType: calSnap.summary?.calendarType ?? calSnap.summary?.typeRaw ?? null,
+          slotDuration: bookingRulesDiagnostics.slotDuration,
+          slotInterval: bookingRulesDiagnostics.slotInterval,
+          appointmentPerSlot: bookingRulesDiagnostics.appointmentsPerSlot,
+          bufferSummary: bookingRulesDiagnostics.bufferSummary,
+          minNoticeSummary: bookingRulesDiagnostics.minNoticeSummary,
+          bookingWindowSummary: bookingRulesDiagnostics.bookingWindowSummary,
+          meetingLocationPresent: bookingRulesDiagnostics.meetingLocationPresent,
+          conflictCheckSummary: bookingRulesDiagnostics.conflictCheckSummary,
+          warningCodes: bookingRulesDiagnostics.warningCodes,
+        })}`,
+      );
     }
 
     return {
@@ -567,6 +616,7 @@ export class BookingSettingsService {
       emptyWithoutError: !r.error && r.slots.length === 0,
       retriedWithUserId,
       scheduleDiagnostics,
+      bookingRulesDiagnostics,
     };
   }
 }

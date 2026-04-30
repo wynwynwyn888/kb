@@ -258,9 +258,31 @@ export interface GhlFreeSlot {
 export interface GhlCalendarDetailSummary {
   name?: string;
   calendarType?: string;
+  /** Legacy alias when API uses `type` only */
+  typeRaw?: string;
   isActive?: boolean;
   status?: string;
   slotDuration?: number;
+  slotInterval?: number;
+  /** Capacity / bookings allowed per slot */
+  appointmentsPerSlot?: number;
+  preBufferMinutes?: number;
+  postBufferMinutes?: number;
+  minSchedulingNoticeMinutes?: number;
+  /** Normalized YYYY-MM-DD when parseable */
+  bookingWindowStartYmd?: string | null;
+  bookingWindowEndYmd?: string | null;
+  meetingLocationType?: string | null;
+  /** True when any primary location field is non-empty (no raw address in summary). */
+  meetingLocationPresent?: boolean;
+  /** External / Google-style busy conflict checks when inferable */
+  conflictCheckEnabled?: boolean;
+  googleConflictChecking?: boolean;
+  formIdPresent?: boolean;
+  consentRequired?: boolean;
+  paymentRequired?: boolean;
+  /** True when services array exists and is empty, or explicit incomplete flag — safe heuristic only */
+  servicesIncompleteHint?: boolean;
   teamMemberCount?: number;
   teamMemberUserIds?: string[];
   openHoursCount?: number;
@@ -353,7 +375,46 @@ export function parseGhlFreeSlotsResponse(raw: unknown): {
   return { slots, dateKeys, shapeSummary: 'objectUnrecognized' };
 }
 
-function extractCalendarDetailSummary(o: Record<string, unknown>): GhlCalendarDetailSummary {
+function readFiniteNumber(v: unknown): number | undefined {
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  if (typeof v === 'string' && v.trim()) {
+    const n = parseFloat(v);
+    if (Number.isFinite(n)) return n;
+  }
+  return undefined;
+}
+
+function readPositiveInt(v: unknown): number | undefined {
+  const n = readFiniteNumber(v);
+  if (n === undefined || n < 0) return undefined;
+  return Math.round(n);
+}
+
+/** First line of ISO or YYYY-MM-DD prefix for comparisons (UTC date from ISO date part). */
+function normalizeBookingYmd(v: unknown): string | null {
+  if (typeof v !== 'string' || !v.trim()) return null;
+  const s = v.trim();
+  const iso = /^(\d{4}-\d{2}-\d{2})/.exec(s);
+  if (iso) return iso[1]!;
+  const t = Date.parse(s);
+  if (!Number.isFinite(t)) return null;
+  const d = new Date(t);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+}
+
+function mergeNestedCalendarFields(o: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...o };
+  const nested = o['bookingSettings'] ?? o['calendarSettings'] ?? o['booking'];
+  if (isRecord(nested)) {
+    for (const [k, v] of Object.entries(nested)) {
+      if (out[k] === undefined) out[k] = v;
+    }
+  }
+  return out;
+}
+
+function extractCalendarDetailSummary(raw: Record<string, unknown>): GhlCalendarDetailSummary {
+  const o = mergeNestedCalendarFields(raw);
   const name = typeof o['name'] === 'string' ? o['name'] : undefined;
   const calendarType =
     typeof o['calendarType'] === 'string'
@@ -361,14 +422,151 @@ function extractCalendarDetailSummary(o: Record<string, unknown>): GhlCalendarDe
       : typeof o['type'] === 'string'
         ? o['type']
         : undefined;
+  const typeRaw = typeof o['type'] === 'string' ? o['type'] : undefined;
   const isActive = typeof o['isActive'] === 'boolean' ? o['isActive'] : undefined;
   const status = typeof o['status'] === 'string' ? o['status'] : undefined;
+
   let slotDuration: number | undefined;
-  if (typeof o['slotDuration'] === 'number' && Number.isFinite(o['slotDuration'])) slotDuration = o['slotDuration'];
-  else if (typeof o['slotDuration'] === 'string') {
-    const n = parseInt(o['slotDuration'], 10);
-    if (Number.isFinite(n)) slotDuration = n;
+  const slotDurRaw = readFiniteNumber(o['slotDuration']);
+  if (slotDurRaw !== undefined) slotDuration = Math.round(slotDurRaw);
+
+  const slotInterval =
+    readPositiveInt(o['slotInterval']) ??
+    readPositiveInt(o['interval']) ??
+    readPositiveInt(o['slotSpacing']) ??
+    readPositiveInt(o['minutesPerSlot']);
+
+  const appointmentsPerSlot =
+    readPositiveInt(o['appointmentPerSlot']) ??
+    readPositiveInt(o['appointmentsPerSlot']) ??
+    readPositiveInt(o['maxBookingsPerSlot']) ??
+    readPositiveInt(o['appointments_per_slot']);
+
+  let preBufferMinutes: number | undefined;
+  let postBufferMinutes: number | undefined;
+  const buf = o['buffer'];
+  if (isRecord(buf)) {
+    preBufferMinutes =
+      readPositiveInt(buf['preBuffer']) ??
+      readPositiveInt(buf['pre']) ??
+      readPositiveInt(buf['before']) ??
+      readPositiveInt(buf['preBufferTime']);
+    postBufferMinutes =
+      readPositiveInt(buf['postBuffer']) ??
+      readPositiveInt(buf['post']) ??
+      readPositiveInt(buf['after']) ??
+      readPositiveInt(buf['postBufferTime']);
   }
+  preBufferMinutes =
+    preBufferMinutes ??
+    readPositiveInt(o['preBuffer']) ??
+    readPositiveInt(o['preBufferTime']) ??
+    readPositiveInt(o['bufferBefore']);
+  postBufferMinutes =
+    postBufferMinutes ??
+    readPositiveInt(o['postBuffer']) ??
+    readPositiveInt(o['postBufferTime']) ??
+    readPositiveInt(o['bufferAfter']);
+
+  let minSchedulingNoticeMinutes: number | undefined;
+  minSchedulingNoticeMinutes =
+    readPositiveInt(o['minimumSchedulingNotice']) ??
+    readPositiveInt(o['minSchedulingNotice']) ??
+    readPositiveInt(o['minimumSchedulingNoticeInMinutes']) ??
+    readPositiveInt(o['minNotice']);
+  const noticeObj = o['schedulingNotice'];
+  if (isRecord(noticeObj)) {
+    minSchedulingNoticeMinutes =
+      minSchedulingNoticeMinutes ??
+      readPositiveInt(noticeObj['minimum']) ??
+      readPositiveInt(noticeObj['minutes']) ??
+      readPositiveInt(noticeObj['value']);
+  }
+
+  let bookingWindowStartYmd: string | null =
+    normalizeBookingYmd(o['bookingStartDate']) ??
+    normalizeBookingYmd(o['startDate']) ??
+    null;
+  let bookingWindowEndYmd: string | null =
+    normalizeBookingYmd(o['bookingEndDate']) ??
+    normalizeBookingYmd(o['endDate']) ??
+    null;
+
+  const dr =
+    (isRecord(o['dateRange']) ? o['dateRange'] : null) ??
+    (isRecord(o['availabilityDateRange']) ? o['availabilityDateRange'] : null) ??
+    (isRecord(o['bookingWindow']) ? o['bookingWindow'] : null);
+  if (isRecord(dr)) {
+    bookingWindowStartYmd =
+      bookingWindowStartYmd ??
+      normalizeBookingYmd(dr['startDate']) ??
+      normalizeBookingYmd(dr['start']) ??
+      normalizeBookingYmd(dr['from']);
+    bookingWindowEndYmd =
+      bookingWindowEndYmd ??
+      normalizeBookingYmd(dr['endDate']) ??
+      normalizeBookingYmd(dr['end']) ??
+      normalizeBookingYmd(dr['to']);
+  }
+
+  const meetingLocationType =
+    typeof o['meetingLocationType'] === 'string'
+      ? o['meetingLocationType']
+      : typeof o['locationType'] === 'string'
+        ? o['locationType']
+        : null;
+
+  const locCandidates = [
+    o['meetingLocation'],
+    o['location'],
+    o['address'],
+    o['customLocation'],
+    o['physicalLocation'],
+  ];
+  let locLen = 0;
+  for (const c of locCandidates) {
+    if (typeof c === 'string' && c.trim()) {
+      locLen += c.trim().length;
+      break;
+    }
+  }
+  const meetingLocationPresent = locLen > 0;
+
+  let conflictCheckEnabled = false;
+  let googleConflictChecking = false;
+  if (typeof o['lookForConflicts'] === 'boolean') conflictCheckEnabled = o['lookForConflicts'];
+  if (typeof o['checkForConflicts'] === 'boolean') conflictCheckEnabled = conflictCheckEnabled || o['checkForConflicts'];
+  if (typeof o['enableConflictChecking'] === 'boolean')
+    conflictCheckEnabled = conflictCheckEnabled || o['enableConflictChecking'];
+  const gc = o['googleCalendar'];
+  if (isRecord(gc)) {
+    if (typeof gc['lookForConflicts'] === 'boolean') conflictCheckEnabled = conflictCheckEnabled || gc['lookForConflicts'];
+    if (typeof gc['checkForConflicts'] === 'boolean') conflictCheckEnabled = conflictCheckEnabled || gc['checkForConflicts'];
+    if (typeof gc['enableBusyCheck'] === 'boolean') googleConflictChecking = gc['enableBusyCheck'];
+    if (typeof gc['syncCalendars'] === 'boolean') googleConflictChecking = googleConflictChecking || gc['syncCalendars'];
+  }
+  if (typeof o['googleConflictCheck'] === 'boolean') googleConflictChecking = googleConflictChecking || o['googleConflictCheck'];
+
+  const formIdPresent =
+    (typeof o['formId'] === 'string' && o['formId'].trim().length > 0) ||
+    (typeof o['form_id'] === 'string' && o['form_id'].trim().length > 0);
+
+  let consentRequired = false;
+  if (typeof o['isConsentRequired'] === 'boolean') consentRequired = o['isConsentRequired'];
+  if (typeof o['consentRequired'] === 'boolean') consentRequired = consentRequired || o['consentRequired'];
+  const consentId = o['consentTemplateId'] ?? o['consentId'];
+  if (typeof consentId === 'string' && consentId.trim()) consentRequired = true;
+
+  let paymentRequired = false;
+  if (typeof o['isPaymentEnabled'] === 'boolean') paymentRequired = o['isPaymentEnabled'];
+  if (typeof o['requirePayment'] === 'boolean') paymentRequired = paymentRequired || o['requirePayment'];
+  if (typeof o['paymentEnabled'] === 'boolean') paymentRequired = paymentRequired || o['paymentEnabled'];
+
+  let servicesIncompleteHint = false;
+  const services = o['services'];
+  if (Array.isArray(services) && services.length === 0) servicesIncompleteHint = true;
+  if (typeof o['shouldSelectService'] === 'boolean' && o['shouldSelectService'] && Array.isArray(services) && services.length === 0)
+    servicesIncompleteHint = true;
 
   const teamMemberUserIds: string[] = [];
   const tm = o['teamMembers'] ?? o['users'] ?? o['userIds'];
@@ -390,9 +588,25 @@ function extractCalendarDetailSummary(o: Record<string, unknown>): GhlCalendarDe
   return {
     name,
     calendarType,
+    typeRaw,
     isActive,
     status,
     slotDuration,
+    slotInterval,
+    appointmentsPerSlot,
+    preBufferMinutes,
+    postBufferMinutes,
+    minSchedulingNoticeMinutes,
+    bookingWindowStartYmd,
+    bookingWindowEndYmd,
+    meetingLocationType,
+    meetingLocationPresent,
+    conflictCheckEnabled,
+    googleConflictChecking,
+    formIdPresent,
+    consentRequired,
+    paymentRequired,
+    servicesIncompleteHint,
     teamMemberCount: teamMemberUserIds.length,
     teamMemberUserIds,
     openHoursCount,
@@ -406,6 +620,15 @@ export function formatGhlCalendarDetailSummary(s: GhlCalendarDetailSummary): str
   if (s.isActive !== undefined) parts.push(`Active: ${s.isActive ? 'yes' : 'no'}`);
   if (s.status) parts.push(`Status: ${s.status}`);
   if (s.slotDuration !== undefined) parts.push(`Slot duration (min): ${s.slotDuration}`);
+  if (s.slotInterval !== undefined) parts.push(`Slot interval (min): ${s.slotInterval}`);
+  if (s.appointmentsPerSlot !== undefined) parts.push(`Appointments/slot: ${s.appointmentsPerSlot}`);
+  if (s.preBufferMinutes !== undefined || s.postBufferMinutes !== undefined) {
+    parts.push(`Buffer (min): ${s.preBufferMinutes ?? '—'} / ${s.postBufferMinutes ?? '—'}`);
+  }
+  if (s.minSchedulingNoticeMinutes !== undefined) parts.push(`Min notice (min): ${s.minSchedulingNoticeMinutes}`);
+  if (s.bookingWindowStartYmd || s.bookingWindowEndYmd) {
+    parts.push(`Booking window: ${s.bookingWindowStartYmd ?? '—'} → ${s.bookingWindowEndYmd ?? '—'}`);
+  }
   if (s.teamMemberCount !== undefined) parts.push(`Team members: ${s.teamMemberCount}`);
   if (s.openHoursCount !== undefined) parts.push(`Open hours entries: ${s.openHoursCount}`);
   return parts.join(' · ');

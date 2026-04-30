@@ -253,6 +253,66 @@ export class TagRulesService {
     return { success: true, message: 'Tag applied to contact.' };
   }
 
+  async createCrmTag(tenantId: string, profileId: string, rawName: string): Promise<{ tag: GhlTagSummary; syncedAt: string }> {
+    const name = rawName.trim();
+    if (!name) throw new BadRequestException('Tag name is required');
+
+    const { client } = await this.ghlService.createGhlClientForConnectedTenantOrThrow(tenantId, profileId);
+    const listed = await client.listTags();
+    if (listed.error) throw new BadRequestException(listed.error);
+    const dup = listed.tags.some(t => t.name.trim().toLowerCase() === name.toLowerCase());
+    if (dup) throw new BadRequestException('A tag with this name already exists in CRM.');
+
+    const created = await client.createTag(name);
+    if (!created.success || !created.tag) {
+      throw new BadRequestException(created.error ?? 'Failed to create tag');
+    }
+    return { tag: created.tag, syncedAt: new Date().toISOString() };
+  }
+
+  async deleteCrmTag(
+    tenantId: string,
+    profileId: string,
+    opts: { tagId?: string; tagName?: string },
+  ): Promise<{ ok: boolean }> {
+    const qId = opts.tagId?.trim();
+    const qName = opts.tagName?.trim();
+    if (!qId && !qName) throw new BadRequestException('tagId or tagName is required');
+
+    const { rules } = await this.listRules(tenantId);
+    const { client } = await this.ghlService.createGhlClientForConnectedTenantOrThrow(tenantId, profileId);
+    const listed = await client.listTags();
+    if (listed.error) throw new BadRequestException(listed.error);
+
+    const target =
+      (qId ? listed.tags.find(t => t.id === qId) : undefined) ??
+      (qName ? listed.tags.find(t => t.name.trim().toLowerCase() === qName.toLowerCase()) : undefined);
+
+    if (!target) {
+      throw new BadRequestException('Tag not found in CRM. Sync tags and try again.');
+    }
+    if (!target.id?.trim()) {
+      throw new BadRequestException(
+        'This CRM connection did not return an id for this tag. Sync CRM tags again, or delete the tag directly in CRM.',
+      );
+    }
+
+    const nameLower = target.name.trim().toLowerCase();
+    const blocked = rules.some(r => r.enabled && r.crmTagName.trim().toLowerCase() === nameLower);
+    if (blocked) {
+      throw new BadRequestException('Disable or update rules that use this tag before deleting it.');
+    }
+
+    const result = await client.deleteTag(target.id);
+    if (!result.success) {
+      if (result.notSupported) {
+        throw new BadRequestException('Delete tag is not supported by this CRM connection yet.');
+      }
+      throw new BadRequestException(result.error ?? 'Failed to delete tag');
+    }
+    return { ok: true };
+  }
+
   /** Load rules for matching (enabled rows). */
   async getRulesForMatch(tenantId: string): Promise<TagRuleDto[]> {
     const { rules } = await this.listRules(tenantId);

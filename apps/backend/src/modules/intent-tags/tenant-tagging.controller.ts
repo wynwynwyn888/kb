@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -78,6 +78,32 @@ export class TenantTaggingController {
     await this.ghlService.ensureTenantAccessOrThrow(tenantId, user.id);
     return this.tagRuleMatchService.testMatch(tenantId, body?.message ?? '', {
       ruleIds: body?.ruleIds,
+    });
+  }
+
+  @Post('tag-rules/create-tag')
+  @ApiOperation({ summary: 'Create a CRM tag at the GHL location' })
+  async createCrmTag(
+    @Param('tenantId') tenantId: string,
+    @CurrentUser() user: SessionUser,
+    @Body() body: { name?: string },
+  ) {
+    await this.ghlService.ensureTenantAccessOrThrow(tenantId, user.id);
+    return this.tagRulesService.createCrmTag(tenantId, user.id, body?.name ?? '');
+  }
+
+  @Delete('tag-rules/delete-tag')
+  @ApiOperation({ summary: 'Delete a CRM tag from the GHL location' })
+  async deleteCrmTag(
+    @Param('tenantId') tenantId: string,
+    @CurrentUser() user: SessionUser,
+    @Query('tagId') tagId?: string,
+    @Query('tagName') tagName?: string,
+  ) {
+    await this.ghlService.ensureTenantAccessOrThrow(tenantId, user.id);
+    return this.tagRulesService.deleteCrmTag(tenantId, user.id, {
+      tagId: tagId?.trim(),
+      tagName: tagName?.trim(),
     });
   }
 

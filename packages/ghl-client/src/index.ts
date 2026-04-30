@@ -706,6 +706,36 @@ export class GhlClient {
   }
 
   /**
+   * Delete a tag from the location.
+   *
+   * Typical: `DELETE /locations/:locationId/tags/:tagId` — verify against your GHL API version.
+   */
+  async deleteTag(tagId: string): Promise<{ success: boolean; error?: string; notSupported?: boolean }> {
+    const id = tagId.trim();
+    if (!id) return { success: false, error: 'Tag id is required' };
+    try {
+      await this.client.delete(`/locations/${encodeURIComponent(this.locationId)}/tags/${encodeURIComponent(id)}`);
+      return { success: true };
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        const status = error.response?.status;
+        const msg = this.extractGhlErrorMessage(error) ?? (error instanceof Error ? error.message : 'deleteTag failed');
+        if (status === 405) {
+          return { success: false, error: msg, notSupported: true };
+        }
+        if (status === 404) {
+          const low = msg.toLowerCase();
+          if (low.includes('cannot') && low.includes('delete')) {
+            return { success: false, error: msg, notSupported: true };
+          }
+        }
+        return { success: false, error: msg };
+      }
+      return { success: false, error: 'Unknown error during delete tag' };
+    }
+  }
+
+  /**
    * Normalize error for safe handling
    */
   private handleError(error: unknown): { valid: boolean; error: string } {

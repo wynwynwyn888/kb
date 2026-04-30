@@ -435,6 +435,8 @@ export interface TagRuleMatchHit {
   passesThreshold: boolean;
   source: 'keyword' | 'ai';
   why: string;
+  /** Present when server supports it; defaults to false in UI if missing. */
+  autoApply?: boolean;
 }
 
 export interface TagRuleTestMatchResult {
@@ -573,7 +575,8 @@ export async function patchTenantTagRule(
     crmTagName: string;
     matchMode: TagMatchMode;
     confidenceThreshold: TagConfidenceThreshold;
-    priority: number;
+    /** Omit — priority is internal only; defaults persist server-side. */
+    priority?: number;
   }>,
 ): Promise<{ rule: TenantTagRule }> {
   return apiRequest(`/tenants/${tenantId}/tag-rules/${ruleId}`, {
@@ -592,6 +595,33 @@ export async function syncTenantGhlTags(
   tenantId: string,
 ): Promise<{ tags: { id?: string; name: string }[]; syncedAt: string; error?: string }> {
   return apiRequest(`/tenants/${tenantId}/tag-rules/sync-tags`, { token, method: 'POST' });
+}
+
+export async function createTenantCrmTag(
+  token: string,
+  tenantId: string,
+  body: { name: string },
+): Promise<{ tag: { id?: string; name: string }; syncedAt: string }> {
+  return apiRequest(`/tenants/${tenantId}/tag-rules/create-tag`, {
+    token,
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function deleteTenantCrmTag(
+  token: string,
+  tenantId: string,
+  params: { tagId?: string; tagName?: string },
+): Promise<{ ok: boolean }> {
+  const q = new URLSearchParams();
+  if (params.tagId?.trim()) q.set('tagId', params.tagId.trim());
+  if (params.tagName?.trim()) q.set('tagName', params.tagName.trim());
+  const qs = q.toString();
+  return apiRequest(`/tenants/${tenantId}/tag-rules/delete-tag${qs ? `?${qs}` : ''}`, {
+    token,
+    method: 'DELETE',
+  });
 }
 
 export async function testIntentTagOnContact(

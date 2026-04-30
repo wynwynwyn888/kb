@@ -17,6 +17,8 @@ export interface TagRuleMatchHit {
   source: 'keyword' | 'ai';
   /** Human-readable reason for the score (debug / UI). */
   why: string;
+  /** Whether the saved rule has auto-apply on (for test UI). */
+  autoApply: boolean;
 }
 
 export interface TagRuleMatchResult {
@@ -181,20 +183,23 @@ export class TagRuleMatchService {
         passesThreshold: passes,
         source,
         why,
+        autoApply: r.autoApply,
       });
     }
 
     hits.sort((a, b) => b.confidence - a.confidence);
 
-    const tagsToApply = hits
+    const passingHits = hits.filter(h => h.passesThreshold);
+
+    const tagsToApply = passingHits
       .filter((h) => {
         const rule = rules.find((x) => x.id === h.ruleId);
-        return rule && rule.autoApply && h.passesThreshold;
+        return rule && rule.autoApply;
       })
       .map((h) => h.crmTagName.trim())
       .filter(Boolean);
 
-    return { hits, tagsToApply: [...new Set(tagsToApply)] };
+    return { hits: passingHits, tagsToApply: [...new Set(tagsToApply)] };
   }
 
   private async runAiClassifier(tenantId: string, message: string, rules: TagRuleDto[]): Promise<string[]> {

@@ -4,6 +4,10 @@ jestGlobal.mock('../../modules/orchestration/orchestration.service', () => ({
   ConversationOrchestrationService: class {},
 }));
 
+jestGlobal.mock('../../modules/intent-tags/tag-rule-match.service', () => ({
+  TagRuleMatchService: class {},
+}));
+
 jestGlobal.mock('@aisbp/formatter', () => ({
   stripCustomerFacingMeta: (x: string) => x,
   stripModelThinking: (x: string) => x,
@@ -57,6 +61,10 @@ const mockResetService = {
     suggestedActions: [],
     draftProvenance: 'policy_reply' as const,
   })),
+};
+
+const mockInboundAutoTagging = {
+  evaluateAndApplyAutoTags: jestGlobal.fn(async () => {}),
 };
 
 const mockSupabase = {
@@ -127,6 +135,7 @@ describe('InboundMessageProcessor', () => {
     processor = new InboundMessageProcessor(
       mockOrchestration as never,
       mockResetService as never,
+      mockInboundAutoTagging as never,
       { add: mockSendBubbleQueueAdd } as never,
       { add: mockInboundQueueAdd } as never,
     );
@@ -332,6 +341,13 @@ describe('InboundMessageProcessor', () => {
     const arg = orchestrate.mock.calls[0]![0] as { recentInboundBatch?: string[]; incomingMessage?: { messageContent?: string } };
     expect(arg.recentInboundBatch).toEqual(['Menu?', 'Actually mains']);
     expect(arg.incomingMessage?.messageContent).toBe('Actually mains');
+    expect(mockInboundAutoTagging.evaluateAndApplyAutoTags).toHaveBeenCalledWith({
+      tenantId: 'tenant-1',
+      conversationId: CONV_ID,
+      contactId: 'ct_1',
+      ghlLocationId: 'loc_1',
+      messageText: 'Menu?\n\nActually mains',
+    });
   });
 
   it('orchestrate: exact /new triggers reset service and skips AI orchestration', async () => {
@@ -389,6 +405,7 @@ describe('InboundMessageProcessor', () => {
     expect(mockResetService.clearHandoverAfterAllowedReset).toHaveBeenCalledWith(CONV_ID, 'tenant-1');
     expect(orchestrate).not.toHaveBeenCalled();
     expect(mockSendBubbleQueueAdd).toHaveBeenCalled();
+    expect(mockInboundAutoTagging.evaluateAndApplyAutoTags).not.toHaveBeenCalled();
   });
 
   it('orchestrate: /new when reset disabled falls through to normal orchestration', async () => {

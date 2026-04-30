@@ -120,11 +120,24 @@ describe('InboundMessageProcessor (happy path)', () => {
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const OrchestrationService = require('../modules/orchestration/orchestration.service').ConversationOrchestrationService;
+    const mockReset = {
+      evaluateChatResetEligibility: jestGlobal.fn(async () => ({
+        allowed: false,
+        deniedReason: 'env_disabled' as const,
+        allowEnvValue: undefined,
+        tenantSettingValue: undefined,
+        whitelistConfigured: false,
+        contactMatchedWhitelist: true,
+      })),
+      performBotStateReset: jestGlobal.fn(async () => ({})),
+      clearHandoverAfterAllowedReset: jestGlobal.fn(async () => {}),
+      buildConfirmationReplyPlan: jestGlobal.fn(() => ({ bubbles: [] })),
+    };
     processor = new InboundMessageProcessor(
       new OrchestrationService(),
-      // sendBubbleQueue
+      mockReset as never,
+      { evaluateAndApplyAutoTags: jestGlobal.fn(async () => {}) } as never,
       { add: mockQueueAdd } as never,
-      // inboundQueue (debounced re-enqueue) — receives the same mock for visibility.
       { add: mockQueueAdd } as never,
     );
   });

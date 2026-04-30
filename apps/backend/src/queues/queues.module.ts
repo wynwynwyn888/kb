@@ -16,6 +16,7 @@ import { OrchestrationModule } from '../modules/orchestration/orchestration.modu
 import { OutboundModule } from '../modules/outbound/outbound.module';
 import { ConversationsModule } from '../modules/conversations/conversations.module';
 import { ActionGatingModule } from '../modules/action-gating/action-gating.module';
+import { IntentTagsModule } from '../modules/intent-tags/intent-tags.module';
 
 @Module({
   imports: [
@@ -29,6 +30,7 @@ import { ActionGatingModule } from '../modules/action-gating/action-gating.modul
     OutboundModule,
     ConversationsModule,
     ActionGatingModule,
+    IntentTagsModule,
   ],
   providers: [
     InboundMessageProcessor,

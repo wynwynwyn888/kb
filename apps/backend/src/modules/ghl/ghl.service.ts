@@ -367,6 +367,31 @@ export class GhlService {
   }
 
   /**
+   * Worker / internal automation — same as {@link createGhlClientForConnectedTenantOrThrow}
+   * but skips end-user access checks. Only for trusted call sites (inbound jobs, system tasks).
+   */
+  async createGhlClientForConnectedTenantWorkerOrThrow(
+    tenantId: string,
+  ): Promise<{ client: GhlClient; ghlLocationId: string }> {
+    const { data: existing, error } = await this.supabase
+      .from('tenant_ghl_connections')
+      .select('*')
+      .eq('tenant_id', tenantId)
+      .single();
+
+    if (error || !existing) {
+      throw new BadRequestException('No GHL connection found for this tenant');
+    }
+    if (existing.status !== 'CONNECTED') {
+      throw new BadRequestException('GHL integration is not connected');
+    }
+
+    const plaintextToken = this.decryptGhlTokenOrThrow(String(existing.private_token_encrypted));
+    const client = createGhlClient(plaintextToken, existing.ghl_location_id);
+    return { client, ghlLocationId: existing.ghl_location_id };
+  }
+
+  /**
    * Check if user has access to tenant
    */
   private async checkTenantAccess(tenantId: string, profileId: string): Promise<boolean> {

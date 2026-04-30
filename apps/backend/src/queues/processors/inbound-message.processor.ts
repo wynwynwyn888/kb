@@ -21,6 +21,7 @@ import {
 } from '../../lib/inbound-burst-batch';
 import { matchChatResetCommand } from '../../lib/chat-reset-command';
 import { ConversationResetService } from '../../modules/conversations/conversation-reset.service';
+import { InboundAutoTaggingService } from '../../modules/intent-tags/inbound-auto-tagging.service';
 
 export interface InboundMessageJobData {
   locationId: string;
@@ -55,6 +56,7 @@ export class InboundMessageProcessor extends WorkerHost {
   constructor(
     private readonly orchestrationService: ConversationOrchestrationService,
     private readonly conversationResetService: ConversationResetService,
+    private readonly inboundAutoTagging: InboundAutoTaggingService,
     @InjectQueue(QUEUES.SEND_BUBBLE) private readonly sendBubbleQueue: Queue,
     @InjectQueue(QUEUES.INBOUND_MESSAGE_PROCESSOR) private readonly inboundQueue: Queue,
   ) {
@@ -260,6 +262,25 @@ export class InboundMessageProcessor extends WorkerHost {
     ) {
       this.logger.log(`Orchestration skipped (chat reset command): conversationId=${conversationId}`);
       return;
+    }
+
+    const messageTextForTags =
+      recentInboundBatch && recentInboundBatch.length > 0
+        ? recentInboundBatch.join('\n\n').trim()
+        : String(latestInboundText ?? '').trim();
+
+    try {
+      await this.inboundAutoTagging.evaluateAndApplyAutoTags({
+        tenantId,
+        conversationId,
+        contactId: ghlContactId,
+        ghlLocationId: locationId,
+        messageText: messageTextForTags,
+      });
+    } catch (e) {
+      this.logger.error(
+        `Inbound auto-tagging threw (should not): ${e instanceof Error ? e.message : String(e)} — continuing to orchestration`,
+      );
     }
 
     const normalizedPayload: NormalizedWebhookPayload = {

@@ -189,6 +189,65 @@ export interface GhlCalendarSummary {
   name: string;
 }
 
+/**
+ * `Version` header for HighLevel "Get Calendars" (GET /calendars/).
+ * Sub-Account Private Integration token per current docs.
+ */
+export const GHL_CALENDARS_LIST_API_VERSION = '2023-02-21';
+
+export interface ListCalendarsResult {
+  calendars: GhlCalendarSummary[];
+  error?: string;
+  httpStatus?: number;
+  responseBodyExcerpt?: string;
+  /** Relative path e.g. `/calendars/` */
+  requestPath?: string;
+}
+
+/**
+ * Normalize GET /calendars/ JSON (array, `{ calendars }`, `{ data }`, nested shapes).
+ */
+export function normalizeGhlCalendarListResponse(raw: unknown): GhlCalendarSummary[] {
+  const rows = extractCalendarListRows(raw);
+  if (!rows) return [];
+  const calendars: GhlCalendarSummary[] = [];
+  for (const x of rows) {
+    if (!isRecord(x)) continue;
+    const id =
+      typeof x['id'] === 'string'
+        ? x['id']
+        : typeof x['_id'] === 'string'
+          ? x['_id']
+          : '';
+    const name =
+      typeof x['name'] === 'string'
+        ? x['name']
+        : typeof x['title'] === 'string'
+          ? x['title']
+          : '';
+    if (id) calendars.push({ id, name: name || id });
+  }
+  return calendars;
+}
+
+function extractCalendarListRows(raw: unknown): unknown[] | null {
+  if (Array.isArray(raw)) return raw;
+  if (!isRecord(raw)) return null;
+  for (const key of ['calendars', 'items', 'results', 'result'] as const) {
+    const v = raw[key];
+    if (Array.isArray(v)) return v;
+  }
+  const data = raw['data'];
+  if (Array.isArray(data)) return data;
+  if (isRecord(data)) {
+    for (const key of ['calendars', 'items', 'results'] as const) {
+      const v = data[key];
+      if (Array.isArray(v)) return v;
+    }
+  }
+  return null;
+}
+
 /** Slot interval returned by free-slots APIs (shape varies — normalized here). */
 export interface GhlFreeSlot {
   startTime: string;
@@ -538,47 +597,55 @@ export class GhlClient {
   }
 
   /**
-   * List calendars for the client's location.
-   *
-   * NOT YET LIVE-VERIFIED — endpoint shape follows LeadConnector `/calendars` docs.
-   * Typical: `GET /calendars?locationId={locationId}` → `{ calendars: [...] }` or array.
+   * List calendars for the location.
+   * HighLevel: `GET /calendars/?locationId=...` with `Version: 2023-02-21`, `Accept: application/json`.
    */
-  async listCalendars(): Promise<{ calendars: GhlCalendarSummary[]; error?: string }> {
+  async listCalendars(): Promise<ListCalendarsResult> {
+    const requestPath = '/calendars/';
+    const baseURL = String(this.client.defaults.baseURL ?? '').replace(/\/$/, '');
+    const apiVersion = GHL_CALENDARS_LIST_API_VERSION;
+
+    if (process.env['NODE_ENV'] !== 'production') {
+      const outboundUrlNoToken = `${baseURL}${requestPath}?locationId=${encodeURIComponent(this.locationId)}`;
+      console.debug(
+        `[GHL] calendar list outbound (no token): GET ${outboundUrlNoToken} Version=${apiVersion}`,
+      );
+    }
+
     try {
-      const response = await this.client.get<unknown>('/calendars', {
+      const response = await this.client.get<unknown>(requestPath, {
         params: { locationId: this.locationId },
+        headers: {
+          Version: GHL_CALENDARS_LIST_API_VERSION,
+          Accept: 'application/json',
+        },
       });
-      const raw = response.data;
-      const calendars: GhlCalendarSummary[] = [];
-      const pushCal = (o: Record<string, unknown>) => {
-        const id = typeof o['id'] === 'string' ? o['id'] : '';
-        const name =
-          typeof o['name'] === 'string'
-            ? o['name']
-            : typeof o['title'] === 'string'
-              ? o['title']
-              : '';
-        if (id) calendars.push({ id, name: name || id });
-      };
-      if (Array.isArray(raw)) {
-        for (const x of raw) {
-          if (isRecord(x)) pushCal(x);
+      const calendars = normalizeGhlCalendarListResponse(response.data);
+      return { calendars, requestPath };
+    } catch (error) {
+      let httpStatus: number | undefined;
+      let responseBodyExcerpt: string | undefined;
+      const msg =
+        this.extractGhlErrorMessage(error) ?? (error instanceof Error ? error.message : 'listCalendars failed');
+      if (axios.isAxiosError(error)) {
+        httpStatus = error.response?.status;
+        const d = error.response?.data;
+        if (d !== undefined) {
+          responseBodyExcerpt = typeof d === 'string' ? d.slice(0, 500) : JSON.stringify(d).slice(0, 500);
         }
-      } else if (isRecord(raw)) {
-        const list =
-          raw['calendars'] ??
-          raw['data'] ??
-          raw['items'];
-        if (Array.isArray(list)) {
-          for (const x of list) {
-            if (isRecord(x)) pushCal(x);
-          }
+        if (process.env['NODE_ENV'] !== 'production') {
+          console.debug(
+            `[GHL] listCalendars error path=${requestPath} status=${httpStatus ?? '?'} excerpt=${(responseBodyExcerpt ?? '').slice(0, 200)}`,
+          );
         }
       }
-      return { calendars };
-    } catch (error) {
-      const msg = this.extractGhlErrorMessage(error) ?? (error instanceof Error ? error.message : 'listCalendars failed');
-      return { calendars: [], error: msg };
+      return {
+        calendars: [],
+        error: msg,
+        httpStatus,
+        responseBodyExcerpt,
+        requestPath,
+      };
     }
   }
 

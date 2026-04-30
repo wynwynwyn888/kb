@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { getSupabaseService } from '../../lib/supabase';
 import { GhlService } from '../ghl/ghl.service';
-import type { GhlCalendarSummary, GhlFreeSlot } from '@aisbp/ghl-client';
+import { GHL_CALENDARS_LIST_API_VERSION, type GhlCalendarSummary, type GhlFreeSlot } from '@aisbp/ghl-client';
 import {
   parseBookingMode,
   parseCoreFieldsJson,
@@ -192,11 +192,31 @@ export class BookingSettingsService {
     syncedAt: string;
     error?: string;
   }> {
-    const { client } = await this.ghlService.createGhlClientForConnectedTenantOrThrow(tenantId, profileId);
+    const { client, ghlLocationId } = await this.ghlService.createGhlClientForConnectedTenantOrThrow(tenantId, profileId);
+
+    this.logger.log(
+      `ghlCalendarListRequest ${JSON.stringify({
+        path: '/calendars/',
+        locationId: ghlLocationId,
+        apiVersion: GHL_CALENDARS_LIST_API_VERSION,
+        tenantId,
+        hasToken: true,
+      })}`,
+    );
+
     const r = await client.listCalendars();
     const syncedAt = new Date().toISOString();
     if (r.error) {
-      this.logger.warn(`syncCalendars GHL: ${r.error}`);
+      this.logger.warn(
+        `ghlCalendarListFailed ${JSON.stringify({
+          status: r.httpStatus ?? null,
+          responseBody: r.responseBodyExcerpt ?? null,
+          path: r.requestPath ?? '/calendars/',
+          locationId: ghlLocationId,
+          tenantId,
+          message: r.error,
+        })}`,
+      );
     }
     return { calendars: r.calendars, syncedAt, error: r.error };
   }
@@ -213,9 +233,19 @@ export class BookingSettingsService {
       return { ok: false, calendarId: null, message: 'Set a default calendar first.' };
     }
 
-    const { client } = await this.ghlService.createGhlClientForConnectedTenantOrThrow(tenantId, profileId);
+    const { client, ghlLocationId } = await this.ghlService.createGhlClientForConnectedTenantOrThrow(tenantId, profileId);
     const listed = await client.listCalendars();
     if (listed.error) {
+      this.logger.warn(
+        `ghlCalendarListFailed ${JSON.stringify({
+          status: listed.httpStatus ?? null,
+          responseBody: listed.responseBodyExcerpt ?? null,
+          path: listed.requestPath ?? '/calendars/',
+          locationId: ghlLocationId,
+          tenantId,
+          message: listed.error,
+        })}`,
+      );
       return { ok: false, calendarId, message: listed.error, calendars: listed.calendars };
     }
     const found = listed.calendars.some((c) => c.id === calendarId);

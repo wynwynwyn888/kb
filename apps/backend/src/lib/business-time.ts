@@ -94,3 +94,41 @@ export function resolveAndApplyProcessTimeZone(): string {
   process.env['TZ'] = tz;
   return tz;
 }
+
+function wallClockKey(w: { year: number; month: number; day: number; hour: number; minute: number }): number {
+  return w.year * 1e10 + w.month * 1e8 + w.day * 1e6 + w.hour * 1e4 + w.minute;
+}
+
+/**
+ * Maps a civil wall-clock time in an IANA zone to a UTC epoch ms instant (GHL free-slots expects ms).
+ * Falls back to `Date.UTC` if no instant in a ±48h window matches (DST gap / search edge case).
+ */
+export function wallClockInZoneToUtcMs(
+  timeZone: string,
+  year: number,
+  month: number,
+  day: number,
+  hour: number,
+  minute: number,
+): number {
+  const target = wallClockKey({ year, month, day, hour, minute });
+  const naive = Date.UTC(year, month - 1, day, hour, minute, 0, 0);
+  let lo = naive - 48 * 3600 * 1000;
+  let hi = naive + 48 * 3600 * 1000;
+  let best = naive;
+  let found = false;
+  while (lo <= hi) {
+    const mid = Math.floor((lo + hi) / 2);
+    const w = wallClockInZone(new Date(mid), timeZone);
+    const k = wallClockKey(w);
+    if (k === target) {
+      found = true;
+      best = mid;
+      break;
+    }
+    if (k < target) lo = mid + 1;
+    else hi = mid - 1;
+  }
+  if (found) return best;
+  return naive;
+}

@@ -5,6 +5,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { SessionUser } from '../../lib/supabase';
 import { GhlService } from '../ghl/ghl.service';
 import { BookingSettingsService } from './booking-settings.service';
+import { TestBookingSlotsDto, TestCalendarConnectionDto } from './dto/booking-tools.dto';
 
 @ApiTags('booking-settings')
 @ApiBearerAuth()
@@ -52,9 +53,13 @@ export class BookingSettingsController {
 
   @Post('test-calendar')
   @ApiOperation({ summary: 'Verify default calendar id is returned by GHL' })
-  async testCalendar(@Param('tenantId') tenantId: string, @CurrentUser() user: SessionUser) {
+  async testCalendar(
+    @Param('tenantId') tenantId: string,
+    @CurrentUser() user: SessionUser,
+    @Body() body: TestCalendarConnectionDto,
+  ) {
     await this.ghlService.ensureTenantAccessOrThrow(tenantId, user.id);
-    return this.bookingSettingsService.testCalendar(tenantId, user.id);
+    return this.bookingSettingsService.testCalendar(tenantId, user.id, body ?? {});
   }
 
   @Post('test-slots')
@@ -62,7 +67,7 @@ export class BookingSettingsController {
   async testSlots(
     @Param('tenantId') tenantId: string,
     @CurrentUser() user: SessionUser,
-    @Body() body: { startDate?: string; endDate?: string; timezone?: string },
+    @Body() body: TestBookingSlotsDto,
   ) {
     await this.ghlService.ensureTenantAccessOrThrow(tenantId, user.id);
     return this.bookingSettingsService.testSlots(tenantId, user.id, body ?? {});

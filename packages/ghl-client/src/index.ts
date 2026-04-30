@@ -650,28 +650,35 @@ export class GhlClient {
   }
 
   /**
-   * Fetch free bookable slots for a calendar in a date range.
+   * Fetch free bookable slots for a calendar in a time range.
    *
-   * NOT YET LIVE-VERIFIED — GHL may use `/calendars/:id/free-slots` or `/free-slots` with calendarId.
-   * Params use ISO date strings (start of day / end of day acceptable).
+   * GHL expects `startDate` and `endDate` as **Unix timestamps in milliseconds** (query strings),
+   * not `YYYY-MM-DD` — the latter yields HTTP 422 from the API.
    */
   async getFreeSlots(params: {
     calendarId: string;
-    startDate: string;
-    endDate: string;
+    /** Unix epoch milliseconds (inclusive start of range). */
+    startDateMs: number;
+    /** Unix epoch milliseconds (inclusive end of range; GHL treats as range end). */
+    endDateMs: number;
     timezone?: string;
-  }): Promise<{ slots: GhlFreeSlot[]; error?: string }> {
+  }): Promise<{
+    slots: GhlFreeSlot[];
+    error?: string;
+    httpStatus?: number;
+    responseBodyExcerpt?: string;
+    requestPath?: string;
+    requestQuery?: Record<string, string>;
+  }> {
+    const requestPath = `/calendars/${encodeURIComponent(params.calendarId)}/free-slots`;
     try {
       const query: Record<string, string> = {
-        startDate: params.startDate,
-        endDate: params.endDate,
+        startDate: String(Math.floor(params.startDateMs)),
+        endDate: String(Math.floor(params.endDateMs)),
       };
       if (params.timezone?.trim()) query['timezone'] = params.timezone.trim();
 
-      const response = await this.client.get<unknown>(
-        `/calendars/${encodeURIComponent(params.calendarId)}/free-slots`,
-        { params: query },
-      );
+      const response = await this.client.get<unknown>(requestPath, { params: query });
       const raw = response.data;
       const slots: GhlFreeSlot[] = [];
       const pushSlot = (o: Record<string, unknown>) => {
@@ -705,10 +712,24 @@ export class GhlClient {
           }
         }
       }
-      return { slots };
+      return { slots, requestPath, requestQuery: query };
     } catch (error) {
+      let httpStatus: number | undefined;
+      let responseBodyExcerpt: string | undefined;
+      if (axios.isAxiosError(error)) {
+        httpStatus = error.response?.status;
+        const d = error.response?.data;
+        if (d !== undefined) {
+          responseBodyExcerpt = typeof d === 'string' ? d.slice(0, 500) : JSON.stringify(d).slice(0, 500);
+        }
+      }
+      const query: Record<string, string> = {
+        startDate: String(Math.floor(params.startDateMs)),
+        endDate: String(Math.floor(params.endDateMs)),
+      };
+      if (params.timezone?.trim()) query['timezone'] = params.timezone.trim();
       const msg = this.extractGhlErrorMessage(error) ?? (error instanceof Error ? error.message : 'getFreeSlots failed');
-      return { slots: [], error: msg };
+      return { slots: [], error: msg, httpStatus, responseBodyExcerpt, requestPath, requestQuery: query };
     }
   }
 

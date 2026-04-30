@@ -5,7 +5,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import {
+  getApiBaseUrl,
   getTenantBookingSettings,
+  isApiHttpError,
   patchTenantBookingSettings,
   syncTenantCalendars,
   testTenantBookingCalendar,
@@ -68,7 +70,7 @@ function todayIsoDate(): string {
   return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
 }
 
-/** Narrow slots to those at or after the chosen local date + starting time (demo UX). */
+/** Narrow slots to those at or after the chosen local date + starting time (extra filter after API). */
 function filterSlotsAfterLocalStart(
   slots: { startTime: string; endTime: string }[],
   dateStr: string,
@@ -101,6 +103,20 @@ function cardStyle(): CSSProperties {
   };
 }
 
+function subsectionTitleStyle(): CSSProperties {
+  return { fontSize: '0.82rem', fontWeight: 600, marginBottom: '0.35rem' };
+}
+
+function statusLineStyle(): CSSProperties {
+  return {
+    fontSize: '0.78rem',
+    color: 'var(--aisbp-muted)',
+    marginTop: '0.4rem',
+    lineHeight: 1.45,
+    marginBottom: 0,
+  };
+}
+
 function btn(kind: 'primary' | 'secondary' | 'danger', disabled: boolean): CSSProperties {
   const base =
     kind === 'primary' ? mvpPrimaryButtonStyle : kind === 'danger' ? mvpDangerButtonStyle : mvpSecondaryButtonStyle;
@@ -110,6 +126,19 @@ function btn(kind: 'primary' | 'secondary' | 'danger', disabled: boolean): CSSPr
     cursor: disabled ? 'not-allowed' : 'pointer',
     whiteSpace: 'nowrap',
   };
+}
+
+function formatHttpErrorDetail(e: unknown): string {
+  if (!isApiHttpError(e)) return e instanceof Error ? e.message : 'Request failed';
+  const body = e.body;
+  if (typeof body === 'object' && body !== null) {
+    const o = body as Record<string, unknown>;
+    if (Array.isArray(o['message'])) {
+      return o['message'].map(String).join('; ');
+    }
+    if (typeof o['message'] === 'string' && o['message'].trim()) return o['message'];
+  }
+  return e.message;
 }
 
 export function AutomationBookingPanel() {
@@ -125,7 +154,11 @@ export function AutomationBookingPanel() {
   const [calendars, setCalendars] = useState<CalendarOption[]>([]);
   const [slotDate, setSlotDate] = useState(() => todayIsoDate());
   const [slotTime, setSlotTime] = useState('');
-  const [bookingBanner, setBookingBanner] = useState('');
+
+  const [syncStatus, setSyncStatus] = useState('');
+  const [testCalendarStatus, setTestCalendarStatus] = useState('');
+  const [availabilityStatus, setAvailabilityStatus] = useState('');
+  const [saveSettingsStatus, setSaveSettingsStatus] = useState('');
 
   const loadBooking = useCallback(async () => {
     if (!token || !tenantId) return;
@@ -161,7 +194,7 @@ export function AutomationBookingPanel() {
   const saveBookingModule = async () => {
     if (!token || !tenantId || !booking) return;
     setBusy('save-booking');
-    setBookingBanner('');
+    setSaveSettingsStatus('');
     try {
       const next = await patchTenantBookingSettings(token, tenantId, {
         enabled: booking.enabled,
@@ -173,9 +206,9 @@ export function AutomationBookingPanel() {
         maxBookingsPerSlot: booking.maxBookingsPerSlot,
       });
       setBooking(next);
-      setBookingBanner('Saved.');
+      setSaveSettingsStatus('Saved.');
     } catch (e) {
-      setBookingBanner(e instanceof Error ? e.message : 'Save failed');
+      setSaveSettingsStatus(formatHttpErrorDetail(e));
     } finally {
       setBusy(null);
     }
@@ -184,56 +217,73 @@ export function AutomationBookingPanel() {
   const onSyncCalendars = async () => {
     if (!token || !tenantId) return;
     setBusy('sync-cal');
-    setBookingBanner('');
+    setSyncStatus('');
     try {
       const r = await syncTenantCalendars(token, tenantId);
       setCalendars(r.calendars);
-      if (r.error) setBookingBanner(`Synced with warning: ${r.error}`);
-      else setBookingBanner(`Loaded ${r.calendars.length} calendars from CRM.`);
+      if (r.error) setSyncStatus(`Could not sync calendars: ${r.error}`);
+      else setSyncStatus(`Loaded ${r.calendars.length} calendars from CRM.`);
     } catch (e) {
-      setBookingBanner(e instanceof Error ? e.message : 'Sync failed');
+      setSyncStatus(`Could not sync calendars: ${formatHttpErrorDetail(e)}`);
     } finally {
       setBusy(null);
     }
   };
 
   const onTestCal = async () => {
-    if (!token || !tenantId) return;
+    if (!token || !tenantId || !booking) return;
     setBusy('test-cal');
-    setBookingBanner('');
+    setTestCalendarStatus('');
     try {
-      const r = await testTenantBookingCalendar(token, tenantId);
-      setBookingBanner(r.ok ? r.message : r.message);
+      const calId = booking.defaultGhlCalendarId?.trim();
+      const r = await testTenantBookingCalendar(token, tenantId, calId ? { calendarId: calId } : {});
+      setTestCalendarStatus(r.ok ? r.message : r.message);
       if (r.calendars?.length) setCalendars(r.calendars);
     } catch (e) {
-      setBookingBanner(e instanceof Error ? e.message : 'Test failed');
+      setTestCalendarStatus(formatHttpErrorDetail(e));
     } finally {
       setBusy(null);
     }
   };
 
   const onTestSlots = async () => {
-    if (!token || !tenantId) return;
+    if (!token || !tenantId || !booking) return;
     const dateStr = (slotDate || todayIsoDate()).trim();
+    const path = `/tenants/${tenantId}/booking-settings/test-slots`;
+    const payload = {
+      selectedDate: dateStr,
+      selectedTime: slotTime.trim(),
+      calendarId: booking.defaultGhlCalendarId?.trim() || undefined,
+    };
+    if (process.env.NODE_ENV === 'development' && typeof window !== 'undefined') {
+      console.debug('[AISBP Booking] check availability', {
+        selectedDate: payload.selectedDate,
+        selectedTime: payload.selectedTime || '(full day in CRM TZ)',
+        calendarId: payload.calendarId ?? null,
+        endpoint: `${getApiBaseUrl()}${path}`,
+        note: 'Backend converts date/time to startDateMs/endDateMs (Unix ms) for GHL free-slots; CRM timezone from tenant settings or app default.',
+      });
+    }
     setBusy('test-slots');
-    setBookingBanner('');
+    setAvailabilityStatus('');
     try {
-      const body = {
-        startDate: dateStr,
-        endDate: dateStr,
-      };
-      const r = await testTenantBookingSlots(token, tenantId, body);
+      const r = await testTenantBookingSlots(token, tenantId, payload);
       let rows = r.slots ?? [];
       if (slotTime.trim()) {
         rows = filterSlotsAfterLocalStart(rows, dateStr, slotTime);
       }
       const n = rows.length;
-      const extra = r.error ? ` (${r.error})` : '';
-      setBookingBanner(
-        `Returned ${n} sample slot(s) for ${dateStr}${slotTime.trim() ? ` from ${slotTime} (local)` : ''}${extra}. Uses your CRM calendar timezone — not a booking confirmation.`,
+      if (r.error) {
+        setAvailabilityStatus(
+          `GHL: ${r.error}${n > 0 ? ` — still showing ${n} parsed slot(s).` : ''}`,
+        );
+        return;
+      }
+      setAvailabilityStatus(
+        `Returned ${n} slot(s) for ${dateStr}${slotTime.trim() ? ` from ${slotTime} (local filter)` : ''}. Not a booking confirmation.`,
       );
     } catch (e) {
-      setBookingBanner(e instanceof Error ? e.message : 'Test failed');
+      setAvailabilityStatus(`Could not check availability: ${formatHttpErrorDetail(e)}`);
     } finally {
       setBusy(null);
     }
@@ -274,7 +324,7 @@ export function AutomationBookingPanel() {
   const calendarOptions = useMemo<CalendarOption[]>(() => calendars, [calendars]);
 
   const bookingHint = !booking?.defaultGhlCalendarId?.trim()
-    ? 'Choose a default calendar, then run Test calendar connection to verify the CRM link.'
+    ? 'Choose a default calendar below, then test the connection here.'
     : null;
 
   const modeHint = BOOKING_MODE_OPTIONS.find(m => m.value === booking?.bookingMode)?.hint ?? '';
@@ -284,75 +334,46 @@ export function AutomationBookingPanel() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
       {loadErr ? <ErrorBanner message={loadErr} /> : null}
 
-      <SectionCard
-        title="Booking assistant"
-        subtitle="One default CRM calendar. This area configures intake only — it does not finalize bookings unless your CRM flow does."
-        accent="muted"
-      >
-        {bookingLoading ? (
+      {bookingLoading || !booking ? (
+        <SectionCard title="Booking assistant" subtitle="Loading…" accent="muted">
           <LoadingBlock />
-        ) : booking ? (
-          <>
-            <div
-              style={{
-                ...cardStyle(),
-                display: 'flex',
-                flexWrap: 'wrap',
-                gap: '0.5rem',
-                alignItems: 'center',
-                marginBottom: '0.85rem',
-              }}
-            >
-              <span style={{ fontSize: '0.72rem', fontWeight: 800, letterSpacing: '0.06em', color: 'var(--aisbp-muted)', width: '100%' }}>
-                CALENDAR TOOLS
-              </span>
+        </SectionCard>
+      ) : (
+        <>
+          <SectionCard
+            title="Calendar tools"
+            subtitle="Use these tools to confirm CRM calendar access before enabling live booking workflows."
+            accent="muted"
+          >
+            <div style={cardStyle()}>
+              <div style={subsectionTitleStyle()}>1. Sync calendars from CRM</div>
               <button type="button" disabled={dim} onClick={() => void onSyncCalendars()} style={btn('secondary', dim)}>
                 Sync calendars from CRM
               </button>
-              <button type="button" disabled={dim} onClick={() => void onTestCal()} style={btn('secondary', dim)}>
-                Test calendar connection
-              </button>
-            </div>
-
-            <div style={cardStyle()}>
-              <div style={{ fontSize: '0.72rem', fontWeight: 800, letterSpacing: '0.06em', color: 'var(--aisbp-muted)', marginBottom: '0.35rem' }}>
-                STEP 1 — CHOOSE DEFAULT CALENDAR
-              </div>
-              <label style={{ ...mvpLabelStyle, display: 'block' }}>
-                Default calendar
-                <select
-                  value={booking.defaultGhlCalendarId ?? ''}
-                  onChange={e => {
-                    const id = e.target.value || null;
-                    const hit = calendarOptions.find((c: CalendarOption) => c.id === id);
-                    setBooking({
-                      ...booking,
-                      defaultGhlCalendarId: id,
-                      defaultGhlCalendarName: hit?.name ?? null,
-                    });
-                  }}
-                  style={{ ...mvpSelectStyle, marginTop: '0.35rem', width: '100%', maxWidth: 420 }}
-                >
-                  <option value="">— Select —</option>
-                  {calendarOptions.map((c: CalendarOption) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name || c.id}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <p style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted)', marginTop: '0.5rem', lineHeight: 1.45, marginBottom: 0 }}>
-                AISBP will use this calendar for demo booking flows.
-              </p>
-              {bookingHint ? (
-                <p style={{ fontSize: '0.76rem', color: 'var(--aisbp-muted)', marginTop: '0.45rem', marginBottom: 0 }}>{bookingHint}</p>
+              {syncStatus ? (
+                <p style={statusLineStyle()} role="status">
+                  {syncStatus}
+                </p>
               ) : null}
             </div>
 
             <div style={cardStyle()}>
-              <div style={{ fontSize: '0.72rem', fontWeight: 800, letterSpacing: '0.06em', color: 'var(--aisbp-muted)', marginBottom: '0.35rem' }}>
-                STEP 2 — CHECK SAMPLE AVAILABILITY
-              </div>
+              <div style={subsectionTitleStyle()}>2. Test calendar connection</div>
+              <p style={{ ...statusLineStyle(), marginTop: 0 }}>
+                Uses the default calendar selected in Booking settings (saved or current selection in this session).
+              </p>
+              <button type="button" disabled={dim} onClick={() => void onTestCal()} style={btn('secondary', dim)}>
+                Test calendar connection
+              </button>
+              {testCalendarStatus ? (
+                <p style={statusLineStyle()} role="status">
+                  {testCalendarStatus}
+                </p>
+              ) : null}
+            </div>
+
+            <div style={cardStyle()}>
+              <div style={subsectionTitleStyle()}>3. Check calendar availability</div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.65rem', alignItems: 'flex-end' }}>
                 <label style={{ ...mvpLabelStyle, margin: 0 }}>
                   Date
@@ -373,171 +394,203 @@ export function AutomationBookingPanel() {
                   />
                 </label>
                 <button type="button" disabled={dim} onClick={() => void onTestSlots()} style={btn('primary', dim)}>
-                  Check availability
+                  Check calendar availability
                 </button>
               </div>
-              <p style={{ fontSize: '0.76rem', color: 'var(--aisbp-muted)', marginTop: '0.55rem', lineHeight: 1.45, marginBottom: 0 }}>
-                Uses your CRM calendar timezone.
-              </p>
+              <p style={{ ...statusLineStyle(), marginTop: '0.55rem' }}>Uses your CRM calendar timezone.</p>
+              {availabilityStatus ? (
+                <p style={{ ...statusLineStyle(), marginTop: '0.5rem' }} role="status">
+                  {availabilityStatus}
+                </p>
+              ) : null}
             </div>
+          </SectionCard>
 
-            <div style={cardStyle()}>
-              <div style={{ fontSize: '0.72rem', fontWeight: 800, letterSpacing: '0.06em', color: 'var(--aisbp-muted)', marginBottom: '0.35rem' }}>
-                STEP 3 — BOOKING MODE &amp; FIELDS
-              </div>
-              <label style={{ ...mvpLabelStyle, display: 'block', marginBottom: '0.35rem' }}>Booking mode</label>
+          <SectionCard
+            title="Booking settings"
+            subtitle="Configure how AISBP collects booking details — confirmation still depends on your CRM."
+            accent="muted"
+          >
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.85rem' }}>
+              <input
+                type="checkbox"
+                checked={booking.enabled}
+                onChange={e => setBooking({ ...booking, enabled: e.target.checked })}
+              />
+              <span style={{ fontWeight: 600 }}>Enable booking assistant</span>
+            </label>
+
+            <label style={{ ...mvpLabelStyle, display: 'block', marginBottom: '0.85rem' }}>
+              Default calendar
               <select
-                value={booking.bookingMode}
-                onChange={e => setBooking({ ...booking, bookingMode: e.target.value as TenantBookingMode })}
-                style={{ ...mvpSelectStyle, maxWidth: '100%', marginBottom: '0.5rem' }}
+                value={booking.defaultGhlCalendarId ?? ''}
+                onChange={e => {
+                  const id = e.target.value || null;
+                  const hit = calendarOptions.find((c: CalendarOption) => c.id === id);
+                  setBooking({
+                    ...booking,
+                    defaultGhlCalendarId: id,
+                    defaultGhlCalendarName: hit?.name ?? null,
+                  });
+                }}
+                style={{ ...mvpSelectStyle, marginTop: '0.35rem', width: '100%', maxWidth: 420 }}
               >
-                {BOOKING_MODE_OPTIONS.map(o => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
+                <option value="">— Select —</option>
+                {calendarOptions.map((c: CalendarOption) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name || c.id}
                   </option>
                 ))}
               </select>
-              <p style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted)', lineHeight: 1.45, marginBottom: '0.85rem' }}>{modeHint}</p>
-
-              <p style={{ fontSize: '0.82rem', fontWeight: 600, margin: '0 0 0.5rem' }}>Core fields</p>
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.84rem' }}>
-                  <thead>
-                    <tr style={{ textAlign: 'left', borderBottom: '1px solid var(--aisbp-border)' }}>
-                      <th style={{ padding: '0.35rem' }}>Field</th>
-                      <th style={{ padding: '0.35rem' }}>Ask</th>
-                      <th style={{ padding: '0.35rem' }}>Required</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {CORE_FIELDS.map(row => {
-                      const st = booking.coreFieldsJson[row.key] ?? { enabled: false, required: false };
-                      return (
-                        <tr key={row.key} style={{ borderBottom: '1px solid var(--aisbp-border)' }}>
-                          <td style={{ padding: '0.4rem 0.35rem' }}>{row.label}</td>
-                          <td style={{ padding: '0.4rem 0.35rem' }}>
-                            <input
-                              type="checkbox"
-                              checked={st.enabled}
-                              onChange={e => toggleCore(row.key, 'enabled', e.target.checked)}
-                            />
-                          </td>
-                          <td style={{ padding: '0.4rem 0.35rem' }}>
-                            <input
-                              type="checkbox"
-                              checked={st.required}
-                              disabled={!st.enabled}
-                              onChange={e => toggleCore(row.key, 'required', e.target.checked)}
-                            />
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-
-              <p style={{ fontSize: '0.82rem', fontWeight: 600, margin: '1rem 0 0.5rem' }}>Custom fields</p>
-              {booking.customFieldsJson.length === 0 ? (
-                <p style={{ fontSize: '0.8rem', color: 'var(--aisbp-muted)', margin: '0 0 0.5rem' }}>None yet.</p>
-              ) : null}
-              {booking.customFieldsJson.map(cf => (
-                <div key={cf.id} style={{ ...cardStyle(), padding: '0.65rem 0.85rem' }}>
-                  <input
-                    value={cf.label}
-                    onChange={e => updateCustomField(cf.id, { label: e.target.value })}
-                    placeholder="Label"
-                    style={{ ...mvpInputStyle, width: '100%', marginBottom: '0.35rem' }}
-                  />
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
-                    <select
-                      value={
-                        (CUSTOM_TYPES as readonly string[]).includes(cf.fieldType) ? cf.fieldType : 'short_text'
-                      }
-                      onChange={e => updateCustomField(cf.id, { fieldType: e.target.value })}
-                      style={{ ...mvpSelectStyle, padding: '0.35rem' }}
-                    >
-                      {CUSTOM_TYPES.map(t => (
-                        <option key={t} value={t}>
-                          {CUSTOM_FIELD_TYPE_LABELS[t]}
-                        </option>
-                      ))}
-                    </select>
-                    <label style={{ fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                      <input
-                        type="checkbox"
-                        checked={cf.required}
-                        onChange={e => updateCustomField(cf.id, { required: e.target.checked })}
-                      />
-                      Required
-                    </label>
-                    <button type="button" disabled={dim} onClick={() => removeCustomField(cf.id)} style={btn('danger', dim)}>
-                      Remove
-                    </button>
-                  </div>
-                  {cf.fieldType === 'single_select' ? (
-                    <textarea
-                      value={(cf.options ?? []).join('\n')}
-                      onChange={e =>
-                        updateCustomField(cf.id, {
-                          options: e.target.value
-                            .split('\n')
-                            .map(s => s.trim())
-                            .filter(Boolean),
-                        })
-                      }
-                      placeholder="One option per line"
-                      rows={3}
-                      style={{ ...mvpInputStyle, width: '100%', marginTop: '0.35rem', fontSize: '0.8rem' }}
-                    />
-                  ) : null}
-                </div>
-              ))}
-              <button type="button" disabled={dim} onClick={() => addCustomField()} style={btn('secondary', dim)}>
-                Add custom field
-              </button>
-            </div>
-
-            <div style={cardStyle()}>
-              <div style={{ fontSize: '0.72rem', fontWeight: 800, letterSpacing: '0.06em', color: 'var(--aisbp-muted)', marginBottom: '0.35rem' }}>
-                STEP 4 — BOOKING SETTINGS
-              </div>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.65rem' }}>
-                <input
-                  type="checkbox"
-                  checked={booking.enabled}
-                  onChange={e => setBooking({ ...booking, enabled: e.target.checked })}
-                />
-                <span style={{ fontWeight: 600 }}>Enable booking assistant</span>
-              </label>
-              <label style={{ ...mvpLabelStyle, display: 'block', maxWidth: 200 }}>
-                Parallel bookings per slot
-                <input
-                  type="number"
-                  min={1}
-                  value={booking.maxBookingsPerSlot}
-                  onChange={e =>
-                    setBooking({ ...booking, maxBookingsPerSlot: Math.max(1, Number(e.target.value) || 1) })
-                  }
-                  style={{ ...mvpInputStyle, marginTop: '0.35rem', maxWidth: 120 }}
-                />
-              </label>
-              <p style={{ fontSize: '0.76rem', color: 'var(--aisbp-muted)', lineHeight: 1.45, marginTop: '0.5rem', marginBottom: '0.85rem' }}>
-                Default is 1. Higher capacity is stored for future CRM-backed counting; AISBP will not invent extra availability.
-              </p>
-              <button type="button" disabled={dim} onClick={() => void saveBookingModule()} style={btn('primary', dim)}>
-                Save booking settings
-              </button>
-            </div>
-
-            {bookingBanner ? (
-              <p style={{ marginTop: '0.35rem', fontSize: '0.85rem', color: 'var(--aisbp-muted)' }} role="status">
-                {bookingBanner}
+            </label>
+            <p style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted)', marginTop: '0.35rem', lineHeight: 1.45, marginBottom: '0.85rem' }}>
+              AISBP uses this calendar for booking-related workflows.
+            </p>
+            {bookingHint ? (
+              <p style={{ fontSize: '0.76rem', color: 'var(--aisbp-muted)', marginTop: '-0.5rem', marginBottom: '0.85rem' }}>
+                {bookingHint}
               </p>
             ) : null}
-          </>
-        ) : null}
-      </SectionCard>
+
+            <label style={{ ...mvpLabelStyle, display: 'block', marginBottom: '0.35rem' }}>Booking mode</label>
+            <select
+              value={booking.bookingMode}
+              onChange={e => setBooking({ ...booking, bookingMode: e.target.value as TenantBookingMode })}
+              style={{ ...mvpSelectStyle, maxWidth: '100%', marginBottom: '0.5rem' }}
+            >
+              {BOOKING_MODE_OPTIONS.map(o => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+            <p style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted)', lineHeight: 1.45, marginBottom: '0.85rem' }}>{modeHint}</p>
+
+            <p style={{ fontSize: '0.82rem', fontWeight: 600, margin: '0 0 0.5rem' }}>Core fields</p>
+            <div style={{ overflowX: 'auto', marginBottom: '1rem' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.84rem' }}>
+                <thead>
+                  <tr style={{ textAlign: 'left', borderBottom: '1px solid var(--aisbp-border)' }}>
+                    <th style={{ padding: '0.35rem' }}>Field</th>
+                    <th style={{ padding: '0.35rem' }}>Ask</th>
+                    <th style={{ padding: '0.35rem' }}>Required</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {CORE_FIELDS.map(row => {
+                    const st = booking.coreFieldsJson[row.key] ?? { enabled: false, required: false };
+                    return (
+                      <tr key={row.key} style={{ borderBottom: '1px solid var(--aisbp-border)' }}>
+                        <td style={{ padding: '0.4rem 0.35rem' }}>{row.label}</td>
+                        <td style={{ padding: '0.4rem 0.35rem' }}>
+                          <input
+                            type="checkbox"
+                            checked={st.enabled}
+                            onChange={e => toggleCore(row.key, 'enabled', e.target.checked)}
+                          />
+                        </td>
+                        <td style={{ padding: '0.4rem 0.35rem' }}>
+                          <input
+                            type="checkbox"
+                            checked={st.required}
+                            disabled={!st.enabled}
+                            onChange={e => toggleCore(row.key, 'required', e.target.checked)}
+                          />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <p style={{ fontSize: '0.82rem', fontWeight: 600, margin: '0 0 0.5rem' }}>Custom fields</p>
+            {booking.customFieldsJson.length === 0 ? (
+              <p style={{ fontSize: '0.8rem', color: 'var(--aisbp-muted)', margin: '0 0 0.5rem' }}>None yet.</p>
+            ) : null}
+            {booking.customFieldsJson.map(cf => (
+              <div key={cf.id} style={{ ...cardStyle(), padding: '0.65rem 0.85rem' }}>
+                <input
+                  value={cf.label}
+                  onChange={e => updateCustomField(cf.id, { label: e.target.value })}
+                  placeholder="Label"
+                  style={{ ...mvpInputStyle, width: '100%', marginBottom: '0.35rem' }}
+                />
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
+                  <select
+                    value={
+                      (CUSTOM_TYPES as readonly string[]).includes(cf.fieldType) ? cf.fieldType : 'short_text'
+                    }
+                    onChange={e => updateCustomField(cf.id, { fieldType: e.target.value })}
+                    style={{ ...mvpSelectStyle, padding: '0.35rem' }}
+                  >
+                    {CUSTOM_TYPES.map(t => (
+                      <option key={t} value={t}>
+                        {CUSTOM_FIELD_TYPE_LABELS[t]}
+                      </option>
+                    ))}
+                  </select>
+                  <label style={{ fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                    <input
+                      type="checkbox"
+                      checked={cf.required}
+                      onChange={e => updateCustomField(cf.id, { required: e.target.checked })}
+                    />
+                    Required
+                  </label>
+                  <button type="button" disabled={dim} onClick={() => removeCustomField(cf.id)} style={btn('danger', dim)}>
+                    Remove
+                  </button>
+                </div>
+                {cf.fieldType === 'single_select' ? (
+                  <textarea
+                    value={(cf.options ?? []).join('\n')}
+                    onChange={e =>
+                      updateCustomField(cf.id, {
+                        options: e.target.value
+                          .split('\n')
+                          .map(s => s.trim())
+                          .filter(Boolean),
+                      })
+                    }
+                    placeholder="One option per line"
+                    rows={3}
+                    style={{ ...mvpInputStyle, width: '100%', marginTop: '0.35rem', fontSize: '0.8rem' }}
+                  />
+                ) : null}
+              </div>
+            ))}
+            <button type="button" disabled={dim} onClick={() => addCustomField()} style={{ ...btn('secondary', dim), marginBottom: '1rem' }}>
+              Add custom field
+            </button>
+
+            <label style={{ ...mvpLabelStyle, display: 'block', maxWidth: 200 }}>
+              Parallel bookings per slot
+              <input
+                type="number"
+                min={1}
+                value={booking.maxBookingsPerSlot}
+                onChange={e =>
+                  setBooking({ ...booking, maxBookingsPerSlot: Math.max(1, Number(e.target.value) || 1) })
+                }
+                style={{ ...mvpInputStyle, marginTop: '0.35rem', maxWidth: 120 }}
+              />
+            </label>
+            <p style={{ fontSize: '0.76rem', color: 'var(--aisbp-muted)', lineHeight: 1.45, marginTop: '0.5rem', marginBottom: '0.85rem' }}>
+              Default is 1. Higher capacity is stored for future CRM-backed counting; AISBP will not invent extra availability.
+            </p>
+
+            <button type="button" disabled={dim} onClick={() => void saveBookingModule()} style={btn('primary', dim)}>
+              Save booking settings
+            </button>
+            {saveSettingsStatus ? (
+              <p style={{ ...statusLineStyle(), marginTop: '0.55rem' }} role="status">
+                {saveSettingsStatus}
+              </p>
+            ) : null}
+          </SectionCard>
+        </>
+      )}
     </div>
   );
 }

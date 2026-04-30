@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { getSupabaseService } from '../../lib/supabase';
+import { resolveAppTimeZone, wallClockInZoneToUtcMs } from '../../lib/business-time';
 import { GhlService } from '../ghl/ghl.service';
 import { GHL_CALENDARS_LIST_API_VERSION, type GhlCalendarSummary, type GhlFreeSlot } from '@aisbp/ghl-client';
 import {
@@ -40,6 +41,71 @@ const DEFAULT_SETTINGS: TenantBookingSettingsDto = {
   customFieldsJson: [],
   maxBookingsPerSlot: 1,
 };
+
+function parseYmd(s: string): { y: number; m: number; d: number } | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s.trim());
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
+  if (!Number.isFinite(y) || !Number.isFinite(mo) || !Number.isFinite(d)) return null;
+  return { y, m: mo, d };
+}
+
+function parseHm(timeStr: string): { hour: number; minute: number } | null {
+  const t = timeStr.trim();
+  if (!t) return null;
+  const pm = /^(\d{1,2}):(\d{2})(?::(\d{2}))?$/.exec(t);
+  if (!pm) return null;
+  const hour = parseInt(pm[1] ?? '', 10);
+  const minute = parseInt(pm[2] ?? '', 10);
+  if (Number.isNaN(hour) || Number.isNaN(minute)) return null;
+  if (hour > 23 || minute > 59) return null;
+  return { hour, minute };
+}
+
+/**
+ * Build UTC ms range for GHL free-slots from CRM-local date/time (IANA zone).
+ */
+function computeFreeSlotRangeMs(
+  crmTz: string,
+  body: {
+    selectedDate?: string;
+    selectedTime?: string;
+    startDate?: string;
+    endDate?: string;
+  },
+): { startMs: number; endMs: number; selectedDate: string; selectedTime: string } {
+  const selDate = body.selectedDate?.trim() || body.startDate?.trim();
+  const today = new Date();
+  const todayYmd = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  const dateStr = selDate || todayYmd;
+
+  const ymd = parseYmd(dateStr);
+  if (!ymd) throw new BadRequestException('Invalid date. Use YYYY-MM-DD.');
+
+  const timeRaw = body.selectedTime?.trim() ?? '';
+  if (timeRaw) {
+    const hm = parseHm(timeRaw);
+    if (!hm) throw new BadRequestException('Invalid time. Use HH:MM (24-hour).');
+    const startMs = wallClockInZoneToUtcMs(crmTz, ymd.y, ymd.m, ymd.d, hm.hour, hm.minute);
+    const endMs = startMs + 3600 * 1000;
+    return { startMs, endMs, selectedDate: dateStr, selectedTime: timeRaw };
+  }
+
+  const endStr = body.endDate?.trim();
+  if (endStr && endStr !== dateStr) {
+    const endYmd = parseYmd(endStr);
+    if (!endYmd) throw new BadRequestException('Invalid end date.');
+    const startMs = wallClockInZoneToUtcMs(crmTz, ymd.y, ymd.m, ymd.d, 0, 0);
+    const endMs = wallClockInZoneToUtcMs(crmTz, endYmd.y, endYmd.m, endYmd.d, 23, 59) + 60 * 1000 - 1;
+    return { startMs, endMs, selectedDate: dateStr, selectedTime: '' };
+  }
+
+  const startMs = wallClockInZoneToUtcMs(crmTz, ymd.y, ymd.m, ymd.d, 0, 0);
+  const endMs = startMs + 86400000 - 1;
+  return { startMs, endMs, selectedDate: dateStr, selectedTime: '' };
+}
 
 function rowToDto(row: Record<string, unknown>): TenantBookingSettingsDto {
   const coreRaw = row['core_fields_json'];
@@ -221,16 +287,31 @@ export class BookingSettingsService {
     return { calendars: r.calendars, syncedAt, error: r.error };
   }
 
-  async testCalendar(tenantId: string, profileId: string): Promise<{
+  private async loadTenantCrmTimezone(tenantId: string): Promise<string | null> {
+    const { data, error } = await this.supabase.from('tenants').select('settings').eq('id', tenantId).maybeSingle();
+    if (error || !data?.settings || typeof data.settings !== 'object' || data.settings === null) return null;
+    const r = data.settings as Record<string, unknown>;
+    for (const key of ['timeZone', 'timezone', 'crmTimezone', 'businessTimezone']) {
+      const v = r[key];
+      if (typeof v === 'string' && v.trim()) return v.trim();
+    }
+    return null;
+  }
+
+  async testCalendar(
+    tenantId: string,
+    profileId: string,
+    body?: { calendarId?: string },
+  ): Promise<{
     ok: boolean;
     calendarId: string | null;
     message: string;
     calendars?: GhlCalendarSummary[];
   }> {
     const settings = await this.getBookingSettings(tenantId);
-    const calendarId = settings.defaultGhlCalendarId?.trim() || null;
+    const calendarId = body?.calendarId?.trim() || settings.defaultGhlCalendarId?.trim() || null;
     if (!calendarId) {
-      return { ok: false, calendarId: null, message: 'Set a default calendar first.' };
+      return { ok: false, calendarId: null, message: 'Choose a default calendar first.' };
     }
 
     const { client, ghlLocationId } = await this.ghlService.createGhlClientForConnectedTenantOrThrow(tenantId, profileId);
@@ -268,36 +349,79 @@ export class BookingSettingsService {
   async testSlots(
     tenantId: string,
     profileId: string,
-    body: { startDate?: string; endDate?: string; timezone?: string },
+    body: {
+      selectedDate?: string;
+      selectedTime?: string;
+      startDate?: string;
+      endDate?: string;
+      timezone?: string;
+      calendarId?: string;
+    },
   ): Promise<{ slots: GhlFreeSlot[]; calendarId: string | null; error?: string }> {
     const settings = await this.getBookingSettings(tenantId);
-    const calendarId = settings.defaultGhlCalendarId?.trim() || null;
+    const calendarId = body.calendarId?.trim() || settings.defaultGhlCalendarId?.trim() || null;
     if (!calendarId) {
-      throw new BadRequestException('Set a default calendar first.');
+      throw new BadRequestException('Choose a default calendar first.');
     }
 
-    const start = body.startDate?.trim();
-    const end = body.endDate?.trim();
-    const today = new Date();
-    const startDate =
-      start ||
-      `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-    const endD = new Date(today);
-    endD.setDate(endD.getDate() + 7);
-    const endDate =
-      end ||
-      `${endD.getFullYear()}-${String(endD.getMonth() + 1).padStart(2, '0')}-${String(endD.getDate()).padStart(2, '0')}`;
+    const tenantTz = await this.loadTenantCrmTimezone(tenantId);
+    let crmTimezoneUsed = body.timezone?.trim() || tenantTz || resolveAppTimeZone();
 
-    const { client } = await this.ghlService.createGhlClientForConnectedTenantOrThrow(tenantId, profileId);
+    let range: { startMs: number; endMs: number; selectedDate: string; selectedTime: string };
+    try {
+      range = computeFreeSlotRangeMs(crmTimezoneUsed, body);
+    } catch (e) {
+      if (e instanceof BadRequestException) throw e;
+      this.logger.warn(`bookingTestSlots: invalid or unsupported CRM timezone "${crmTimezoneUsed}", using ${resolveAppTimeZone()}`);
+      crmTimezoneUsed = resolveAppTimeZone();
+      range = computeFreeSlotRangeMs(crmTimezoneUsed, body);
+    }
+
+    let startMs = range.startMs;
+    let endMs = range.endMs;
+    if (endMs <= startMs) {
+      endMs = startMs + 3600 * 1000;
+    }
+
+    const { client, ghlLocationId } = await this.ghlService.createGhlClientForConnectedTenantOrThrow(tenantId, profileId);
+
+    this.logger.log(
+      `bookingTestSlotsRequest ${JSON.stringify({
+        tenantId,
+        calendarId,
+        selectedDate: range.selectedDate,
+        selectedTime: range.selectedTime || null,
+        generatedStartIso: new Date(startMs).toISOString(),
+        generatedEndIso: new Date(endMs).toISOString(),
+        crmTimezoneUsed,
+        requestShapeSentToGhl: 'GET /calendars/:calendarId/free-slots?startDate=<ms>&endDate=<ms>&timezone=<iana>',
+        ghlLocationId,
+      })}`,
+    );
+
     const r = await client.getFreeSlots({
       calendarId,
-      startDate,
-      endDate,
-      timezone: body.timezone?.trim() || undefined,
+      startDateMs: startMs,
+      endDateMs: endMs,
+      timezone: crmTimezoneUsed,
     });
+
     if (r.error) {
-      this.logger.warn(`testSlots GHL: ${r.error}`);
+      this.logger.warn(
+        `bookingTestSlotsFailed ${JSON.stringify({
+          tenantId,
+          calendarId,
+          status: r.httpStatus ?? null,
+          responseBodyExcerpt: r.responseBodyExcerpt ?? null,
+          requestShapeSentToGhl: {
+            path: r.requestPath ?? null,
+            query: r.requestQuery ?? null,
+          },
+          message: r.error,
+        })}`,
+      );
     }
+
     return { slots: r.slots, calendarId, error: r.error };
   }
 }

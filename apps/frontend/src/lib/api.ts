@@ -513,19 +513,31 @@ export async function syncTenantCalendars(
 export async function testTenantBookingCalendar(
   token: string,
   tenantId: string,
+  body?: { calendarId?: string | null },
 ): Promise<{ ok: boolean; calendarId: string | null; message: string; calendars?: GhlCalendarOption[] }> {
-  return apiRequest(`/tenants/${tenantId}/booking-settings/test-calendar`, { token, method: 'POST' });
+  return apiRequest(`/tenants/${tenantId}/booking-settings/test-calendar`, {
+    token,
+    method: 'POST',
+    body: JSON.stringify(body ?? {}),
+  });
 }
 
 export async function testTenantBookingSlots(
   token: string,
   tenantId: string,
-  body?: { startDate?: string; endDate?: string; timezone?: string },
+  body?: {
+    selectedDate?: string;
+    selectedTime?: string;
+    calendarId?: string | null;
+    /** Legacy — backend maps to ms range internally */
+    startDate?: string;
+    endDate?: string;
+  },
 ): Promise<{ slots: { startTime: string; endTime: string }[]; calendarId: string | null; error?: string }> {
   return apiRequest(`/tenants/${tenantId}/booking-settings/test-slots`, {
     token,
     method: 'POST',
-    body: body ? JSON.stringify(body) : JSON.stringify({}),
+    body: JSON.stringify(body ?? {}),
   });
 }
 

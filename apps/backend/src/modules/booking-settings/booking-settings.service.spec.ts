@@ -75,6 +75,8 @@ describe('BookingSettingsService', () => {
     expect(getFreeSlots).toHaveBeenCalledWith(
       expect.objectContaining({
         calendarId: 'cal_9',
+        startDateMs: expect.any(Number),
+        endDateMs: expect.any(Number),
       }),
     );
     expect(r.slots).toHaveLength(1);

@@ -11,7 +11,25 @@ import {
   type FollowUpStepSetting,
   type TenantFollowUpSettings,
 } from '@/lib/api';
-import { ErrorBanner, LoadingBlock, SectionCard } from '@/components/app/mvp-ui';
+import {
+  ErrorBanner,
+  LoadingBlock,
+  SectionCard,
+  mvpDangerButtonStyle,
+  mvpPrimaryButtonStyle,
+  mvpSecondaryButtonStyle,
+} from '@/components/app/mvp-ui';
+
+function btn(kind: 'primary' | 'secondary' | 'danger', disabled: boolean): CSSProperties {
+  const base =
+    kind === 'primary' ? mvpPrimaryButtonStyle : kind === 'danger' ? mvpDangerButtonStyle : mvpSecondaryButtonStyle;
+  return {
+    ...base,
+    opacity: disabled ? 0.58 : 1,
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    whiteSpace: 'nowrap',
+  };
+}
 
 const DAYS: { key: string; label: string }[] = [
   { key: 'mon', label: 'Monday' },
@@ -347,13 +365,23 @@ export function AutomationFollowUpPanel() {
                   />
                   Step enabled
                 </label>
-                <button type="button" onClick={() => removeStep(idx)} style={{ marginTop: '0.35rem', fontSize: '0.78rem' }}>
+                <button
+                  type="button"
+                  disabled={busy !== null}
+                  onClick={() => removeStep(idx)}
+                  style={{ ...btn('danger', busy !== null), marginTop: '0.35rem', fontSize: '0.78rem' }}
+                >
                   Delete step
                 </button>
               </div>
             ))}
             {followUp.steps.length < 5 ? (
-              <button type="button" onClick={() => addStep()} style={{ marginBottom: '0.75rem', padding: '0.4rem 0.65rem', borderRadius: 8 }}>
+              <button
+                type="button"
+                disabled={busy !== null}
+                onClick={() => addStep()}
+                style={{ ...btn('secondary', busy !== null), marginBottom: '0.75rem', fontSize: '0.85rem' }}
+              >
                 Add step
               </button>
             ) : null}
@@ -362,7 +390,7 @@ export function AutomationFollowUpPanel() {
               type="button"
               disabled={busy !== null}
               onClick={() => void save()}
-              style={{ padding: '0.5rem 1rem', borderRadius: 8, fontWeight: 600, cursor: busy ? 'wait' : 'pointer' }}
+              style={{ ...btn('primary', busy !== null), fontSize: '0.9rem' }}
             >
               Save follow-up settings
             </button>

@@ -14,7 +14,17 @@ import {
   type TenantBookingMode,
   type TenantBookingSettings,
 } from '@/lib/api';
-import { ErrorBanner, LoadingBlock, SectionCard } from '@/components/app/mvp-ui';
+import {
+  ErrorBanner,
+  LoadingBlock,
+  SectionCard,
+  mvpDangerButtonStyle,
+  mvpInputStyle,
+  mvpLabelStyle,
+  mvpPrimaryButtonStyle,
+  mvpSecondaryButtonStyle,
+  mvpSelectStyle,
+} from '@/components/app/mvp-ui';
 
 const BOOKING_MODE_OPTIONS: { value: TenantBookingMode; label: string; hint: string }[] = [
   {
@@ -46,6 +56,41 @@ const CORE_FIELDS: { key: string; label: string }[] = [
 
 const CUSTOM_TYPES = ['short_text', 'long_text', 'single_select', 'checkbox'] as const;
 
+const CUSTOM_FIELD_TYPE_LABELS: Record<(typeof CUSTOM_TYPES)[number], string> = {
+  short_text: 'Short text',
+  long_text: 'Long text',
+  single_select: 'Single select',
+  checkbox: 'Checkbox',
+};
+
+function todayIsoDate(): string {
+  const t = new Date();
+  return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+}
+
+/** Narrow slots to those at or after the chosen local date + starting time (demo UX). */
+function filterSlotsAfterLocalStart(
+  slots: { startTime: string; endTime: string }[],
+  dateStr: string,
+  timeStr: string,
+): { startTime: string; endTime: string }[] {
+  const t = timeStr.trim();
+  if (!t) return slots;
+  const [hhRaw, mmRaw] = t.split(':');
+  const hh = parseInt(hhRaw ?? '', 10);
+  if (Number.isNaN(hh)) return slots;
+  const mm = mmRaw !== undefined ? parseInt(mmRaw, 10) : 0;
+  const minute = Number.isNaN(mm) ? 0 : mm;
+  const minMs = new Date(
+    `${dateStr}T${String(hh).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00`,
+  ).getTime();
+  if (Number.isNaN(minMs)) return slots;
+  return slots.filter(s => {
+    const x = new Date(s.startTime).getTime();
+    return !Number.isNaN(x) && x >= minMs;
+  });
+}
+
 function cardStyle(): CSSProperties {
   return {
     border: '1px solid var(--aisbp-border)',
@@ -53,6 +98,17 @@ function cardStyle(): CSSProperties {
     padding: '0.85rem 1rem',
     marginBottom: '0.75rem',
     background: 'var(--aisbp-surface)',
+  };
+}
+
+function btn(kind: 'primary' | 'secondary' | 'danger', disabled: boolean): CSSProperties {
+  const base =
+    kind === 'primary' ? mvpPrimaryButtonStyle : kind === 'danger' ? mvpDangerButtonStyle : mvpSecondaryButtonStyle;
+  return {
+    ...base,
+    opacity: disabled ? 0.58 : 1,
+    cursor: disabled ? 'not-allowed' : 'pointer',
+    whiteSpace: 'nowrap',
   };
 }
 
@@ -67,9 +123,8 @@ export function AutomationBookingPanel() {
   const [booking, setBooking] = useState<TenantBookingSettings | null>(null);
   type CalendarOption = { id: string; name: string };
   const [calendars, setCalendars] = useState<CalendarOption[]>([]);
-  const [slotStart, setSlotStart] = useState('');
-  const [slotEnd, setSlotEnd] = useState('');
-  const [slotTz, setSlotTz] = useState('');
+  const [slotDate, setSlotDate] = useState(() => todayIsoDate());
+  const [slotTime, setSlotTime] = useState('');
   const [bookingBanner, setBookingBanner] = useState('');
 
   const loadBooking = useCallback(async () => {
@@ -159,21 +214,24 @@ export function AutomationBookingPanel() {
 
   const onTestSlots = async () => {
     if (!token || !tenantId) return;
+    const dateStr = (slotDate || todayIsoDate()).trim();
     setBusy('test-slots');
     setBookingBanner('');
     try {
-      const body =
-        slotStart.trim() || slotEnd.trim() || slotTz.trim()
-          ? {
-              startDate: slotStart.trim() || undefined,
-              endDate: slotEnd.trim() || undefined,
-              timezone: slotTz.trim() || undefined,
-            }
-          : undefined;
+      const body = {
+        startDate: dateStr,
+        endDate: dateStr,
+      };
       const r = await testTenantBookingSlots(token, tenantId, body);
-      const n = r.slots?.length ?? 0;
+      let rows = r.slots ?? [];
+      if (slotTime.trim()) {
+        rows = filterSlotsAfterLocalStart(rows, dateStr, slotTime);
+      }
+      const n = rows.length;
       const extra = r.error ? ` (${r.error})` : '';
-      setBookingBanner(`Returned ${n} sample slots${extra}. Times come from CRM — not a booking confirmation.`);
+      setBookingBanner(
+        `Returned ${n} sample slot(s) for ${dateStr}${slotTime.trim() ? ` from ${slotTime} (local)` : ''}${extra}. Uses your CRM calendar timezone — not a booking confirmation.`,
+      );
     } catch (e) {
       setBookingBanner(e instanceof Error ? e.message : 'Test failed');
     } finally {
@@ -216,15 +274,11 @@ export function AutomationBookingPanel() {
   const calendarOptions = useMemo<CalendarOption[]>(() => calendars, [calendars]);
 
   const bookingHint = !booking?.defaultGhlCalendarId?.trim()
-    ? 'Choose a default calendar and pass Test calendar before relying on availability checks.'
+    ? 'Choose a default calendar, then run Test calendar connection to verify the CRM link.'
     : null;
 
-  const capacityNote =
-    booking && booking.maxBookingsPerSlot > 1
-      ? 'Capacity above 1 is stored for when CRM-backed counting exists — extra slots are never invented.'
-      : null;
-
   const modeHint = BOOKING_MODE_OPTIONS.find(m => m.value === booking?.bookingMode)?.hint ?? '';
+  const dim = busy !== null;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -239,145 +293,103 @@ export function AutomationBookingPanel() {
           <LoadingBlock />
         ) : booking ? (
           <>
-            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.85rem' }}>
-              <input
-                type="checkbox"
-                checked={booking.enabled}
-                onChange={e => setBooking({ ...booking, enabled: e.target.checked })}
-              />
-              <span style={{ fontWeight: 600 }}>Enable booking assistant</span>
-            </label>
-
-            <div style={cardStyle()}>
-              <div style={{ fontSize: '0.72rem', fontWeight: 800, letterSpacing: '0.06em', color: 'var(--aisbp-muted)', marginBottom: '0.35rem' }}>
-                STEP 1 — SYNC CALENDARS
-              </div>
-              <button
-                type="button"
-                disabled={busy !== null}
-                onClick={() => void onSyncCalendars()}
-                style={{ padding: '0.45rem 0.75rem', borderRadius: 8, cursor: busy ? 'wait' : 'pointer' }}
-              >
+            <div
+              style={{
+                ...cardStyle(),
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: '0.5rem',
+                alignItems: 'center',
+                marginBottom: '0.85rem',
+              }}
+            >
+              <span style={{ fontSize: '0.72rem', fontWeight: 800, letterSpacing: '0.06em', color: 'var(--aisbp-muted)', width: '100%' }}>
+                CALENDAR TOOLS
+              </span>
+              <button type="button" disabled={dim} onClick={() => void onSyncCalendars()} style={btn('secondary', dim)}>
                 Sync calendars from CRM
+              </button>
+              <button type="button" disabled={dim} onClick={() => void onTestCal()} style={btn('secondary', dim)}>
+                Test calendar connection
               </button>
             </div>
 
             <div style={cardStyle()}>
               <div style={{ fontSize: '0.72rem', fontWeight: 800, letterSpacing: '0.06em', color: 'var(--aisbp-muted)', marginBottom: '0.35rem' }}>
-                STEP 2 — DEFAULT CALENDAR
+                STEP 1 — CHOOSE DEFAULT CALENDAR
               </div>
-              <select
-                value={booking.defaultGhlCalendarId ?? ''}
-                onChange={e => {
-                  const id = e.target.value || null;
-                  const hit = calendarOptions.find((c: CalendarOption) => c.id === id);
-                  setBooking({
-                    ...booking,
-                    defaultGhlCalendarId: id,
-                    defaultGhlCalendarName: hit?.name ?? null,
-                  });
-                }}
-                style={{ maxWidth: '100%', padding: '0.45rem 0.5rem', borderRadius: 8 }}
-              >
-                <option value="">— Select —</option>
-                {calendarOptions.map((c: CalendarOption) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name || c.id}
-                  </option>
-                ))}
-              </select>
-              <p style={{ fontSize: '0.76rem', color: 'var(--aisbp-muted)', marginTop: '0.35rem' }}>
-                Demo scope uses this calendar only.
+              <label style={{ ...mvpLabelStyle, display: 'block' }}>
+                Default calendar
+                <select
+                  value={booking.defaultGhlCalendarId ?? ''}
+                  onChange={e => {
+                    const id = e.target.value || null;
+                    const hit = calendarOptions.find((c: CalendarOption) => c.id === id);
+                    setBooking({
+                      ...booking,
+                      defaultGhlCalendarId: id,
+                      defaultGhlCalendarName: hit?.name ?? null,
+                    });
+                  }}
+                  style={{ ...mvpSelectStyle, marginTop: '0.35rem', width: '100%', maxWidth: 420 }}
+                >
+                  <option value="">— Select —</option>
+                  {calendarOptions.map((c: CalendarOption) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name || c.id}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <p style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted)', marginTop: '0.5rem', lineHeight: 1.45, marginBottom: 0 }}>
+                AISBP will use this calendar for demo booking flows.
+              </p>
+              {bookingHint ? (
+                <p style={{ fontSize: '0.76rem', color: 'var(--aisbp-muted)', marginTop: '0.45rem', marginBottom: 0 }}>{bookingHint}</p>
+              ) : null}
+            </div>
+
+            <div style={cardStyle()}>
+              <div style={{ fontSize: '0.72rem', fontWeight: 800, letterSpacing: '0.06em', color: 'var(--aisbp-muted)', marginBottom: '0.35rem' }}>
+                STEP 2 — CHECK SAMPLE AVAILABILITY
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.65rem', alignItems: 'flex-end' }}>
+                <label style={{ ...mvpLabelStyle, margin: 0 }}>
+                  Date
+                  <input
+                    type="date"
+                    value={slotDate}
+                    onChange={e => setSlotDate(e.target.value)}
+                    style={{ ...mvpInputStyle, display: 'block', marginTop: '0.35rem' }}
+                  />
+                </label>
+                <label style={{ ...mvpLabelStyle, margin: 0 }}>
+                  Starting time
+                  <input
+                    type="time"
+                    value={slotTime}
+                    onChange={e => setSlotTime(e.target.value)}
+                    style={{ ...mvpInputStyle, display: 'block', marginTop: '0.35rem' }}
+                  />
+                </label>
+                <button type="button" disabled={dim} onClick={() => void onTestSlots()} style={btn('primary', dim)}>
+                  Check availability
+                </button>
+              </div>
+              <p style={{ fontSize: '0.76rem', color: 'var(--aisbp-muted)', marginTop: '0.55rem', lineHeight: 1.45, marginBottom: 0 }}>
+                Uses your CRM calendar timezone.
               </p>
             </div>
 
             <div style={cardStyle()}>
               <div style={{ fontSize: '0.72rem', fontWeight: 800, letterSpacing: '0.06em', color: 'var(--aisbp-muted)', marginBottom: '0.35rem' }}>
-                STEP 3 — TEST CALENDAR CONNECTION
+                STEP 3 — BOOKING MODE &amp; FIELDS
               </div>
-              <button
-                type="button"
-                disabled={busy !== null}
-                onClick={() => void onTestCal()}
-                style={{ padding: '0.45rem 0.75rem', borderRadius: 8, cursor: busy ? 'wait' : 'pointer' }}
-              >
-                Test calendar
-              </button>
-              {bookingHint ? (
-                <p style={{ fontSize: '0.76rem', color: 'var(--aisbp-muted)', marginTop: '0.35rem' }}>{bookingHint}</p>
-              ) : null}
-            </div>
-
-            <div style={cardStyle()}>
-              <div style={{ fontSize: '0.72rem', fontWeight: 800, letterSpacing: '0.06em', color: 'var(--aisbp-muted)', marginBottom: '0.35rem' }}>
-                STEP 4 — PARALLEL BOOKINGS PER SLOT
-              </div>
-              <input
-                type="number"
-                min={1}
-                value={booking.maxBookingsPerSlot}
-                onChange={e =>
-                  setBooking({ ...booking, maxBookingsPerSlot: Math.max(1, Number(e.target.value) || 1) })
-                }
-                style={{ padding: '0.35rem', borderRadius: 8, maxWidth: 120 }}
-              />
-              {capacityNote ? (
-                <p style={{ fontSize: '0.76rem', color: 'var(--aisbp-muted)', marginTop: '0.35rem', lineHeight: 1.45 }}>{capacityNote}</p>
-              ) : null}
-            </div>
-
-            <div style={cardStyle()}>
-              <div style={{ fontSize: '0.72rem', fontWeight: 800, letterSpacing: '0.06em', color: 'var(--aisbp-muted)', marginBottom: '0.35rem' }}>
-                STEP 5 — SAMPLE AVAILABILITY (DATES / TIMEZONE)
-              </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'flex-end' }}>
-                <label style={{ fontSize: '0.78rem' }}>
-                  Start date
-                  <input
-                    type="date"
-                    value={slotStart}
-                    onChange={e => setSlotStart(e.target.value)}
-                    style={{ display: 'block', marginTop: '0.25rem', padding: '0.35rem', borderRadius: 8 }}
-                  />
-                </label>
-                <label style={{ fontSize: '0.78rem' }}>
-                  End date
-                  <input
-                    type="date"
-                    value={slotEnd}
-                    onChange={e => setSlotEnd(e.target.value)}
-                    style={{ display: 'block', marginTop: '0.25rem', padding: '0.35rem', borderRadius: 8 }}
-                  />
-                </label>
-                <label style={{ fontSize: '0.78rem' }}>
-                  Timezone (optional)
-                  <input
-                    value={slotTz}
-                    onChange={e => setSlotTz(e.target.value)}
-                    placeholder="e.g. Australia/Sydney"
-                    style={{ display: 'block', marginTop: '0.25rem', padding: '0.35rem', borderRadius: 8, minWidth: 160 }}
-                  />
-                </label>
-                <button
-                  type="button"
-                  disabled={busy !== null}
-                  onClick={() => void onTestSlots()}
-                  style={{ padding: '0.45rem 0.75rem', borderRadius: 8, cursor: busy ? 'wait' : 'pointer' }}
-                >
-                  Check slots
-                </button>
-              </div>
-            </div>
-
-            <div style={cardStyle()}>
-              <div style={{ fontSize: '0.72rem', fontWeight: 800, letterSpacing: '0.06em', color: 'var(--aisbp-muted)', marginBottom: '0.35rem' }}>
-                STEP 6 — BOOKING MODE &amp; FIELDS
-              </div>
-              <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '0.35rem' }}>Booking mode</label>
+              <label style={{ ...mvpLabelStyle, display: 'block', marginBottom: '0.35rem' }}>Booking mode</label>
               <select
                 value={booking.bookingMode}
                 onChange={e => setBooking({ ...booking, bookingMode: e.target.value as TenantBookingMode })}
-                style={{ maxWidth: '100%', padding: '0.45rem 0.5rem', borderRadius: 8, marginBottom: '0.5rem' }}
+                style={{ ...mvpSelectStyle, maxWidth: '100%', marginBottom: '0.5rem' }}
               >
                 {BOOKING_MODE_OPTIONS.map(o => (
                   <option key={o.value} value={o.value}>
@@ -435,17 +447,19 @@ export function AutomationBookingPanel() {
                     value={cf.label}
                     onChange={e => updateCustomField(cf.id, { label: e.target.value })}
                     placeholder="Label"
-                    style={{ width: '100%', padding: '0.35rem', borderRadius: 6, marginBottom: '0.35rem' }}
+                    style={{ ...mvpInputStyle, width: '100%', marginBottom: '0.35rem' }}
                   />
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
                     <select
-                      value={cf.fieldType}
+                      value={
+                        (CUSTOM_TYPES as readonly string[]).includes(cf.fieldType) ? cf.fieldType : 'short_text'
+                      }
                       onChange={e => updateCustomField(cf.id, { fieldType: e.target.value })}
-                      style={{ padding: '0.35rem', borderRadius: 6 }}
+                      style={{ ...mvpSelectStyle, padding: '0.35rem' }}
                     >
                       {CUSTOM_TYPES.map(t => (
                         <option key={t} value={t}>
-                          {t}
+                          {CUSTOM_FIELD_TYPE_LABELS[t]}
                         </option>
                       ))}
                     </select>
@@ -457,7 +471,7 @@ export function AutomationBookingPanel() {
                       />
                       Required
                     </label>
-                    <button type="button" onClick={() => removeCustomField(cf.id)} style={{ fontSize: '0.78rem' }}>
+                    <button type="button" disabled={dim} onClick={() => removeCustomField(cf.id)} style={btn('danger', dim)}>
                       Remove
                     </button>
                   </div>
@@ -474,26 +488,52 @@ export function AutomationBookingPanel() {
                       }
                       placeholder="One option per line"
                       rows={3}
-                      style={{ width: '100%', marginTop: '0.35rem', padding: '0.35rem', borderRadius: 6, fontSize: '0.8rem' }}
+                      style={{ ...mvpInputStyle, width: '100%', marginTop: '0.35rem', fontSize: '0.8rem' }}
                     />
                   ) : null}
                 </div>
               ))}
-              <button type="button" onClick={() => addCustomField()} style={{ marginBottom: '0.75rem', padding: '0.4rem 0.65rem', borderRadius: 8 }}>
+              <button type="button" disabled={dim} onClick={() => addCustomField()} style={btn('secondary', dim)}>
                 Add custom field
               </button>
             </div>
 
-            <button
-              type="button"
-              disabled={busy !== null}
-              onClick={() => void saveBookingModule()}
-              style={{ padding: '0.5rem 1rem', borderRadius: 8, fontWeight: 600, cursor: busy ? 'wait' : 'pointer' }}
-            >
-              Save booking settings
-            </button>
+            <div style={cardStyle()}>
+              <div style={{ fontSize: '0.72rem', fontWeight: 800, letterSpacing: '0.06em', color: 'var(--aisbp-muted)', marginBottom: '0.35rem' }}>
+                STEP 4 — BOOKING SETTINGS
+              </div>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.65rem' }}>
+                <input
+                  type="checkbox"
+                  checked={booking.enabled}
+                  onChange={e => setBooking({ ...booking, enabled: e.target.checked })}
+                />
+                <span style={{ fontWeight: 600 }}>Enable booking assistant</span>
+              </label>
+              <label style={{ ...mvpLabelStyle, display: 'block', maxWidth: 200 }}>
+                Parallel bookings per slot
+                <input
+                  type="number"
+                  min={1}
+                  value={booking.maxBookingsPerSlot}
+                  onChange={e =>
+                    setBooking({ ...booking, maxBookingsPerSlot: Math.max(1, Number(e.target.value) || 1) })
+                  }
+                  style={{ ...mvpInputStyle, marginTop: '0.35rem', maxWidth: 120 }}
+                />
+              </label>
+              <p style={{ fontSize: '0.76rem', color: 'var(--aisbp-muted)', lineHeight: 1.45, marginTop: '0.5rem', marginBottom: '0.85rem' }}>
+                Default is 1. Higher capacity is stored for future CRM-backed counting; AISBP will not invent extra availability.
+              </p>
+              <button type="button" disabled={dim} onClick={() => void saveBookingModule()} style={btn('primary', dim)}>
+                Save booking settings
+              </button>
+            </div>
+
             {bookingBanner ? (
-              <p style={{ marginTop: '0.75rem', fontSize: '0.85rem', color: 'var(--aisbp-muted)' }}>{bookingBanner}</p>
+              <p style={{ marginTop: '0.35rem', fontSize: '0.85rem', color: 'var(--aisbp-muted)' }} role="status">
+                {bookingBanner}
+              </p>
             ) : null}
           </>
         ) : null}

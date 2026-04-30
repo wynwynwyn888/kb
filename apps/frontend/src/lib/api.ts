@@ -391,7 +391,7 @@ export interface TenantBookingSettings {
   bookingMode: TenantBookingMode;
   defaultGhlCalendarId: string | null;
   defaultGhlCalendarName: string | null;
-  coreRequiredFieldsJson: string[];
+  coreFieldsJson: Record<string, { enabled: boolean; required: boolean }>;
   customFieldsJson: CustomBookingField[];
   maxBookingsPerSlot: number;
 }
@@ -415,6 +415,7 @@ export interface TenantTagRule {
   autoApply: boolean;
   ruleName: string;
   ruleDescription: string;
+  keywords: string[];
   crmTagId: string | null;
   crmTagName: string;
   matchMode: TagMatchMode;
@@ -433,6 +434,7 @@ export interface TagRuleMatchHit {
   confidenceLabel: TagConfidenceThreshold;
   passesThreshold: boolean;
   source: 'keyword' | 'ai';
+  why: string;
 }
 
 export interface TagRuleTestMatchResult {
@@ -450,6 +452,14 @@ export interface FollowUpStepSetting {
   enabled: boolean;
 }
 
+export type FollowUpHoursTimezoneMode = 'BUSINESS' | 'CONTACT';
+
+export interface ActiveHoursDayWindow {
+  enabled: boolean;
+  start: string;
+  end: string;
+}
+
 export interface TenantFollowUpSettings {
   enabled: boolean;
   maxFollowUps: number;
@@ -458,6 +468,8 @@ export interface TenantFollowUpSettings {
   stopOnEscalated: boolean;
   stopOnOptOut: boolean;
   businessHoursOnly: boolean;
+  activeHoursTimezoneMode: FollowUpHoursTimezoneMode;
+  activeHoursWindows: Record<string, ActiveHoursDayWindow>;
   steps: FollowUpStepSetting[];
 }
 
@@ -473,7 +485,7 @@ export async function patchTenantBookingSettings(
     bookingMode: TenantBookingMode;
     defaultGhlCalendarId: string | null;
     defaultGhlCalendarName: string | null;
-    coreRequiredFieldsJson: string[];
+    coreFieldsJson: Record<string, { enabled: boolean; required: boolean }>;
     customFieldsJson: CustomBookingField[];
     maxBookingsPerSlot: number;
   }>,
@@ -489,7 +501,11 @@ export async function syncTenantCalendars(
   token: string,
   tenantId: string,
 ): Promise<{ calendars: GhlCalendarOption[]; syncedAt: string; error?: string }> {
-  return apiRequest(`/tenants/${tenantId}/booking-settings/sync-calendars`, { token, method: 'POST' });
+  const path = `/tenants/${tenantId}/booking-settings/sync-calendars`;
+  if (process.env.NODE_ENV === 'development' && typeof window !== 'undefined') {
+    console.debug('[AISBP API] POST', `${getApiBaseUrl()}${path}`);
+  }
+  return apiRequest(path, { token, method: 'POST' });
 }
 
 export async function testTenantBookingCalendar(
@@ -552,6 +568,7 @@ export async function patchTenantTagRule(
     autoApply: boolean;
     ruleName: string;
     ruleDescription: string;
+    keywords?: string[];
     crmTagId: string | null;
     crmTagName: string;
     matchMode: TagMatchMode;

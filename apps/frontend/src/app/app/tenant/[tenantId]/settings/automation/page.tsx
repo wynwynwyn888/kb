@@ -1,5 +1,6 @@
-import { TenantAutomationSettingsContent } from '@/components/app/tenant-workspace/TenantAutomationSettingsContent';
+import { redirect } from 'next/navigation';
 
-export default function TenantSettingsAutomationPage() {
-  return <TenantAutomationSettingsContent />;
+/** Automation moved to top-level nav: /app/tenant/[tenantId]/automation */
+export default function TenantSettingsAutomationRedirectPage({ params }: { params: { tenantId: string } }) {
+  redirect(`/app/tenant/${params.tenantId}/automation/tags`);
 }

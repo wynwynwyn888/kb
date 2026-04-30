@@ -4,7 +4,7 @@ import { normalizeModelForLiveProvider } from '@aisbp/types';
 import { getSupabaseService } from '../../lib/supabase';
 import { isUsableOpenAiFallbackKey } from '../../lib/ai-live-model-resolve';
 import type { ConfidenceThreshold, TagMatchMode } from '../../lib/tenant-automation-constants';
-import type { TagRuleDto } from './tag-rules.service';
+import { mapTagRuleRow, type TagRuleDto } from './tag-rules.service';
 
 export interface TagRuleMatchHit {
   ruleId: string;
@@ -15,6 +15,8 @@ export interface TagRuleMatchHit {
   confidenceLabel: ConfidenceThreshold;
   passesThreshold: boolean;
   source: 'keyword' | 'ai';
+  /** Human-readable reason for the score (debug / UI). */
+  why: string;
 }
 
 export interface TagRuleMatchResult {
@@ -50,6 +52,30 @@ function keywordScore(message: string, description: string): number {
   return hits / uniq.length;
 }
 
+function keywordBasis(message: string, rule: TagRuleDto): { score: number; detail: string } {
+  const useList =
+    rule.keywords.length > 0 && (rule.matchMode === 'KEYWORD' || rule.matchMode === 'HYBRID');
+  if (useList) {
+    const m = message.toLowerCase();
+    let hits = 0;
+    const list = rule.keywords.map(k => k.trim()).filter(Boolean);
+    const total = list.length;
+    for (const k of list) {
+      if (m.includes(k.toLowerCase())) hits++;
+    }
+    const score = total === 0 ? 0 : hits / total;
+    return { score, detail: `Matched ${hits}/${total} configured keyword phrase(s).` };
+  }
+  const s = keywordScore(message, rule.ruleDescription);
+  return {
+    score: s,
+    detail:
+      s > 0
+        ? 'Token overlap with the rule description (auto-extracted terms, length ≥4).'
+        : 'No token overlap with the rule description (auto-extracted terms, length ≥4).',
+  };
+}
+
 type ProviderRow = {
   api_key: string | null;
   endpoint: string | null;
@@ -83,18 +109,18 @@ export class TagRuleMatchService {
       throw new BadRequestException('Could not load tag rules');
     }
 
-    let rules = (rows ?? []).map((r) => this.rowToDto(r as Record<string, unknown>));
+    let rules = (rows ?? []).map((r) => mapTagRuleRow(r as Record<string, unknown>));
     if (opts?.ruleIds?.length) {
       const allow = new Set(opts.ruleIds);
       rules = rules.filter((x) => allow.has(x.id));
     }
 
-    const keywordHits = new Map<string, { score: number }>();
+    const keywordHits = new Map<string, { score: number; detail: string }>();
     const needAiIds = new Set<string>();
 
     for (const r of rules) {
-      const ks = keywordScore(trimmed, r.ruleDescription);
-      keywordHits.set(r.id, { score: ks });
+      const kb = keywordBasis(trimmed, r);
+      keywordHits.set(r.id, { score: kb.score, detail: kb.detail });
       if (r.matchMode === 'AI' || r.matchMode === 'HYBRID') {
         needAiIds.add(r.id);
       }
@@ -110,27 +136,35 @@ export class TagRuleMatchService {
     const hits: TagRuleMatchHit[] = [];
 
     for (const r of rules) {
-      const ks = keywordHits.get(r.id)?.score ?? 0;
+      const kbRow = keywordHits.get(r.id);
+      const ks = kbRow?.score ?? 0;
+      const kwDetail = kbRow?.detail ?? '';
       let score = 0;
       let source: 'keyword' | 'ai' = 'keyword';
+      let why = kwDetail;
 
       if (r.matchMode === 'KEYWORD') {
         score = ks;
       } else if (r.matchMode === 'AI') {
         score = aiSelected.has(r.id) ? 0.88 : 0;
         source = 'ai';
+        why = aiSelected.has(r.id)
+          ? 'OpenAI classifier returned this rule id (allowed list only).'
+          : 'OpenAI classifier did not return this rule id.';
       } else {
-        // HYBRID
         const kwOk = ks >= minScoreForThreshold('LOW');
         const aiOk = aiSelected.has(r.id);
         if (aiOk) {
           score = Math.max(ks, 0.88);
           source = 'ai';
+          why = `Hybrid: classifier matched. ${kwDetail}`;
         } else if (kwOk) {
           score = ks;
           source = 'keyword';
+          why = `Hybrid: keyword arm satisfied. ${kwDetail}`;
         } else {
           score = 0;
+          why = `Hybrid: neither classifier nor keyword arm met the relaxed keyword gate. ${kwDetail}`;
         }
       }
 
@@ -146,6 +180,7 @@ export class TagRuleMatchService {
         confidenceLabel: label,
         passesThreshold: passes,
         source,
+        why,
       });
     }
 
@@ -160,24 +195,6 @@ export class TagRuleMatchService {
       .filter(Boolean);
 
     return { hits, tagsToApply: [...new Set(tagsToApply)] };
-  }
-
-  private rowToDto(rec: Record<string, unknown>): TagRuleDto {
-    return {
-      id: String(rec['id'] ?? ''),
-      tenantId: String(rec['tenant_id'] ?? ''),
-      enabled: Boolean(rec['enabled']),
-      autoApply: Boolean(rec['auto_apply']),
-      ruleName: String(rec['rule_name'] ?? ''),
-      ruleDescription: String(rec['rule_description'] ?? ''),
-      crmTagId: rec['crm_tag_id'] == null ? null : String(rec['crm_tag_id']),
-      crmTagName: String(rec['crm_tag_name'] ?? ''),
-      matchMode: String(rec['match_mode'] ?? 'AI') as TagRuleDto['matchMode'],
-      confidenceThreshold: String(rec['confidence_threshold'] ?? 'NORMAL') as TagRuleDto['confidenceThreshold'],
-      priority: Number(rec['priority'] ?? 0),
-      createdAt: String(rec['created_at'] ?? ''),
-      updatedAt: String(rec['updated_at'] ?? ''),
-    };
   }
 
   private async runAiClassifier(tenantId: string, message: string, rules: TagRuleDto[]): Promise<string[]> {

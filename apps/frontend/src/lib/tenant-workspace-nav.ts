@@ -4,7 +4,7 @@ export type TenantNavItem = {
   href: string;
   label: string;
   /** Lucide-style label for aria; icon rendered in UI */
-  icon: 'settings' | 'book' | 'bot' | 'chart' | 'users' | 'scroll' | 'sliders';
+  icon: 'settings' | 'book' | 'bot' | 'automation' | 'chart' | 'users' | 'scroll' | 'sliders';
   match: (pathname: string) => boolean;
 };
 
@@ -32,6 +32,12 @@ export function buildTenantNavItems(tenantId: string): TenantNavItem[] {
       label: 'Bot Instructions',
       icon: 'bot',
       match: p => p === `${base}/goals` || p === `${base}/bot` || p === `${base}/prompt`,
+    },
+    {
+      href: `${base}/automation`,
+      label: 'Automation',
+      icon: 'automation',
+      match: p => p === `${base}/automation` || p.startsWith(`${base}/automation/`),
     },
     { href: `${base}/usage`, label: 'Usage', icon: 'chart', match: p => p === `${base}/usage` },
     { href: `${base}/team`, label: 'Team', icon: 'users', match: p => p === `${base}/team` },

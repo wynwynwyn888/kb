@@ -1,18 +1,46 @@
 import { BadRequestException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import {
+  ACTIVE_HOURS_DAY_KEYS,
   BOOKING_CORE_FIELD_KEYS,
   BOOKING_MODES,
   CONFIDENCE_THRESHOLDS,
   CUSTOM_FIELD_TYPES,
   FOLLOW_UP_DELAY_UNITS,
   FOLLOW_UP_STEP_MODES,
+  FOLLOW_UP_ACTIVE_HOURS_TIMEZONE_MODES,
   TAG_MATCH_MODES,
   type BookingMode,
   type ConfidenceThreshold,
+  type FollowUpActiveHoursTimezoneMode,
   type TagMatchMode,
 } from './tenant-automation-constants';
 
+export type CoreFieldToggle = { enabled: boolean; required: boolean };
+
+export function parseCoreFieldsJson(raw: unknown): Record<string, CoreFieldToggle> {
+  const allowed = new Set<string>(BOOKING_CORE_FIELD_KEYS);
+  const out: Record<string, CoreFieldToggle> = {};
+  for (const k of BOOKING_CORE_FIELD_KEYS) {
+    out[k] = { enabled: false, required: false };
+  }
+  if (raw === undefined || raw === null) return out;
+  if (typeof raw !== 'object') throw new BadRequestException('coreFieldsJson must be a JSON object');
+  const o = raw as Record<string, unknown>;
+  for (const key of Object.keys(o)) {
+    if (!allowed.has(key)) throw new BadRequestException(`Unknown core field key: ${key}`);
+    const v = o[key];
+    if (!v || typeof v !== 'object') throw new BadRequestException(`Invalid core field entry: ${key}`);
+    const vo = v as Record<string, unknown>;
+    out[key] = {
+      enabled: Boolean(vo['enabled']),
+      required: Boolean(vo['required']),
+    };
+  }
+  return out;
+}
+
+/** @deprecated legacy array-only shape — used only when migrating old rows in services */
 export function parseCoreRequiredFieldsJson(raw: unknown): string[] {
   if (raw === undefined || raw === null) return [];
   if (!Array.isArray(raw)) {
@@ -60,13 +88,14 @@ export function parseCustomFieldsJson(raw: unknown): CustomBookingFieldDto[] {
     if (!CUSTOM_FIELD_TYPES.includes(fieldType as (typeof CUSTOM_FIELD_TYPES)[number])) {
       throw new BadRequestException(`Invalid fieldType: ${fieldType}`);
     }
+    const needsOptions = fieldType === 'single_choice' || fieldType === 'single_select';
     const options = Array.isArray(o['options'])
       ? (o['options'] as unknown[])
           .filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
           .map((s) => s.trim())
       : undefined;
-    if (fieldType === 'single_choice' && (!options || options.length === 0)) {
-      throw new BadRequestException('single_choice fields require options');
+    if (needsOptions && (!options || options.length === 0)) {
+      throw new BadRequestException('single_select / single_choice fields require options');
     }
     const required = Boolean(o['required']);
     const displayOrder =
@@ -113,11 +142,57 @@ export function parseConfidenceThreshold(raw: unknown): ConfidenceThreshold {
   throw new BadRequestException(`confidenceThreshold must be one of: ${CONFIDENCE_THRESHOLDS.join(', ')} (or lowercase)`);
 }
 
+export function parseKeywordsJson(raw: unknown): string[] {
+  if (raw === undefined || raw === null) return [];
+  if (!Array.isArray(raw)) throw new BadRequestException('keywords must be an array of strings');
+  const out: string[] = [];
+  for (const x of raw) {
+    if (typeof x !== 'string' || !x.trim()) continue;
+    const t = x.trim();
+    if (t && !out.includes(t)) out.push(t);
+  }
+  if (out.length > 64) throw new BadRequestException('At most 64 keywords');
+  return out;
+}
+
+export function parseFollowUpActiveHoursTimezoneMode(raw: unknown): FollowUpActiveHoursTimezoneMode {
+  if (raw === undefined || raw === null) return 'BUSINESS';
+  if (typeof raw !== 'string' || !raw.trim()) return 'BUSINESS';
+  const u = raw.trim().toUpperCase();
+  if (FOLLOW_UP_ACTIVE_HOURS_TIMEZONE_MODES.includes(u as FollowUpActiveHoursTimezoneMode)) return u as FollowUpActiveHoursTimezoneMode;
+  throw new BadRequestException('activeHoursTimezoneMode must be BUSINESS or CONTACT');
+}
+
+const HHMM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+export function parseActiveHoursWindowsJson(raw: unknown): Record<string, { enabled: boolean; start: string; end: string }> {
+  const base: Record<string, { enabled: boolean; start: string; end: string }> = {};
+  for (const d of ACTIVE_HOURS_DAY_KEYS) {
+    base[d] = { enabled: false, start: '09:00', end: '17:00' };
+  }
+  if (raw === undefined || raw === null) return base;
+  if (typeof raw !== 'object' || raw === null) throw new BadRequestException('activeHoursWindows must be an object');
+  const o = raw as Record<string, unknown>;
+  for (const d of ACTIVE_HOURS_DAY_KEYS) {
+    const v = o[d];
+    if (v === undefined) continue;
+    if (!v || typeof v !== 'object') throw new BadRequestException(`Invalid window for ${d}`);
+    const vo = v as Record<string, unknown>;
+    const enabled = Boolean(vo['enabled']);
+    const start = typeof vo['start'] === 'string' ? vo['start'].trim() : '09:00';
+    const end = typeof vo['end'] === 'string' ? vo['end'].trim() : '17:00';
+    if (!HHMM_RE.test(start) || !HHMM_RE.test(end)) throw new BadRequestException(`Invalid time for ${d} (use HH:MM)`);
+    base[d] = { enabled, start, end };
+  }
+  return base;
+}
+
 export interface TagRulePatchInput {
   enabled?: boolean;
   autoApply?: boolean;
   ruleName?: string;
   ruleDescription?: string;
+  keywords?: string[];
   crmTagId?: string | null;
   crmTagName?: string;
   matchMode?: TagMatchMode;
@@ -141,6 +216,9 @@ export function parseTagRulePatch(raw: unknown, opts: { partial: boolean }): Tag
   if (o['ruleDescription'] !== undefined) {
     if (typeof o['ruleDescription'] !== 'string') throw new BadRequestException('ruleDescription must be a string');
     out.ruleDescription = o['ruleDescription'];
+  }
+  if (o['keywords'] !== undefined) {
+    out.keywords = parseKeywordsJson(o['keywords']);
   }
   if (o['crmTagId'] !== undefined) {
     out.crmTagId = o['crmTagId'] === null ? null : String(o['crmTagId']);

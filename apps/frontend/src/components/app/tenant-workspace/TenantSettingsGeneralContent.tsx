@@ -180,14 +180,6 @@ export function TenantSettingsGeneralContent() {
           </Link>
         </div>
       </SectionCard>
-
-      <div style={{ marginTop: '1rem' }}>
-        <SectionCard title="Automation" subtitle="Configure CRM tags, booking calendar, and escalation behavior." accent="muted">
-          <Link href={`${base}/settings/automation`} style={appFloatingSecondaryButtonStyle}>
-            Open automation settings
-          </Link>
-        </SectionCard>
-      </div>
     </>
   );
 }

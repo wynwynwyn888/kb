@@ -17,6 +17,8 @@ export interface TagRuleDto {
   autoApply: boolean;
   ruleName: string;
   ruleDescription: string;
+  /** Explicit keyword phrases for KEYWORD/HYBRID when provided. */
+  keywords: string[];
   crmTagId: string | null;
   crmTagName: string;
   matchMode: TagMatchMode;
@@ -30,7 +32,16 @@ export interface TaggingSettingsDto {
   automaticTaggingEnabled: boolean;
 }
 
-function rowToRule(rec: Record<string, unknown>): TagRuleDto {
+function parseKeywordsCell(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  for (const x of raw) {
+    if (typeof x === 'string' && x.trim()) out.push(x.trim());
+  }
+  return out;
+}
+
+export function mapTagRuleRow(rec: Record<string, unknown>): TagRuleDto {
   return {
     id: String(rec['id'] ?? ''),
     tenantId: String(rec['tenant_id'] ?? ''),
@@ -38,6 +49,7 @@ function rowToRule(rec: Record<string, unknown>): TagRuleDto {
     autoApply: Boolean(rec['auto_apply']),
     ruleName: String(rec['rule_name'] ?? ''),
     ruleDescription: String(rec['rule_description'] ?? ''),
+    keywords: parseKeywordsCell(rec['keywords_json']),
     crmTagId: rec['crm_tag_id'] == null ? null : String(rec['crm_tag_id']),
     crmTagName: String(rec['crm_tag_name'] ?? ''),
     matchMode: String(rec['match_mode'] ?? 'AI') as TagMatchMode,
@@ -46,6 +58,10 @@ function rowToRule(rec: Record<string, unknown>): TagRuleDto {
     createdAt: String(rec['created_at'] ?? ''),
     updatedAt: String(rec['updated_at'] ?? ''),
   };
+}
+
+function rowToRule(rec: Record<string, unknown>): TagRuleDto {
+  return mapTagRuleRow(rec);
 }
 
 /** Rules eligible for automatic CRM tagging (executor must only use these). */
@@ -134,6 +150,7 @@ export class TagRulesService {
       auto_apply: dto.autoApply ?? false,
       rule_name: dto.ruleName.trim(),
       rule_description: dto.ruleDescription.trim(),
+      keywords_json: dto.keywords ?? [],
       crm_tag_id: dto.crmTagId ?? null,
       crm_tag_name: dto.crmTagName.trim(),
       match_mode: dto.matchMode ?? 'AI',
@@ -167,6 +184,7 @@ export class TagRulesService {
     if (dto.autoApply !== undefined) patch['auto_apply'] = dto.autoApply;
     if (dto.ruleName !== undefined) patch['rule_name'] = dto.ruleName.trim();
     if (dto.ruleDescription !== undefined) patch['rule_description'] = dto.ruleDescription.trim();
+    if (dto.keywords !== undefined) patch['keywords_json'] = dto.keywords;
     if (dto.crmTagId !== undefined) patch['crm_tag_id'] = dto.crmTagId;
     if (dto.crmTagName !== undefined) patch['crm_tag_name'] = dto.crmTagName.trim();
     if (dto.matchMode !== undefined) patch['match_mode'] = dto.matchMode;

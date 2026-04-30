@@ -50,7 +50,6 @@ export function TenantSettingsShell({ children }: { children: ReactNode }) {
 
   const settingsRoot = `${base}/settings`;
   const isGeneral = pathname === settingsRoot || pathname === `${settingsRoot}/`;
-  const isAutomation = pathname.startsWith(`${settingsRoot}/automation`);
   const isAdvanced = pathname.startsWith(`${settingsRoot}/advanced`);
 
   const aiModeLabel = botMode === 'off' ? 'Off' : botMode === 'suggestive' ? 'Suggestive' : 'Auto';
@@ -188,9 +187,6 @@ export function TenantSettingsShell({ children }: { children: ReactNode }) {
           <nav style={{ display: 'flex', flexWrap: 'wrap', gap: '0.45rem', marginBottom: '1.25rem' }} aria-label="Settings sections">
             <Link href={settingsRoot} style={tabLinkStyle(isGeneral)} aria-current={isGeneral ? 'page' : undefined}>
               General
-            </Link>
-            <Link href={`${settingsRoot}/automation`} style={tabLinkStyle(isAutomation)} aria-current={isAutomation ? 'page' : undefined}>
-              Automation
             </Link>
             <Link href={`${settingsRoot}/advanced`} style={tabLinkStyle(isAdvanced)} aria-current={isAdvanced ? 'page' : undefined}>
               Advanced

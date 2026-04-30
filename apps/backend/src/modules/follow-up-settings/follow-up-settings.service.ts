@@ -1,6 +1,11 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { getSupabaseService } from '../../lib/supabase';
-import { parseFollowUpSteps } from '../../lib/tenant-automation-validation';
+import {
+  parseFollowUpSteps,
+  parseActiveHoursWindowsJson,
+  parseFollowUpActiveHoursTimezoneMode,
+} from '../../lib/tenant-automation-validation';
+import type { FollowUpActiveHoursTimezoneMode } from '../../lib/tenant-automation-constants';
 
 export interface FollowUpStepApi {
   stepNumber: number;
@@ -12,6 +17,8 @@ export interface FollowUpStepApi {
   enabled: boolean;
 }
 
+export type ActiveHoursDayWindow = { enabled: boolean; start: string; end: string };
+
 export interface TenantFollowUpSettingsDto {
   enabled: boolean;
   maxFollowUps: number;
@@ -20,6 +27,8 @@ export interface TenantFollowUpSettingsDto {
   stopOnEscalated: boolean;
   stopOnOptOut: boolean;
   businessHoursOnly: boolean;
+  activeHoursTimezoneMode: FollowUpActiveHoursTimezoneMode;
+  activeHoursWindows: Record<string, ActiveHoursDayWindow>;
   steps: FollowUpStepApi[];
 }
 
@@ -31,6 +40,8 @@ const DEFAULT: TenantFollowUpSettingsDto = {
   stopOnEscalated: true,
   stopOnOptOut: true,
   businessHoursOnly: false,
+  activeHoursTimezoneMode: 'BUSINESS',
+  activeHoursWindows: parseActiveHoursWindowsJson({}),
   steps: [],
 };
 
@@ -42,6 +53,18 @@ function rowToDto(row: Record<string, unknown>): TenantFollowUpSettingsDto {
   } catch {
     steps = [];
   }
+  let activeHoursWindows = DEFAULT.activeHoursWindows;
+  try {
+    activeHoursWindows = parseActiveHoursWindowsJson(row['active_hours_windows_json']);
+  } catch {
+    activeHoursWindows = parseActiveHoursWindowsJson({});
+  }
+  let activeHoursTimezoneMode: FollowUpActiveHoursTimezoneMode = 'BUSINESS';
+  try {
+    activeHoursTimezoneMode = parseFollowUpActiveHoursTimezoneMode(row['active_hours_timezone_mode']);
+  } catch {
+    activeHoursTimezoneMode = 'BUSINESS';
+  }
   const mf = Number(row['max_follow_ups'] ?? 3);
   return {
     enabled: Boolean(row['enabled']),
@@ -51,6 +74,8 @@ function rowToDto(row: Record<string, unknown>): TenantFollowUpSettingsDto {
     stopOnEscalated: Boolean(row['stop_on_escalated']),
     stopOnOptOut: Boolean(row['stop_on_opt_out']),
     businessHoursOnly: Boolean(row['business_hours_only']),
+    activeHoursTimezoneMode,
+    activeHoursWindows,
     steps,
   };
 }
@@ -97,6 +122,16 @@ export class FollowUpSettingsService {
     const businessHoursOnly =
       o['businessHoursOnly'] !== undefined ? Boolean(o['businessHoursOnly']) : current.businessHoursOnly;
 
+    let activeHoursTimezoneMode = current.activeHoursTimezoneMode;
+    if (o['activeHoursTimezoneMode'] !== undefined) {
+      activeHoursTimezoneMode = parseFollowUpActiveHoursTimezoneMode(o['activeHoursTimezoneMode']);
+    }
+
+    let activeHoursWindows = current.activeHoursWindows;
+    if (o['activeHoursWindows'] !== undefined) {
+      activeHoursWindows = parseActiveHoursWindowsJson(o['activeHoursWindows']);
+    }
+
     let steps = current.steps;
     if (o['steps'] !== undefined) {
       steps = parseFollowUpSteps(o['steps']);
@@ -112,6 +147,8 @@ export class FollowUpSettingsService {
       stop_on_escalated: stopOnEscalated,
       stop_on_opt_out: stopOnOptOut,
       business_hours_only: businessHoursOnly,
+      active_hours_timezone_mode: activeHoursTimezoneMode,
+      active_hours_windows_json: activeHoursWindows,
       steps_json: steps,
       updated_at: now,
     };

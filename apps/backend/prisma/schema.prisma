@@ -159,6 +159,8 @@ model TenantTagRule {
   autoApply               Boolean              @default(false) @map("auto_apply")
   ruleName                String               @map("rule_name")
   ruleDescription         String               @map("rule_description") @db.Text
+  /// Optional explicit phrases for KEYWORD / HYBRID (otherwise description tokens are used).
+  keywordsJson            Json                 @default("[]") @map("keywords_json")
   crmTagId                String?              @map("crm_tag_id")
   crmTagName              String               @map("crm_tag_name")
   matchMode               TagMatchMode         @default(AI) @map("match_mode")
@@ -180,7 +182,8 @@ model TenantBookingSettings {
   bookingMode              BookingMode @default(COLLECT_DETAILS_ONLY) @map("booking_mode")
   defaultGhlCalendarId     String?     @map("default_ghl_calendar_id")
   defaultGhlCalendarName   String?     @map("default_ghl_calendar_name")
-  coreRequiredFieldsJson   Json        @default("[]") @map("core_required_fields_json")
+  /// Per core field: `{ "name": { "enabled": true, "required": true }, ... }`
+  coreFieldsJson           Json        @default("{}") @map("core_fields_json")
   customFieldsJson         Json        @default("[]") @map("custom_fields_json")
   maxBookingsPerSlot       Int         @default(1) @map("max_bookings_per_slot")
   createdAt                DateTime    @default(now()) @map("created_at")
@@ -201,6 +204,10 @@ model TenantFollowUpSettings {
   stopOnEscalated           Boolean  @default(true) @map("stop_on_escalated")
   stopOnOptOut              Boolean  @default(true) @map("stop_on_opt_out")
   businessHoursOnly         Boolean  @default(false) @map("business_hours_only")
+  /// BUSINESS (agency/workspace TZ) or CONTACT — stored for future scheduler.
+  activeHoursTimezoneMode   String   @default("BUSINESS") @map("active_hours_timezone_mode")
+  /// Per weekday windows: `{ "mon": { "enabled", "start", "end" }, ... }`
+  activeHoursWindowsJson    Json     @default("{}") @map("active_hours_windows_json")
   stepsJson                 Json     @default("[]") @map("steps_json")
   createdAt                 DateTime @default(now()) @map("created_at")
   updatedAt                 DateTime @updatedAt @map("updated_at")

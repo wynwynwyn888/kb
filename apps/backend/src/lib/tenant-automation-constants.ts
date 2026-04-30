@@ -8,7 +8,7 @@ export const BOOKING_MODES = [
 
 export type BookingMode = (typeof BOOKING_MODES)[number];
 
-/** Core keys stored in `tenant_booking_settings.core_required_fields_json`. */
+/** Core keys in `tenant_booking_settings.core_fields_json`. */
 export const BOOKING_CORE_FIELD_KEYS = [
   'name',
   'phone',
@@ -31,7 +31,9 @@ export const CUSTOM_FIELD_TYPES = [
   'short_text',
   'long_text',
   'yes_no',
+  'checkbox',
   'single_choice',
+  'single_select',
   'date',
   'time',
 ] as const;
@@ -43,3 +45,9 @@ export type FollowUpDelayUnit = (typeof FOLLOW_UP_DELAY_UNITS)[number];
 
 export const FOLLOW_UP_STEP_MODES = ['fixed', 'ai'] as const;
 export type FollowUpStepMode = (typeof FOLLOW_UP_STEP_MODES)[number];
+
+export const FOLLOW_UP_ACTIVE_HOURS_TIMEZONE_MODES = ['BUSINESS', 'CONTACT'] as const;
+export type FollowUpActiveHoursTimezoneMode = (typeof FOLLOW_UP_ACTIVE_HOURS_TIMEZONE_MODES)[number];
+
+export const ACTIVE_HOURS_DAY_KEYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const;
+export type ActiveHoursDayKey = (typeof ACTIVE_HOURS_DAY_KEYS)[number];

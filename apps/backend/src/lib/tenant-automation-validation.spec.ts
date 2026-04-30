@@ -1,14 +1,19 @@
 import {
   parseBookingMode,
-  parseCoreRequiredFieldsJson,
+  parseCoreFieldsJson,
   parseMatchMode,
   parseConfidenceThreshold,
 } from './tenant-automation-validation';
 
 describe('tenant-automation-validation', () => {
-  it('parses core required fields and rejects unknown keys', () => {
-    expect(parseCoreRequiredFieldsJson(['name', 'phone'])).toEqual(['name', 'phone']);
-    expect(() => parseCoreRequiredFieldsJson(['name', 'nope'])).toThrow();
+  it('parses core fields object', () => {
+    const o = parseCoreFieldsJson({
+      name: { enabled: true, required: true },
+      phone: { enabled: false, required: false },
+    });
+    expect(o.name).toEqual({ enabled: true, required: true });
+    expect(o.phone).toEqual({ enabled: false, required: false });
+    expect(() => parseCoreFieldsJson({ nope: { enabled: true, required: false } })).toThrow();
   });
 
   it('parses booking mode', () => {

@@ -4,20 +4,31 @@ import { GhlService } from '../ghl/ghl.service';
 import type { GhlCalendarSummary, GhlFreeSlot } from '@aisbp/ghl-client';
 import {
   parseBookingMode,
-  parseCoreRequiredFieldsJson,
+  parseCoreFieldsJson,
   parseCustomFieldsJson,
+  type CoreFieldToggle,
   type CustomBookingFieldDto,
 } from '../../lib/tenant-automation-validation';
-import type { BookingMode } from '../../lib/tenant-automation-constants';
+import { BOOKING_CORE_FIELD_KEYS, type BookingMode } from '../../lib/tenant-automation-constants';
+
+export type TenantCoreFieldsDto = Record<string, CoreFieldToggle>;
 
 export interface TenantBookingSettingsDto {
   enabled: boolean;
   bookingMode: BookingMode;
   defaultGhlCalendarId: string | null;
   defaultGhlCalendarName: string | null;
-  coreRequiredFieldsJson: string[];
+  coreFieldsJson: TenantCoreFieldsDto;
   customFieldsJson: CustomBookingFieldDto[];
   maxBookingsPerSlot: number;
+}
+
+function defaultCoreFields(): TenantCoreFieldsDto {
+  const o: TenantCoreFieldsDto = {} as TenantCoreFieldsDto;
+  for (const k of BOOKING_CORE_FIELD_KEYS) {
+    o[k] = { enabled: false, required: false };
+  }
+  return o;
 }
 
 const DEFAULT_SETTINGS: TenantBookingSettingsDto = {
@@ -25,19 +36,22 @@ const DEFAULT_SETTINGS: TenantBookingSettingsDto = {
   bookingMode: 'COLLECT_DETAILS_ONLY',
   defaultGhlCalendarId: null,
   defaultGhlCalendarName: null,
-  coreRequiredFieldsJson: [],
+  coreFieldsJson: defaultCoreFields(),
   customFieldsJson: [],
   maxBookingsPerSlot: 1,
 };
 
 function rowToDto(row: Record<string, unknown>): TenantBookingSettingsDto {
-  const coreRaw = row['core_required_fields_json'];
-  let coreRequiredFieldsJson: string[] = [];
+  const coreRaw = row['core_fields_json'];
+  let coreFieldsJson: TenantCoreFieldsDto;
   try {
-    coreRequiredFieldsJson =
-      coreRaw === undefined || coreRaw === null ? [] : parseCoreRequiredFieldsJson(coreRaw as unknown);
+    coreFieldsJson = coreRaw === undefined || coreRaw === null ? defaultCoreFields() : parseCoreFieldsJson(coreRaw as unknown);
   } catch {
-    coreRequiredFieldsJson = [];
+    coreFieldsJson = defaultCoreFields();
+  }
+  const merged = defaultCoreFields();
+  for (const k of BOOKING_CORE_FIELD_KEYS) {
+    merged[k] = coreFieldsJson[k] ?? { enabled: false, required: false };
   }
 
   const custRaw = row['custom_fields_json'];
@@ -63,7 +77,7 @@ function rowToDto(row: Record<string, unknown>): TenantBookingSettingsDto {
       row['default_ghl_calendar_name'] === null || row['default_ghl_calendar_name'] === undefined
         ? null
         : String(row['default_ghl_calendar_name']),
-    coreRequiredFieldsJson,
+    coreFieldsJson: merged,
     customFieldsJson,
     maxBookingsPerSlot,
   };
@@ -98,7 +112,7 @@ export class BookingSettingsService {
       bookingMode: unknown;
       defaultGhlCalendarId: string | null;
       defaultGhlCalendarName: string | null;
-      coreRequiredFieldsJson: unknown;
+      coreFieldsJson: unknown;
       customFieldsJson: unknown;
       maxBookingsPerSlot: unknown;
     }>,
@@ -110,9 +124,9 @@ export class BookingSettingsService {
       bookingMode = parseBookingMode(patch.bookingMode);
     }
 
-    let coreRequiredFieldsJson = current.coreRequiredFieldsJson;
-    if (patch.coreRequiredFieldsJson !== undefined) {
-      coreRequiredFieldsJson = parseCoreRequiredFieldsJson(patch.coreRequiredFieldsJson);
+    let coreFieldsJson = current.coreFieldsJson;
+    if (patch.coreFieldsJson !== undefined) {
+      coreFieldsJson = parseCoreFieldsJson(patch.coreFieldsJson);
     }
 
     let customFieldsJson = current.customFieldsJson;
@@ -149,7 +163,7 @@ export class BookingSettingsService {
       booking_mode: bookingMode,
       default_ghl_calendar_id: defaultGhlCalendarId,
       default_ghl_calendar_name: defaultGhlCalendarName,
-      core_required_fields_json: coreRequiredFieldsJson,
+      core_fields_json: coreFieldsJson,
       custom_fields_json: customFieldsJson,
       max_bookings_per_slot: maxBookingsPerSlot,
       updated_at: now,

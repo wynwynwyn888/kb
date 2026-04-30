@@ -34,7 +34,7 @@ export class BookingSettingsController {
       bookingMode: unknown;
       defaultGhlCalendarId: string | null;
       defaultGhlCalendarName: string | null;
-      coreRequiredFieldsJson: unknown;
+      coreFieldsJson: unknown;
       customFieldsJson: unknown;
       maxBookingsPerSlot: unknown;
     }>,

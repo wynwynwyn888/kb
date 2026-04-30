@@ -58,7 +58,15 @@ describe('BookingSettingsService', () => {
       bookingMode: 'CHECK_AVAILABILITY',
       defaultGhlCalendarId: 'cal_9',
       defaultGhlCalendarName: 'Main',
-      coreRequiredFieldsJson: [],
+      coreFieldsJson: {
+        name: { enabled: false, required: false },
+        phone: { enabled: false, required: false },
+        email: { enabled: false, required: false },
+        service: { enabled: false, required: false },
+        preferred_date: { enabled: false, required: false },
+        preferred_time: { enabled: false, required: false },
+        first_visit: { enabled: false, required: false },
+      },
       customFieldsJson: [],
       maxBookingsPerSlot: 1,
     });

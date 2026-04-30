@@ -411,6 +411,63 @@ export function formatGhlCalendarDetailSummary(s: GhlCalendarDetailSummary): str
   return parts.join(' · ');
 }
 
+/** Normalized availability schedule fields for diagnostics (no secrets). */
+export interface GhlAvailabilityScheduleDiagnostics {
+  scheduleId?: string;
+  timezone?: string;
+  rulesCount: number;
+  associatedCalendarIds: string[];
+}
+
+function collectAssociatedCalendarIdsFromSchedule(o: Record<string, unknown>): string[] {
+  const out: string[] = [];
+  const walk = (v: unknown): void => {
+    if (typeof v === 'string' && v.trim()) {
+      out.push(v.trim());
+      return;
+    }
+    if (Array.isArray(v)) {
+      for (const x of v) walk(x);
+      return;
+    }
+    if (isRecord(v)) {
+      const id = v['calendarId'] ?? v['id'] ?? v['_id'];
+      if (typeof id === 'string' && id.trim()) out.push(id.trim());
+    }
+  };
+  walk(o['calendarIds']);
+  walk(o['calendars']);
+  walk(o['associatedCalendarIds']);
+  walk(o['assignedCalendarIds']);
+  return [...new Set(out)];
+}
+
+/**
+ * Extract schedule timezone, rules count, and calendar associations from GET schedule / search row bodies.
+ */
+export function extractScheduleDiagnosticsFromPayload(raw: unknown): GhlAvailabilityScheduleDiagnostics | null {
+  if (!isRecord(raw)) return null;
+  const sch = isRecord(raw['schedule']) ? (raw['schedule'] as Record<string, unknown>) : raw;
+  if (!sch || Object.keys(sch).length === 0) return null;
+  const scheduleId =
+    typeof sch['id'] === 'string' ? sch['id'] : typeof sch['_id'] === 'string' ? sch['_id'] : undefined;
+  const timezone = typeof sch['timezone'] === 'string' ? sch['timezone'] : undefined;
+  const rules = sch['rules'];
+  const rulesCount = Array.isArray(rules) ? rules.length : 0;
+  const associatedCalendarIds = collectAssociatedCalendarIdsFromSchedule(sch);
+  return { scheduleId, timezone, rulesCount, associatedCalendarIds };
+}
+
+function normalizeScheduleSearchRows(raw: unknown): Record<string, unknown>[] {
+  if (Array.isArray(raw)) return raw.filter(isRecord) as Record<string, unknown>[];
+  if (!isRecord(raw)) return [];
+  for (const key of ['schedules', 'data', 'items', 'results'] as const) {
+    const v = raw[key];
+    if (Array.isArray(v)) return v.filter(isRecord) as Record<string, unknown>[];
+  }
+  return [];
+}
+
 export interface GhlTagSummary {
   id?: string;
   name: string;
@@ -853,6 +910,143 @@ export class GhlClient {
         }
       }
       return { error: msg, httpStatus, responseBodyExcerpt, requestPath };
+    }
+  }
+
+  /**
+   * Search user availability schedules (location / optional calendar / optional user).
+   * HighLevel: `GET /calendars/schedules/search` with `Version: 2023-02-21`.
+   * Note: Official docs may mark `userId` as required; pass a team user id when possible.
+   */
+  async searchAvailabilitySchedules(params: {
+    locationId: string;
+    calendarId?: string;
+    userId?: string;
+    skip?: number;
+    limit?: number;
+  }): Promise<{
+    schedules: GhlAvailabilityScheduleDiagnostics[];
+    error?: string;
+    httpStatus?: number;
+    requestPath: string;
+  }> {
+    const requestPath = '/calendars/schedules/search';
+    const query: Record<string, string | number> = {
+      locationId: params.locationId.trim(),
+      skip: params.skip ?? 0,
+      limit: Math.min(500, Math.max(1, params.limit ?? 50)),
+    };
+    if (params.calendarId?.trim()) query['calendarId'] = params.calendarId.trim();
+    if (params.userId?.trim()) query['userId'] = params.userId.trim();
+
+    try {
+      const response = await this.client.get<unknown>(requestPath, {
+        params: query,
+        headers: {
+          Version: GHL_CALENDARS_LIST_API_VERSION,
+          Accept: 'application/json',
+        },
+      });
+      const rows = normalizeScheduleSearchRows(response.data);
+      const schedules: GhlAvailabilityScheduleDiagnostics[] = [];
+      for (const row of rows) {
+        const d = extractScheduleDiagnosticsFromPayload(row);
+        if (d) schedules.push(d);
+      }
+      return { schedules, httpStatus: response.status, requestPath };
+    } catch (error) {
+      let httpStatus: number | undefined;
+      let msg =
+        this.extractGhlErrorMessage(error) ?? (error instanceof Error ? error.message : 'searchAvailabilitySchedules failed');
+      if (axios.isAxiosError(error)) {
+        httpStatus = error.response?.status;
+      }
+      return { schedules: [], error: msg, httpStatus, requestPath };
+    }
+  }
+
+  /** Alias aligned with GHL docs wording (`listAvailabilitySchedules`). */
+  async listAvailabilitySchedules(
+    locationId: string,
+    calendarId?: string,
+    userId?: string,
+  ): Promise<{
+    schedules: GhlAvailabilityScheduleDiagnostics[];
+    error?: string;
+    httpStatus?: number;
+    requestPath: string;
+  }> {
+    return this.searchAvailabilitySchedules({ locationId, calendarId, userId });
+  }
+
+  /**
+   * Event-calendar availability schedule for a specific calendar.
+   * HighLevel: `GET /calendars/schedules/event-calendar/:calendarId`
+   */
+  async getEventCalendarSchedule(calendarId: string): Promise<{
+    found: boolean;
+    diagnostics?: GhlAvailabilityScheduleDiagnostics;
+    error?: string;
+    httpStatus?: number;
+    requestPath: string;
+  }> {
+    const requestPath = `/calendars/schedules/event-calendar/${encodeURIComponent(calendarId)}`;
+    try {
+      const response = await this.client.get<unknown>(requestPath, {
+        headers: {
+          Version: GHL_CALENDARS_LIST_API_VERSION,
+          Accept: 'application/json',
+        },
+      });
+      const diagnostics = extractScheduleDiagnosticsFromPayload(response.data) ?? undefined;
+      const found = response.status === 200 && diagnostics !== undefined;
+      return { found, diagnostics, httpStatus: response.status, requestPath };
+    } catch (error) {
+      if (axios.isAxiosError(error) && error.response?.status === 404) {
+        return { found: false, httpStatus: 404, requestPath };
+      }
+      let httpStatus: number | undefined;
+      const msg =
+        this.extractGhlErrorMessage(error) ?? (error instanceof Error ? error.message : 'getEventCalendarSchedule failed');
+      if (axios.isAxiosError(error)) {
+        httpStatus = error.response?.status;
+      }
+      return { found: false, error: msg, httpStatus, requestPath };
+    }
+  }
+
+  /**
+   * Single availability schedule by id (rules, timezone, calendar associations).
+   * HighLevel: `GET /calendars/schedules/:id` (locationId query per docs).
+   */
+  async getAvailabilitySchedule(
+    scheduleId: string,
+    locationId: string,
+  ): Promise<{
+    diagnostics?: GhlAvailabilityScheduleDiagnostics;
+    error?: string;
+    httpStatus?: number;
+    requestPath: string;
+  }> {
+    const requestPath = `/calendars/schedules/${encodeURIComponent(scheduleId)}`;
+    try {
+      const response = await this.client.get<unknown>(requestPath, {
+        params: { locationId: locationId.trim() },
+        headers: {
+          Version: GHL_CALENDARS_LIST_API_VERSION,
+          Accept: 'application/json',
+        },
+      });
+      const diagnostics = extractScheduleDiagnosticsFromPayload(response.data) ?? undefined;
+      return { diagnostics, httpStatus: response.status, requestPath };
+    } catch (error) {
+      let httpStatus: number | undefined;
+      const msg =
+        this.extractGhlErrorMessage(error) ?? (error instanceof Error ? error.message : 'getAvailabilitySchedule failed');
+      if (axios.isAxiosError(error)) {
+        httpStatus = error.response?.status;
+      }
+      return { error: msg, httpStatus, requestPath };
     }
   }
 

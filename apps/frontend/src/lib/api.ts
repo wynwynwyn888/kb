@@ -510,11 +510,33 @@ export async function syncTenantCalendars(
   return apiRequest(path, { token, method: 'POST' });
 }
 
+export interface TenantBookingScheduleDiagnostics {
+  calendarReachable: boolean;
+  calendarType?: string | null;
+  active?: boolean | null;
+  teamMembersCount: number;
+  openHoursCount: number;
+  eventCalendarScheduleFound: boolean;
+  userScheduleFound: boolean;
+  scheduleRulesCount: number;
+  scheduleTimezone?: string | null;
+  scheduleAssociatedCalendarIds: string[];
+  selectedCalendarInSchedule: boolean;
+  warnings: string[];
+  warningCodes: string[];
+}
+
 export async function testTenantBookingCalendar(
   token: string,
   tenantId: string,
   body?: { calendarId?: string | null },
-): Promise<{ ok: boolean; calendarId: string | null; message: string; calendars?: GhlCalendarOption[] }> {
+): Promise<{
+  ok: boolean;
+  calendarId: string | null;
+  message: string;
+  calendars?: GhlCalendarOption[];
+  scheduleDiagnostics?: TenantBookingScheduleDiagnostics;
+}> {
   return apiRequest(`/tenants/${tenantId}/booking-settings/test-calendar`, {
     token,
     method: 'POST',
@@ -539,6 +561,7 @@ export async function testTenantBookingSlots(
   error?: string;
   emptyWithoutError?: boolean;
   retriedWithUserId?: string | null;
+  scheduleDiagnostics?: TenantBookingScheduleDiagnostics;
 }> {
   return apiRequest(`/tenants/${tenantId}/booking-settings/test-slots`, {
     token,

@@ -10,6 +10,11 @@ import {
   type GhlFreeSlot,
 } from '@aisbp/ghl-client';
 import {
+  computeBookingScheduleDiagnostics,
+  SCHED_WARN_FREE_SLOTS_EMPTY_RETRY,
+  type BookingScheduleDiagnosticsDto,
+} from './booking-schedule-diagnostics';
+import {
   parseBookingMode,
   parseCoreFieldsJson,
   parseCustomFieldsJson,
@@ -314,6 +319,7 @@ export class BookingSettingsService {
     message: string;
     calendars?: GhlCalendarSummary[];
     calendarDetail?: GhlCalendarDetailSummary;
+    scheduleDiagnostics?: BookingScheduleDiagnosticsDto;
   }> {
     const settings = await this.getBookingSettings(tenantId);
     const calendarId = body?.calendarId?.trim() || settings.defaultGhlCalendarId?.trim() || null;
@@ -359,12 +365,35 @@ export class BookingSettingsService {
       );
     }
     const detailLine = detail.summary ? formatGhlCalendarDetailSummary(detail.summary) : '';
+
+    const scheduleDiagnostics = await computeBookingScheduleDiagnostics(
+      client,
+      calendarId,
+      ghlLocationId,
+      detail.summary,
+    );
+    this.logger.log(
+      `bookingCalendarScheduleDiagnostic ${JSON.stringify({
+        tenantId,
+        calendarId,
+        locationId: ghlLocationId,
+        teamMembersCount: scheduleDiagnostics.teamMembersCount,
+        openHoursCount: scheduleDiagnostics.openHoursCount,
+        eventCalendarScheduleFound: scheduleDiagnostics.eventCalendarScheduleFound,
+        userScheduleFound: scheduleDiagnostics.userScheduleFound,
+        scheduleRulesCount: scheduleDiagnostics.scheduleRulesCount,
+        scheduleTimezone: scheduleDiagnostics.scheduleTimezone,
+        warningCodes: scheduleDiagnostics.warningCodes,
+      })}`,
+    );
+
     return {
       ok: true,
       calendarId,
       message: detailLine ? `Calendar is reachable. ${detailLine}` : 'Calendar is reachable.',
       calendars: listed.calendars,
       calendarDetail: detail.summary,
+      scheduleDiagnostics,
     };
   }
 
@@ -385,6 +414,7 @@ export class BookingSettingsService {
     error?: string;
     emptyWithoutError?: boolean;
     retriedWithUserId?: string | null;
+    scheduleDiagnostics?: BookingScheduleDiagnosticsDto;
   }> {
     const settings = await this.getBookingSettings(tenantId);
     const calendarId = body.calendarId?.trim() || settings.defaultGhlCalendarId?.trim() || null;
@@ -500,12 +530,43 @@ export class BookingSettingsService {
       );
     }
 
+    let scheduleDiagnostics: BookingScheduleDiagnosticsDto | undefined;
+    if (!r.error && r.slots.length === 0) {
+      const calSnap = await client.getCalendar(calendarId);
+      const extraCodes = retriedWithUserId ? [SCHED_WARN_FREE_SLOTS_EMPTY_RETRY] : [];
+      const extraWarnings = retriedWithUserId
+        ? ['CRM returned no bookable slots even after staff-specific retry.']
+        : [];
+      scheduleDiagnostics = await computeBookingScheduleDiagnostics(
+        client,
+        calendarId,
+        ghlLocationId,
+        calSnap.summary,
+        { extraWarnings, extraCodes },
+      );
+      this.logger.log(
+        `bookingCalendarScheduleDiagnostic ${JSON.stringify({
+          tenantId,
+          calendarId,
+          locationId: ghlLocationId,
+          teamMembersCount: scheduleDiagnostics.teamMembersCount,
+          openHoursCount: scheduleDiagnostics.openHoursCount,
+          eventCalendarScheduleFound: scheduleDiagnostics.eventCalendarScheduleFound,
+          userScheduleFound: scheduleDiagnostics.userScheduleFound,
+          scheduleRulesCount: scheduleDiagnostics.scheduleRulesCount,
+          scheduleTimezone: scheduleDiagnostics.scheduleTimezone,
+          warningCodes: scheduleDiagnostics.warningCodes,
+        })}`,
+      );
+    }
+
     return {
       slots: r.slots,
       calendarId,
       error: r.error,
       emptyWithoutError: !r.error && r.slots.length === 0,
       retriedWithUserId,
+      scheduleDiagnostics,
     };
   }
 }

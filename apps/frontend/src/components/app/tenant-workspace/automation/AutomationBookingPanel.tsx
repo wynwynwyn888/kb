@@ -14,6 +14,7 @@ import {
   testTenantBookingSlots,
   type CustomBookingField,
   type TenantBookingMode,
+  type TenantBookingScheduleDiagnostics,
   type TenantBookingSettings,
 } from '@/lib/api';
 import {
@@ -134,6 +135,61 @@ function availabilityHintStyle(): CSSProperties {
   };
 }
 
+function scheduleDiagBoxStyle(): CSSProperties {
+  return {
+    marginTop: '0.65rem',
+    padding: '0.65rem 0.75rem',
+    borderRadius: 8,
+    border: '1px solid rgba(234, 179, 8, 0.55)',
+    background: 'rgba(234, 179, 8, 0.09)',
+  };
+}
+
+function ScheduleDiagnosticsPanel({ d }: { d: TenantBookingScheduleDiagnostics }) {
+  const row = (label: string, value: string | number | boolean) => (
+    <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap', fontSize: '0.76rem', marginBottom: '0.2rem' }}>
+      <span style={{ color: 'var(--aisbp-muted)', minWidth: 140 }}>{label}</span>
+      <span style={{ fontWeight: 600, color: 'var(--aisbp-text-secondary)' }}>{String(value)}</span>
+    </div>
+  );
+  const idsPreview =
+    d.scheduleAssociatedCalendarIds.length <= 2
+      ? d.scheduleAssociatedCalendarIds.join(', ') || '—'
+      : `${d.scheduleAssociatedCalendarIds.slice(0, 2).join(', ')} +${d.scheduleAssociatedCalendarIds.length - 2}`;
+  return (
+    <div style={scheduleDiagBoxStyle()} role="region" aria-label="Schedule diagnostics">
+      <div style={{ fontSize: '0.78rem', fontWeight: 700, marginBottom: '0.45rem', color: '#92400e' }}>
+        Schedule diagnostics
+      </div>
+      {row('Calendar reachable', d.calendarReachable ? 'Yes' : 'No')}
+      {row('Calendar type', d.calendarType?.trim() ? d.calendarType : '—')}
+      {row(
+        'Active',
+        d.active === null || d.active === undefined ? '—' : d.active ? 'Yes' : 'No',
+      )}
+      {row('Team members', d.teamMembersCount)}
+      {row('Open hours (calendar object)', d.openHoursCount)}
+      {row('Event calendar schedule', d.eventCalendarScheduleFound ? 'Found' : 'Not found')}
+      {row('User schedule (search)', d.userScheduleFound ? 'Found' : 'Not found')}
+      {row('Rules count', d.scheduleRulesCount)}
+      {row('Schedule timezone', d.scheduleTimezone ?? '—')}
+      {row('Selected calendar in schedule', d.selectedCalendarInSchedule ? 'Yes' : 'No')}
+      {row('Associated calendar ids', idsPreview)}
+      {d.warnings.length > 0 ? (
+        <ul style={{ margin: '0.5rem 0 0', paddingLeft: '1.1rem', fontSize: '0.74rem', color: '#92400e', lineHeight: 1.45 }}>
+          {d.warnings.map((w, i) => (
+            <li key={i}>{w}</li>
+          ))}
+        </ul>
+      ) : null}
+      <p style={{ ...availabilityHintStyle(), marginTop: '0.55rem', color: '#92400e' }}>
+        What to fix in CRM: Open CRM → Calendars → selected calendar → Availability. Create or apply an availability schedule,
+        assign staff, and save.
+      </p>
+    </div>
+  );
+}
+
 function btn(kind: 'primary' | 'secondary' | 'danger', disabled: boolean): CSSProperties {
   const base =
     kind === 'primary' ? mvpPrimaryButtonStyle : kind === 'danger' ? mvpDangerButtonStyle : mvpSecondaryButtonStyle;
@@ -181,6 +237,8 @@ export function AutomationBookingPanel() {
 
   const [calendarForTest, setCalendarForTest] = useState('');
   const [testConnectionOk, setTestConnectionOk] = useState(false);
+  const [calendarScheduleDiag, setCalendarScheduleDiag] = useState<TenantBookingScheduleDiagnostics | null>(null);
+  const [slotsScheduleDiag, setSlotsScheduleDiag] = useState<TenantBookingScheduleDiagnostics | null>(null);
   const didInitTestCalendar = useRef(false);
 
   const loadBooking = useCallback(async () => {
@@ -285,14 +343,17 @@ export function AutomationBookingPanel() {
     }
     setBusy('test-cal');
     setTestCalendarStatus('');
+    setCalendarScheduleDiag(null);
     try {
       const r = await testTenantBookingCalendar(token, tenantId, { calendarId: calendarForTest.trim() });
       setTestConnectionOk(r.ok);
       setTestCalendarStatus(r.ok ? r.message : r.message);
+      setCalendarScheduleDiag(r.scheduleDiagnostics ?? null);
       if (r.calendars?.length) setCalendars(r.calendars);
     } catch (e) {
       setTestConnectionOk(false);
       setTestCalendarStatus(formatHttpErrorDetail(e));
+      setCalendarScheduleDiag(null);
     } finally {
       setBusy(null);
     }
@@ -326,6 +387,7 @@ export function AutomationBookingPanel() {
     setAvailabilityMain('');
     setAvailabilityHint('');
     setAvailabilityExtra('');
+    setSlotsScheduleDiag(null);
     try {
       const r = await testTenantBookingSlots(token, tenantId, payload);
       const rawCount = (r.slots ?? []).length;
@@ -335,12 +397,14 @@ export function AutomationBookingPanel() {
       }
       const n = rows.length;
       if (r.error) {
+        setSlotsScheduleDiag(null);
         setAvailabilityMain(
           `GHL: ${r.error}${n > 0 ? ` — still showing ${n} parsed slot(s).` : ''}`,
         );
         return;
       }
       if (n === 0) {
+        setSlotsScheduleDiag(r.scheduleDiagnostics ?? calendarScheduleDiag ?? null);
         if (rawCount === 0) {
           setAvailabilityMain(AVAILABILITY_ZERO_MAIN);
           setAvailabilityHint(AVAILABILITY_ZERO_HINT);
@@ -355,12 +419,14 @@ export function AutomationBookingPanel() {
         }
         return;
       }
+      setSlotsScheduleDiag(null);
       let msg = `Returned ${n} slot(s) for ${dateStr}${slotTime.trim() ? ` from ${slotTime} (local filter)` : ''}. Not a booking confirmation.`;
       if (r.retriedWithUserId) {
         msg += ` (CRM returned slots when querying staff user ${r.retriedWithUserId}.)`;
       }
       setAvailabilityMain(msg);
     } catch (e) {
+      setSlotsScheduleDiag(null);
       setAvailabilityMain(`Could not check availability: ${formatHttpErrorDetail(e)}`);
     } finally {
       setBusy(null);
@@ -484,6 +550,7 @@ export function AutomationBookingPanel() {
                   {testCalendarStatus}
                 </p>
               ) : null}
+              {calendarScheduleDiag ? <ScheduleDiagnosticsPanel d={calendarScheduleDiag} /> : null}
             </div>
 
             <div style={cardStyle()}>
@@ -531,6 +598,7 @@ export function AutomationBookingPanel() {
               ) : null}
               {availabilityHint ? <p style={availabilityHintStyle()}>{availabilityHint}</p> : null}
               {availabilityExtra ? <p style={availabilityHintStyle()}>{availabilityExtra}</p> : null}
+              {slotsScheduleDiag ? <ScheduleDiagnosticsPanel d={slotsScheduleDiag} /> : null}
             </div>
           </SectionCard>
 

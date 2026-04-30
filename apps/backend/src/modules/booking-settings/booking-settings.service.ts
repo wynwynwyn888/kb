@@ -2,7 +2,13 @@ import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { getSupabaseService } from '../../lib/supabase';
 import { resolveAppTimeZone, wallClockInZoneToUtcMs } from '../../lib/business-time';
 import { GhlService } from '../ghl/ghl.service';
-import { GHL_CALENDARS_LIST_API_VERSION, type GhlCalendarSummary, type GhlFreeSlot } from '@aisbp/ghl-client';
+import {
+  GHL_CALENDARS_LIST_API_VERSION,
+  formatGhlCalendarDetailSummary,
+  type GhlCalendarDetailSummary,
+  type GhlCalendarSummary,
+  type GhlFreeSlot,
+} from '@aisbp/ghl-client';
 import {
   parseBookingMode,
   parseCoreFieldsJson,
@@ -307,6 +313,7 @@ export class BookingSettingsService {
     calendarId: string | null;
     message: string;
     calendars?: GhlCalendarSummary[];
+    calendarDetail?: GhlCalendarDetailSummary;
   }> {
     const settings = await this.getBookingSettings(tenantId);
     const calendarId = body?.calendarId?.trim() || settings.defaultGhlCalendarId?.trim() || null;
@@ -338,11 +345,26 @@ export class BookingSettingsService {
         calendars: listed.calendars,
       };
     }
+
+    const detail = await client.getCalendar(calendarId);
+    if (detail.error) {
+      this.logger.warn(
+        `calendarDetailFetchFailed ${JSON.stringify({
+          tenantId,
+          calendarId,
+          status: detail.httpStatus ?? null,
+          excerpt: detail.responseBodyExcerpt ?? null,
+          message: detail.error,
+        })}`,
+      );
+    }
+    const detailLine = detail.summary ? formatGhlCalendarDetailSummary(detail.summary) : '';
     return {
       ok: true,
       calendarId,
-      message: 'Calendar is reachable.',
+      message: detailLine ? `Calendar is reachable. ${detailLine}` : 'Calendar is reachable.',
       calendars: listed.calendars,
+      calendarDetail: detail.summary,
     };
   }
 
@@ -357,7 +379,13 @@ export class BookingSettingsService {
       timezone?: string;
       calendarId?: string;
     },
-  ): Promise<{ slots: GhlFreeSlot[]; calendarId: string | null; error?: string }> {
+  ): Promise<{
+    slots: GhlFreeSlot[];
+    calendarId: string | null;
+    error?: string;
+    emptyWithoutError?: boolean;
+    retriedWithUserId?: string | null;
+  }> {
     const settings = await this.getBookingSettings(tenantId);
     const calendarId = body.calendarId?.trim() || settings.defaultGhlCalendarId?.trim() || null;
     if (!calendarId) {
@@ -399,12 +427,62 @@ export class BookingSettingsService {
       })}`,
     );
 
-    const r = await client.getFreeSlots({
+    let r = await client.getFreeSlots({
       calendarId,
       startDateMs: startMs,
       endDateMs: endMs,
       timezone: crmTimezoneUsed,
     });
+
+    let retriedWithUserId: string | null = null;
+
+    if (!r.error && r.slots.length === 0) {
+      const calD = await client.getCalendar(calendarId);
+      const userIds = calD.summary?.teamMemberUserIds;
+      if (userIds && userIds.length > 0) {
+        const uid = userIds[0]!;
+        const r2 = await client.getFreeSlots({
+          calendarId,
+          startDateMs: startMs,
+          endDateMs: endMs,
+          timezone: crmTimezoneUsed,
+          userId: uid,
+        });
+        retriedWithUserId = uid;
+        this.logger.log(
+          `bookingTestSlotsRetryWithUser ${JSON.stringify({
+            calendarId,
+            userId: uid,
+            userIdsCount: userIds.length,
+            slotsReturned: r2.slots.length,
+            httpStatus: r2.httpStatus ?? null,
+            shapeSummary: r2.shapeSummary,
+          })}`,
+        );
+        if (r2.error) {
+          this.logger.warn(`bookingTestSlots retry free-slots error: ${r2.error}`);
+        } else if (r2.slots.length > 0) {
+          r = r2;
+        }
+      }
+    }
+
+    this.logger.log(
+      `bookingTestSlotsResult ${JSON.stringify({
+        tenantId,
+        calendarId,
+        generatedStartIso: new Date(startMs).toISOString(),
+        generatedEndIso: new Date(endMs).toISOString(),
+        crmTimezoneUsed,
+        httpStatus: r.httpStatus ?? null,
+        rawResponseShape: r.shapeSummary,
+        dateKeysReturned: r.dateKeys,
+        slotsReturned: r.slots.length,
+        hasSlots: r.slots.length > 0,
+        retriedWithUserId,
+        ghlLocationId,
+      })}`,
+    );
 
     if (r.error) {
       this.logger.warn(
@@ -422,6 +500,12 @@ export class BookingSettingsService {
       );
     }
 
-    return { slots: r.slots, calendarId, error: r.error };
+    return {
+      slots: r.slots,
+      calendarId,
+      error: r.error,
+      emptyWithoutError: !r.error && r.slots.length === 0,
+      retriedWithUserId,
+    };
   }
 }

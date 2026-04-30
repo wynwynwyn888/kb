@@ -41,12 +41,17 @@ describe('BookingSettingsService', () => {
   it('testSlots delegates to getFreeSlots', async () => {
     const getFreeSlots = jest.fn(async () => ({
       slots: [{ startTime: '2026-04-29T10:00:00Z', endTime: '2026-04-29T10:30:00Z' }],
+      dateKeys: [] as string[],
+      shapeSummary: 'nestedArrayField',
+      httpStatus: 200,
       error: undefined as string | undefined,
     }));
 
+    const getCalendar = jest.fn(async () => ({ summary: { teamMemberUserIds: [] as string[] } }));
+
     const ghl = {
       createGhlClientForConnectedTenantOrThrow: jest.fn(async () => ({
-        client: { getFreeSlots },
+        client: { getFreeSlots, getCalendar },
         ghlLocationId: 'loc_x',
       })),
     } as unknown as GhlService;

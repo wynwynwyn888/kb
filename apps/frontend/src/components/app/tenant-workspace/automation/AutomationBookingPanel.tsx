@@ -1,7 +1,7 @@
 'use client';
 
 import type { CSSProperties } from 'react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import {
@@ -65,6 +65,13 @@ const CUSTOM_FIELD_TYPE_LABELS: Record<(typeof CUSTOM_TYPES)[number], string> = 
   checkbox: 'Checkbox',
 };
 
+const AVAILABILITY_ZERO_MAIN =
+  'No available slots were returned for this calendar and time range.';
+const AVAILABILITY_ZERO_HINT =
+  'Check the CRM calendar’s availability hours, assigned staff, service settings, and timezone. Some CRM service calendars may require a staff/user assignment before slots appear.';
+const AVAILABILITY_EXTRA_WHEN_TEST_OK =
+  'Calendar is reachable, but no availability was returned. This usually means availability/staff/service settings need checking inside CRM.';
+
 function todayIsoDate(): string {
   const t = new Date();
   return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
@@ -117,6 +124,16 @@ function statusLineStyle(): CSSProperties {
   };
 }
 
+function availabilityHintStyle(): CSSProperties {
+  return {
+    fontSize: '0.72rem',
+    color: 'var(--aisbp-muted)',
+    marginTop: '0.45rem',
+    lineHeight: 1.5,
+    marginBottom: 0,
+  };
+}
+
 function btn(kind: 'primary' | 'secondary' | 'danger', disabled: boolean): CSSProperties {
   const base =
     kind === 'primary' ? mvpPrimaryButtonStyle : kind === 'danger' ? mvpDangerButtonStyle : mvpSecondaryButtonStyle;
@@ -157,8 +174,14 @@ export function AutomationBookingPanel() {
 
   const [syncStatus, setSyncStatus] = useState('');
   const [testCalendarStatus, setTestCalendarStatus] = useState('');
-  const [availabilityStatus, setAvailabilityStatus] = useState('');
+  const [availabilityMain, setAvailabilityMain] = useState('');
+  const [availabilityHint, setAvailabilityHint] = useState('');
+  const [availabilityExtra, setAvailabilityExtra] = useState('');
   const [saveSettingsStatus, setSaveSettingsStatus] = useState('');
+
+  const [calendarForTest, setCalendarForTest] = useState('');
+  const [testConnectionOk, setTestConnectionOk] = useState(false);
+  const didInitTestCalendar = useRef(false);
 
   const loadBooking = useCallback(async () => {
     if (!token || !tenantId) return;
@@ -177,6 +200,16 @@ export function AutomationBookingPanel() {
   useEffect(() => {
     void loadBooking();
   }, [loadBooking]);
+
+  useEffect(() => {
+    didInitTestCalendar.current = false;
+  }, [tenantId]);
+
+  useEffect(() => {
+    if (!booking || didInitTestCalendar.current) return;
+    setCalendarForTest(booking.defaultGhlCalendarId?.trim() ?? '');
+    didInitTestCalendar.current = true;
+  }, [booking]);
 
   const toggleCore = (key: string, field: 'enabled' | 'required', on: boolean) => {
     setBooking(prev => {
@@ -206,6 +239,7 @@ export function AutomationBookingPanel() {
         maxBookingsPerSlot: booking.maxBookingsPerSlot,
       });
       setBooking(next);
+      setCalendarForTest(next.defaultGhlCalendarId?.trim() ?? '');
       setSaveSettingsStatus('Saved.');
     } catch (e) {
       setSaveSettingsStatus(formatHttpErrorDetail(e));
@@ -230,16 +264,34 @@ export function AutomationBookingPanel() {
     }
   };
 
+  const useTestCalendarAsDefault = () => {
+    if (!booking) return;
+    const id = calendarForTest.trim();
+    if (!id) return;
+    const hit = calendars.find(c => c.id === id);
+    setBooking({
+      ...booking,
+      defaultGhlCalendarId: id,
+      defaultGhlCalendarName: hit?.name ?? null,
+    });
+  };
+
   const onTestCal = async () => {
     if (!token || !tenantId || !booking) return;
+    if (!calendarForTest.trim()) {
+      setTestCalendarStatus('Select a calendar first.');
+      setTestConnectionOk(false);
+      return;
+    }
     setBusy('test-cal');
     setTestCalendarStatus('');
     try {
-      const calId = booking.defaultGhlCalendarId?.trim();
-      const r = await testTenantBookingCalendar(token, tenantId, calId ? { calendarId: calId } : {});
+      const r = await testTenantBookingCalendar(token, tenantId, { calendarId: calendarForTest.trim() });
+      setTestConnectionOk(r.ok);
       setTestCalendarStatus(r.ok ? r.message : r.message);
       if (r.calendars?.length) setCalendars(r.calendars);
     } catch (e) {
+      setTestConnectionOk(false);
       setTestCalendarStatus(formatHttpErrorDetail(e));
     } finally {
       setBusy(null);
@@ -248,42 +300,68 @@ export function AutomationBookingPanel() {
 
   const onTestSlots = async () => {
     if (!token || !tenantId || !booking) return;
+    if (!calendarForTest.trim()) {
+      setAvailabilityMain('Select a calendar first.');
+      setAvailabilityHint('');
+      setAvailabilityExtra('');
+      return;
+    }
     const dateStr = (slotDate || todayIsoDate()).trim();
     const path = `/tenants/${tenantId}/booking-settings/test-slots`;
     const payload = {
       selectedDate: dateStr,
       selectedTime: slotTime.trim(),
-      calendarId: booking.defaultGhlCalendarId?.trim() || undefined,
+      calendarId: calendarForTest.trim(),
     };
     if (process.env.NODE_ENV === 'development' && typeof window !== 'undefined') {
       console.debug('[AISBP Booking] check availability', {
         selectedDate: payload.selectedDate,
         selectedTime: payload.selectedTime || '(full day in CRM TZ)',
-        calendarId: payload.calendarId ?? null,
+        calendarId: payload.calendarId,
         endpoint: `${getApiBaseUrl()}${path}`,
-        note: 'Backend converts date/time to startDateMs/endDateMs (Unix ms) for GHL free-slots; CRM timezone from tenant settings or app default.',
+        note: 'Backend maps to Unix ms for GHL free-slots; may retry with a staff user id when the CRM returns zero slots.',
       });
     }
     setBusy('test-slots');
-    setAvailabilityStatus('');
+    setAvailabilityMain('');
+    setAvailabilityHint('');
+    setAvailabilityExtra('');
     try {
       const r = await testTenantBookingSlots(token, tenantId, payload);
+      const rawCount = (r.slots ?? []).length;
       let rows = r.slots ?? [];
       if (slotTime.trim()) {
         rows = filterSlotsAfterLocalStart(rows, dateStr, slotTime);
       }
       const n = rows.length;
       if (r.error) {
-        setAvailabilityStatus(
+        setAvailabilityMain(
           `GHL: ${r.error}${n > 0 ? ` — still showing ${n} parsed slot(s).` : ''}`,
         );
         return;
       }
-      setAvailabilityStatus(
-        `Returned ${n} slot(s) for ${dateStr}${slotTime.trim() ? ` from ${slotTime} (local filter)` : ''}. Not a booking confirmation.`,
-      );
+      if (n === 0) {
+        if (rawCount === 0) {
+          setAvailabilityMain(AVAILABILITY_ZERO_MAIN);
+          setAvailabilityHint(AVAILABILITY_ZERO_HINT);
+          if (testConnectionOk && r.emptyWithoutError) {
+            setAvailabilityExtra(AVAILABILITY_EXTRA_WHEN_TEST_OK);
+          }
+        } else {
+          setAvailabilityMain(
+            `No slots matched your starting time after filtering — the CRM returned ${rawCount} slot(s) for this date range. Try clearing the time field or choosing an earlier or later start.`,
+          );
+          setAvailabilityHint(AVAILABILITY_ZERO_HINT);
+        }
+        return;
+      }
+      let msg = `Returned ${n} slot(s) for ${dateStr}${slotTime.trim() ? ` from ${slotTime} (local filter)` : ''}. Not a booking confirmation.`;
+      if (r.retriedWithUserId) {
+        msg += ` (CRM returned slots when querying staff user ${r.retriedWithUserId}.)`;
+      }
+      setAvailabilityMain(msg);
     } catch (e) {
-      setAvailabilityStatus(`Could not check availability: ${formatHttpErrorDetail(e)}`);
+      setAvailabilityMain(`Could not check availability: ${formatHttpErrorDetail(e)}`);
     } finally {
       setBusy(null);
     }
@@ -323,12 +401,11 @@ export function AutomationBookingPanel() {
 
   const calendarOptions = useMemo<CalendarOption[]>(() => calendars, [calendars]);
 
-  const bookingHint = !booking?.defaultGhlCalendarId?.trim()
-    ? 'Choose a default calendar below, then test the connection here.'
-    : null;
+  const syncCalendarsHint = calendars.length === 0 ? 'Sync calendars from CRM above to load the list.' : null;
 
   const modeHint = BOOKING_MODE_OPTIONS.find(m => m.value === booking?.bookingMode)?.hint ?? '';
   const dim = busy !== null;
+  const noTestCalendar = !calendarForTest.trim();
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -358,11 +435,48 @@ export function AutomationBookingPanel() {
             </div>
 
             <div style={cardStyle()}>
-              <div style={subsectionTitleStyle()}>2. Test calendar connection</div>
-              <p style={{ ...statusLineStyle(), marginTop: 0 }}>
-                Uses the default calendar selected in Booking settings (saved or current selection in this session).
+              <div style={subsectionTitleStyle()}>2. Calendar to test</div>
+              <label style={{ ...mvpLabelStyle, display: 'block', maxWidth: 480 }}>
+                Calendar
+                <select
+                  value={calendarForTest}
+                  onChange={e => setCalendarForTest(e.target.value)}
+                  style={{ ...mvpSelectStyle, marginTop: '0.35rem', width: '100%' }}
+                >
+                  <option value="">— Select —</option>
+                  {calendarOptions.map((c: CalendarOption) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name || c.id}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {syncCalendarsHint ? (
+                <p style={{ ...statusLineStyle(), marginTop: '0.45rem' }}>{syncCalendarsHint}</p>
+              ) : null}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '0.5rem' }}>
+                <button
+                  type="button"
+                  disabled={dim || noTestCalendar}
+                  onClick={useTestCalendarAsDefault}
+                  style={btn('secondary', dim || noTestCalendar)}
+                >
+                  Use selected calendar as default
+                </button>
+              </div>
+              <p style={{ ...statusLineStyle(), marginTop: '0.45rem' }}>
+                This selection is used for Test and Check below. Use the button to copy it to Booking settings (save to persist).
               </p>
-              <button type="button" disabled={dim} onClick={() => void onTestCal()} style={btn('secondary', dim)}>
+            </div>
+
+            <div style={cardStyle()}>
+              <div style={subsectionTitleStyle()}>3. Test calendar connection</div>
+              <button
+                type="button"
+                disabled={dim || noTestCalendar}
+                onClick={() => void onTestCal()}
+                style={btn('secondary', dim || noTestCalendar)}
+              >
                 Test calendar connection
               </button>
               {testCalendarStatus ? (
@@ -373,7 +487,7 @@ export function AutomationBookingPanel() {
             </div>
 
             <div style={cardStyle()}>
-              <div style={subsectionTitleStyle()}>3. Check calendar availability</div>
+              <div style={subsectionTitleStyle()}>4. Check calendar availability</div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.65rem', alignItems: 'flex-end' }}>
                 <label style={{ ...mvpLabelStyle, margin: 0 }}>
                   Date
@@ -388,21 +502,35 @@ export function AutomationBookingPanel() {
                   Starting time
                   <input
                     type="time"
+                    step={300}
                     value={slotTime}
                     onChange={e => setSlotTime(e.target.value)}
                     style={{ ...mvpInputStyle, display: 'block', marginTop: '0.35rem' }}
                   />
                 </label>
-                <button type="button" disabled={dim} onClick={() => void onTestSlots()} style={btn('primary', dim)}>
+                <button
+                  type="button"
+                  disabled={dim || noTestCalendar}
+                  onClick={() => void onTestSlots()}
+                  style={btn('primary', dim || noTestCalendar)}
+                >
                   Check calendar availability
                 </button>
               </div>
-              <p style={{ ...statusLineStyle(), marginTop: '0.55rem' }}>Uses your CRM calendar timezone.</p>
-              {availabilityStatus ? (
-                <p style={{ ...statusLineStyle(), marginTop: '0.5rem' }} role="status">
-                  {availabilityStatus}
+              {noTestCalendar ? (
+                <p style={{ ...statusLineStyle(), marginTop: '0.55rem', fontWeight: 600 }} role="status">
+                  Select a calendar first.
+                </p>
+              ) : (
+                <p style={{ ...statusLineStyle(), marginTop: '0.55rem' }}>Uses your CRM calendar timezone.</p>
+              )}
+              {availabilityMain ? (
+                <p style={{ ...statusLineStyle(), marginTop: '0.5rem', fontWeight: 500, color: 'var(--aisbp-text-secondary)' }} role="status">
+                  {availabilityMain}
                 </p>
               ) : null}
+              {availabilityHint ? <p style={availabilityHintStyle()}>{availabilityHint}</p> : null}
+              {availabilityExtra ? <p style={availabilityHintStyle()}>{availabilityExtra}</p> : null}
             </div>
           </SectionCard>
 
@@ -446,9 +574,9 @@ export function AutomationBookingPanel() {
             <p style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted)', marginTop: '0.35rem', lineHeight: 1.45, marginBottom: '0.85rem' }}>
               AISBP uses this calendar for booking-related workflows.
             </p>
-            {bookingHint ? (
+            {syncCalendarsHint ? (
               <p style={{ fontSize: '0.76rem', color: 'var(--aisbp-muted)', marginTop: '-0.5rem', marginBottom: '0.85rem' }}>
-                {bookingHint}
+                {syncCalendarsHint}
               </p>
             ) : null}
 

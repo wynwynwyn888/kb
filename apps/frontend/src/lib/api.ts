@@ -533,7 +533,13 @@ export async function testTenantBookingSlots(
     startDate?: string;
     endDate?: string;
   },
-): Promise<{ slots: { startTime: string; endTime: string }[]; calendarId: string | null; error?: string }> {
+): Promise<{
+  slots: { startTime: string; endTime: string }[];
+  calendarId: string | null;
+  error?: string;
+  emptyWithoutError?: boolean;
+  retriedWithUserId?: string | null;
+}> {
   return apiRequest(`/tenants/${tenantId}/booking-settings/test-slots`, {
     token,
     method: 'POST',

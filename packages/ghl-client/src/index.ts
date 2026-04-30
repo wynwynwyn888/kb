@@ -254,6 +254,163 @@ export interface GhlFreeSlot {
   endTime: string;
 }
 
+/** Safe subset of GET /calendars/:id for debugging / UI (no tokens). */
+export interface GhlCalendarDetailSummary {
+  name?: string;
+  calendarType?: string;
+  isActive?: boolean;
+  status?: string;
+  slotDuration?: number;
+  teamMemberCount?: number;
+  teamMemberUserIds?: string[];
+  openHoursCount?: number;
+}
+
+const YMD_KEY = /^\d{4}-\d{2}-\d{2}$/;
+
+function pushSlotFromRecord(o: Record<string, unknown>, slots: GhlFreeSlot[]): void {
+  let start =
+    typeof o['startTime'] === 'string'
+      ? o['startTime']
+      : typeof o['start'] === 'string'
+        ? o['start']
+        : typeof o['slotStart'] === 'string'
+          ? o['slotStart']
+          : '';
+  let end =
+    typeof o['endTime'] === 'string'
+      ? o['endTime']
+      : typeof o['end'] === 'string'
+        ? o['end']
+        : typeof o['slotEnd'] === 'string'
+          ? o['slotEnd']
+          : '';
+  if (!start && typeof o['start'] === 'number' && Number.isFinite(o['start'])) {
+    start = new Date(o['start']).toISOString();
+  }
+  if (!end && typeof o['end'] === 'number' && Number.isFinite(o['end'])) {
+    end = new Date(o['end']).toISOString();
+  }
+  if (start && end) slots.push({ startTime: start, endTime: end });
+}
+
+/**
+ * GHL free-slots returns an availability map keyed by YYYY-MM-DD (per docs), not always a flat array.
+ */
+export function parseGhlFreeSlotsResponse(raw: unknown): {
+  slots: GhlFreeSlot[];
+  dateKeys: string[];
+  shapeSummary: string;
+} {
+  const slots: GhlFreeSlot[] = [];
+  const dateKeys: string[] = [];
+
+  if (raw === null || raw === undefined) {
+    return { slots, dateKeys, shapeSummary: 'nullish' };
+  }
+  if (Array.isArray(raw)) {
+    for (const x of raw) {
+      if (isRecord(x)) pushSlotFromRecord(x, slots);
+    }
+    return { slots, dateKeys, shapeSummary: 'topLevelArray' };
+  }
+  if (!isRecord(raw)) {
+    return { slots, dateKeys, shapeSummary: `primitive:${typeof raw}` };
+  }
+
+  for (const [k, v] of Object.entries(raw)) {
+    if (!YMD_KEY.test(k)) continue;
+    dateKeys.push(k);
+    if (Array.isArray(v)) {
+      for (const x of v) {
+        if (isRecord(x)) pushSlotFromRecord(x, slots);
+      }
+    } else if (isRecord(v)) {
+      const inner = v['slots'] ?? v['freeSlots'] ?? v['data'] ?? v['items'];
+      if (Array.isArray(inner)) {
+        for (const x of inner) {
+          if (isRecord(x)) pushSlotFromRecord(x, slots);
+        }
+      }
+    }
+  }
+  if (dateKeys.length > 0) {
+    return { slots, dateKeys, shapeSummary: 'dateKeyedMap' };
+  }
+
+  if (isRecord(raw['calendar'])) {
+    return parseGhlFreeSlotsResponse(raw['calendar']);
+  }
+
+  const list = raw['slots'] ?? raw['data'] ?? raw['events'] ?? raw['freeSlots'];
+  if (Array.isArray(list)) {
+    for (const x of list) {
+      if (isRecord(x)) pushSlotFromRecord(x, slots);
+    }
+    return { slots, dateKeys, shapeSummary: 'nestedArrayField' };
+  }
+
+  return { slots, dateKeys, shapeSummary: 'objectUnrecognized' };
+}
+
+function extractCalendarDetailSummary(o: Record<string, unknown>): GhlCalendarDetailSummary {
+  const name = typeof o['name'] === 'string' ? o['name'] : undefined;
+  const calendarType =
+    typeof o['calendarType'] === 'string'
+      ? o['calendarType']
+      : typeof o['type'] === 'string'
+        ? o['type']
+        : undefined;
+  const isActive = typeof o['isActive'] === 'boolean' ? o['isActive'] : undefined;
+  const status = typeof o['status'] === 'string' ? o['status'] : undefined;
+  let slotDuration: number | undefined;
+  if (typeof o['slotDuration'] === 'number' && Number.isFinite(o['slotDuration'])) slotDuration = o['slotDuration'];
+  else if (typeof o['slotDuration'] === 'string') {
+    const n = parseInt(o['slotDuration'], 10);
+    if (Number.isFinite(n)) slotDuration = n;
+  }
+
+  const teamMemberUserIds: string[] = [];
+  const tm = o['teamMembers'] ?? o['users'] ?? o['userIds'];
+  if (Array.isArray(tm)) {
+    for (const u of tm) {
+      if (typeof u === 'string' && u.trim()) teamMemberUserIds.push(u.trim());
+      else if (isRecord(u)) {
+        const id = u['userId'] ?? u['id'] ?? u['_id'];
+        if (typeof id === 'string' && id.trim()) teamMemberUserIds.push(id.trim());
+      }
+    }
+  }
+
+  let openHoursCount: number | undefined;
+  const oh = o['openHours'] ?? o['availability'] ?? o['weeklyHours'] ?? o['businessHours'];
+  if (Array.isArray(oh)) openHoursCount = oh.length;
+  else if (isRecord(oh)) openHoursCount = Object.keys(oh).length;
+
+  return {
+    name,
+    calendarType,
+    isActive,
+    status,
+    slotDuration,
+    teamMemberCount: teamMemberUserIds.length,
+    teamMemberUserIds,
+    openHoursCount,
+  };
+}
+
+export function formatGhlCalendarDetailSummary(s: GhlCalendarDetailSummary): string {
+  const parts: string[] = [];
+  if (s.name) parts.push(`Name: ${s.name}`);
+  if (s.calendarType) parts.push(`Type: ${s.calendarType}`);
+  if (s.isActive !== undefined) parts.push(`Active: ${s.isActive ? 'yes' : 'no'}`);
+  if (s.status) parts.push(`Status: ${s.status}`);
+  if (s.slotDuration !== undefined) parts.push(`Slot duration (min): ${s.slotDuration}`);
+  if (s.teamMemberCount !== undefined) parts.push(`Team members: ${s.teamMemberCount}`);
+  if (s.openHoursCount !== undefined) parts.push(`Open hours entries: ${s.openHoursCount}`);
+  return parts.join(' · ');
+}
+
 export interface GhlTagSummary {
   id?: string;
   name: string;
@@ -650,10 +807,61 @@ export class GhlClient {
   }
 
   /**
+   * Single calendar detail (team members, slot duration, etc.).
+   * HighLevel: `GET /calendars/:calendarId` with `Version: 2023-02-21`.
+   */
+  async getCalendar(calendarId: string): Promise<{
+    summary?: GhlCalendarDetailSummary;
+    error?: string;
+    httpStatus?: number;
+    responseBodyExcerpt?: string;
+    requestPath?: string;
+  }> {
+    const requestPath = `/calendars/${encodeURIComponent(calendarId)}`;
+    try {
+      const response = await this.client.get<unknown>(requestPath, {
+        headers: {
+          Version: GHL_CALENDARS_LIST_API_VERSION,
+          Accept: 'application/json',
+        },
+      });
+      const raw = response.data;
+      let payload: Record<string, unknown> | null = null;
+      if (isRecord(raw) && isRecord(raw['calendar'])) {
+        payload = raw['calendar'] as Record<string, unknown>;
+      } else if (isRecord(raw)) {
+        payload = raw;
+      }
+      if (!payload) {
+        return { summary: undefined, requestPath, httpStatus: response.status };
+      }
+      return {
+        summary: extractCalendarDetailSummary(payload),
+        requestPath,
+        httpStatus: response.status,
+      };
+    } catch (error) {
+      let httpStatus: number | undefined;
+      let responseBodyExcerpt: string | undefined;
+      const msg =
+        this.extractGhlErrorMessage(error) ?? (error instanceof Error ? error.message : 'getCalendar failed');
+      if (axios.isAxiosError(error)) {
+        httpStatus = error.response?.status;
+        const d = error.response?.data;
+        if (d !== undefined) {
+          responseBodyExcerpt = typeof d === 'string' ? d.slice(0, 500) : JSON.stringify(d).slice(0, 500);
+        }
+      }
+      return { error: msg, httpStatus, responseBodyExcerpt, requestPath };
+    }
+  }
+
+  /**
    * Fetch free bookable slots for a calendar in a time range.
    *
    * GHL expects `startDate` and `endDate` as **Unix timestamps in milliseconds** (query strings),
    * not `YYYY-MM-DD` — the latter yields HTTP 422 from the API.
+   * Response is often a **map keyed by YYYY-MM-DD**; see `parseGhlFreeSlotsResponse`.
    */
   async getFreeSlots(params: {
     calendarId: string;
@@ -662,8 +870,12 @@ export class GhlClient {
     /** Unix epoch milliseconds (inclusive end of range; GHL treats as range end). */
     endDateMs: number;
     timezone?: string;
+    /** Some calendars require a staff user for slot generation. */
+    userId?: string;
   }): Promise<{
     slots: GhlFreeSlot[];
+    dateKeys: string[];
+    shapeSummary: string;
     error?: string;
     httpStatus?: number;
     responseBodyExcerpt?: string;
@@ -671,48 +883,30 @@ export class GhlClient {
     requestQuery?: Record<string, string>;
   }> {
     const requestPath = `/calendars/${encodeURIComponent(params.calendarId)}/free-slots`;
-    try {
-      const query: Record<string, string> = {
-        startDate: String(Math.floor(params.startDateMs)),
-        endDate: String(Math.floor(params.endDateMs)),
-      };
-      if (params.timezone?.trim()) query['timezone'] = params.timezone.trim();
+    const query: Record<string, string> = {
+      startDate: String(Math.floor(params.startDateMs)),
+      endDate: String(Math.floor(params.endDateMs)),
+    };
+    if (params.timezone?.trim()) query['timezone'] = params.timezone.trim();
+    if (params.userId?.trim()) query['userId'] = params.userId.trim();
 
-      const response = await this.client.get<unknown>(requestPath, { params: query });
-      const raw = response.data;
-      const slots: GhlFreeSlot[] = [];
-      const pushSlot = (o: Record<string, unknown>) => {
-        const start =
-          typeof o['startTime'] === 'string'
-            ? o['startTime']
-            : typeof o['start'] === 'string'
-              ? o['start']
-              : typeof o['slotStart'] === 'string'
-                ? o['slotStart']
-                : '';
-        const end =
-          typeof o['endTime'] === 'string'
-            ? o['endTime']
-            : typeof o['end'] === 'string'
-              ? o['end']
-              : typeof o['slotEnd'] === 'string'
-                ? o['slotEnd']
-                : '';
-        if (start && end) slots.push({ startTime: start, endTime: end });
+    try {
+      const response = await this.client.get<unknown>(requestPath, {
+        params: query,
+        headers: {
+          Version: GHL_CALENDARS_LIST_API_VERSION,
+          Accept: 'application/json',
+        },
+      });
+      const parsed = parseGhlFreeSlotsResponse(response.data);
+      return {
+        slots: parsed.slots,
+        dateKeys: parsed.dateKeys,
+        shapeSummary: parsed.shapeSummary,
+        httpStatus: response.status,
+        requestPath,
+        requestQuery: query,
       };
-      if (Array.isArray(raw)) {
-        for (const x of raw) {
-          if (isRecord(x)) pushSlot(x);
-        }
-      } else if (isRecord(raw)) {
-        const list = raw['slots'] ?? raw['data'] ?? raw['events'] ?? raw['freeSlots'];
-        if (Array.isArray(list)) {
-          for (const x of list) {
-            if (isRecord(x)) pushSlot(x);
-          }
-        }
-      }
-      return { slots, requestPath, requestQuery: query };
     } catch (error) {
       let httpStatus: number | undefined;
       let responseBodyExcerpt: string | undefined;
@@ -723,13 +917,17 @@ export class GhlClient {
           responseBodyExcerpt = typeof d === 'string' ? d.slice(0, 500) : JSON.stringify(d).slice(0, 500);
         }
       }
-      const query: Record<string, string> = {
-        startDate: String(Math.floor(params.startDateMs)),
-        endDate: String(Math.floor(params.endDateMs)),
-      };
-      if (params.timezone?.trim()) query['timezone'] = params.timezone.trim();
       const msg = this.extractGhlErrorMessage(error) ?? (error instanceof Error ? error.message : 'getFreeSlots failed');
-      return { slots: [], error: msg, httpStatus, responseBodyExcerpt, requestPath, requestQuery: query };
+      return {
+        slots: [],
+        dateKeys: [],
+        shapeSummary: 'requestError',
+        error: msg,
+        httpStatus,
+        responseBodyExcerpt,
+        requestPath,
+        requestQuery: query,
+      };
     }
   }
 

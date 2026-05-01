@@ -19,6 +19,7 @@ import {
   type TenantBookingScheduleDiagnostics,
   type TenantBookingSettings,
   type TenantFreeSlotsProbeResult,
+  type TenantFreeSlotsProbeVariant,
 } from '@/lib/api';
 import {
   ErrorBanner,
@@ -279,6 +280,31 @@ function formatHttpErrorDetail(e: unknown): string {
     if (typeof o['message'] === 'string' && o['message'].trim()) return o['message'];
   }
   return e.message;
+}
+
+/** Prefer more slots, then broader range mode, then probe order. */
+function pickWinningProbeVariant(
+  variants: TenantFreeSlotsProbeVariant[],
+): TenantFreeSlotsProbeVariant | null {
+  const winners = variants.filter(v => v.slotsReturned > 0);
+  if (winners.length === 0) return null;
+  const rangeRank = (m: string) => (m === 'fullLocalDay' ? 0 : 1);
+  return winners.reduce((best, v) => {
+    if (v.slotsReturned > best.slotsReturned) return v;
+    if (v.slotsReturned < best.slotsReturned) return best;
+    if (rangeRank(v.rangeMode) < rangeRank(best.rangeMode)) return v;
+    return best;
+  });
+}
+
+function productionEnvFromWinningVariant(v: TenantFreeSlotsProbeVariant): { key: string; value: string }[] {
+  const retryParam = v.userParamMode === 'userIds' ? 'userIds' : 'userId';
+  return [
+    { key: 'GHL_FREE_SLOTS_API_VERSION', value: v.apiVersion },
+    { key: 'GHL_FREE_SLOTS_TIMESTAMP_UNIT', value: v.timestampUnit },
+    { key: 'GHL_FREE_SLOTS_INCLUDE_TIMEZONE', value: v.timezoneIncluded ? 'true' : 'false' },
+    { key: 'GHL_FREE_SLOTS_RETRY_USER_PARAM', value: retryParam },
+  ];
 }
 
 export function AutomationBookingPanel() {
@@ -576,6 +602,15 @@ export function AutomationBookingPanel() {
   const dim = busy !== null;
   const noTestCalendar = !calendarForTest.trim();
 
+  const winningProbeVariant = useMemo(
+    () => (probeResult?.variants?.length ? pickWinningProbeVariant(probeResult.variants) : null),
+    [probeResult],
+  );
+  const winningEnvLines = useMemo(
+    () => (winningProbeVariant ? productionEnvFromWinningVariant(winningProbeVariant) : []),
+    [winningProbeVariant],
+  );
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
       {loadErr ? <ErrorBanner message={loadErr} /> : null}
@@ -689,6 +724,143 @@ export function AutomationBookingPanel() {
                   Check calendar availability
                 </button>
               </div>
+
+              <div style={{ marginTop: '0.65rem', paddingTop: '0.65rem', borderTop: '1px solid var(--aisbp-border)' }}>
+                <div style={subsectionTitleStyle()}>Probe CRM slot API</div>
+                <p style={{ ...statusLineStyle(), marginTop: 0, marginBottom: '0.45rem' }}>
+                  Diagnostic: tries multiple GHL <code style={{ fontSize: '0.75rem' }}>free-slots</code> API shapes
+                  (version, timestamp unit, user query param, timezone). Uses the calendar and date/time above. Click to
+                  run and show all tested variants.
+                </p>
+                <button
+                  type="button"
+                  disabled={dim || noTestCalendar}
+                  onClick={() => void onProbeFreeSlots()}
+                  style={btn('secondary', dim || noTestCalendar)}
+                >
+                  {busy === 'probe-slots' ? 'Probing…' : 'Probe CRM slot API'}
+                </button>
+                {probeErr ? (
+                  <p style={{ ...statusLineStyle(), marginTop: '0.45rem', color: '#b45309' }} role="alert">
+                    {probeErr}
+                  </p>
+                ) : null}
+                {probeResult?.message ? (
+                  <p style={{ ...availabilityHintStyle(), marginTop: '0.5rem', color: '#92400e', fontWeight: 600 }}>
+                    {probeResult.message}
+                  </p>
+                ) : null}
+                {winningProbeVariant ? (
+                  <div
+                    style={{
+                      marginTop: '0.55rem',
+                      padding: '0.6rem 0.7rem',
+                      borderRadius: 8,
+                      border: '1px solid rgba(34, 197, 94, 0.45)',
+                      background: 'rgba(34, 197, 94, 0.1)',
+                    }}
+                    role="status"
+                  >
+                    <p
+                      style={{
+                        margin: 0,
+                        fontSize: '0.8rem',
+                        fontWeight: 700,
+                        color: 'rgb(22 101 52)',
+                      }}
+                    >
+                      Use this variant for production
+                    </p>
+                    <p style={{ ...statusLineStyle(), marginTop: '0.35rem', marginBottom: '0.4rem' }}>
+                      Set these on the <strong>backend</strong> (then redeploy). Values match the strongest variant (
+                      {winningProbeVariant.slotsReturned} slot
+                      {winningProbeVariant.slotsReturned === 1 ? '' : 's'}, {winningProbeVariant.rangeMode},{' '}
+                      {winningProbeVariant.variantName}).
+                    </p>
+                    {winningProbeVariant.userParamMode === 'none' ? (
+                      <p style={{ ...availabilityHintStyle(), marginTop: 0, marginBottom: '0.45rem', color: '#166534' }}>
+                        That probe row did not send a staff user query param.{' '}
+                        <code style={{ fontSize: '0.7rem' }}>GHL_FREE_SLOTS_RETRY_USER_PARAM</code> below is the usual
+                        retry shape; confirm with your GHL account if retries should differ.
+                      </p>
+                    ) : null}
+                    <ul
+                      style={{
+                        margin: 0,
+                        paddingLeft: '1.1rem',
+                        fontSize: '0.74rem',
+                        lineHeight: 1.55,
+                        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+                        color: 'var(--aisbp-text-secondary)',
+                      }}
+                    >
+                      {winningEnvLines.map(row => (
+                        <li key={row.key} style={{ marginBottom: '0.15rem' }}>
+                          <span style={{ fontWeight: 600 }}>{row.key}</span>={row.value}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+                {probeResult && probeResult.variants.length > 0 ? (
+                  <div style={{ marginTop: '0.55rem', overflowX: 'auto' }}>
+                    <p style={{ ...subsectionTitleStyle(), marginBottom: '0.35rem' }}>Tested variants</p>
+                    <table
+                      style={{
+                        width: '100%',
+                        borderCollapse: 'collapse',
+                        fontSize: '0.72rem',
+                      }}
+                    >
+                      <thead>
+                        <tr style={{ textAlign: 'left', color: 'var(--aisbp-muted)' }}>
+                          <th style={{ padding: '0.25rem 0.35rem' }}>Range</th>
+                          <th style={{ padding: '0.25rem 0.35rem' }}>API</th>
+                          <th style={{ padding: '0.25rem 0.35rem' }}>Unit</th>
+                          <th style={{ padding: '0.25rem 0.35rem' }}>User</th>
+                          <th style={{ padding: '0.25rem 0.35rem' }}>TZ</th>
+                          <th style={{ padding: '0.25rem 0.35rem' }}>HTTP</th>
+                          <th style={{ padding: '0.25rem 0.35rem' }}>Slots</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {probeResult.variants.map((v, i) => (
+                          <tr
+                            key={i}
+                            title={v.variantName}
+                            style={{
+                              background: v.slotsReturned > 0 ? 'rgba(34, 197, 94, 0.22)' : undefined,
+                              boxShadow: v.slotsReturned > 0 ? 'inset 3px 0 0 0 rgb(22 163 74)' : undefined,
+                              borderTop: '1px solid var(--aisbp-border)',
+                            }}
+                          >
+                            <td style={{ padding: '0.3rem 0.35rem', maxWidth: 100 }}>{v.rangeMode}</td>
+                            <td style={{ padding: '0.3rem 0.35rem' }}>{v.apiVersion}</td>
+                            <td style={{ padding: '0.3rem 0.35rem' }}>{v.timestampUnit}</td>
+                            <td style={{ padding: '0.3rem 0.35rem' }}>{v.userParamMode}</td>
+                            <td style={{ padding: '0.3rem 0.35rem' }}>{v.timezoneIncluded ? 'yes' : 'no'}</td>
+                            <td style={{ padding: '0.3rem 0.35rem' }}>{v.httpStatus ?? '—'}</td>
+                            <td
+                              style={{
+                                padding: '0.3rem 0.35rem',
+                                fontWeight: v.slotsReturned > 0 ? 800 : 700,
+                                color: v.slotsReturned > 0 ? 'rgb(22 101 52)' : undefined,
+                              }}
+                            >
+                              {v.slotsReturned}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    <p style={{ ...statusLineStyle(), marginTop: '0.5rem' }} title={probeResult.crmTimezoneUsed}>
+                      CRM tz used: {probeResult.crmTimezoneUsed}
+                      {probeResult.teamUserIdProbe ? ` · team user: ${probeResult.teamUserIdProbe}` : ''}
+                    </p>
+                  </div>
+                ) : null}
+              </div>
+
               {noTestCalendar ? (
                 <p style={{ ...statusLineStyle(), marginTop: '0.55rem', fontWeight: 600 }} role="status">
                   Select a calendar first.
@@ -705,90 +877,6 @@ export function AutomationBookingPanel() {
               {availabilityExtra ? <p style={availabilityHintStyle()}>{availabilityExtra}</p> : null}
               {slotsScheduleDiag ? (
                 <ScheduleDiagnosticsPanel schedule={slotsScheduleDiag} rules={slotsRulesDiag} />
-              ) : null}
-            </div>
-
-            <div style={cardStyle()}>
-              <div style={subsectionTitleStyle()}>5. Probe CRM slot API (diagnostic)</div>
-              <p style={{ ...statusLineStyle(), marginTop: 0 }}>
-                Tries multiple GHL <code style={{ fontSize: '0.75rem' }}>free-slots</code> variants (version, ms vs
-                seconds, userId vs userIds, timezone on/off, two local date ranges). Uses the calendar and date/time
-                from step 4.
-              </p>
-              <button
-                type="button"
-                disabled={dim || noTestCalendar}
-                onClick={() => void onProbeFreeSlots()}
-                style={btn('secondary', dim || noTestCalendar)}
-              >
-                Probe CRM slot API
-              </button>
-              {probeErr ? (
-                <p style={{ ...statusLineStyle(), marginTop: '0.45rem', color: '#b45309' }} role="alert">
-                  {probeErr}
-                </p>
-              ) : null}
-              {probeResult?.message ? (
-                <p style={{ ...availabilityHintStyle(), marginTop: '0.5rem', color: '#92400e', fontWeight: 600 }}>
-                  {probeResult.message}
-                </p>
-              ) : null}
-              {probeResult?.anySlotsReturned ? (
-                <p style={{ ...statusLineStyle(), marginTop: '0.45rem', fontWeight: 600, color: 'rgb(22 101 52)' }}>
-                  At least one variant returned slots — set backend env{' '}
-                  <code style={{ fontSize: '0.7rem' }}>GHL_FREE_SLOTS_API_VERSION</code>,{' '}
-                  <code style={{ fontSize: '0.7rem' }}>GHL_FREE_SLOTS_TIMESTAMP_UNIT</code> (ms|s),{' '}
-                  <code style={{ fontSize: '0.7rem' }}>GHL_FREE_SLOTS_INCLUDE_TIMEZONE</code>, and{' '}
-                  <code style={{ fontSize: '0.7rem' }}>GHL_FREE_SLOTS_RETRY_USER_PARAM</code> to match the winning row,
-                  then redeploy.
-                </p>
-              ) : null}
-              {probeResult && probeResult.variants.length > 0 ? (
-                <div style={{ marginTop: '0.55rem', overflowX: 'auto' }}>
-                  <table
-                    style={{
-                      width: '100%',
-                      borderCollapse: 'collapse',
-                      fontSize: '0.72rem',
-                    }}
-                  >
-                    <thead>
-                      <tr style={{ textAlign: 'left', color: 'var(--aisbp-muted)' }}>
-                        <th style={{ padding: '0.25rem 0.35rem' }}>Range</th>
-                        <th style={{ padding: '0.25rem 0.35rem' }}>API</th>
-                        <th style={{ padding: '0.25rem 0.35rem' }}>Unit</th>
-                        <th style={{ padding: '0.25rem 0.35rem' }}>User</th>
-                        <th style={{ padding: '0.25rem 0.35rem' }}>TZ</th>
-                        <th style={{ padding: '0.25rem 0.35rem' }}>HTTP</th>
-                        <th style={{ padding: '0.25rem 0.35rem' }}>Slots</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {probeResult.variants.map((v, i) => (
-                        <tr
-                          key={i}
-                          title={v.variantName}
-                          style={{
-                            background: v.slotsReturned > 0 ? 'rgba(34, 197, 94, 0.16)' : undefined,
-                            borderTop: '1px solid var(--aisbp-border)',
-                          }}
-                        >
-                          <td style={{ padding: '0.3rem 0.35rem', maxWidth: 100 }}>{v.rangeMode}</td>
-                          <td style={{ padding: '0.3rem 0.35rem' }}>{v.apiVersion}</td>
-                          <td style={{ padding: '0.3rem 0.35rem' }}>{v.timestampUnit}</td>
-                          <td style={{ padding: '0.3rem 0.35rem' }}>{v.userParamMode}</td>
-                          <td style={{ padding: '0.3rem 0.35rem' }}>{v.timezoneIncluded ? 'yes' : 'no'}</td>
-                          <td style={{ padding: '0.3rem 0.35rem' }}>{v.httpStatus ?? '—'}</td>
-                          <td style={{ padding: '0.3rem 0.35rem', fontWeight: 700 }}>{v.slotsReturned}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  <p style={{ ...statusLineStyle(), marginTop: '0.5rem' }} title={probeResult.crmTimezoneUsed}>
-                    CRM tz used: {probeResult.crmTimezoneUsed}
-                    {probeResult.teamUserIdProbe ? ` · team user: ${probeResult.teamUserIdProbe}` : ''}
-                  </p>
-                </div>
               ) : null}
             </div>
           </SectionCard>

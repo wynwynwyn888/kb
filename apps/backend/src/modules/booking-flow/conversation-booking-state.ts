@@ -52,6 +52,10 @@ export interface AisbpBookingStateV1 {
   lastError?: string;
   /** @deprecated use lastError — still read for older persisted sessions */
   lastCreateError?: string;
+  /** Core keys or `custom:<id>` for optional Ask fields we have already prompted once. */
+  optionalAskedFieldIds?: string[];
+  /** Core keys or `custom:<id>` the user explicitly skipped (optional Ask only). */
+  skippedFieldIds?: string[];
 }
 
 export function emptyBookingState(): AisbpBookingStateV1 {
@@ -130,6 +134,14 @@ export function parseAisbpBookingState(metadata: Record<string, unknown> | undef
       ? (o['customAnswers'] as AisbpCustomAnswers)
       : undefined;
 
+  const parseIdList = (v: unknown): string[] | undefined => {
+    if (!Array.isArray(v)) return undefined;
+    const xs = v.filter((x): x is string => typeof x === 'string' && x.trim().length > 0).map(x => x.trim());
+    return xs.length ? xs : undefined;
+  };
+  const optionalAskedFieldIds = parseIdList(o['optionalAskedFieldIds']);
+  const skippedFieldIds = parseIdList(o['skippedFieldIds']);
+
   return {
     status: status as AisbpBookingStatus,
     version,
@@ -165,6 +177,8 @@ export function parseAisbpBookingState(metadata: Record<string, unknown> | undef
         : typeof o['lastError'] === 'string'
           ? o['lastError']
           : undefined,
+    optionalAskedFieldIds,
+    skippedFieldIds,
   };
 }
 

@@ -10,6 +10,23 @@ import {
   resolveRelativeDayPhrase,
 } from './booking-intent-and-parse';
 
+/** Phrases that skip an optional Ask field (not a bare "no", which may answer first_visit). */
+export function isOptionalSkipIntent(line: string): boolean {
+  const s = line.trim().toLowerCase();
+  if (!s) return false;
+  if (/^(skip|pass|none|n\/a|na|later|not now)\s*$/i.test(s)) return true;
+  if (/^(no thanks|no thank you|maybe later)\s*$/i.test(s)) return true;
+  if (/^don'?t have\b/i.test(s) || /^dont have\b/i.test(s)) return true;
+  if (/^i\s+don'?t\s+have\b/i.test(s)) return true;
+  return false;
+}
+
+function appendUnique(list: string[] | undefined, id: string): string[] {
+  const cur = list ? [...list] : [];
+  if (!cur.includes(id)) cur.push(id);
+  return cur;
+}
+
 /**
  * When the bot asked for a specific field (`pendingFieldId`), interpret the next inbound line
  * primarily as an answer to that field (not generic booking chatter).
@@ -18,7 +35,7 @@ export function applyPendingFieldAnswer(params: {
   booking: AisbpBookingStateV1;
   latest: string;
   todayYmd: string;
-}): { answered: boolean; fieldId?: string } {
+}): { answered: boolean; fieldId?: string; skippedOptional?: boolean } {
   const pid = (params.booking.pendingFieldId ?? '').trim();
   if (!pid) return { answered: false };
 
@@ -26,12 +43,20 @@ export function applyPendingFieldAnswer(params: {
   if (!line) return { answered: false };
 
   const { booking, todayYmd } = params;
+  const required = booking.pendingFieldRequired === true;
 
   const clearPending = () => {
     booking.pendingFieldId = undefined;
     booking.pendingFieldLabel = undefined;
     booking.pendingFieldRequired = undefined;
   };
+
+  if (!required && isOptionalSkipIntent(line)) {
+    booking.skippedFieldIds = appendUnique(booking.skippedFieldIds, pid);
+    booking.optionalAskedFieldIds = appendUnique(booking.optionalAskedFieldIds, pid);
+    clearPending();
+    return { answered: true, fieldId: pid, skippedOptional: true };
+  }
 
   if (pid === 'name') {
     const n = parsePlainNameAnswerLine(line) ?? extractNameGuess(line);

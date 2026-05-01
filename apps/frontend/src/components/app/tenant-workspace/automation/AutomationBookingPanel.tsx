@@ -70,6 +70,11 @@ const CUSTOM_FIELD_TYPE_LABELS: Record<(typeof CUSTOM_TYPES)[number], string> = 
   checkbox: 'Checkbox',
 };
 
+/** Hidden in production unless `NEXT_PUBLIC_SHOW_BOOKING_DIAGNOSTICS=true` (see `apps/frontend/.env.example`). */
+const SHOW_BOOKING_DIAGNOSTICS =
+  process.env.NODE_ENV !== 'production' ||
+  process.env['NEXT_PUBLIC_SHOW_BOOKING_DIAGNOSTICS'] === 'true';
+
 const AVAILABILITY_ZERO_MAIN =
   'No available slots were returned for this calendar and time range.';
 /** Secondary guidance — wording depends on whether the availability schedule includes this calendar. */
@@ -89,10 +94,10 @@ function todayIsoDate(): string {
 
 /** Narrow slots to those at or after the chosen local date + starting time (extra filter after API). */
 function filterSlotsAfterLocalStart(
-  slots: { startTime: string; endTime: string }[],
+  slots: { startTime: string; endTime?: string }[],
   dateStr: string,
   timeStr: string,
-): { startTime: string; endTime: string }[] {
+): { startTime: string; endTime?: string }[] {
   const t = timeStr.trim();
   if (!t) return slots;
   const [hhRaw, mmRaw] = t.split(':');
@@ -368,6 +373,7 @@ export function AutomationBookingPanel() {
   const [availabilityMain, setAvailabilityMain] = useState('');
   const [availabilityHint, setAvailabilityHint] = useState('');
   const [availabilityExtra, setAvailabilityExtra] = useState('');
+  const [availabilityOk, setAvailabilityOk] = useState(false);
   const [saveSettingsStatus, setSaveSettingsStatus] = useState('');
 
   const [calendarForTest, setCalendarForTest] = useState('');
@@ -507,6 +513,7 @@ export function AutomationBookingPanel() {
       setAvailabilityMain('Select a calendar first.');
       setAvailabilityHint('');
       setAvailabilityExtra('');
+      setAvailabilityOk(false);
       return;
     }
     const dateStr = (slotDate || todayIsoDate()).trim();
@@ -529,6 +536,7 @@ export function AutomationBookingPanel() {
     setAvailabilityMain('');
     setAvailabilityHint('');
     setAvailabilityExtra('');
+    setAvailabilityOk(false);
     setSlotsScheduleDiag(null);
     setSlotsRulesDiag(null);
     try {
@@ -542,6 +550,7 @@ export function AutomationBookingPanel() {
       if (r.error) {
         setSlotsScheduleDiag(null);
         setSlotsRulesDiag(null);
+        setAvailabilityOk(false);
         setAvailabilityMain(
           `GHL: ${r.error}${n > 0 ? ` — still showing ${n} parsed slot(s).` : ''}`,
         );
@@ -551,6 +560,7 @@ export function AutomationBookingPanel() {
         const schedDiag = r.scheduleDiagnostics ?? calendarScheduleDiag ?? null;
         setSlotsScheduleDiag(schedDiag);
         setSlotsRulesDiag(r.bookingRulesDiagnostics ?? calendarRulesDiag ?? null);
+        setAvailabilityOk(false);
         if (rawCount === 0) {
           setAvailabilityMain(AVAILABILITY_ZERO_MAIN);
           setAvailabilityHint(availabilityZeroHint(schedDiag));
@@ -567,17 +577,14 @@ export function AutomationBookingPanel() {
       }
       setSlotsScheduleDiag(null);
       setSlotsRulesDiag(null);
-      let msg = `Returned ${n} slot(s) for ${dateStr}${slotTime.trim() ? ` from ${slotTime} (local filter)` : ''}. Not a booking confirmation.`;
-      if (r.slotsSourceMessage) {
-        msg = `${r.slotsSourceMessage} ${msg}`;
-      }
-      if (r.retriedWithUserId) {
-        msg += ` (CRM returned slots when querying staff user ${r.retriedWithUserId}.)`;
-      }
-      setAvailabilityMain(msg);
+      setAvailabilityOk(true);
+      setAvailabilityMain(`Returned ${n} available slot(s). Not a booking confirmation.`);
+      setAvailabilityHint('');
+      setAvailabilityExtra('');
     } catch (e) {
       setSlotsScheduleDiag(null);
       setSlotsRulesDiag(null);
+      setAvailabilityOk(false);
       setAvailabilityMain(`Could not check availability: ${formatHttpErrorDetail(e)}`);
     } finally {
       setBusy(null);
@@ -770,194 +777,6 @@ export function AutomationBookingPanel() {
                 </button>
               </div>
 
-              <div style={{ marginTop: '0.65rem', paddingTop: '0.65rem', borderTop: '1px solid var(--aisbp-border)' }}>
-                <div style={subsectionTitleStyle()}>Probe CRM slot API</div>
-                <p style={{ ...statusLineStyle(), marginTop: 0, marginBottom: '0.45rem' }}>
-                  Diagnostic: tries multiple GHL <code style={{ fontSize: '0.75rem' }}>free-slots</code> API shapes
-                  (version, timestamp unit, user query param, timezone). Uses the calendar and date/time above. Click to
-                  run and show all tested variants.
-                </p>
-                <button
-                  type="button"
-                  disabled={dim || noTestCalendar}
-                  onClick={() => void onProbeFreeSlots()}
-                  style={btn('secondary', dim || noTestCalendar)}
-                >
-                  {busy === 'probe-slots' ? 'Probing…' : 'Probe CRM slot API'}
-                </button>
-                {probeErr ? (
-                  <p style={{ ...statusLineStyle(), marginTop: '0.45rem', color: '#b45309' }} role="alert">
-                    {probeErr}
-                  </p>
-                ) : null}
-                {probeResult?.message ? (
-                  <p style={{ ...availabilityHintStyle(), marginTop: '0.5rem', color: '#92400e', fontWeight: 600 }}>
-                    {probeResult.message}
-                  </p>
-                ) : null}
-                {winningProbeVariant ? (
-                  <div
-                    style={{
-                      marginTop: '0.55rem',
-                      padding: '0.6rem 0.7rem',
-                      borderRadius: 8,
-                      border: '1px solid rgba(34, 197, 94, 0.45)',
-                      background: 'rgba(34, 197, 94, 0.1)',
-                    }}
-                    role="status"
-                  >
-                    <p
-                      style={{
-                        margin: 0,
-                        fontSize: '0.8rem',
-                        fontWeight: 700,
-                        color: 'rgb(22 101 52)',
-                      }}
-                    >
-                      Use this variant for production
-                    </p>
-                    <p style={{ ...statusLineStyle(), marginTop: '0.35rem', marginBottom: '0.4rem' }}>
-                      Set these on the <strong>backend</strong> (then redeploy). Values match the strongest variant (
-                      {winningProbeVariant.slotsReturned} slot
-                      {winningProbeVariant.slotsReturned === 1 ? '' : 's'}, {winningProbeVariant.hostMode},{' '}
-                      {winningProbeVariant.rangeMode}, {winningProbeVariant.variantName}).
-                    </p>
-                    {winningProbeVariant.hostMode === 'servicesApi' && winningProbeVariant.userParamMode === 'none' ? (
-                      <p style={{ ...availabilityHintStyle(), marginTop: 0, marginBottom: '0.45rem', color: '#166534' }}>
-                        That probe row did not send a staff user query param.{' '}
-                        <code style={{ fontSize: '0.7rem' }}>GHL_FREE_SLOTS_RETRY_USER_PARAM</code> below is the usual
-                        retry shape; confirm with your GHL account if retries should differ.
-                      </p>
-                    ) : null}
-                    <ul
-                      style={{
-                        margin: 0,
-                        paddingLeft: '1.1rem',
-                        fontSize: '0.74rem',
-                        lineHeight: 1.55,
-                        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-                        color: 'var(--aisbp-text-secondary)',
-                      }}
-                    >
-                      {winningEnvLines.map(row => (
-                        <li key={row.key} style={{ marginBottom: '0.15rem' }}>
-                          <span style={{ fontWeight: 600 }}>{row.key}</span>={row.value}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : null}
-                {probeResult && probeResult.variants.length > 0 ? (
-                  <div style={{ marginTop: '0.55rem', overflowX: 'auto' }}>
-                    <p style={{ ...subsectionTitleStyle(), marginBottom: '0.35rem' }}>Tested variants</p>
-                    <table
-                      style={{
-                        width: '100%',
-                        borderCollapse: 'collapse',
-                        fontSize: '0.68rem',
-                      }}
-                    >
-                      <thead>
-                        <tr style={{ textAlign: 'left', color: 'var(--aisbp-muted)' }}>
-                          <th style={{ padding: '0.22rem 0.3rem' }}>hostMode</th>
-                          <th style={{ padding: '0.22rem 0.3rem' }}>rangeMode</th>
-                          <th style={{ padding: '0.22rem 0.3rem' }}>seats</th>
-                          <th style={{ padding: '0.22rem 0.3rem' }}>version</th>
-                          <th style={{ padding: '0.22rem 0.3rem' }}>unit</th>
-                          <th style={{ padding: '0.22rem 0.3rem' }}>user</th>
-                          <th style={{ padding: '0.22rem 0.3rem' }}>TZ q</th>
-                          <th style={{ padding: '0.22rem 0.3rem' }}>HTTP</th>
-                          <th style={{ padding: '0.22rem 0.3rem' }} title="Coarse HTTP body shape">
-                            raw
-                          </th>
-                          <th style={{ padding: '0.22rem 0.3rem' }} title="ISO-like strings detected in payload">
-                            ISO#
-                          </th>
-                          <th style={{ padding: '0.22rem 0.3rem' }} title="Slots after parser">
-                            parsed#
-                          </th>
-                          <th style={{ padding: '0.22rem 0.3rem' }} title="Parser shapeSummary">
-                            parse
-                          </th>
-                          <th style={{ padding: '0.22rem 0.3rem' }}>#</th>
-                          <th style={{ padding: '0.22rem 0.3rem', minWidth: 120 }}>firstFewSlots</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {probeResult.variants.map((v, i) => (
-                          <tr
-                            key={i}
-                            title={v.variantName}
-                            style={{
-                              background: v.slotsReturned > 0 ? 'rgba(34, 197, 94, 0.22)' : undefined,
-                              boxShadow: v.slotsReturned > 0 ? 'inset 3px 0 0 0 rgb(22 163 74)' : undefined,
-                              borderTop: '1px solid var(--aisbp-border)',
-                            }}
-                          >
-                            <td style={{ padding: '0.28rem 0.3rem', whiteSpace: 'nowrap' }}>
-                              {v.hostMode === 'leadconnectorBackendWidget' ? 'leadconnectorBackendWidget' : 'servicesApi'}
-                            </td>
-                            <td style={{ padding: '0.28rem 0.3rem' }}>{v.rangeMode}</td>
-                            <td style={{ padding: '0.28rem 0.3rem' }}>{v.sendSeatsPerSlot ? 'true' : 'false'}</td>
-                            <td style={{ padding: '0.28rem 0.3rem' }}>{v.version}</td>
-                            <td style={{ padding: '0.28rem 0.3rem' }}>{v.timestampUnit}</td>
-                            <td style={{ padding: '0.28rem 0.3rem' }}>{v.userParamMode}</td>
-                            <td style={{ padding: '0.28rem 0.3rem' }}>{v.timezoneIncluded ? 'yes' : 'no'}</td>
-                            <td style={{ padding: '0.28rem 0.3rem' }}>{v.httpStatus ?? '—'}</td>
-                            <td
-                              style={{
-                                padding: '0.28rem 0.3rem',
-                                maxWidth: 88,
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                whiteSpace: 'nowrap',
-                              }}
-                              title={v.rawResponseShape ?? ''}
-                            >
-                              {(v.rawResponseShape ?? '—').length > 14
-                                ? `${(v.rawResponseShape ?? '—').slice(0, 12)}…`
-                                : (v.rawResponseShape ?? '—')}
-                            </td>
-                            <td style={{ padding: '0.28rem 0.3rem' }}>{v.rawIsoStringCount ?? 0}</td>
-                            <td style={{ padding: '0.28rem 0.3rem' }}>{v.parsedSlotsReturned ?? v.slotsReturned}</td>
-                            <td
-                              style={{
-                                padding: '0.28rem 0.3rem',
-                                maxWidth: 100,
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                whiteSpace: 'nowrap',
-                              }}
-                              title={v.responseShape}
-                            >
-                              {(v.responseShape ?? '—').length > 12
-                                ? `${(v.responseShape ?? '—').slice(0, 10)}…`
-                                : (v.responseShape ?? '—')}
-                            </td>
-                            <td
-                              style={{
-                                padding: '0.28rem 0.3rem',
-                                fontWeight: v.slotsReturned > 0 ? 800 : 700,
-                                color: v.slotsReturned > 0 ? 'rgb(22 101 52)' : undefined,
-                              }}
-                            >
-                              {v.slotsReturned}
-                            </td>
-                            <td style={{ padding: '0.28rem 0.3rem', color: 'var(--aisbp-muted)', lineHeight: 1.35 }}>
-                              {formatProbeFirstFewSlots(v)}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                    <p style={{ ...statusLineStyle(), marginTop: '0.5rem' }} title={probeResult.crmTimezoneUsed}>
-                      CRM tz used: {probeResult.crmTimezoneUsed}
-                      {probeResult.teamUserIdProbe ? ` · team user: ${probeResult.teamUserIdProbe}` : ''}
-                    </p>
-                  </div>
-                ) : null}
-              </div>
-
               {noTestCalendar ? (
                 <p style={{ ...statusLineStyle(), marginTop: '0.55rem', fontWeight: 600 }} role="status">
                   Select a calendar first.
@@ -966,14 +785,254 @@ export function AutomationBookingPanel() {
                 <p style={{ ...statusLineStyle(), marginTop: '0.55rem' }}>Uses your CRM calendar timezone.</p>
               )}
               {availabilityMain ? (
-                <p style={{ ...statusLineStyle(), marginTop: '0.5rem', fontWeight: 500, color: 'var(--aisbp-text-secondary)' }} role="status">
+                <p
+                  style={{
+                    ...statusLineStyle(),
+                    marginTop: '0.5rem',
+                    fontWeight: availabilityOk ? 600 : 500,
+                    color: availabilityOk ? 'rgb(22 101 52)' : 'var(--aisbp-text-secondary)',
+                  }}
+                  role="status"
+                >
                   {availabilityMain}
                 </p>
               ) : null}
               {availabilityHint ? <p style={availabilityHintStyle()}>{availabilityHint}</p> : null}
               {availabilityExtra ? <p style={availabilityHintStyle()}>{availabilityExtra}</p> : null}
               {slotsScheduleDiag ? (
-                <ScheduleDiagnosticsPanel schedule={slotsScheduleDiag} rules={slotsRulesDiag} />
+                <details style={{ marginTop: '0.55rem' }}>
+                  <summary
+                    style={{
+                      cursor: 'pointer',
+                      fontSize: '0.78rem',
+                      fontWeight: 600,
+                      color: 'var(--aisbp-text-secondary)',
+                    }}
+                  >
+                    Troubleshooting details
+                  </summary>
+                  <div style={{ marginTop: '0.45rem' }}>
+                    <ScheduleDiagnosticsPanel schedule={slotsScheduleDiag} rules={slotsRulesDiag} />
+                  </div>
+                  {slotsRulesDiag?.meetingLocationPresent === false ? (
+                    <p style={{ ...availabilityHintStyle(), marginTop: '0.45rem' }}>
+                      Meeting location was not found in the CRM API response. If booking links work in GHL, this can
+                      usually be ignored.
+                    </p>
+                  ) : null}
+                </details>
+              ) : null}
+
+              {SHOW_BOOKING_DIAGNOSTICS ? (
+                <details
+                  style={{
+                    marginTop: '0.65rem',
+                    paddingTop: '0.65rem',
+                    borderTop: '1px solid var(--aisbp-border)',
+                  }}
+                >
+                  <summary
+                    style={{
+                      cursor: 'pointer',
+                      fontSize: '0.8rem',
+                      fontWeight: 600,
+                      color: 'var(--aisbp-text-secondary)',
+                      marginBottom: '0.35rem',
+                    }}
+                  >
+                    Advanced diagnostics (API probe)
+                  </summary>
+                  <div>
+                    <p style={{ ...statusLineStyle(), marginTop: 0, marginBottom: '0.45rem' }}>
+                      Tries multiple GHL <code style={{ fontSize: '0.75rem' }}>free-slots</code> request shapes
+                      (version, timestamp unit, user query param, timezone). Uses the calendar and date/time above.
+                    </p>
+                    <button
+                      type="button"
+                      disabled={dim || noTestCalendar}
+                      onClick={() => void onProbeFreeSlots()}
+                      style={btn('secondary', dim || noTestCalendar)}
+                    >
+                      {busy === 'probe-slots' ? 'Probing…' : 'Run API probe'}
+                    </button>
+                    {probeErr ? (
+                      <p style={{ ...statusLineStyle(), marginTop: '0.45rem', color: '#b45309' }} role="alert">
+                        {probeErr}
+                      </p>
+                    ) : null}
+                    {probeResult?.message ? (
+                      <p style={{ ...availabilityHintStyle(), marginTop: '0.5rem', color: '#92400e', fontWeight: 600 }}>
+                        {probeResult.message}
+                      </p>
+                    ) : null}
+                    {winningProbeVariant ? (
+                      <div
+                        style={{
+                          marginTop: '0.55rem',
+                          padding: '0.6rem 0.7rem',
+                          borderRadius: 8,
+                          border: '1px solid rgba(34, 197, 94, 0.45)',
+                          background: 'rgba(34, 197, 94, 0.1)',
+                        }}
+                        role="status"
+                      >
+                        <p
+                          style={{
+                            margin: 0,
+                            fontSize: '0.8rem',
+                            fontWeight: 700,
+                            color: 'rgb(22 101 52)',
+                          }}
+                        >
+                          Suggested backend env (strongest probe row)
+                        </p>
+                        <p style={{ ...statusLineStyle(), marginTop: '0.35rem', marginBottom: '0.4rem' }}>
+                          Default production is <code style={{ fontSize: '0.7rem' }}>services_api</code> +{' '}
+                          <code style={{ fontSize: '0.7rem' }}>day</code>. This row had {winningProbeVariant.slotsReturned}{' '}
+                          slot{winningProbeVariant.slotsReturned === 1 ? '' : 's'} ({winningProbeVariant.hostMode},{' '}
+                          {winningProbeVariant.rangeMode}, {winningProbeVariant.variantName}).
+                        </p>
+                        {winningProbeVariant.hostMode === 'servicesApi' &&
+                        winningProbeVariant.userParamMode === 'none' ? (
+                          <p
+                            style={{ ...availabilityHintStyle(), marginTop: 0, marginBottom: '0.45rem', color: '#166534' }}
+                          >
+                            That probe row did not send a staff user query param.{' '}
+                            <code style={{ fontSize: '0.7rem' }}>GHL_FREE_SLOTS_RETRY_USER_PARAM</code> is the usual retry
+                            shape; confirm with your GHL account if retries should differ.
+                          </p>
+                        ) : null}
+                        <ul
+                          style={{
+                            margin: 0,
+                            paddingLeft: '1.1rem',
+                            fontSize: '0.74rem',
+                            lineHeight: 1.55,
+                            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+                            color: 'var(--aisbp-text-secondary)',
+                          }}
+                        >
+                          {winningEnvLines.map(row => (
+                            <li key={row.key} style={{ marginBottom: '0.15rem' }}>
+                              <span style={{ fontWeight: 600 }}>{row.key}</span>={row.value}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+                    {probeResult && probeResult.variants.length > 0 ? (
+                      <div style={{ marginTop: '0.55rem', overflowX: 'auto' }}>
+                        <p style={{ ...subsectionTitleStyle(), marginBottom: '0.35rem' }}>Tested variants</p>
+                        <table
+                          style={{
+                            width: '100%',
+                            borderCollapse: 'collapse',
+                            fontSize: '0.68rem',
+                          }}
+                        >
+                          <thead>
+                            <tr style={{ textAlign: 'left', color: 'var(--aisbp-muted)' }}>
+                              <th style={{ padding: '0.22rem 0.3rem' }}>hostMode</th>
+                              <th style={{ padding: '0.22rem 0.3rem' }}>rangeMode</th>
+                              <th style={{ padding: '0.22rem 0.3rem' }}>seats</th>
+                              <th style={{ padding: '0.22rem 0.3rem' }}>version</th>
+                              <th style={{ padding: '0.22rem 0.3rem' }}>unit</th>
+                              <th style={{ padding: '0.22rem 0.3rem' }}>user</th>
+                              <th style={{ padding: '0.22rem 0.3rem' }}>TZ q</th>
+                              <th style={{ padding: '0.22rem 0.3rem' }}>HTTP</th>
+                              <th style={{ padding: '0.22rem 0.3rem' }} title="Coarse HTTP body shape">
+                                raw
+                              </th>
+                              <th style={{ padding: '0.22rem 0.3rem' }} title="ISO-like strings detected in payload">
+                                ISO#
+                              </th>
+                              <th style={{ padding: '0.22rem 0.3rem' }} title="Slots after parser">
+                                parsed#
+                              </th>
+                              <th style={{ padding: '0.22rem 0.3rem' }} title="Parser shapeSummary">
+                                parse
+                              </th>
+                              <th style={{ padding: '0.22rem 0.3rem' }}>#</th>
+                              <th style={{ padding: '0.22rem 0.3rem', minWidth: 120 }}>firstFewSlots</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {probeResult.variants.map((v, i) => (
+                              <tr
+                                key={i}
+                                title={v.variantName}
+                                style={{
+                                  background: v.slotsReturned > 0 ? 'rgba(34, 197, 94, 0.22)' : undefined,
+                                  boxShadow: v.slotsReturned > 0 ? 'inset 3px 0 0 0 rgb(22 163 74)' : undefined,
+                                  borderTop: '1px solid var(--aisbp-border)',
+                                }}
+                              >
+                                <td style={{ padding: '0.28rem 0.3rem', whiteSpace: 'nowrap' }}>
+                                  {v.hostMode === 'leadconnectorBackendWidget'
+                                    ? 'leadconnectorBackendWidget'
+                                    : 'servicesApi'}
+                                </td>
+                                <td style={{ padding: '0.28rem 0.3rem' }}>{v.rangeMode}</td>
+                                <td style={{ padding: '0.28rem 0.3rem' }}>{v.sendSeatsPerSlot ? 'true' : 'false'}</td>
+                                <td style={{ padding: '0.28rem 0.3rem' }}>{v.version}</td>
+                                <td style={{ padding: '0.28rem 0.3rem' }}>{v.timestampUnit}</td>
+                                <td style={{ padding: '0.28rem 0.3rem' }}>{v.userParamMode}</td>
+                                <td style={{ padding: '0.28rem 0.3rem' }}>{v.timezoneIncluded ? 'yes' : 'no'}</td>
+                                <td style={{ padding: '0.28rem 0.3rem' }}>{v.httpStatus ?? '—'}</td>
+                                <td
+                                  style={{
+                                    padding: '0.28rem 0.3rem',
+                                    maxWidth: 88,
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    whiteSpace: 'nowrap',
+                                  }}
+                                  title={v.rawResponseShape ?? ''}
+                                >
+                                  {(v.rawResponseShape ?? '—').length > 14
+                                    ? `${(v.rawResponseShape ?? '—').slice(0, 12)}…`
+                                    : (v.rawResponseShape ?? '—')}
+                                </td>
+                                <td style={{ padding: '0.28rem 0.3rem' }}>{v.rawIsoStringCount ?? 0}</td>
+                                <td style={{ padding: '0.28rem 0.3rem' }}>{v.parsedSlotsReturned ?? v.slotsReturned}</td>
+                                <td
+                                  style={{
+                                    padding: '0.28rem 0.3rem',
+                                    maxWidth: 100,
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    whiteSpace: 'nowrap',
+                                  }}
+                                  title={v.responseShape}
+                                >
+                                  {(v.responseShape ?? '—').length > 12
+                                    ? `${(v.responseShape ?? '—').slice(0, 10)}…`
+                                    : (v.responseShape ?? '—')}
+                                </td>
+                                <td
+                                  style={{
+                                    padding: '0.28rem 0.3rem',
+                                    fontWeight: v.slotsReturned > 0 ? 800 : 700,
+                                    color: v.slotsReturned > 0 ? 'rgb(22 101 52)' : undefined,
+                                  }}
+                                >
+                                  {v.slotsReturned}
+                                </td>
+                                <td style={{ padding: '0.28rem 0.3rem', color: 'var(--aisbp-muted)', lineHeight: 1.35 }}>
+                                  {formatProbeFirstFewSlots(v)}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                        <p style={{ ...statusLineStyle(), marginTop: '0.5rem' }} title={probeResult.crmTimezoneUsed}>
+                          CRM tz used: {probeResult.crmTimezoneUsed}
+                          {probeResult.teamUserIdProbe ? ` · team user: ${probeResult.teamUserIdProbe}` : ''}
+                        </p>
+                      </div>
+                    ) : null}
+                  </div>
+                </details>
               ) : null}
             </div>
           </SectionCard>

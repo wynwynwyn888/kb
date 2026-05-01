@@ -1,0 +1,160 @@
+/** Live booking state in `conversations.metadata.aisbp_booking` (channel-agnostic). */
+
+export const AISBP_BOOKING_METADATA_KEY = 'aisbp_booking';
+
+export type AisbpBookingStatus =
+  | 'collecting_details'
+  | 'offered_slots'
+  | 'creating'
+  | 'confirmed'
+  | 'failed';
+
+export interface AisbpOfferedSlot {
+  option: number;
+  startIso: string;
+  endIso: string;
+  displayText: string;
+  calendarId: string;
+}
+
+export type AisbpCustomAnswers = Record<string, string>;
+
+export interface AisbpBookingStateV1 {
+  status: AisbpBookingStatus;
+  version: number;
+  calendarId: string;
+  service?: string;
+  customerName?: string;
+  phone?: string;
+  email?: string;
+  firstVisit?: string;
+  preferredDate?: string;
+  preferredTime?: string;
+  customAnswers?: AisbpCustomAnswers;
+  offeredSlots?: AisbpOfferedSlot[];
+  lastOfferedAt?: string;
+  selectedSlot?: AisbpOfferedSlot;
+  appointmentId?: string;
+  bookingConfirmedAt?: string;
+  /** Slot duration minutes observed from calendar (optional). */
+  slotDurationMinutes?: number;
+  /** Last appointment create outcome for idempotency / diagnostics. */
+  lastCreateError?: string;
+}
+
+export function emptyBookingState(): AisbpBookingStateV1 {
+  return {
+    status: 'collecting_details',
+    version: 1,
+    calendarId: '',
+  };
+}
+
+export function parseAisbpBookingState(metadata: Record<string, unknown> | undefined): AisbpBookingStateV1 | null {
+  if (!metadata || typeof metadata !== 'object') return null;
+  const raw = metadata[AISBP_BOOKING_METADATA_KEY];
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const o = raw as Record<string, unknown>;
+  const status = o['status'];
+  if (
+    status !== 'collecting_details' &&
+    status !== 'offered_slots' &&
+    status !== 'creating' &&
+    status !== 'confirmed' &&
+    status !== 'failed'
+  ) {
+    return null;
+  }
+  const calendarId = typeof o['calendarId'] === 'string' ? o['calendarId'].trim() : '';
+  if (!calendarId) return null;
+  const version = typeof o['version'] === 'number' && Number.isFinite(o['version']) ? Math.floor(o['version']) : 1;
+
+  const offeredSlots = Array.isArray(o['offeredSlots'])
+    ? (o['offeredSlots'] as unknown[])
+        .map((row, i): AisbpOfferedSlot | null => {
+          if (!row || typeof row !== 'object') return null;
+          const r = row as Record<string, unknown>;
+          const startIso = typeof r['startIso'] === 'string' ? r['startIso'] : '';
+          const endIso = typeof r['endIso'] === 'string' ? r['endIso'] : '';
+          const displayText = typeof r['displayText'] === 'string' ? r['displayText'] : '';
+          const cal = typeof r['calendarId'] === 'string' ? r['calendarId'] : calendarId;
+          if (!startIso || !displayText) return null;
+          const option =
+            typeof r['option'] === 'number' && Number.isFinite(r['option']) ? Math.floor(r['option']) : i + 1;
+          return {
+            option,
+            startIso,
+            endIso: endIso || startIso,
+            displayText,
+            calendarId: cal || calendarId,
+          };
+        })
+        .filter((x): x is AisbpOfferedSlot => x !== null)
+    : undefined;
+
+  const selected =
+    o['selectedSlot'] && typeof o['selectedSlot'] === 'object' && !Array.isArray(o['selectedSlot'])
+      ? (() => {
+          const r = o['selectedSlot'] as Record<string, unknown>;
+          const startIso = typeof r['startIso'] === 'string' ? r['startIso'] : '';
+          const endIso = typeof r['endIso'] === 'string' ? r['endIso'] : '';
+          const displayText = typeof r['displayText'] === 'string' ? r['displayText'] : '';
+          const cal = typeof r['calendarId'] === 'string' ? r['calendarId'] : calendarId;
+          const option =
+            typeof r['option'] === 'number' && Number.isFinite(r['option']) ? Math.floor(r['option']) : 1;
+          if (!startIso || !displayText) return undefined;
+          return {
+            option,
+            startIso,
+            endIso: endIso || startIso,
+            displayText,
+            calendarId: cal || calendarId,
+          };
+        })()
+      : undefined;
+
+  const customAnswers =
+    o['customAnswers'] && typeof o['customAnswers'] === 'object' && !Array.isArray(o['customAnswers'])
+      ? (o['customAnswers'] as AisbpCustomAnswers)
+      : undefined;
+
+  return {
+    status: status as AisbpBookingStatus,
+    version,
+    calendarId,
+    service: typeof o['service'] === 'string' ? o['service'] : undefined,
+    customerName: typeof o['customerName'] === 'string' ? o['customerName'] : undefined,
+    phone: typeof o['phone'] === 'string' ? o['phone'] : undefined,
+    email: typeof o['email'] === 'string' ? o['email'] : undefined,
+    firstVisit: typeof o['firstVisit'] === 'string' ? o['firstVisit'] : undefined,
+    preferredDate: typeof o['preferredDate'] === 'string' ? o['preferredDate'] : undefined,
+    preferredTime: typeof o['preferredTime'] === 'string' ? o['preferredTime'] : undefined,
+    customAnswers,
+    offeredSlots,
+    lastOfferedAt: typeof o['lastOfferedAt'] === 'string' ? o['lastOfferedAt'] : undefined,
+    selectedSlot: selected,
+    appointmentId: typeof o['appointmentId'] === 'string' ? o['appointmentId'] : undefined,
+    bookingConfirmedAt: typeof o['bookingConfirmedAt'] === 'string' ? o['bookingConfirmedAt'] : undefined,
+    slotDurationMinutes:
+      typeof o['slotDurationMinutes'] === 'number' && Number.isFinite(o['slotDurationMinutes'])
+        ? Math.floor(o['slotDurationMinutes'])
+        : undefined,
+    lastCreateError: typeof o['lastCreateError'] === 'string' ? o['lastCreateError'] : undefined,
+  };
+}
+
+export function mergeBookingIntoConversationMetadata(
+  prev: Record<string, unknown>,
+  booking: AisbpBookingStateV1,
+): Record<string, unknown> {
+  return {
+    ...prev,
+    [AISBP_BOOKING_METADATA_KEY]: { ...booking },
+  };
+}
+
+export function stripAisbpBookingFromMetadata(prev: Record<string, unknown>): Record<string, unknown> {
+  const next = { ...prev };
+  delete next[AISBP_BOOKING_METADATA_KEY];
+  return next;
+}

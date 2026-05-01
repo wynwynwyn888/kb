@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { getSupabaseService } from '../../lib/supabase';
 import { resolveAppTimeZone, snapUtcEpochMsToWholeMinute, snapUtcEpochMsToWholeSecond, wallClockInZoneToUtcMs } from '../../lib/business-time';
 import { GhlService } from '../ghl/ghl.service';
@@ -565,7 +565,7 @@ export class BookingSettingsService {
           userId: uid,
         });
         retriedWithUserId = uid;
-        this.logger.log(
+        this.logger.debug(
           `bookingTestSlotsRetryWithUser ${JSON.stringify({
             calendarId,
             userId: uid,
@@ -640,33 +640,31 @@ export class BookingSettingsService {
         zeroSlots: true,
       });
       this.logger.log(
-        `bookingCalendarScheduleDiagnostic ${JSON.stringify({
+        `bookingCalendarZeroSlotsDiagnostics ${JSON.stringify({
           tenantId,
           calendarId,
           locationId: ghlLocationId,
-          teamMembersCount: scheduleDiagnostics.teamMembersCount,
-          openHoursCount: scheduleDiagnostics.openHoursCount,
-          eventCalendarScheduleFound: scheduleDiagnostics.eventCalendarScheduleFound,
-          userScheduleFound: scheduleDiagnostics.userScheduleFound,
-          scheduleRulesCount: scheduleDiagnostics.scheduleRulesCount,
-          scheduleTimezone: scheduleDiagnostics.scheduleTimezone,
-          warningCodes: scheduleDiagnostics.warningCodes,
-        })}`,
-      );
-      this.logger.log(
-        `bookingCalendarRulesDiagnostic ${JSON.stringify({
-          tenantId,
-          calendarId,
-          calendarType: calSnap.summary?.calendarType ?? calSnap.summary?.typeRaw ?? null,
-          slotDuration: bookingRulesDiagnostics.slotDuration,
-          slotInterval: bookingRulesDiagnostics.slotInterval,
-          appointmentPerSlot: bookingRulesDiagnostics.appointmentsPerSlot,
-          bufferSummary: bookingRulesDiagnostics.bufferSummary,
-          minNoticeSummary: bookingRulesDiagnostics.minNoticeSummary,
-          bookingWindowSummary: bookingRulesDiagnostics.bookingWindowSummary,
-          meetingLocationPresent: bookingRulesDiagnostics.meetingLocationPresent,
-          conflictCheckSummary: bookingRulesDiagnostics.conflictCheckSummary,
-          warningCodes: bookingRulesDiagnostics.warningCodes,
+          schedule: {
+            teamMembersCount: scheduleDiagnostics.teamMembersCount,
+            openHoursCount: scheduleDiagnostics.openHoursCount,
+            eventCalendarScheduleFound: scheduleDiagnostics.eventCalendarScheduleFound,
+            userScheduleFound: scheduleDiagnostics.userScheduleFound,
+            scheduleRulesCount: scheduleDiagnostics.scheduleRulesCount,
+            scheduleTimezone: scheduleDiagnostics.scheduleTimezone,
+            warningCodes: scheduleDiagnostics.warningCodes,
+          },
+          rules: {
+            calendarType: calSnap.summary?.calendarType ?? calSnap.summary?.typeRaw ?? null,
+            slotDuration: bookingRulesDiagnostics.slotDuration,
+            slotInterval: bookingRulesDiagnostics.slotInterval,
+            appointmentPerSlot: bookingRulesDiagnostics.appointmentsPerSlot,
+            bufferSummary: bookingRulesDiagnostics.bufferSummary,
+            minNoticeSummary: bookingRulesDiagnostics.minNoticeSummary,
+            bookingWindowSummary: bookingRulesDiagnostics.bookingWindowSummary,
+            meetingLocationPresent: bookingRulesDiagnostics.meetingLocationPresent,
+            conflictCheckSummary: bookingRulesDiagnostics.conflictCheckSummary,
+            warningCodes: bookingRulesDiagnostics.warningCodes,
+          },
         })}`,
       );
     }
@@ -680,6 +678,131 @@ export class BookingSettingsService {
       scheduleDiagnostics,
       bookingRulesDiagnostics,
       slotsSourceMessage: r.availabilityNote,
+    };
+  }
+
+  /**
+   * Inbound automation (WhatsApp booking): same free-slots lookup as test-slots without heavy diagnostics,
+   * using worker GHL credentials (no end-user JWT).
+   */
+  async fetchFreeSlotsForAutomation(
+    tenantId: string,
+    body: { calendarId: string; selectedDate: string; selectedTime?: string },
+  ): Promise<{
+    slots: GhlFreeSlot[];
+    calendarId: string;
+    error?: string;
+    retriedWithUserId?: string | null;
+    crmTimezoneUsed: string;
+    selectedDate: string;
+    selectedTime: string;
+    startMs: number;
+    endMs: number;
+    ghlLocationId: string;
+  }> {
+    const calendarId = body.calendarId.trim();
+    if (!calendarId) {
+      throw new BadRequestException('calendarId is required.');
+    }
+
+    const tenantTz = await this.loadTenantCrmTimezone(tenantId);
+    let crmTimezoneUsed = tenantTz || resolveAppTimeZone();
+
+    let range: { startMs: number; endMs: number; selectedDate: string; selectedTime: string };
+    try {
+      range = computeFreeSlotRangeMs(crmTimezoneUsed, body);
+    } catch (e) {
+      if (e instanceof BadRequestException) throw e;
+      this.logger.warn(
+        `fetchFreeSlotsForAutomation: invalid CRM timezone "${crmTimezoneUsed}", using ${resolveAppTimeZone()}`,
+      );
+      crmTimezoneUsed = resolveAppTimeZone();
+      range = computeFreeSlotRangeMs(crmTimezoneUsed, body);
+    }
+
+    let startMs = range.startMs;
+    let endMs = range.endMs;
+    if (endMs <= startMs) {
+      endMs = startMs + 3600 * 1000;
+    }
+
+    const { client, ghlLocationId } = await this.ghlService.createGhlClientForConnectedTenantWorkerOrThrow(tenantId);
+
+    this.logger.log(`selectedFreeSlotsVariant ${JSON.stringify(resolveGhlFreeSlotsProductionSpec())}`);
+
+    const freeSlotsProd = resolveGhlFreeSlotsProductionSpec();
+
+    this.logger.log(
+      `bookingSlotsFetched ${JSON.stringify({
+        tenantId,
+        calendarId,
+        selectedDate: range.selectedDate,
+        selectedTime: range.selectedTime || null,
+        generatedStartIso: new Date(startMs).toISOString(),
+        generatedEndIso: new Date(endMs).toISOString(),
+        crmTimezoneUsed,
+        ghlLocationId,
+      })}`,
+    );
+
+    let r = await client.getFreeSlots({
+      calendarId,
+      startDateMs: startMs,
+      endDateMs: endMs,
+      timezone: crmTimezoneUsed,
+    });
+
+    let retriedWithUserId: string | null = null;
+
+    if (freeSlotsProd.hostMode !== 'widget_backend' && !r.error && r.slots.length === 0) {
+      const calWhenEmpty = await client.getCalendar(calendarId);
+      const userIds = calWhenEmpty.summary?.teamMemberUserIds;
+      if (userIds && userIds.length > 0) {
+        const uid = userIds[0]!;
+        const r2 = await client.getFreeSlots({
+          calendarId,
+          startDateMs: startMs,
+          endDateMs: endMs,
+          timezone: crmTimezoneUsed,
+          userId: uid,
+        });
+        retriedWithUserId = uid;
+        this.logger.debug(
+          `bookingSlotsFetchedRetry ${JSON.stringify({
+            calendarId,
+            userId: uid,
+            slotsReturned: r2.slots.length,
+            httpStatus: r2.httpStatus ?? null,
+          })}`,
+        );
+        if (!r2.error && r2.slots.length > 0) {
+          r = r2;
+        }
+      }
+    }
+
+    this.logger.log(
+      `bookingSlotsFetchedResult ${JSON.stringify({
+        tenantId,
+        calendarId,
+        httpStatus: r.httpStatus ?? null,
+        slotsReturned: r.slots.length,
+        hasError: Boolean(r.error),
+        retriedWithUserId,
+      })}`,
+    );
+
+    return {
+      slots: r.slots,
+      calendarId,
+      error: r.error,
+      retriedWithUserId,
+      crmTimezoneUsed,
+      selectedDate: range.selectedDate,
+      selectedTime: range.selectedTime,
+      startMs,
+      endMs,
+      ghlLocationId,
     };
   }
 
@@ -732,6 +855,14 @@ export class BookingSettingsService {
     const selectedDate = body.selectedDate?.trim();
     if (!selectedDate) {
       throw new BadRequestException('selectedDate is required (YYYY-MM-DD).');
+    }
+
+    const nodeEnv = (process.env['NODE_ENV'] ?? '').trim();
+    const allowProbe = (process.env['ALLOW_BOOKING_PROBE'] ?? '').trim().toLowerCase();
+    if (nodeEnv === 'production' && allowProbe !== 'true') {
+      throw new ForbiddenException(
+        'Booking free-slots probe is disabled in production. Set ALLOW_BOOKING_PROBE=true on the server to enable it.',
+      );
     }
 
     const tenantTz = await this.loadTenantCrmTimezone(tenantId);
@@ -919,25 +1050,13 @@ export class BookingSettingsService {
     let message: string | undefined;
     if (allVariantsZero) {
       message =
-        'GHL booking widget shows slots, but CRM API returned no free slots for all tested API variants. This may require GHL support or using a different endpoint/booking-link strategy.';
+        'All tested free-slots probe variants returned zero slots for this calendar and date range. Adjust GHL availability or booking rules, or align backend env with a variant that returns slots.';
     } else if (widgetMonthWin) {
       message = 'CRM returned slots using widget-compatible month range.';
     }
 
     this.logger.log(
-      `probeFreeSlotsSummary ${JSON.stringify({
-        tenantId,
-        calendarId,
-        ghlLocationId,
-        variantCount: variants.length,
-        anySlotsReturned,
-        widgetMonthWin,
-        productionSpec: {
-          hostMode: productionSpec.hostMode,
-          rangeMode: productionSpec.rangeMode,
-          apiVersion: productionSpec.apiVersion,
-        },
-      })}`,
+      `probeFreeSlotsComplete tenant=${tenantId} calendarId=${calendarId} locationId=${ghlLocationId} variantCount=${variants.length} anySlotsReturned=${anySlotsReturned} widgetMonthWin=${widgetMonthWin} hostMode=${productionSpec.hostMode} rangeMode=${productionSpec.rangeMode}`,
     );
 
     return {

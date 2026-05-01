@@ -2,6 +2,17 @@ import { describe, expect, it } from 'vitest';
 import { parseGhlFreeSlotsResponse } from './parse-ghl-free-slots-response.js';
 
 describe('parseGhlFreeSlotsResponse', () => {
+  it('parses widget-style month map with multiple date keys (ISO strings per day)', () => {
+    const r = parseGhlFreeSlotsResponse({
+      '2026-05-06': ['2026-05-06T00:30:00+08:00'],
+      '2026-05-07': ['2026-05-07T10:00:00.000Z', '2026-05-07T10:30:00.000Z'],
+    });
+    expect(r.shapeSummary).toBe('dateKeyedMap');
+    expect(r.slots).toHaveLength(3);
+    expect(r.dateKeys).toContain('2026-05-06');
+    expect(r.dateKeys).toContain('2026-05-07');
+  });
+
   it('parses top-level ISO string array (widget shape)', () => {
     const raw = ['2026-05-06T00:30:00+08:00', '2026-05-06T01:00:00+08:00', '2026-05-06T01:30:00+08:00'];
     const r = parseGhlFreeSlotsResponse(raw);

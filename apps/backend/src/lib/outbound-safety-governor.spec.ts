@@ -1,6 +1,7 @@
 import {
   COMPLAINT_ESCALATION_REPLY,
   detectComplaintServiceIssue,
+  isTrustedExecutedBookSlotSource,
   isUnsupportedSalonScopeQuery,
   shouldRewriteUnrequestedMenuRepetition,
   textClaimsBookingConfirmed,
@@ -86,6 +87,23 @@ describe('outbound-safety-governor', () => {
   describe('userAskedForColourAlternatives', () => {
     it('detects alternative requests', () => {
       expect(userAskedForColourAlternatives('any other colour options?')).toBe(true);
+    });
+  });
+
+  describe('isTrustedExecutedBookSlotSource', () => {
+    it('allows legacy WHATSAPP_BOOKING and new CONVERSATION_BOOKING prefixes', () => {
+      expect(isTrustedExecutedBookSlotSource('WHATSAPP_BOOKING:ap1')).toBe(true);
+      expect(isTrustedExecutedBookSlotSource('CONVERSATION_BOOKING:ap1')).toBe(true);
+    });
+
+    it('allows AI and empty source', () => {
+      expect(isTrustedExecutedBookSlotSource('AI')).toBe(true);
+      expect(isTrustedExecutedBookSlotSource('')).toBe(true);
+      expect(isTrustedExecutedBookSlotSource(undefined)).toBe(true);
+    });
+
+    it('rejects unrelated sources', () => {
+      expect(isTrustedExecutedBookSlotSource('OTHER:ap1')).toBe(false);
     });
   });
 });

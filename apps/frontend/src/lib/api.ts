@@ -639,7 +639,7 @@ export async function testTenantBookingSlots(
     endDate?: string;
   },
 ): Promise<{
-  slots: { startTime: string; endTime: string }[];
+  slots: { startTime: string; endTime?: string }[];
   calendarId: string | null;
   error?: string;
   emptyWithoutError?: boolean;

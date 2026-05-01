@@ -8,6 +8,7 @@ import {
   parseAisbpPolicyState,
   policyStateAfterBotReset,
 } from '../conversation-policy/conversation-policy-state';
+import { stripAisbpBookingFromMetadata } from '../booking-flow/conversation-booking-state';
 import {
   buildChatResetContactWhitelist,
   evaluateAllowChatResetCommands,
@@ -160,7 +161,8 @@ export class ConversationResetService implements OnModuleInit {
     const prevPolicy = parseAisbpPolicyState(prevMeta);
     const resetAt = new Date().toISOString();
     const nextPolicy = policyStateAfterBotReset(prevPolicy, resetAt);
-    const merged = mergePolicyIntoConversationMetadata(prevMeta, nextPolicy);
+    let merged = mergePolicyIntoConversationMetadata(prevMeta, nextPolicy);
+    merged = stripAisbpBookingFromMetadata(merged);
 
     const { error: uErr } = await this.supabase
       .from('conversations')

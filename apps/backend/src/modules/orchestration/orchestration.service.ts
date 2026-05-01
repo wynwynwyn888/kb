@@ -53,6 +53,8 @@ import {
   detectComplaintServiceIssue,
   isUnsupportedSalonScopeQuery,
 } from '../../lib/outbound-safety-governor';
+import { ConversationBookingFlowService } from '../booking-flow/conversation-booking-flow.service';
+import { BookingSettingsService } from '../booking-settings/booking-settings.service';
 
 @Injectable()
 export class ConversationOrchestrationService {
@@ -67,6 +69,8 @@ export class ConversationOrchestrationService {
     private readonly replyPlanner: ReplyPlannerService,
     private readonly conversationPolicy: ConversationPolicyEngineService,
     private readonly conversationsService: ConversationsService,
+    private readonly bookingFlow: ConversationBookingFlowService,
+    private readonly bookingSettings: BookingSettingsService,
   ) {}
 
   /**
@@ -260,6 +264,39 @@ export class ConversationOrchestrationService {
         };
       }
 
+      const bookingHook = await this.bookingFlow.maybeHandleConversationBookingTurn({
+        tenantId: input.tenantId,
+        conversationId,
+        contactId: input.conversation?.contactId ?? '',
+        channel: input.conversation?.channel ?? '',
+        combinedInboundText: batchSummary.combinedText || latestMsg,
+        latestInboundText: latestMsg,
+        metadata: (input.conversation?.metadata as Record<string, unknown>) ?? {},
+        tenantDisplayName: input.tenant?.name,
+        tenantTimeZone: input.tenant?.timeZone,
+      });
+
+      if (bookingHook.handled) {
+        await this.persistConversationMetadata(conversationId, bookingHook.persistMetadata);
+        const logId = await this.persistOrchestrationLog(
+          input,
+          guardOutcome,
+          bookingHook.routing,
+          null,
+          bookingHook.replyPlan,
+        );
+        return {
+          success: true,
+          outcome: 'PROCEED',
+          conversationId,
+          webhookEventId,
+          guards: guardOutcome,
+          routing: bookingHook.routing,
+          replyPlan: bookingHook.replyPlan,
+          logId,
+        };
+      }
+
       // Step 3: Retrieve KB + intent-aware filter (query may expand for menu category selection)
       const { chunks: kbAfterRetrieve, meta: retrievalMeta } = await this.retrieveKbContext(
         input,
@@ -333,7 +370,8 @@ export class ConversationOrchestrationService {
       );
 
       // Step 4: Build AI routing request (includes KB context)
-      const systemPrompt = this.buildSystemPromptWithRuntimeGreeting(input);
+      const bookingCapabilityForPrompt = await this.resolveBookingCapabilityForGovernor(input.tenantId);
+      const systemPrompt = this.buildSystemPromptWithRuntimeGreeting(input, bookingCapabilityForPrompt);
       const routingInbound = batch.length > 1 ? batchSummary.combinedText : latestMsg;
       const routingRequest = this.buildRoutingRequest(
         input,
@@ -372,7 +410,7 @@ export class ConversationOrchestrationService {
           repeatedHumanTextDetected: repeatMeta.repeatedHumanTextDetected,
           repeatedHumanTextAction: repeatMeta.repeatedHumanTextAction,
           suppressColourRecommendations: isUnsupportedSalonScopeQuery(latestMsg),
-          bookingCapability: 'collect_details_only',
+          bookingCapability: bookingCapabilityForPrompt,
           handoverCapability: input.tenant?.ghlLocationId?.trim()
             ? 'tag_and_notify'
             : 'collect_details_only',
@@ -594,6 +632,39 @@ export class ConversationOrchestrationService {
    * Retrieve KB context for the incoming user message.
    * Returns { chunks, meta } — chunks may be empty even when meta is non-null.
    */
+  private async persistConversationMetadata(
+    conversationId: string,
+    metadata: Record<string, unknown>,
+  ): Promise<void> {
+    const { error } = await this.supabase
+      .from('conversations')
+      .update({ metadata, updated_at: new Date().toISOString() })
+      .eq('id', conversationId);
+    if (error) {
+      this.logger.warn(
+        `Failed to persist conversation metadata: conversationId=${conversationId} ${formatPostgrestError(error)}`,
+      );
+    }
+  }
+
+  private async resolveBookingCapabilityForGovernor(
+    tenantId: string,
+  ): Promise<'live_slot_booking' | 'collect_details_only'> {
+    try {
+      const bs = await this.bookingSettings.getBookingSettings(tenantId);
+      if (
+        bs.enabled &&
+        bs.defaultGhlCalendarId?.trim() &&
+        (bs.bookingMode === 'CHECK_AVAILABILITY' || bs.bookingMode === 'BOOK_AFTER_CONFIRMATION')
+      ) {
+        return 'live_slot_booking';
+      }
+    } catch {
+      /* ignore */
+    }
+    return 'collect_details_only';
+  }
+
   private async persistConversationPolicyMetadata(
     conversationId: string,
     prevMetadata: Record<string, unknown>,
@@ -699,7 +770,10 @@ export class ConversationOrchestrationService {
    * Appends backend-computed local time context so the model greets with the correct period
    * (e.g. Good evening at 21:00 Singapore) instead of guessing from model training cut-off.
    */
-  private buildSystemPromptWithRuntimeGreeting(input: OrchestrationInput): string {
+  private buildSystemPromptWithRuntimeGreeting(
+    input: OrchestrationInput,
+    bookingCapability: 'collect_details_only' | 'live_slot_booking',
+  ): string {
     const base = this.buildSystemPrompt(input);
     const tenantTz = input.tenant?.timeZone?.trim();
     const businessTimezone = tenantTz || resolveAppTimeZone();
@@ -713,7 +787,7 @@ export class ConversationOrchestrationService {
       `- localDayPeriod: ${snap.dayPeriod}\n` +
       `- greetingLabel: ${snap.greetingLabel}\n`;
     const caps = buildGovernorCapabilityAppendix({
-      bookingCapability: 'collect_details_only',
+      bookingCapability,
       handoverCapability: input.tenant?.ghlLocationId ? 'tag_and_notify' : 'collect_details_only',
     });
     return `${base}\n\n${block}${caps}`;

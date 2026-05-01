@@ -1,4 +1,5 @@
 import { jest } from '@jest/globals';
+import { ForbiddenException } from '@nestjs/common';
 import { BookingSettingsService } from './booking-settings.service';
 import type { GhlService } from '../ghl/ghl.service';
 
@@ -85,5 +86,69 @@ describe('BookingSettingsService', () => {
       }),
     );
     expect(r.slots).toHaveLength(1);
+  });
+
+  it('testSlots does not call probeFreeSlots', async () => {
+    const getFreeSlots = jest.fn(async () => ({
+      slots: [{ startTime: '2026-04-29T10:00:00Z', endTime: '2026-04-29T10:30:00Z' }],
+      dateKeys: [] as string[],
+      shapeSummary: 'nestedArrayField',
+      httpStatus: 200,
+      error: undefined as string | undefined,
+    }));
+    const getCalendar = jest.fn(async () => ({ summary: { teamMemberUserIds: [] as string[] } }));
+    const ghl = {
+      createGhlClientForConnectedTenantOrThrow: jest.fn(async () => ({
+        client: { getFreeSlots, getCalendar },
+        ghlLocationId: 'loc_x',
+      })),
+    } as unknown as GhlService;
+    const svc = new BookingSettingsService(ghl);
+    const probeSpy = jest.spyOn(svc, 'probeFreeSlots').mockRejectedValue(new Error('probe should not run'));
+    const getSettingsSpy = jest.spyOn(svc, 'getBookingSettings').mockResolvedValue({
+      enabled: true,
+      bookingMode: 'CHECK_AVAILABILITY',
+      defaultGhlCalendarId: 'cal_9',
+      defaultGhlCalendarName: 'Main',
+      coreFieldsJson: {
+        name: { enabled: false, required: false },
+        phone: { enabled: false, required: false },
+        email: { enabled: false, required: false },
+        service: { enabled: false, required: false },
+        preferred_date: { enabled: false, required: false },
+        preferred_time: { enabled: false, required: false },
+        first_visit: { enabled: false, required: false },
+      },
+      customFieldsJson: [],
+      maxBookingsPerSlot: 1,
+    });
+    await svc.testSlots('tenant-1', 'profile-1', {});
+    expect(probeSpy).not.toHaveBeenCalled();
+    probeSpy.mockRestore();
+    getSettingsSpy.mockRestore();
+  });
+
+  it('probeFreeSlots is forbidden in production without ALLOW_BOOKING_PROBE', async () => {
+    const prevEnv = process.env.NODE_ENV;
+    const prevAllow = process.env.ALLOW_BOOKING_PROBE;
+    try {
+      process.env.NODE_ENV = 'production';
+      delete process.env.ALLOW_BOOKING_PROBE;
+      const ghl = {
+        createGhlClientForConnectedTenantOrThrow: jest.fn(),
+      } as unknown as GhlService;
+      const svc = new BookingSettingsService(ghl);
+      await expect(
+        svc.probeFreeSlots('tenant-1', 'profile-1', {
+          calendarId: 'cal_1',
+          selectedDate: '2026-05-06',
+        }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      expect(ghl.createGhlClientForConnectedTenantOrThrow).not.toHaveBeenCalled();
+    } finally {
+      process.env.NODE_ENV = prevEnv;
+      if (prevAllow === undefined) delete process.env.ALLOW_BOOKING_PROBE;
+      else process.env.ALLOW_BOOKING_PROBE = prevAllow;
+    }
   });
 });

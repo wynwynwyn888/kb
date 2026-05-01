@@ -57,7 +57,7 @@ export interface ReplyPlanPolicyContext {
   repeatedHumanTextAction?: 'none' | 'answer_again' | 'concise_confirm';
   /** Hair-salon: prior colour topic must not drive recommendations for out-of-scope questions. */
   suppressColourRecommendations?: boolean;
-  bookingCapability?: string;
+  bookingCapability?: 'collect_details_only' | 'live_slot_booking' | string;
   handoverCapability?: string;
 }
 
@@ -468,14 +468,6 @@ export class ReplyPlannerService {
     kbChunks: RetrievalChunk[],
   ): SuggestedAction[] {
     const actions: SuggestedAction[] = [];
-
-    if (routing.bookingIntentDetected) {
-      actions.push({
-        type: 'BOOK_SLOT',
-        params: { detected: true },
-        reason: 'bookingIntentDetected=true from routing',
-      });
-    }
 
     if (routing.tagsSuggested.length > 0) {
       actions.push({

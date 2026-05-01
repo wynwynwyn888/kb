@@ -250,13 +250,14 @@ export function formatFreeSlotsTimestamp(ms: number, unit: GhlFreeSlotsTimestamp
 }
 
 /**
- * Production free-slots query shape — override via env after running CRM probe when defaults return zero slots.
+ * Production free-slots query shape — defaults: `services_api` + `day` + Version `2023-02-21` + `ms` + timezone + `sendSeatsPerSlot` false + `userId` retry.
+ * Override via env when your GHL account needs a different shape (use Automation → Advanced diagnostics probe to compare).
  * - `GHL_FREE_SLOTS_API_VERSION` — default `2023-02-21` (Version header / services path)
  * - `GHL_FREE_SLOTS_TIMESTAMP_UNIT` — `ms` or `s` (seconds) — services API only
  * - `GHL_FREE_SLOTS_INCLUDE_TIMEZONE` — `true` / `false` (omit `timezone` query param when false) — services API
  * - `GHL_FREE_SLOTS_RETRY_USER_PARAM` — `userId` or `userIds` (staff retry query key) — services API
- * - `GHL_FREE_SLOTS_HOST_MODE` — `widget_backend` | `services_api` (default `services_api`)
- * - `GHL_FREE_SLOTS_RANGE_MODE` — `month` | `day` | `selected_to_day_end` (widget_backend wide query; default `day`)
+ * - `GHL_FREE_SLOTS_HOST_MODE` — `services_api` (default) | `widget_backend` (fallback / wide-window diagnostic only)
+ * - `GHL_FREE_SLOTS_RANGE_MODE` — `month` | `day` | `selected_to_day_end` (widget_backend query window only; default `day`)
  * - `GHL_FREE_SLOTS_SEND_SEATS_PER_SLOT` — `true` / `false` (default `false`)
  * - `GHL_FREE_SLOTS_CHANNEL` — default `APP`
  * - `GHL_FREE_SLOTS_SOURCE` — default `WEB_USER`

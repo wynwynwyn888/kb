@@ -8,6 +8,7 @@ import { getSupabaseService } from '../../lib/supabase';
 import {
   SAFE_PENDING_BOOKING_REPLY,
   UNREQUESTED_MENU_FALLBACK_REPLY,
+  isTrustedExecutedBookSlotSource,
   shouldRewriteUnrequestedMenuRepetition,
   textClaimsBookingConfirmed,
 } from '../../lib/outbound-safety-governor';
@@ -35,7 +36,7 @@ export class OutboundSafetyGovernorService {
 
     const { data, error } = await this.supabase
       .from('action_intents')
-      .select('id, executed_at, params')
+      .select('id, executed_at, params, source')
       .eq('conversation_id', conversationId)
       .eq('action_type', 'UPDATE_CALENDAR')
       .eq('status', 'EXECUTED')
@@ -56,6 +57,8 @@ export class OutboundSafetyGovernorService {
     const ackOnly = /^(thanks|thank\s+you|ok+|okay|great|perfect)\b[!?.\s]*$/i.test(inbound.content.trim());
 
     for (const row of data) {
+      const src = row.source as string | null | undefined;
+      if (!isTrustedExecutedBookSlotSource(src)) continue;
       const params = row.params as Record<string, unknown> | null | undefined;
       if (!params?.['calendarId'] || typeof params['calendarId'] !== 'string') continue;
       const execAtRaw = row.executed_at;

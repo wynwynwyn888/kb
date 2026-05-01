@@ -256,6 +256,7 @@ describe('ActionIntentExecutorService', () => {
       expect(results).toHaveLength(1);
       expect(results[0]!.status).toBe('EXECUTED');
       expect(mockGhlClient.bookSlot).toHaveBeenCalledWith({
+        locationId: ghlLocationId,
         calendarId: 'cal_1',
         contactId,
         startTime: '2026-05-01T10:00:00',

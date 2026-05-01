@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Patch, Post, Param, UseGuards } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -74,6 +75,7 @@ export class BookingSettingsController {
   }
 
   @Post('probe-free-slots')
+  @Throttle({ default: { limit: 8, ttl: 60000 } })
   @ApiOperation({ summary: 'Diagnostic: try multiple GHL free-slots request variants (safe summary only)' })
   async probeFreeSlots(
     @Param('tenantId') tenantId: string,

@@ -28,6 +28,17 @@ export function textClaimsBookingConfirmed(text: string): boolean {
   return BOOKING_CLAIM_PATTERNS.some(p => p.test(t));
 }
 
+/**
+ * `action_intents.source` values that mark a trusted EXECUTED calendar booking for confirmation wording.
+ * Legacy `WHATSAPP_BOOKING:` prefix is accepted for backward compatibility; `AI` covers deferred executor paths.
+ */
+export function isTrustedExecutedBookSlotSource(source: string | null | undefined): boolean {
+  const s = typeof source === 'string' ? source.trim() : '';
+  if (!s) return true;
+  if (s === 'AI') return true;
+  return s.startsWith('CONVERSATION_BOOKING:') || s.startsWith('WHATSAPP_BOOKING:');
+}
+
 export type ComplaintServiceIssue = {
   triggered: boolean;
   reason: string;
@@ -136,7 +147,7 @@ export const COMPLAINT_ESCALATION_REPLY =
   '- A clear photo of the area you are concerned about\n' +
   '- Your appointment date and stylist name (if you recall)\n' +
   '- What looks uneven or wrong to you\n' +
-  '- The best way to reach you (WhatsApp / call)\n\n' +
+  '- The best way to reach you (messaging or call)\n\n' +
   "I'll pass this to the team for review.";
 
 export function buildGovernorCapabilityAppendix(params: {
@@ -151,6 +162,7 @@ export function buildGovernorCapabilityAppendix(params: {
     `Rules:\n` +
     `- You may collect booking details, but you must NOT state that an appointment is confirmed, booked, reserved, or finalized unless the backend has already recorded a successful calendar booking action for this conversation.\n` +
     `- If bookingCapability is collect_details_only, use pending / team-will-confirm language instead.\n` +
+    `- If bookingCapability is live_slot_booking, the assistant may offer live CRM slots and collect a selection, but must still avoid confirmed/booked language until the backend confirms a successful appointment create for this conversation.\n` +
     `- For complaints or service recovery, you may ask for details and rely on tag/handover flows — do not claim a callback was arranged unless those backend actions succeeded.\n`
   );
 }

@@ -10,6 +10,8 @@ import { KbModule } from '../kb/kb.module';
 import { ReplyPlanningModule } from '../reply-planning/reply-planning.module';
 import { ConversationPolicyModule } from '../conversation-policy/conversation-policy.module';
 import { ConversationsModule } from '../conversations/conversations.module';
+import { BookingFlowModule } from '../booking-flow/booking-flow.module';
+import { BookingSettingsModule } from '../booking-settings/booking-settings.module';
 
 @Module({
   imports: [
@@ -18,6 +20,8 @@ import { ConversationsModule } from '../conversations/conversations.module';
     ReplyPlanningModule,
     ConversationPolicyModule,
     ConversationsModule,
+    BookingFlowModule,
+    BookingSettingsModule,
   ],
   providers: [
     ConversationOrchestrationService,

@@ -467,6 +467,9 @@ export class ReplyPlannerService {
     routing: RoutingResponse,
     kbChunks: RetrievalChunk[],
   ): SuggestedAction[] {
+    // Suggested actions: TAG_CONTACT only. BOOK_SLOT is not emitted here — live booking is owned by
+    // ConversationBookingFlowService (sync GHL create + EXECUTED intent). Deferred BOOK_SLOT execution
+    // is disabled by default in ActionIntentExecutorService.
     const actions: SuggestedAction[] = [];
 
     if (routing.tagsSuggested.length > 0) {

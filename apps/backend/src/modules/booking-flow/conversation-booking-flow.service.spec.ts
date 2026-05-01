@@ -197,6 +197,173 @@ describe('ConversationBookingFlowService', () => {
     }
   });
 
+  it('parses hair colour, May 21, and 9am from first message', async () => {
+    const booking = {
+      getBookingSettings: jest.fn(async () => baseSettings),
+    } as unknown as BookingSettingsService;
+    const ghl = {} as unknown as GhlService;
+    const r = await svc(booking, ghl).maybeHandleConversationBookingTurn({
+      tenantId: 't1',
+      conversationId: 'c1',
+      contactId: 'ct1',
+      channel: 'SMS',
+      combinedInboundText: 'I want to book hair colour on 21 May around 9am',
+      latestInboundText: 'I want to book hair colour on 21 May around 9am',
+      metadata: {},
+    });
+    expect(r.handled).toBe(true);
+    if (r.handled) {
+      const meta = (r.persistMetadata as { aisbp_booking?: Record<string, unknown> }).aisbp_booking;
+      expect(meta?.['service']).toMatch(/hair colour/i);
+      expect(meta?.['preferredDate']).toBe('2026-05-21');
+      expect(meta?.['preferredTime']).toBe('09:00');
+    }
+  });
+
+  it('optional name and phone do not block slot lookup when core details are present', async () => {
+    const fetchFree = jest.fn(async () => ({
+      slots: [
+        { startTime: '2026-05-21T09:00:00.000Z', endTime: '2026-05-21T09:30:00.000Z' },
+        { startTime: '2026-05-21T09:30:00.000Z', endTime: '2026-05-21T10:00:00.000Z' },
+        { startTime: '2026-05-21T10:00:00.000Z', endTime: '2026-05-21T10:30:00.000Z' },
+      ],
+      calendarId: 'cal_1',
+      error: undefined as string | undefined,
+      retriedWithUserId: null,
+      crmTimezoneUsed: 'UTC',
+      selectedDate: '2026-05-21',
+      selectedTime: '',
+      startMs: 0,
+      endMs: 1,
+      ghlLocationId: 'loc',
+    }));
+    const core = {
+      ...baseSettings.coreFieldsJson,
+      name: { enabled: true, required: false },
+      phone: { enabled: true, required: false },
+    };
+    const booking = {
+      getBookingSettings: jest.fn(async () => ({ ...baseSettings, coreFieldsJson: core })),
+      fetchFreeSlotsForAutomation: fetchFree,
+    } as unknown as BookingSettingsService;
+    const ghl = {} as unknown as GhlService;
+    const r = await svc(booking, ghl).maybeHandleConversationBookingTurn({
+      tenantId: 't1',
+      conversationId: 'c1',
+      contactId: 'ct1',
+      channel: 'SMS',
+      combinedInboundText: 'I want to book hair colour on 21 May around 9am',
+      latestInboundText: 'I want to book hair colour on 21 May around 9am',
+      metadata: {},
+    });
+    expect(r.handled).toBe(true);
+    if (r.handled) {
+      expect(fetchFree).toHaveBeenCalled();
+      expect(r.replyPlan.bubbles[0]!.text).toMatch(/1\./);
+    }
+  });
+
+  it('saves pending name reply "Lucy" and proceeds to slots when other required fields are set', async () => {
+    const fetchFree = jest.fn(async () => ({
+      slots: [
+        { startTime: '2026-05-21T09:00:00.000Z', endTime: '2026-05-21T09:30:00.000Z' },
+        { startTime: '2026-05-21T09:30:00.000Z', endTime: '2026-05-21T10:00:00.000Z' },
+        { startTime: '2026-05-21T10:00:00.000Z', endTime: '2026-05-21T10:30:00.000Z' },
+      ],
+      calendarId: 'cal_1',
+      error: undefined as string | undefined,
+      retriedWithUserId: null,
+      crmTimezoneUsed: 'UTC',
+      selectedDate: '2026-05-21',
+      selectedTime: '',
+      startMs: 0,
+      endMs: 1,
+      ghlLocationId: 'loc',
+    }));
+    const booking = {
+      getBookingSettings: jest.fn(async () => baseSettings),
+      fetchFreeSlotsForAutomation: fetchFree,
+    } as unknown as BookingSettingsService;
+    const ghl = {} as unknown as GhlService;
+    const meta = {
+      aisbp_booking: {
+        status: 'collecting_details',
+        version: 1,
+        calendarId: 'cal_1',
+        service: 'Hair colour',
+        preferredDate: '2026-05-21',
+        preferredTime: '09:00',
+        phone: '+15551234567',
+        pendingFieldId: 'name',
+      },
+    };
+    const r = await svc(booking, ghl).maybeHandleConversationBookingTurn({
+      tenantId: 't1',
+      conversationId: 'c1',
+      contactId: 'ct1',
+      channel: 'SMS',
+      combinedInboundText: 'Lucy',
+      latestInboundText: 'Lucy',
+      metadata: meta as Record<string, unknown>,
+    });
+    expect(r.handled).toBe(true);
+    if (r.handled) {
+      const out = (r.persistMetadata as { aisbp_booking?: Record<string, unknown> }).aisbp_booking;
+      expect(out?.['customerName']).toBe('Lucy');
+      expect(out?.['pendingFieldId']).toBeUndefined();
+      expect(fetchFree).toHaveBeenCalled();
+    }
+  });
+
+  it('saves "i told u Lucy" as name when pendingFieldId is name', async () => {
+    const fetchFree = jest.fn(async () => ({
+      slots: [
+        { startTime: '2026-05-21T09:00:00.000Z', endTime: '2026-05-21T09:30:00.000Z' },
+        { startTime: '2026-05-21T09:30:00.000Z', endTime: '2026-05-21T10:00:00.000Z' },
+      ],
+      calendarId: 'cal_1',
+      error: undefined as string | undefined,
+      retriedWithUserId: null,
+      crmTimezoneUsed: 'UTC',
+      selectedDate: '2026-05-21',
+      selectedTime: '',
+      startMs: 0,
+      endMs: 1,
+      ghlLocationId: 'loc',
+    }));
+    const booking = {
+      getBookingSettings: jest.fn(async () => baseSettings),
+      fetchFreeSlotsForAutomation: fetchFree,
+    } as unknown as BookingSettingsService;
+    const ghl = {} as unknown as GhlService;
+    const meta = {
+      aisbp_booking: {
+        status: 'collecting_details',
+        version: 1,
+        calendarId: 'cal_1',
+        service: 'Hair colour',
+        preferredDate: '2026-05-21',
+        preferredTime: '09:00',
+        phone: '+15551234567',
+        pendingFieldId: 'name',
+      },
+    };
+    const r = await svc(booking, ghl).maybeHandleConversationBookingTurn({
+      tenantId: 't1',
+      conversationId: 'c1',
+      contactId: 'ct1',
+      channel: 'SMS',
+      combinedInboundText: 'i told u Lucy',
+      latestInboundText: 'i told u Lucy',
+      metadata: meta as Record<string, unknown>,
+    });
+    expect(r.handled).toBe(true);
+    if (r.handled) {
+      const out = (r.persistMetadata as { aisbp_booking?: Record<string, unknown> }).aisbp_booking;
+      expect(out?.['customerName']).toBe('Lucy');
+    }
+  });
+
   it('offers up to three slots when details complete', async () => {
     const fetchFree = jest.fn(async () => ({
       slots: [

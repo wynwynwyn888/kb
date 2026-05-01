@@ -22,6 +22,33 @@ const BOOKING_LEX = new RegExp(
 const PRICE_ONLY = /\b(how\s+much|price|cost|pricing|rate|charge)\b/i;
 
 const YMD = /\b(20\d{2})-(\d{2})-(\d{2})\b/;
+
+const MONTH_NAMES: Record<string, number> = {
+  january: 1,
+  jan: 1,
+  february: 2,
+  feb: 2,
+  march: 3,
+  mar: 3,
+  april: 4,
+  apr: 4,
+  may: 5,
+  june: 6,
+  jun: 6,
+  july: 7,
+  jul: 7,
+  august: 8,
+  aug: 8,
+  september: 9,
+  sep: 9,
+  sept: 9,
+  october: 10,
+  oct: 10,
+  november: 11,
+  nov: 11,
+  december: 12,
+  dec: 12,
+};
 const EMAIL = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
 const PHONE = /(\+?\d{1,3}[\s-]?)?\(?\d{2,4}\)?[\s.-]?\d{3,4}[\s.-]?\d{3,4}\b/;
 
@@ -66,6 +93,80 @@ export function resolveRelativeDayPhrase(text: string, todayYmd: string): string
   }
   const m = YMD.exec(text);
   if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  return resolveBookingCalendarDay(text, todayYmd);
+}
+
+/** Day-first slash dates (e.g. 21/5), day-month names (21 May), and ISO — uses todayYmd as reference for implied year. */
+export function resolveBookingCalendarDay(text: string, todayYmd: string): string | undefined {
+  const ref = parseYmd(todayYmd);
+  if (!ref) return undefined;
+
+  const tryBuild = (y: number, m: number, d: number): string | undefined => {
+    if (m < 1 || m > 12 || d < 1 || d > 31) return undefined;
+    const dt = new Date(Date.UTC(y, m - 1, d));
+    if (dt.getUTCMonth() !== m - 1 || dt.getUTCDate() !== d) return undefined;
+    return formatYmd(dt);
+  };
+
+  const pickYearForMd = (month: number, day: number): string | undefined => {
+    let y = ref.y;
+    let cand = tryBuild(y, month, day);
+    if (!cand) return undefined;
+    if (cand < todayYmd) {
+      y += 1;
+      cand = tryBuild(y, month, day);
+    }
+    return cand;
+  };
+
+  const mSlash = /\b(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?\b/.exec(text);
+  if (mSlash) {
+    const a = parseInt(mSlash[1]!, 10);
+    const b = parseInt(mSlash[2]!, 10);
+    const yPart = mSlash[3];
+    let month: number;
+    let day: number;
+    if (a > 12) {
+      month = a;
+      day = b;
+    } else if (b > 12) {
+      day = a;
+      month = b;
+    } else {
+      day = a;
+      month = b;
+    }
+    let year = ref.y;
+    if (yPart) {
+      const yn = parseInt(yPart, 10);
+      year = yn < 100 ? 2000 + yn : yn;
+    } else {
+      const cand0 = tryBuild(year, month, day);
+      if (cand0 && cand0 < todayYmd) year += 1;
+    }
+    return tryBuild(year, month, day);
+  }
+
+  const m1 = /\b(\d{1,2})(?:st|nd|rd|th)?\s+(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)\b/i.exec(
+    text,
+  );
+  if (m1) {
+    const day = parseInt(m1[1]!, 10);
+    const mk = m1[2]!.toLowerCase();
+    const month = MONTH_NAMES[mk];
+    if (month && Number.isFinite(day)) return pickYearForMd(month, day);
+  }
+
+  const m2 = /\b(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)\s+(\d{1,2})(?:st|nd|rd|th)?\b/i.exec(
+    text,
+  );
+  if (m2) {
+    const mk = m2[1]!.toLowerCase();
+    const day = parseInt(m2[2]!, 10);
+    const month = MONTH_NAMES[mk];
+    if (month && Number.isFinite(day)) return pickYearForMd(month, day);
+  }
+
   return undefined;
 }
 
@@ -111,16 +212,56 @@ export function extractPreferredTime(text: string): string | undefined {
 }
 
 export function extractServiceGuess(text: string): string | undefined {
+  return extractServiceFromBookingMessage(text) ?? legacyExtractServiceGuess(text);
+}
+
+function legacyExtractServiceGuess(text: string): string | undefined {
   const t = text.trim();
   const m = /\b(book|schedule|appointment)\s+(?:for\s+)?(?:a\s+)?([a-z0-9][a-z0-9\s&'-]{2,40})/i.exec(t);
   if (m && m[2]) return m[2]!.trim();
   return undefined;
 }
 
+/** Service phrase after book/want to book, stopping before date/time prepositions. */
+export function extractServiceFromBookingMessage(text: string): string | undefined {
+  const t = text.replace(/\s+/g, ' ').trim();
+  const re =
+    /\b(?:want\s+to|would\s+like\s+to|like\s+to|need\s+to)?\s*book(?:ing)?(?:\s+for)?\s+(?:an?\s+)?(.+?)(?=\s+(?:on|at|around|from|between|the|this|next|tomorrow|today)\s|\s+(?:\d{1,2}\s+(?:january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)\b)|(?:\d{1,2}[/-]\d{1,2})|\s+20\d{2}\b|$)/i;
+  const m = re.exec(t);
+  if (!m?.[1]) return undefined;
+  let s = m[1].trim();
+  s = s.replace(/\s+for\s+you\s*$/i, '').trim();
+  if (s.length < 2 || s.length > 120) return undefined;
+  return s;
+}
+
 export function extractNameGuess(text: string): string | undefined {
-  const m = /\b(?:i'?m|i am|name is|this is)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b/.exec(text);
-  if (m) return m[1]!.trim();
+  const m = /\b(?:i'?m|i am|name is|this is)\s+([A-Za-z][a-z]+(?:\s+[A-Za-z][a-z]+)?)\b/.exec(text);
+  if (m) return m[1]!.trim().replace(/\b\w/g, c => c.toUpperCase());
   return undefined;
+}
+
+/** Plain name from a reply line when we already asked for their name (short, human-looking). */
+export function parsePlainNameAnswerLine(raw: string): string | undefined {
+  let t = raw.replace(/\s+/g, ' ').trim();
+  if (!t || t.length > 80) return undefined;
+  if (/^(1|2|3|one|two|three)\b/i.test(t)) return undefined;
+  if (/\b(book|appointment|cancel|complaint|reschedule|human|stop)\b/i.test(t) && t.length > 24) return undefined;
+  t = t.replace(
+    /^(?:i\s*told\s+(?:u|you)\s*|my\s+name\s+is\s+|it'?s\s+|this\s+is\s+|name\s*[:']?\s*|call\s+me\s+)/i,
+    '',
+  );
+  t = t.trim();
+  const words = t.split(/\s+/).filter(Boolean);
+  if (words.length === 0) return undefined;
+  if (words.length > 4) return undefined;
+  const candidate = words
+    .map(w => w.replace(/^[^A-Za-z]+|[^A-Za-z'.-]+$/g, ''))
+    .filter(Boolean)
+    .join(' ');
+  if (!candidate || candidate.length < 1 || candidate.length > 48) return undefined;
+  if (!/^[A-Za-z][A-Za-z\s'.-]*$/.test(candidate)) return undefined;
+  return candidate.replace(/\b\w/g, c => c.toUpperCase());
 }
 
 export function extractFirstVisit(text: string): string | undefined {

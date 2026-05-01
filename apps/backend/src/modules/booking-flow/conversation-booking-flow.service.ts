@@ -1,8 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { randomUUID } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { formatPostgrestError } from '../../lib/format-postgrest-error';
 import { getSupabaseService } from '../../lib/supabase';
 import { getBusinessLocalNow, resolveAppTimeZone } from '../../lib/business-time';
+import type { BookingCoreFieldKey } from '../../lib/tenant-automation-constants';
 import { BOOKING_CORE_FIELD_KEYS, type BookingMode } from '../../lib/tenant-automation-constants';
 import type { CoreFieldToggle } from '../../lib/tenant-automation-validation';
 import type { CustomBookingFieldDto } from '../../lib/tenant-automation-validation';
@@ -12,7 +13,6 @@ import type { GhlFreeSlot } from '@aisbp/ghl-client';
 import type { ReplyDecision } from '../reply-planning/dto';
 import type { RoutingResponse } from '../orchestration/dto';
 import {
-  AISBP_BOOKING_METADATA_KEY,
   emptyBookingState,
   mergeBookingIntoConversationMetadata,
   parseAisbpBookingState,
@@ -26,11 +26,22 @@ import {
   extractNameGuess,
   extractPhone,
   extractPreferredTime,
+  extractServiceFromBookingMessage,
   extractServiceGuess,
   matchOfferedByHm,
   parseSlotSelection,
   resolveRelativeDayPhrase,
 } from './booking-intent-and-parse';
+import { applyPendingFieldAnswer } from './booking-pending-field';
+
+/**
+ * Live booking path map (single owner: this service):
+ * - Booking detection: orchestration calls here when inbound text + tenant live booking enabled; `detectLiveBookingInterest` / active `aisbp_booking` session.
+ * - Detail collection + slot offer + GHL create: all in `maybeHandleConversationBookingTurn`.
+ * - `action_intents` EXECUTED row: written only after successful `client.bookSlot` (audit + OutboundSafetyGovernor).
+ * - Confirmation wording guard: OutboundSafetyGovernorService + EXECUTED `bookSlotIntent` rows with trusted `source` prefixes (see outbound-safety-governor.ts).
+ * - Deferred BOOK_SLOT execution: disabled by default in ActionIntentExecutorService (env AISBP_EXECUTE_DEFERRED_BOOK_SLOT); reply planner does not emit BOOK_SLOT.
+ */
 
 export type BookingFlowOrchestrationHookResult =
   | { handled: false }
@@ -59,6 +70,10 @@ function stubRouting(): RoutingResponse {
     confidence: 1,
     reasoning: 'conversation_booking_flow',
   };
+}
+
+function fingerprintBookingQuestion(text: string): string {
+  return createHash('sha256').update(text.trim().toLowerCase()).digest('hex').slice(0, 20);
 }
 
 function plan(text: string, rationale: string, suggestedActions: ReplyDecision['suggestedActions'] = []): ReplyDecision {
@@ -196,6 +211,7 @@ export class ConversationBookingFlowService {
         offeredSlots: undefined,
         lastOfferedAt: undefined,
         selectedSlot: undefined,
+        lastError: undefined,
         lastCreateError: undefined,
       };
     }
@@ -248,13 +264,18 @@ export class ConversationBookingFlowService {
         ...emptyBookingState(),
         calendarId: settings.defaultGhlCalendarId!.trim(),
         version: 1,
+        bookingMode: settings.bookingMode,
       };
     }
-    booking = { ...booking, calendarId: settings.defaultGhlCalendarId!.trim() };
+    booking = {
+      ...booking,
+      calendarId: settings.defaultGhlCalendarId!.trim(),
+      bookingMode: settings.bookingMode,
+    };
 
     if (booking.status === 'confirmed' && booking.appointmentId) {
-      const ack = /^(thanks|thank\s+you|ok+|okay|great|perfect)\b/i.test(latest);
-      if (ack || combined.length < 40) {
+      const ack = /^(thanks|thank\s+you|ok+|okay|great|perfect|cheers)\b/i.test(latest);
+      if (ack) {
         this.logger.log(`bookingFlowSkipped ${JSON.stringify({ reason: 'already_confirmed_ack' })}`);
         const when = booking.selectedSlot?.displayText ?? 'your appointment';
         return {
@@ -269,12 +290,37 @@ export class ConversationBookingFlowService {
       }
     }
 
-    this.applyFieldExtraction(booking, settings, combined, latest, todayYmd);
+    if (booking.status === 'offered_slots' && booking.offeredSlots?.length) {
+      booking.pendingFieldId = undefined;
+      booking.pendingFieldLabel = undefined;
+      booking.pendingFieldRequired = undefined;
+    }
+
+    const snapshotBefore = this.snapshotBookingCore(booking);
+
+    const pendingAns = applyPendingFieldAnswer({ booking, latest, todayYmd });
+    if (pendingAns.answered) {
+      this.logger.log(
+        `bookingPendingFieldAnswered ${JSON.stringify({
+          tenantId: params.tenantId,
+          conversationId: params.conversationId,
+          fieldId: pendingAns.fieldId,
+        })}`,
+      );
+    }
+
+    this.applyRichFieldExtraction(booking, settings, combined, latest, todayYmd);
+
+    const fieldChanged = pendingAns.answered || this.snapshotBookingCore(booking) !== snapshotBefore;
+
+    const requiredMissingList = this.listRequiredMissingIds(settings, booking);
 
     this.logger.log(
       `bookingDetailsUpdated ${JSON.stringify({
         tenantId: params.tenantId,
         conversationId: params.conversationId,
+        pendingFieldId: booking.pendingFieldId ?? null,
+        requiredMissing: requiredMissingList,
         hasName: Boolean(booking.customerName),
         hasPhone: Boolean(booking.phone),
         hasEmail: Boolean(booking.email),
@@ -284,23 +330,57 @@ export class ConversationBookingFlowService {
       })}`,
     );
 
-    const missing = this.nextMissingAskField(settings, booking);
-    if (missing) {
+    const nextRequired = this.firstRequiredMissingId(settings, booking);
+    if (nextRequired) {
+      const baseQ = this.promptForMissingField(nextRequired, settings);
+      const fpBase = fingerprintBookingQuestion(baseQ);
+      const suppress = !fieldChanged && this.shouldSuppressRepeatQuestion(booking, nextRequired, fpBase);
+      const outQ = suppress ? this.clarifyRepeatedAsk(nextRequired) : baseQ;
+
+      booking.pendingFieldId = nextRequired;
+      booking.pendingFieldRequired = true;
+      booking.lastAskedFieldId = nextRequired;
+      booking.lastAskedAt = new Date().toISOString();
+      booking.lastQuestionFingerprint = fpBase;
+
+      this.logger.log(
+        `bookingNextStepSelected ${JSON.stringify({
+          step: 'ask_required',
+          fieldId: nextRequired,
+          suppressedDuplicate: suppress,
+        })}`,
+      );
+
       const nextMeta = mergeBookingIntoConversationMetadata(prevMeta, { ...booking, status: 'collecting_details' });
       return {
         handled: true,
         persistMetadata: nextMeta,
-        replyPlan: plan(missing, 'booking_collect_field'),
+        replyPlan: plan(outQ, suppress ? 'booking_ask_repeat_clarify' : 'booking_collect_field'),
         routing: stubRouting(),
       };
     }
 
     if (!booking.preferredDate) {
+      const baseQ = 'What date works best for you?';
+      const fpBase = fingerprintBookingQuestion(baseQ);
+      const suppress = !fieldChanged && this.shouldSuppressRepeatQuestion(booking, 'preferred_date', fpBase);
+      const outQ = suppress ? this.clarifyRepeatedAsk('preferred_date') : baseQ;
+
+      booking.pendingFieldId = 'preferred_date';
+      booking.pendingFieldRequired = true;
+      booking.lastAskedFieldId = 'preferred_date';
+      booking.lastAskedAt = new Date().toISOString();
+      booking.lastQuestionFingerprint = fpBase;
+
+      this.logger.log(
+        `bookingNextStepSelected ${JSON.stringify({ step: 'need_date_for_slots', suppressedDuplicate: suppress })}`,
+      );
+
       const nextMeta = mergeBookingIntoConversationMetadata(prevMeta, { ...booking, status: 'collecting_details' });
       return {
         handled: true,
         persistMetadata: nextMeta,
-        replyPlan: plan('What date would you like to come in? (You can say today, tomorrow, or YYYY-MM-DD.)', 'booking_need_date'),
+        replyPlan: plan(outQ, suppress ? 'booking_ask_repeat_clarify' : 'booking_need_date'),
         routing: stubRouting(),
       };
     }
@@ -433,6 +513,7 @@ export class ConversationBookingFlowService {
           ...booking,
           status: 'failed',
           selectedSlot: picked,
+          lastError: bookRes.error ?? 'unknown',
           lastCreateError: bookRes.error ?? 'unknown',
         });
         return {
@@ -492,6 +573,13 @@ export class ConversationBookingFlowService {
         offeredSlots: undefined,
         lastOfferedAt: undefined,
         lastCreateError: undefined,
+        lastError: undefined,
+        pendingFieldId: undefined,
+        pendingFieldLabel: undefined,
+        pendingFieldRequired: undefined,
+        lastAskedFieldId: undefined,
+        lastAskedAt: undefined,
+        lastQuestionFingerprint: undefined,
       });
 
       return {
@@ -521,6 +609,15 @@ export class ConversationBookingFlowService {
         routing: stubRouting(),
       };
     }
+
+    this.logger.log(
+      `bookingSlotsFetched ${JSON.stringify({
+        tenantId: params.tenantId,
+        conversationId: params.conversationId,
+        slotCount: slotFetch.slots.length,
+        hasError: Boolean(slotFetch.error),
+      })}`,
+    );
 
     const top = pickTopSlots(
       slotFetch.slots,
@@ -566,6 +663,12 @@ export class ConversationBookingFlowService {
       status: 'offered_slots',
       offeredSlots: offered,
       lastOfferedAt: new Date().toISOString(),
+      pendingFieldId: undefined,
+      pendingFieldLabel: undefined,
+      pendingFieldRequired: undefined,
+      lastAskedFieldId: undefined,
+      lastAskedAt: undefined,
+      lastQuestionFingerprint: undefined,
     });
 
     return {
@@ -611,7 +714,116 @@ export class ConversationBookingFlowService {
     return false;
   }
 
-  private applyFieldExtraction(
+  private snapshotBookingCore(booking: AisbpBookingStateV1): string {
+    return JSON.stringify({
+      n: booking.customerName ?? '',
+      p: booking.phone ?? '',
+      e: booking.email ?? '',
+      s: booking.service ?? '',
+      fd: booking.preferredDate ?? '',
+      ft: booking.preferredTime ?? '',
+      fv: booking.firstVisit ?? '',
+      ca: booking.customAnswers ?? {},
+    });
+  }
+
+  private listRequiredMissingIds(
+    settings: { coreFieldsJson: Record<string, CoreFieldToggle>; customFieldsJson: CustomBookingFieldDto[] },
+    booking: AisbpBookingStateV1,
+  ): string[] {
+    const out: string[] = [];
+    for (const key of BOOKING_CORE_FIELD_KEYS) {
+      const t = settings.coreFieldsJson[key];
+      if (!t?.enabled || !t.required) continue;
+      const v = this.readCore(booking, key);
+      if (v?.trim()) continue;
+      out.push(key);
+    }
+    for (const cf of settings.customFieldsJson) {
+      if (!cf.required) continue;
+      const ans = booking.customAnswers?.[cf.id];
+      if (ans?.trim()) continue;
+      out.push(`custom:${cf.id}`);
+    }
+    return out;
+  }
+
+  private firstRequiredMissingId(
+    settings: { coreFieldsJson: Record<string, CoreFieldToggle>; customFieldsJson: CustomBookingFieldDto[] },
+    booking: AisbpBookingStateV1,
+  ): string | null {
+    const ids = this.listRequiredMissingIds(settings, booking);
+    return ids[0] ?? null;
+  }
+
+  private shouldSuppressRepeatQuestion(
+    booking: AisbpBookingStateV1,
+    nextFieldId: string,
+    canonicalQuestionFp: string,
+  ): boolean {
+    if (!booking.lastAskedAt || !booking.lastQuestionFingerprint || !booking.lastAskedFieldId) return false;
+    if (booking.lastAskedFieldId !== nextFieldId) return false;
+    if (booking.lastQuestionFingerprint !== canonicalQuestionFp) return false;
+    const ageMs = Date.now() - Date.parse(booking.lastAskedAt);
+    if (!Number.isFinite(ageMs) || ageMs > 120_000) return false;
+    return true;
+  }
+
+  private clarifyRepeatedAsk(fieldId: string): string {
+    switch (fieldId) {
+      case 'phone':
+        return 'I still need a mobile number with digits (for example +61 400 000 000) so we can confirm your booking.';
+      case 'email':
+        return 'Could you send a valid email address (something like name@example.com)?';
+      case 'preferred_date':
+        return 'Which day works for you? You can say a date like 21 May, or today / tomorrow.';
+      case 'name':
+        return 'Thanks — what name should I use on the booking? A first name is fine.';
+      case 'service':
+        return 'What service would you like — for example colour, haircut, or treatment?';
+      case 'preferred_time':
+        return 'Do you prefer morning, afternoon, or a specific time (like 2:30pm)?';
+      case 'first_visit':
+        return 'Is this your first visit with us? A quick yes or no is perfect.';
+      default:
+        if (fieldId.startsWith('custom:')) {
+          return "I've got that — could you answer the previous question one more time?";
+        }
+        return "I've got that. Let me check available slots now.";
+    }
+  }
+
+  private promptForMissingField(
+    fieldId: string,
+    settings: { coreFieldsJson: Record<string, CoreFieldToggle>; customFieldsJson: CustomBookingFieldDto[] },
+  ): string {
+    if (fieldId.startsWith('custom:')) {
+      const id = fieldId.slice('custom:'.length);
+      const cf = settings.customFieldsJson.find(c => c.id === id);
+      return cf ? `Quick one: ${cf.label}?` : 'Could you share a bit more detail for your booking?';
+    }
+    const key = fieldId as BookingCoreFieldKey;
+    switch (key) {
+      case 'name':
+        return "What's the best name for the booking?";
+      case 'phone':
+        return "What's the best phone number to reach you on?";
+      case 'email':
+        return 'What email should we use for your booking?';
+      case 'service':
+        return 'Sure — what service would you like to book?';
+      case 'preferred_date':
+        return 'What date works best for you?';
+      case 'preferred_time':
+        return 'Do you prefer morning, afternoon, or a specific time?';
+      case 'first_visit':
+        return 'Is this your first visit with us? (yes or no)';
+      default:
+        return 'Could you share a bit more detail for your booking?';
+    }
+  }
+
+  private applyRichFieldExtraction(
     booking: AisbpBookingStateV1,
     settings: {
       coreFieldsJson: Record<string, CoreFieldToggle>;
@@ -623,7 +835,11 @@ export class ConversationBookingFlowService {
   ): void {
     const text = `${combined}\n${latest}`;
     if (!booking.service) {
-      const g = extractServiceGuess(text);
+      const g =
+        extractServiceFromBookingMessage(combined) ||
+        extractServiceFromBookingMessage(latest) ||
+        extractServiceFromBookingMessage(text) ||
+        extractServiceGuess(text);
       if (g) booking.service = g;
     }
     if (!booking.customerName) {
@@ -643,7 +859,7 @@ export class ConversationBookingFlowService {
       if (d) booking.preferredDate = d;
     }
     if (!booking.preferredTime) {
-      const t = extractPreferredTime(latest) || extractPreferredTime(combined);
+      const t = extractPreferredTime(latest) || extractPreferredTime(combined) || extractPreferredTime(text);
       if (t) booking.preferredTime = t;
     }
     if (!booking.firstVisit) {
@@ -681,52 +897,6 @@ export class ConversationBookingFlowService {
         return booking.firstVisit;
       default:
         return undefined;
-    }
-  }
-
-  private nextMissingAskField(
-    settings: {
-      coreFieldsJson: Record<string, CoreFieldToggle>;
-      customFieldsJson: CustomBookingFieldDto[];
-    },
-    booking: AisbpBookingStateV1,
-  ): string | null {
-    for (const key of BOOKING_CORE_FIELD_KEYS) {
-      const t = settings.coreFieldsJson[key];
-      if (!t?.enabled) continue;
-      if (key === 'preferred_time' && !t.required) continue;
-      const v = this.readCore(booking, key);
-      if (v && v.trim()) continue;
-      return this.promptForCoreField(key, t.required);
-    }
-    for (const cf of settings.customFieldsJson) {
-      if (!cf.required) continue;
-      const ans = booking.customAnswers?.[cf.id];
-      if (ans && ans.trim()) continue;
-      return `Quick one: ${cf.label}?`;
-    }
-    return null;
-  }
-
-  private promptForCoreField(key: (typeof BOOKING_CORE_FIELD_KEYS)[number], required: boolean): string {
-    const suffix = required ? '' : ' (optional)';
-    switch (key) {
-      case 'name':
-        return `What name should I put on the booking?${suffix}`;
-      case 'phone':
-        return `What's the best phone number for your booking?${suffix}`;
-      case 'email':
-        return `What's your email address for the booking?${suffix}`;
-      case 'service':
-        return `What service would you like to book?${suffix}`;
-      case 'preferred_date':
-        return `What date works best for you?${suffix}`;
-      case 'preferred_time':
-        return `Do you have a preferred time of day? (If not, I'll suggest the earliest openings.)${suffix}`;
-      case 'first_visit':
-        return `Is this your first visit with us? (yes/no)${suffix}`;
-      default:
-        return `Could you share a bit more detail for your booking?${suffix}`;
     }
   }
 }

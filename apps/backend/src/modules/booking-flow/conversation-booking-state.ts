@@ -23,6 +23,8 @@ export interface AisbpBookingStateV1 {
   status: AisbpBookingStatus;
   version: number;
   calendarId: string;
+  /** Mirrors tenant booking mode when session started (observability). */
+  bookingMode?: string;
   service?: string;
   customerName?: string;
   phone?: string;
@@ -31,6 +33,14 @@ export interface AisbpBookingStateV1 {
   preferredDate?: string;
   preferredTime?: string;
   customAnswers?: AisbpCustomAnswers;
+  /** Next inbound line is interpreted as an answer to this field (`name`, `preferred_date`, or `custom:<id>`). */
+  pendingFieldId?: string;
+  pendingFieldLabel?: string | null;
+  pendingFieldRequired?: boolean;
+  lastAskedFieldId?: string | null;
+  lastAskedAt?: string | null;
+  /** Hash of the last outbound booking question (duplicate suppression). */
+  lastQuestionFingerprint?: string | null;
   offeredSlots?: AisbpOfferedSlot[];
   lastOfferedAt?: string;
   selectedSlot?: AisbpOfferedSlot;
@@ -38,7 +48,9 @@ export interface AisbpBookingStateV1 {
   bookingConfirmedAt?: string;
   /** Slot duration minutes observed from calendar (optional). */
   slotDurationMinutes?: number;
-  /** Last appointment create outcome for idempotency / diagnostics. */
+  /** Last appointment create error (customer-safe string). */
+  lastError?: string;
+  /** @deprecated use lastError — still read for older persisted sessions */
   lastCreateError?: string;
 }
 
@@ -130,6 +142,13 @@ export function parseAisbpBookingState(metadata: Record<string, unknown> | undef
     preferredDate: typeof o['preferredDate'] === 'string' ? o['preferredDate'] : undefined,
     preferredTime: typeof o['preferredTime'] === 'string' ? o['preferredTime'] : undefined,
     customAnswers,
+    bookingMode: typeof o['bookingMode'] === 'string' ? o['bookingMode'] : undefined,
+    pendingFieldId: typeof o['pendingFieldId'] === 'string' ? o['pendingFieldId'] : undefined,
+    pendingFieldLabel: typeof o['pendingFieldLabel'] === 'string' ? o['pendingFieldLabel'] : undefined,
+    pendingFieldRequired: typeof o['pendingFieldRequired'] === 'boolean' ? o['pendingFieldRequired'] : undefined,
+    lastAskedFieldId: typeof o['lastAskedFieldId'] === 'string' ? o['lastAskedFieldId'] : undefined,
+    lastAskedAt: typeof o['lastAskedAt'] === 'string' ? o['lastAskedAt'] : undefined,
+    lastQuestionFingerprint: typeof o['lastQuestionFingerprint'] === 'string' ? o['lastQuestionFingerprint'] : undefined,
     offeredSlots,
     lastOfferedAt: typeof o['lastOfferedAt'] === 'string' ? o['lastOfferedAt'] : undefined,
     selectedSlot: selected,
@@ -139,7 +158,13 @@ export function parseAisbpBookingState(metadata: Record<string, unknown> | undef
       typeof o['slotDurationMinutes'] === 'number' && Number.isFinite(o['slotDurationMinutes'])
         ? Math.floor(o['slotDurationMinutes'])
         : undefined,
-    lastCreateError: typeof o['lastCreateError'] === 'string' ? o['lastCreateError'] : undefined,
+    lastError: typeof o['lastError'] === 'string' ? o['lastError'] : typeof o['lastCreateError'] === 'string' ? o['lastCreateError'] : undefined,
+    lastCreateError:
+      typeof o['lastCreateError'] === 'string'
+        ? o['lastCreateError']
+        : typeof o['lastError'] === 'string'
+          ? o['lastError']
+          : undefined,
   };
 }
 

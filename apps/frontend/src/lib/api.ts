@@ -557,7 +557,12 @@ export interface TenantFreeSlotsProbeVariant {
   startDateValue: string;
   endDateValue: string;
   httpStatus?: number;
+  /** Parser output shape (e.g. topLevelIsoStringArray). */
   responseShape: string;
+  /** Coarse HTTP body classification. */
+  rawResponseShape?: string;
+  rawIsoStringCount?: number;
+  parsedSlotsReturned?: number;
   dateKeysReturned: string[];
   slotsReturned: number;
   firstFewSlots: { startTime: string; endTime: string }[];

@@ -591,7 +591,9 @@ export class BookingSettingsService {
         generatedEndIso: new Date(endMs).toISOString(),
         crmTimezoneUsed,
         httpStatus: r.httpStatus ?? null,
-        rawResponseShape: r.shapeSummary,
+        rawResponseShape: r.rawResponseShape ?? null,
+        parsedShapeSummary: r.shapeSummary,
+        rawIsoStringCount: r.rawIsoStringCount ?? null,
         dateKeysReturned: r.dateKeys,
         slotsReturned: r.slots.length,
         hasSlots: r.slots.length > 0,
@@ -708,7 +710,12 @@ export class BookingSettingsService {
       startDateValue: string;
       endDateValue: string;
       httpStatus?: number;
+      /** Parsed / normalized shape label from `parseGhlFreeSlotsResponse`. */
       responseShape: string;
+      /** Coarse HTTP body classification (e.g. `array(len=N)`). */
+      rawResponseShape: string;
+      rawIsoStringCount: number;
+      parsedSlotsReturned: number;
       dateKeysReturned: string[];
       slotsReturned: number;
       firstFewSlots: { startTime: string; endTime: string }[];
@@ -732,14 +739,46 @@ export class BookingSettingsService {
 
     const { client, ghlLocationId } = await this.ghlService.createGhlClientForConnectedTenantOrThrow(tenantId, profileId);
 
+    const calSnap = await client.getCalendar(calendarId);
+
     let teamUserId = body.userId?.trim() || null;
     if (!teamUserId) {
-      const cal = await client.getCalendar(calendarId);
-      const ids = cal.summary?.teamMemberUserIds;
+      const ids = calSnap.summary?.teamMemberUserIds;
       if (ids && ids.length > 0) teamUserId = ids[0]!;
     }
 
+    const slotDurationMinutes =
+      typeof calSnap.summary?.slotDuration === 'number' && Number.isFinite(calSnap.summary.slotDuration)
+        ? calSnap.summary.slotDuration
+        : null;
+
     const productionSpec = resolveGhlFreeSlotsProductionSpec();
+
+    const mapFirstFew = (slots: GhlFreeSlot[]) =>
+      slots.slice(0, 3).map((s) => ({
+        startTime: s.startTime.length > 48 ? `${s.startTime.slice(0, 45)}…` : s.startTime,
+        endTime:
+          s.endTime !== undefined && s.endTime.trim().length > 0
+            ? s.endTime.length > 48
+              ? `${s.endTime.slice(0, 45)}…`
+              : s.endTime
+            : '—',
+      }));
+
+    const logParserMiss = (variantName: string, exec: { httpStatus?: number; rawIsoStringCount?: number; slots: GhlFreeSlot[]; shapeSummary: string; rawResponseShape?: string }) => {
+      if (exec.httpStatus === 200 && (exec.rawIsoStringCount ?? 0) > 0 && exec.slots.length === 0) {
+        this.logger.warn(
+          `freeSlotsParserMissedIsoStringArray ${JSON.stringify({
+            tenantId,
+            calendarId,
+            variantName,
+            rawIsoStringCount: exec.rawIsoStringCount ?? 0,
+            rawResponseShape: exec.rawResponseShape ?? null,
+            parsedShapeSummary: exec.shapeSummary,
+          })}`,
+        );
+      }
+    };
 
     type ProbeRow = {
       variantName: string;
@@ -755,6 +794,9 @@ export class BookingSettingsService {
       endDateValue: string;
       httpStatus?: number;
       responseShape: string;
+      rawResponseShape: string;
+      rawIsoStringCount: number;
+      parsedSlotsReturned: number;
       dateKeysReturned: string[];
       slotsReturned: number;
       firstFewSlots: { startTime: string; endTime: string }[];
@@ -771,14 +813,19 @@ export class BookingSettingsService {
       selectedDateYmd: selectedDate,
       crmTimezone: crmTimezoneUsed,
       usePrivateIntegrationBearer: widgetProbeUsesBearer,
+      slotDurationMinutes,
     });
-    const wFirstFew = widgetExec.slots.slice(0, 3).map((s) => ({
-      startTime: s.startTime.length > 48 ? `${s.startTime.slice(0, 45)}…` : s.startTime,
-      endTime: s.endTime.length > 48 ? `${s.endTime.slice(0, 45)}…` : s.endTime,
-    }));
+    const widgetVariantName = `widgetExact|month|${widgetProbeUsesBearer ? 'bearer' : 'public'}|2021-04-15`;
+    logParserMiss(widgetVariantName, {
+      httpStatus: widgetExec.httpStatus,
+      rawIsoStringCount: widgetExec.rawIsoStringCount,
+      slots: widgetExec.slots,
+      shapeSummary: widgetExec.shapeSummary,
+      rawResponseShape: widgetExec.rawResponseShape,
+    });
     const wVersion = widgetExec.versionHeader ?? '2021-04-15';
     variants.push({
-      variantName: `widgetCompatibleMonthRange|${widgetProbeUsesBearer ? 'bearer' : 'public'}|${wVersion}`,
+      variantName: widgetVariantName,
       hostMode: 'leadconnectorBackendWidget',
       rangeMode: 'month',
       sendSeatsPerSlot: Boolean(widgetExec.sendSeatsPerSlot),
@@ -791,9 +838,12 @@ export class BookingSettingsService {
       endDateValue: widgetExec.requestQuery?.['endDate'] ?? '',
       httpStatus: widgetExec.httpStatus,
       responseShape: widgetExec.shapeSummary,
+      rawResponseShape: widgetExec.rawResponseShape ?? 'unknown',
+      rawIsoStringCount: widgetExec.rawIsoStringCount ?? 0,
+      parsedSlotsReturned: widgetExec.slots.length,
       dateKeysReturned: widgetExec.dateKeys,
       slotsReturned: widgetExec.slots.length,
-      firstFewSlots: wFirstFew,
+      firstFewSlots: mapFirstFew(widgetExec.slots),
       errorExcerpt: widgetExec.error?.slice(0, 220),
     });
 
@@ -826,10 +876,13 @@ export class BookingSettingsService {
                 includeTimezone,
                 variantMeta: { probeRangeMode },
               });
-              const firstFew = exec.slots.slice(0, 3).map((s) => ({
-                startTime: s.startTime.length > 48 ? `${s.startTime.slice(0, 45)}…` : s.startTime,
-                endTime: s.endTime.length > 48 ? `${s.endTime.slice(0, 45)}…` : s.endTime,
-              }));
+              logParserMiss(variantName, {
+                httpStatus: exec.httpStatus,
+                rawIsoStringCount: exec.rawIsoStringCount,
+                slots: exec.slots,
+                shapeSummary: exec.shapeSummary,
+                rawResponseShape: exec.rawResponseShape,
+              });
               variants.push({
                 variantName,
                 hostMode: 'servicesApi',
@@ -844,9 +897,12 @@ export class BookingSettingsService {
                 endDateValue: exec.requestQuery?.['endDate'] ?? '',
                 httpStatus: exec.httpStatus,
                 responseShape: exec.shapeSummary,
+                rawResponseShape: exec.rawResponseShape ?? 'unknown',
+                rawIsoStringCount: exec.rawIsoStringCount ?? 0,
+                parsedSlotsReturned: exec.slots.length,
                 dateKeysReturned: exec.dateKeys,
                 slotsReturned: exec.slots.length,
-                firstFewSlots: firstFew,
+                firstFewSlots: mapFirstFew(exec.slots),
                 errorExcerpt: exec.error?.slice(0, 220),
               });
             }

@@ -13,6 +13,16 @@ import {
   filterFreeSlotsToUtcWindow,
 } from './free-slots-ranges.js';
 
+import {
+  parseGhlFreeSlotsResponse,
+  isLikelySlotIsoInstant,
+  type GhlFreeSlot,
+  type GhlFreeSlotsParseResult,
+} from './parse-ghl-free-slots-response.js';
+
+export { parseGhlFreeSlotsResponse, isLikelySlotIsoInstant };
+export type { GhlFreeSlot, GhlFreeSlotsParseResult };
+
 export interface GhlClientConfig {
   baseUrl: string;
   accessToken: string;
@@ -301,6 +311,9 @@ export interface GhlFreeSlotsVariantExecution {
   slots: GhlFreeSlot[];
   dateKeys: string[];
   shapeSummary: string;
+  rawResponseShape?: string;
+  rawIsoStringCount?: number;
+  parsedSlotsReturned?: number;
   error?: string;
   httpStatus?: number;
   responseBodyExcerpt?: string;
@@ -372,12 +385,6 @@ function extractCalendarListRows(raw: unknown): unknown[] | null {
   return null;
 }
 
-/** Slot interval returned by free-slots APIs (shape varies — normalized here). */
-export interface GhlFreeSlot {
-  startTime: string;
-  endTime: string;
-}
-
 /** Safe subset of GET /calendars/:id for debugging / UI (no tokens). */
 export interface GhlCalendarDetailSummary {
   name?: string;
@@ -410,97 +417,6 @@ export interface GhlCalendarDetailSummary {
   teamMemberCount?: number;
   teamMemberUserIds?: string[];
   openHoursCount?: number;
-}
-
-const YMD_KEY = /^\d{4}-\d{2}-\d{2}$/;
-
-function pushSlotFromRecord(o: Record<string, unknown>, slots: GhlFreeSlot[]): void {
-  let start =
-    typeof o['startTime'] === 'string'
-      ? o['startTime']
-      : typeof o['start'] === 'string'
-        ? o['start']
-        : typeof o['slotStart'] === 'string'
-          ? o['slotStart']
-          : '';
-  let end =
-    typeof o['endTime'] === 'string'
-      ? o['endTime']
-      : typeof o['end'] === 'string'
-        ? o['end']
-        : typeof o['slotEnd'] === 'string'
-          ? o['slotEnd']
-          : '';
-  if (!start && typeof o['start'] === 'number' && Number.isFinite(o['start'])) {
-    start = new Date(o['start']).toISOString();
-  }
-  if (!end && typeof o['end'] === 'number' && Number.isFinite(o['end'])) {
-    end = new Date(o['end']).toISOString();
-  }
-  if (start && end) slots.push({ startTime: start, endTime: end });
-}
-
-/**
- * GHL free-slots returns an availability map keyed by YYYY-MM-DD (per docs), not always a flat array.
- */
-export function parseGhlFreeSlotsResponse(raw: unknown): {
-  slots: GhlFreeSlot[];
-  dateKeys: string[];
-  shapeSummary: string;
-} {
-  const slots: GhlFreeSlot[] = [];
-  const dateKeys: string[] = [];
-
-  if (raw === null || raw === undefined) {
-    return { slots, dateKeys, shapeSummary: 'nullish' };
-  }
-  if (Array.isArray(raw)) {
-    for (const x of raw) {
-      if (isRecord(x)) pushSlotFromRecord(x, slots);
-    }
-    return { slots, dateKeys, shapeSummary: 'topLevelArray' };
-  }
-  if (!isRecord(raw)) {
-    return { slots, dateKeys, shapeSummary: `primitive:${typeof raw}` };
-  }
-
-  for (const [k, v] of Object.entries(raw)) {
-    const dayPrefix = /^(\d{4}-\d{2}-\d{2})/.exec(k);
-    if (!dayPrefix) continue;
-    dateKeys.push(YMD_KEY.test(k) ? k : dayPrefix[1]!);
-    if (Array.isArray(v)) {
-      for (const x of v) {
-        if (typeof x === 'string' && x.trim()) {
-          const st = x.trim();
-          if (/\d{4}-\d{2}-\d{2}/.test(st)) slots.push({ startTime: st, endTime: st });
-        } else if (isRecord(x)) pushSlotFromRecord(x, slots);
-      }
-    } else if (isRecord(v)) {
-      const inner = v['slots'] ?? v['freeSlots'] ?? v['data'] ?? v['items'];
-      if (Array.isArray(inner)) {
-        for (const x of inner) {
-          if (isRecord(x)) pushSlotFromRecord(x, slots);
-        }
-      }
-    }
-  }
-  if (dateKeys.length > 0) {
-    return { slots, dateKeys, shapeSummary: 'dateKeyedMap' };
-  }
-
-  if (isRecord(raw['calendar'])) {
-    return parseGhlFreeSlotsResponse(raw['calendar']);
-  }
-
-  const list = raw['slots'] ?? raw['data'] ?? raw['events'] ?? raw['freeSlots'];
-  if (Array.isArray(list)) {
-    for (const x of list) {
-      if (isRecord(x)) pushSlotFromRecord(x, slots);
-    }
-    return { slots, dateKeys, shapeSummary: 'nestedArrayField' };
-  }
-
-  return { slots, dateKeys, shapeSummary: 'objectUnrecognized' };
 }
 
 function readFiniteNumber(v: unknown): number | undefined {
@@ -1417,6 +1333,7 @@ export class GhlClient {
     sourceHeader: string;
     useBearer: boolean;
     probeRangeMode: GhlFreeSlotsProbeRangeMode;
+    slotDurationMinutes?: number | null;
   }): Promise<GhlFreeSlotsVariantExecution> {
     const requestPath = `/calendars/${encodeURIComponent(opts.calendarId)}/free-slots`;
     const query: Record<string, string> = {
@@ -1446,11 +1363,16 @@ export class GhlClient {
 
     try {
       const response = await inst.get<unknown>(requestPath, { params: query });
-      const parsed = parseGhlFreeSlotsResponse(response.data);
+      const parsed = parseGhlFreeSlotsResponse(response.data, {
+        slotDurationMinutes: opts.slotDurationMinutes,
+      });
       return {
         slots: parsed.slots,
         dateKeys: parsed.dateKeys,
         shapeSummary: parsed.shapeSummary,
+        rawResponseShape: parsed.rawResponseShape,
+        rawIsoStringCount: parsed.rawIsoStringCount,
+        parsedSlotsReturned: parsed.slots.length,
         httpStatus: response.status,
         requestPath,
         requestQuery: query,
@@ -1476,6 +1398,9 @@ export class GhlClient {
         slots: [],
         dateKeys: [],
         shapeSummary: 'requestError',
+        rawResponseShape: 'requestError',
+        rawIsoStringCount: 0,
+        parsedSlotsReturned: 0,
         error: msg,
         httpStatus,
         responseBodyExcerpt,
@@ -1499,6 +1424,7 @@ export class GhlClient {
     selectedDateYmd: string;
     crmTimezone: string;
     usePrivateIntegrationBearer?: boolean;
+    slotDurationMinutes?: number | null;
   }): Promise<GhlFreeSlotsVariantExecution> {
     const { startMs, endMs } = crmMonthStartEndMsInclusive(params.crmTimezone, params.selectedDateYmd);
     return this.executeLeadConnectorWidgetFreeSlots({
@@ -1512,6 +1438,7 @@ export class GhlClient {
       sourceHeader: 'WEB_USER',
       useBearer: params.usePrivateIntegrationBearer ?? false,
       probeRangeMode: 'month',
+      slotDurationMinutes: params.slotDurationMinutes,
     });
   }
 
@@ -1563,6 +1490,9 @@ export class GhlClient {
         slots: parsed.slots,
         dateKeys: parsed.dateKeys,
         shapeSummary: parsed.shapeSummary,
+        rawResponseShape: parsed.rawResponseShape,
+        rawIsoStringCount: parsed.rawIsoStringCount,
+        parsedSlotsReturned: parsed.slots.length,
         httpStatus: response.status,
         requestPath,
         requestQuery: query,
@@ -1583,6 +1513,9 @@ export class GhlClient {
         slots: [],
         dateKeys: [],
         shapeSummary: 'requestError',
+        rawResponseShape: 'requestError',
+        rawIsoStringCount: 0,
+        parsedSlotsReturned: 0,
         error: msg,
         httpStatus,
         responseBodyExcerpt,

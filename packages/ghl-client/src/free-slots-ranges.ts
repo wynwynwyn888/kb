@@ -180,10 +180,10 @@ export function computeWidgetFreeSlotsQueryRange(
 }
 
 export function filterFreeSlotsToUtcWindow(
-  slots: { startTime: string; endTime: string }[],
+  slots: { startTime: string; endTime?: string }[],
   windowStartMs: number,
   windowEndMs: number,
-): { startTime: string; endTime: string }[] {
+): { startTime: string; endTime?: string }[] {
   return slots.filter((s) => {
     const t = Date.parse(s.startTime);
     if (Number.isNaN(t)) return false;

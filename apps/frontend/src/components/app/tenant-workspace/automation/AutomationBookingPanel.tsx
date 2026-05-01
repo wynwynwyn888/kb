@@ -867,6 +867,18 @@ export function AutomationBookingPanel() {
                           <th style={{ padding: '0.22rem 0.3rem' }}>user</th>
                           <th style={{ padding: '0.22rem 0.3rem' }}>TZ q</th>
                           <th style={{ padding: '0.22rem 0.3rem' }}>HTTP</th>
+                          <th style={{ padding: '0.22rem 0.3rem' }} title="Coarse HTTP body shape">
+                            raw
+                          </th>
+                          <th style={{ padding: '0.22rem 0.3rem' }} title="ISO-like strings detected in payload">
+                            ISO#
+                          </th>
+                          <th style={{ padding: '0.22rem 0.3rem' }} title="Slots after parser">
+                            parsed#
+                          </th>
+                          <th style={{ padding: '0.22rem 0.3rem' }} title="Parser shapeSummary">
+                            parse
+                          </th>
                           <th style={{ padding: '0.22rem 0.3rem' }}>#</th>
                           <th style={{ padding: '0.22rem 0.3rem', minWidth: 120 }}>firstFewSlots</th>
                         </tr>
@@ -892,6 +904,36 @@ export function AutomationBookingPanel() {
                             <td style={{ padding: '0.28rem 0.3rem' }}>{v.userParamMode}</td>
                             <td style={{ padding: '0.28rem 0.3rem' }}>{v.timezoneIncluded ? 'yes' : 'no'}</td>
                             <td style={{ padding: '0.28rem 0.3rem' }}>{v.httpStatus ?? '—'}</td>
+                            <td
+                              style={{
+                                padding: '0.28rem 0.3rem',
+                                maxWidth: 88,
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                              }}
+                              title={v.rawResponseShape ?? ''}
+                            >
+                              {(v.rawResponseShape ?? '—').length > 14
+                                ? `${(v.rawResponseShape ?? '—').slice(0, 12)}…`
+                                : (v.rawResponseShape ?? '—')}
+                            </td>
+                            <td style={{ padding: '0.28rem 0.3rem' }}>{v.rawIsoStringCount ?? 0}</td>
+                            <td style={{ padding: '0.28rem 0.3rem' }}>{v.parsedSlotsReturned ?? v.slotsReturned}</td>
+                            <td
+                              style={{
+                                padding: '0.28rem 0.3rem',
+                                maxWidth: 100,
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                whiteSpace: 'nowrap',
+                              }}
+                              title={v.responseShape}
+                            >
+                              {(v.responseShape ?? '—').length > 12
+                                ? `${(v.responseShape ?? '—').slice(0, 10)}…`
+                                : (v.responseShape ?? '—')}
+                            </td>
                             <td
                               style={{
                                 padding: '0.28rem 0.3rem',

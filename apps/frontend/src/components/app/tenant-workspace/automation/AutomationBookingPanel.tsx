@@ -282,13 +282,23 @@ function formatHttpErrorDetail(e: unknown): string {
   return e.message;
 }
 
-/** Prefer more slots, then broader range mode, then probe order. */
+/** Prefer widget-compatible month row, then more slots, then tighter range rank. */
 function pickWinningProbeVariant(
   variants: TenantFreeSlotsProbeVariant[],
 ): TenantFreeSlotsProbeVariant | null {
+  const widgetMonthWinners = variants.filter(
+    v => v.hostMode === 'leadconnectorBackendWidget' && v.rangeMode === 'month' && v.slotsReturned > 0,
+  );
+  if (widgetMonthWinners.length > 0) {
+    return widgetMonthWinners.reduce((best, v) => (v.slotsReturned > best.slotsReturned ? v : best));
+  }
   const winners = variants.filter(v => v.slotsReturned > 0);
   if (winners.length === 0) return null;
-  const rangeRank = (m: string) => (m === 'fullLocalDay' ? 0 : 1);
+  const rangeRank = (m: string) => {
+    if (m === 'month') return 0;
+    if (m === 'fullLocalDay') return 1;
+    return 2;
+  };
   return winners.reduce((best, v) => {
     if (v.slotsReturned > best.slotsReturned) return v;
     if (v.slotsReturned < best.slotsReturned) return best;
@@ -297,10 +307,42 @@ function pickWinningProbeVariant(
   });
 }
 
+function formatProbeFirstFewSlots(v: TenantFreeSlotsProbeVariant): string {
+  if (!v.firstFewSlots?.length) return '—';
+  return v.firstFewSlots
+    .map(s => (s.startTime.length > 28 ? `${s.startTime.slice(0, 25)}…` : s.startTime))
+    .join(', ');
+}
+
 function productionEnvFromWinningVariant(v: TenantFreeSlotsProbeVariant): { key: string; value: string }[] {
+  if (v.hostMode === 'leadconnectorBackendWidget' && v.rangeMode === 'month') {
+    return [
+      { key: 'GHL_FREE_SLOTS_HOST_MODE', value: 'widget_backend' },
+      { key: 'GHL_FREE_SLOTS_RANGE_MODE', value: 'month' },
+      { key: 'GHL_FREE_SLOTS_SEND_SEATS_PER_SLOT', value: v.sendSeatsPerSlot ? 'true' : 'false' },
+      { key: 'GHL_FREE_SLOTS_CHANNEL', value: 'APP' },
+      { key: 'GHL_FREE_SLOTS_SOURCE', value: 'WEB_USER' },
+      { key: 'GHL_FREE_SLOTS_API_VERSION', value: v.version },
+      { key: 'GHL_FREE_SLOTS_TIMESTAMP_UNIT', value: 'ms' },
+      { key: 'GHL_FREE_SLOTS_INCLUDE_TIMEZONE', value: 'true' },
+      { key: 'GHL_FREE_SLOTS_RETRY_USER_PARAM', value: 'userId' },
+      { key: 'GHL_FREE_SLOTS_WIDGET_USE_BEARER', value: 'false' },
+    ];
+  }
   const retryParam = v.userParamMode === 'userIds' ? 'userIds' : 'userId';
+  const rangeEnv =
+    v.rangeMode === 'selectedToDayEnd'
+      ? 'selected_to_day_end'
+      : v.rangeMode === 'month'
+        ? 'month'
+        : 'day';
   return [
-    { key: 'GHL_FREE_SLOTS_API_VERSION', value: v.apiVersion },
+    { key: 'GHL_FREE_SLOTS_HOST_MODE', value: 'services_api' },
+    { key: 'GHL_FREE_SLOTS_RANGE_MODE', value: rangeEnv },
+    { key: 'GHL_FREE_SLOTS_SEND_SEATS_PER_SLOT', value: 'false' },
+    { key: 'GHL_FREE_SLOTS_CHANNEL', value: 'APP' },
+    { key: 'GHL_FREE_SLOTS_SOURCE', value: 'WEB_USER' },
+    { key: 'GHL_FREE_SLOTS_API_VERSION', value: v.version },
     { key: 'GHL_FREE_SLOTS_TIMESTAMP_UNIT', value: v.timestampUnit },
     { key: 'GHL_FREE_SLOTS_INCLUDE_TIMEZONE', value: v.timezoneIncluded ? 'true' : 'false' },
     { key: 'GHL_FREE_SLOTS_RETRY_USER_PARAM', value: retryParam },
@@ -526,6 +568,9 @@ export function AutomationBookingPanel() {
       setSlotsScheduleDiag(null);
       setSlotsRulesDiag(null);
       let msg = `Returned ${n} slot(s) for ${dateStr}${slotTime.trim() ? ` from ${slotTime} (local filter)` : ''}. Not a booking confirmation.`;
+      if (r.slotsSourceMessage) {
+        msg = `${r.slotsSourceMessage} ${msg}`;
+      }
       if (r.retriedWithUserId) {
         msg += ` (CRM returned slots when querying staff user ${r.retriedWithUserId}.)`;
       }
@@ -774,10 +819,10 @@ export function AutomationBookingPanel() {
                     <p style={{ ...statusLineStyle(), marginTop: '0.35rem', marginBottom: '0.4rem' }}>
                       Set these on the <strong>backend</strong> (then redeploy). Values match the strongest variant (
                       {winningProbeVariant.slotsReturned} slot
-                      {winningProbeVariant.slotsReturned === 1 ? '' : 's'}, {winningProbeVariant.rangeMode},{' '}
-                      {winningProbeVariant.variantName}).
+                      {winningProbeVariant.slotsReturned === 1 ? '' : 's'}, {winningProbeVariant.hostMode},{' '}
+                      {winningProbeVariant.rangeMode}, {winningProbeVariant.variantName}).
                     </p>
-                    {winningProbeVariant.userParamMode === 'none' ? (
+                    {winningProbeVariant.hostMode === 'servicesApi' && winningProbeVariant.userParamMode === 'none' ? (
                       <p style={{ ...availabilityHintStyle(), marginTop: 0, marginBottom: '0.45rem', color: '#166534' }}>
                         That probe row did not send a staff user query param.{' '}
                         <code style={{ fontSize: '0.7rem' }}>GHL_FREE_SLOTS_RETRY_USER_PARAM</code> below is the usual
@@ -809,18 +854,21 @@ export function AutomationBookingPanel() {
                       style={{
                         width: '100%',
                         borderCollapse: 'collapse',
-                        fontSize: '0.72rem',
+                        fontSize: '0.68rem',
                       }}
                     >
                       <thead>
                         <tr style={{ textAlign: 'left', color: 'var(--aisbp-muted)' }}>
-                          <th style={{ padding: '0.25rem 0.35rem' }}>Range</th>
-                          <th style={{ padding: '0.25rem 0.35rem' }}>API</th>
-                          <th style={{ padding: '0.25rem 0.35rem' }}>Unit</th>
-                          <th style={{ padding: '0.25rem 0.35rem' }}>User</th>
-                          <th style={{ padding: '0.25rem 0.35rem' }}>TZ</th>
-                          <th style={{ padding: '0.25rem 0.35rem' }}>HTTP</th>
-                          <th style={{ padding: '0.25rem 0.35rem' }}>Slots</th>
+                          <th style={{ padding: '0.22rem 0.3rem' }}>hostMode</th>
+                          <th style={{ padding: '0.22rem 0.3rem' }}>rangeMode</th>
+                          <th style={{ padding: '0.22rem 0.3rem' }}>seats</th>
+                          <th style={{ padding: '0.22rem 0.3rem' }}>version</th>
+                          <th style={{ padding: '0.22rem 0.3rem' }}>unit</th>
+                          <th style={{ padding: '0.22rem 0.3rem' }}>user</th>
+                          <th style={{ padding: '0.22rem 0.3rem' }}>TZ q</th>
+                          <th style={{ padding: '0.22rem 0.3rem' }}>HTTP</th>
+                          <th style={{ padding: '0.22rem 0.3rem' }}>#</th>
+                          <th style={{ padding: '0.22rem 0.3rem', minWidth: 120 }}>firstFewSlots</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -834,20 +882,27 @@ export function AutomationBookingPanel() {
                               borderTop: '1px solid var(--aisbp-border)',
                             }}
                           >
-                            <td style={{ padding: '0.3rem 0.35rem', maxWidth: 100 }}>{v.rangeMode}</td>
-                            <td style={{ padding: '0.3rem 0.35rem' }}>{v.apiVersion}</td>
-                            <td style={{ padding: '0.3rem 0.35rem' }}>{v.timestampUnit}</td>
-                            <td style={{ padding: '0.3rem 0.35rem' }}>{v.userParamMode}</td>
-                            <td style={{ padding: '0.3rem 0.35rem' }}>{v.timezoneIncluded ? 'yes' : 'no'}</td>
-                            <td style={{ padding: '0.3rem 0.35rem' }}>{v.httpStatus ?? '—'}</td>
+                            <td style={{ padding: '0.28rem 0.3rem', whiteSpace: 'nowrap' }}>
+                              {v.hostMode === 'leadconnectorBackendWidget' ? 'leadconnectorBackendWidget' : 'servicesApi'}
+                            </td>
+                            <td style={{ padding: '0.28rem 0.3rem' }}>{v.rangeMode}</td>
+                            <td style={{ padding: '0.28rem 0.3rem' }}>{v.sendSeatsPerSlot ? 'true' : 'false'}</td>
+                            <td style={{ padding: '0.28rem 0.3rem' }}>{v.version}</td>
+                            <td style={{ padding: '0.28rem 0.3rem' }}>{v.timestampUnit}</td>
+                            <td style={{ padding: '0.28rem 0.3rem' }}>{v.userParamMode}</td>
+                            <td style={{ padding: '0.28rem 0.3rem' }}>{v.timezoneIncluded ? 'yes' : 'no'}</td>
+                            <td style={{ padding: '0.28rem 0.3rem' }}>{v.httpStatus ?? '—'}</td>
                             <td
                               style={{
-                                padding: '0.3rem 0.35rem',
+                                padding: '0.28rem 0.3rem',
                                 fontWeight: v.slotsReturned > 0 ? 800 : 700,
                                 color: v.slotsReturned > 0 ? 'rgb(22 101 52)' : undefined,
                               }}
                             >
                               {v.slotsReturned}
+                            </td>
+                            <td style={{ padding: '0.28rem 0.3rem', color: 'var(--aisbp-muted)', lineHeight: 1.35 }}>
+                              {formatProbeFirstFewSlots(v)}
                             </td>
                           </tr>
                         ))}

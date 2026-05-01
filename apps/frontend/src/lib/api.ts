@@ -546,11 +546,13 @@ export interface TenantBookingRulesDiagnostics {
 
 export interface TenantFreeSlotsProbeVariant {
   variantName: string;
-  apiVersion: string;
+  hostMode: 'leadconnectorBackendWidget' | 'servicesApi';
+  rangeMode: 'month' | 'fullLocalDay' | 'selectedToDayEnd';
+  sendSeatsPerSlot: boolean;
+  version: string;
   timestampUnit: string;
   userParamMode: string;
   timezoneIncluded: boolean;
-  rangeMode: string;
   requestPath: string;
   startDateValue: string;
   endDateValue: string;
@@ -570,6 +572,12 @@ export interface TenantFreeSlotsProbeResult {
     timestampUnit: string;
     includeTimezoneQuery: boolean;
     retryAddsUserAs: string;
+    hostMode: string;
+    rangeMode: string;
+    sendSeatsPerSlot: boolean;
+    channel: string;
+    source: string;
+    widgetRequestUsesBearer: boolean;
   };
   variants: TenantFreeSlotsProbeVariant[];
   anySlotsReturned: boolean;
@@ -633,6 +641,7 @@ export async function testTenantBookingSlots(
   retriedWithUserId?: string | null;
   scheduleDiagnostics?: TenantBookingScheduleDiagnostics;
   bookingRulesDiagnostics?: TenantBookingRulesDiagnostics;
+  slotsSourceMessage?: string;
 }> {
   return apiRequest(`/tenants/${tenantId}/booking-settings/test-slots`, {
     token,

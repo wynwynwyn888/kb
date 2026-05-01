@@ -7,6 +7,12 @@
 import axios from 'axios';
 import type { AxiosInstance, AxiosError } from 'axios';
 
+import {
+  computeWidgetFreeSlotsQueryRange,
+  crmMonthStartEndMsInclusive,
+  filterFreeSlotsToUtcWindow,
+} from './free-slots-ranges.js';
+
 export interface GhlClientConfig {
   baseUrl: string;
   accessToken: string;
@@ -198,8 +204,19 @@ export const GHL_CALENDARS_LIST_API_VERSION = '2023-02-21';
 /** API `Version` header values used when probing free-slots compatibility. */
 export const GHL_FREE_SLOTS_PROBE_API_VERSIONS = ['2023-02-21', '2021-07-28', '2021-04-15'] as const;
 
+/** Public booking widget network capture uses this host (not `services.leadconnectorhq.com`). */
+export const GHL_WIDGET_BACKEND_BASE_URL = 'https://backend.leadconnectorhq.com';
+
 export type GhlFreeSlotsTimestampUnit = 'ms' | 's';
 export type GhlFreeSlotsUserParamMode = 'none' | 'userId' | 'userIds';
+
+/** Env `GHL_FREE_SLOTS_HOST_MODE` */
+export type GhlFreeSlotsHostMode = 'widget_backend' | 'services_api';
+/** Env `GHL_FREE_SLOTS_RANGE_MODE` — when host is widget_backend, controls the wide HTTP query window. */
+export type GhlFreeSlotsRangeMode = 'month' | 'day' | 'selected_to_day_end';
+
+export type GhlFreeSlotsProbeHostMode = 'leadconnectorBackendWidget' | 'servicesApi';
+export type GhlFreeSlotsProbeRangeMode = 'month' | 'fullLocalDay' | 'selectedToDayEnd';
 
 export interface GhlFreeSlotsProductionSpec {
   apiVersion: string;
@@ -207,6 +224,14 @@ export interface GhlFreeSlotsProductionSpec {
   includeTimezoneQuery: boolean;
   /** How to attach staff id on retry when the first free-slots call returns zero slots. */
   retryAddsUserAs: 'userId' | 'userIds';
+  hostMode: GhlFreeSlotsHostMode;
+  /** Wide query window for widget-backend host; ignored for services_api (caller supplies ms range). */
+  rangeMode: GhlFreeSlotsRangeMode;
+  sendSeatsPerSlot: boolean;
+  channel: string;
+  source: string;
+  /** When host is widget_backend, optionally send the Private Integration bearer (never logged). */
+  widgetRequestUsesBearer: boolean;
 }
 
 export function formatFreeSlotsTimestamp(ms: number, unit: GhlFreeSlotsTimestampUnit): string {
@@ -216,10 +241,16 @@ export function formatFreeSlotsTimestamp(ms: number, unit: GhlFreeSlotsTimestamp
 
 /**
  * Production free-slots query shape — override via env after running CRM probe when defaults return zero slots.
- * - `GHL_FREE_SLOTS_API_VERSION` — default `2023-02-21`
- * - `GHL_FREE_SLOTS_TIMESTAMP_UNIT` — `ms` or `s` (seconds)
- * - `GHL_FREE_SLOTS_INCLUDE_TIMEZONE` — `true` / `false` (omit `timezone` query param when false)
- * - `GHL_FREE_SLOTS_RETRY_USER_PARAM` — `userId` or `userIds` (staff retry query key)
+ * - `GHL_FREE_SLOTS_API_VERSION` — default `2023-02-21` (Version header / services path)
+ * - `GHL_FREE_SLOTS_TIMESTAMP_UNIT` — `ms` or `s` (seconds) — services API only
+ * - `GHL_FREE_SLOTS_INCLUDE_TIMEZONE` — `true` / `false` (omit `timezone` query param when false) — services API
+ * - `GHL_FREE_SLOTS_RETRY_USER_PARAM` — `userId` or `userIds` (staff retry query key) — services API
+ * - `GHL_FREE_SLOTS_HOST_MODE` — `widget_backend` | `services_api` (default `services_api`)
+ * - `GHL_FREE_SLOTS_RANGE_MODE` — `month` | `day` | `selected_to_day_end` (widget_backend wide query; default `day`)
+ * - `GHL_FREE_SLOTS_SEND_SEATS_PER_SLOT` — `true` / `false` (default `false`)
+ * - `GHL_FREE_SLOTS_CHANNEL` — default `APP`
+ * - `GHL_FREE_SLOTS_SOURCE` — default `WEB_USER`
+ * - `GHL_FREE_SLOTS_WIDGET_USE_BEARER` — `true` / `false` (default `false`) — attach PI bearer on widget host only
  */
 export function resolveGhlFreeSlotsProductionSpec(): GhlFreeSlotsProductionSpec {
   const apiVersion = (process.env['GHL_FREE_SLOTS_API_VERSION'] ?? '').trim() || GHL_CALENDARS_LIST_API_VERSION;
@@ -231,7 +262,39 @@ export function resolveGhlFreeSlotsProductionSpec(): GhlFreeSlotsProductionSpec 
   const retryRaw = (process.env['GHL_FREE_SLOTS_RETRY_USER_PARAM'] ?? 'userId').trim().toLowerCase();
   const retryAddsUserAs: 'userId' | 'userIds' =
     retryRaw === 'userids' || retryRaw === 'user_ids' ? 'userIds' : 'userId';
-  return { apiVersion, timestampUnit, includeTimezoneQuery, retryAddsUserAs };
+
+  const hostRaw = (process.env['GHL_FREE_SLOTS_HOST_MODE'] ?? 'services_api').trim().toLowerCase().replace(/-/g, '_');
+  const hostMode: GhlFreeSlotsHostMode =
+    hostRaw === 'widget_backend' || hostRaw === 'widget' || hostRaw === 'leadconnector_backend'
+      ? 'widget_backend'
+      : 'services_api';
+
+  const rangeRaw = (process.env['GHL_FREE_SLOTS_RANGE_MODE'] ?? 'day').trim().toLowerCase().replace(/-/g, '_');
+  let rangeMode: GhlFreeSlotsRangeMode = 'day';
+  if (rangeRaw === 'month') rangeMode = 'month';
+  else if (rangeRaw === 'selected_to_day_end') rangeMode = 'selected_to_day_end';
+
+  const seatsRaw = (process.env['GHL_FREE_SLOTS_SEND_SEATS_PER_SLOT'] ?? 'false').trim().toLowerCase();
+  const sendSeatsPerSlot = seatsRaw === 'true' || seatsRaw === '1' || seatsRaw === 'yes';
+
+  const channel = (process.env['GHL_FREE_SLOTS_CHANNEL'] ?? 'APP').trim() || 'APP';
+  const source = (process.env['GHL_FREE_SLOTS_SOURCE'] ?? 'WEB_USER').trim() || 'WEB_USER';
+
+  const bearerRaw = (process.env['GHL_FREE_SLOTS_WIDGET_USE_BEARER'] ?? 'false').trim().toLowerCase();
+  const widgetRequestUsesBearer = bearerRaw === 'true' || bearerRaw === '1' || bearerRaw === 'yes';
+
+  return {
+    apiVersion,
+    timestampUnit,
+    includeTimezoneQuery,
+    retryAddsUserAs,
+    hostMode,
+    rangeMode,
+    sendSeatsPerSlot,
+    channel,
+    source,
+    widgetRequestUsesBearer,
+  };
 }
 
 export interface GhlFreeSlotsVariantExecution {
@@ -243,6 +306,17 @@ export interface GhlFreeSlotsVariantExecution {
   responseBodyExcerpt?: string;
   requestPath: string;
   requestQuery: Record<string, string>;
+  hostMode?: GhlFreeSlotsProbeHostMode;
+  probeRangeMode?: GhlFreeSlotsProbeRangeMode;
+  sendSeatsPerSlot?: boolean;
+  /** Version header sent on the wire (diagnostics). */
+  versionHeader?: string;
+  channelHeader?: string;
+  sourceHeader?: string;
+  /** When slots were narrowed to the caller window after a wide widget query. */
+  filteredToRequestWindow?: boolean;
+  /** Human-facing note for booking UI (no secrets). */
+  availabilityNote?: string;
 }
 
 export interface ListCalendarsResult {
@@ -391,11 +465,15 @@ export function parseGhlFreeSlotsResponse(raw: unknown): {
   }
 
   for (const [k, v] of Object.entries(raw)) {
-    if (!YMD_KEY.test(k)) continue;
-    dateKeys.push(k);
+    const dayPrefix = /^(\d{4}-\d{2}-\d{2})/.exec(k);
+    if (!dayPrefix) continue;
+    dateKeys.push(YMD_KEY.test(k) ? k : dayPrefix[1]!);
     if (Array.isArray(v)) {
       for (const x of v) {
-        if (isRecord(x)) pushSlotFromRecord(x, slots);
+        if (typeof x === 'string' && x.trim()) {
+          const st = x.trim();
+          if (/\d{4}-\d{2}-\d{2}/.test(st)) slots.push({ startTime: st, endTime: st });
+        } else if (isRecord(x)) pushSlotFromRecord(x, slots);
       }
     } else if (isRecord(v)) {
       const inner = v['slots'] ?? v['freeSlots'] ?? v['data'] ?? v['items'];
@@ -761,9 +839,11 @@ export interface BookSlotRequest {
 export class GhlClient {
   private client: AxiosInstance;
   private locationId: string;
+  private accessToken: string;
 
   constructor(config: GhlClientConfig) {
     this.locationId = config.locationId;
+    this.accessToken = config.accessToken;
     this.client = axios.create({
       baseURL: config.baseUrl || 'https://services.leadconnectorhq.com',
       headers: {
@@ -1324,6 +1404,118 @@ export class GhlClient {
   }
 
   /**
+   * `backend.leadconnectorhq.com` widget-style free-slots (browser capture). No cookies; optional bearer only when `useBearer`.
+   */
+  async executeLeadConnectorWidgetFreeSlots(opts: {
+    calendarId: string;
+    startDateMs: number;
+    endDateMs: number;
+    timezone: string;
+    sendSeatsPerSlot: boolean;
+    versionHeader: string;
+    channelHeader: string;
+    sourceHeader: string;
+    useBearer: boolean;
+    probeRangeMode: GhlFreeSlotsProbeRangeMode;
+  }): Promise<GhlFreeSlotsVariantExecution> {
+    const requestPath = `/calendars/${encodeURIComponent(opts.calendarId)}/free-slots`;
+    const query: Record<string, string> = {
+      startDate: String(Math.floor(opts.startDateMs)),
+      endDate: String(Math.floor(opts.endDateMs)),
+      timezone: opts.timezone.trim(),
+      sendSeatsPerSlot: opts.sendSeatsPerSlot ? 'true' : 'false',
+    };
+
+    const headers: Record<string, string> = {
+      Version: opts.versionHeader.trim(),
+      Channel: opts.channelHeader.trim(),
+      Source: opts.sourceHeader.trim(),
+      Accept: '*/*',
+      Timezone: opts.timezone.trim(),
+    };
+    if (opts.useBearer && this.accessToken.trim()) {
+      headers['Authorization'] = `Bearer ${this.accessToken}`;
+    }
+
+    const inst = axios.create({
+      baseURL: GHL_WIDGET_BACKEND_BASE_URL,
+      headers,
+      timeout: 25000,
+      withCredentials: false,
+    });
+
+    try {
+      const response = await inst.get<unknown>(requestPath, { params: query });
+      const parsed = parseGhlFreeSlotsResponse(response.data);
+      return {
+        slots: parsed.slots,
+        dateKeys: parsed.dateKeys,
+        shapeSummary: parsed.shapeSummary,
+        httpStatus: response.status,
+        requestPath,
+        requestQuery: query,
+        hostMode: 'leadconnectorBackendWidget',
+        probeRangeMode: opts.probeRangeMode,
+        sendSeatsPerSlot: opts.sendSeatsPerSlot,
+        versionHeader: opts.versionHeader.trim(),
+        channelHeader: opts.channelHeader.trim(),
+        sourceHeader: opts.sourceHeader.trim(),
+      };
+    } catch (error) {
+      let httpStatus: number | undefined;
+      let responseBodyExcerpt: string | undefined;
+      if (axios.isAxiosError(error)) {
+        httpStatus = error.response?.status;
+        const d = error.response?.data;
+        if (d !== undefined) {
+          responseBodyExcerpt = typeof d === 'string' ? d.slice(0, 500) : JSON.stringify(d).slice(0, 500);
+        }
+      }
+      const msg = this.extractGhlErrorMessage(error) ?? (error instanceof Error ? error.message : 'widget free-slots failed');
+      return {
+        slots: [],
+        dateKeys: [],
+        shapeSummary: 'requestError',
+        error: msg,
+        httpStatus,
+        responseBodyExcerpt,
+        requestPath,
+        requestQuery: query,
+        hostMode: 'leadconnectorBackendWidget',
+        probeRangeMode: opts.probeRangeMode,
+        sendSeatsPerSlot: opts.sendSeatsPerSlot,
+        versionHeader: opts.versionHeader.trim(),
+        channelHeader: opts.channelHeader.trim(),
+        sourceHeader: opts.sourceHeader.trim(),
+      };
+    }
+  }
+
+  /**
+   * Diagnostic: widget-compatible **full selected month** in CRM timezone (Chrome network capture shape).
+   */
+  async executeWidgetCompatibleMonthRangeProbe(params: {
+    calendarId: string;
+    selectedDateYmd: string;
+    crmTimezone: string;
+    usePrivateIntegrationBearer?: boolean;
+  }): Promise<GhlFreeSlotsVariantExecution> {
+    const { startMs, endMs } = crmMonthStartEndMsInclusive(params.crmTimezone, params.selectedDateYmd);
+    return this.executeLeadConnectorWidgetFreeSlots({
+      calendarId: params.calendarId,
+      startDateMs: startMs,
+      endDateMs: endMs,
+      timezone: params.crmTimezone,
+      sendSeatsPerSlot: false,
+      versionHeader: '2021-04-15',
+      channelHeader: 'APP',
+      sourceHeader: 'WEB_USER',
+      useBearer: params.usePrivateIntegrationBearer ?? false,
+      probeRangeMode: 'month',
+    });
+  }
+
+  /**
    * Execute one free-slots GET with an explicit request variant (probe / advanced).
    * `startDate` / `endDate` are formatted per `timestampUnit` (ms vs seconds since epoch).
    */
@@ -1337,6 +1529,7 @@ export class GhlClient {
     timestampUnit: GhlFreeSlotsTimestampUnit;
     userParamMode: GhlFreeSlotsUserParamMode;
     includeTimezone: boolean;
+    variantMeta?: { probeRangeMode?: GhlFreeSlotsProbeRangeMode };
   }): Promise<GhlFreeSlotsVariantExecution> {
     const requestPath = `/calendars/${encodeURIComponent(params.calendarId)}/free-slots`;
     const query: Record<string, string> = {
@@ -1349,11 +1542,19 @@ export class GhlClient {
     if (params.userParamMode === 'userId' && uid) query['userId'] = uid;
     if (params.userParamMode === 'userIds' && uid) query['userIds'] = uid;
 
+    const versionHeader = params.apiVersion.trim() || GHL_CALENDARS_LIST_API_VERSION;
+    const baseMeta = {
+      hostMode: 'servicesApi' as const,
+      probeRangeMode: params.variantMeta?.probeRangeMode,
+      sendSeatsPerSlot: false,
+      versionHeader,
+    };
+
     try {
       const response = await this.client.get<unknown>(requestPath, {
         params: query,
         headers: {
-          Version: params.apiVersion.trim() || GHL_CALENDARS_LIST_API_VERSION,
+          Version: versionHeader,
           Accept: 'application/json',
         },
       });
@@ -1365,6 +1566,7 @@ export class GhlClient {
         httpStatus: response.status,
         requestPath,
         requestQuery: query,
+        ...baseMeta,
       };
     } catch (error) {
       let httpStatus: number | undefined;
@@ -1386,6 +1588,7 @@ export class GhlClient {
         responseBodyExcerpt,
         requestPath,
         requestQuery: query,
+        ...baseMeta,
       };
     }
   }
@@ -1404,13 +1607,64 @@ export class GhlClient {
     userId?: string;
   }): Promise<GhlFreeSlotsVariantExecution> {
     const prod = resolveGhlFreeSlotsProductionSpec();
+    const tzFull = (params.timezone ?? '').trim();
+
+    if (prod.hostMode === 'widget_backend') {
+      if (!tzFull) {
+        return {
+          slots: [],
+          dateKeys: [],
+          shapeSummary: 'noTimezone',
+          error: 'timezone is required for widget_backend free-slots',
+          requestPath: `/calendars/${encodeURIComponent(params.calendarId)}/free-slots`,
+          requestQuery: {},
+          hostMode: 'leadconnectorBackendWidget',
+          sendSeatsPerSlot: prod.sendSeatsPerSlot,
+          versionHeader: prod.apiVersion,
+          channelHeader: prod.channel,
+          sourceHeader: prod.source,
+        };
+      }
+      const { queryStartMs, queryEndMs } = computeWidgetFreeSlotsQueryRange(
+        prod.rangeMode,
+        tzFull,
+        params.startDateMs,
+      );
+      const probeRangeMode: GhlFreeSlotsProbeRangeMode =
+        prod.rangeMode === 'month' ? 'month' : prod.rangeMode === 'day' ? 'fullLocalDay' : 'selectedToDayEnd';
+      const raw = await this.executeLeadConnectorWidgetFreeSlots({
+        calendarId: params.calendarId,
+        startDateMs: queryStartMs,
+        endDateMs: queryEndMs,
+        timezone: tzFull,
+        sendSeatsPerSlot: prod.sendSeatsPerSlot,
+        versionHeader: prod.apiVersion,
+        channelHeader: prod.channel,
+        sourceHeader: prod.source,
+        useBearer: prod.widgetRequestUsesBearer,
+        probeRangeMode,
+      });
+      if (raw.error) return raw;
+      const filtered = filterFreeSlotsToUtcWindow(raw.slots, params.startDateMs, params.endDateMs);
+      const availabilityNote =
+        prod.rangeMode === 'month' && filtered.length > 0
+          ? 'CRM returned slots using widget-compatible month range.'
+          : undefined;
+      return {
+        ...raw,
+        slots: filtered,
+        filteredToRequestWindow: prod.rangeMode === 'month' || filtered.length !== raw.slots.length,
+        availabilityNote,
+      };
+    }
+
     const hasUser = Boolean(params.userId?.trim());
     const userParamMode: GhlFreeSlotsUserParamMode = hasUser
       ? prod.retryAddsUserAs === 'userIds'
         ? 'userIds'
         : 'userId'
       : 'none';
-    const tz = prod.includeTimezoneQuery ? params.timezone?.trim() : undefined;
+    const tz = prod.includeTimezoneQuery ? tzFull || undefined : undefined;
     return this.executeFreeSlotsVariant({
       calendarId: params.calendarId,
       startDateMs: params.startDateMs,

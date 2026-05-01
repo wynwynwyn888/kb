@@ -12,6 +12,8 @@ import {
   type GhlFreeSlot,
   type GhlFreeSlotsTimestampUnit,
   type GhlFreeSlotsUserParamMode,
+  type GhlFreeSlotsProbeHostMode,
+  type GhlFreeSlotsProbeRangeMode,
 } from '@aisbp/ghl-client';
 import {
   computeBookingRulesDiagnostics,
@@ -493,6 +495,7 @@ export class BookingSettingsService {
     retriedWithUserId?: string | null;
     scheduleDiagnostics?: BookingScheduleDiagnosticsDto;
     bookingRulesDiagnostics?: BookingRulesDiagnosticsDto;
+    slotsSourceMessage?: string;
   }> {
     const settings = await this.getBookingSettings(tenantId);
     const calendarId = body.calendarId?.trim() || settings.defaultGhlCalendarId?.trim() || null;
@@ -523,6 +526,8 @@ export class BookingSettingsService {
 
     this.logger.log(`selectedFreeSlotsVariant ${JSON.stringify(resolveGhlFreeSlotsProductionSpec())}`);
 
+    const freeSlotsProd = resolveGhlFreeSlotsProductionSpec();
+
     this.logger.log(
       `bookingTestSlotsRequest ${JSON.stringify({
         tenantId,
@@ -547,7 +552,7 @@ export class BookingSettingsService {
     let retriedWithUserId: string | null = null;
     let calWhenEmpty: { summary?: GhlCalendarDetailSummary } | undefined;
 
-    if (!r.error && r.slots.length === 0) {
+    if (freeSlotsProd.hostMode !== 'widget_backend' && !r.error && r.slots.length === 0) {
       calWhenEmpty = await client.getCalendar(calendarId);
       const userIds = calWhenEmpty.summary?.teamMemberUserIds;
       if (userIds && userIds.length > 0) {
@@ -672,6 +677,7 @@ export class BookingSettingsService {
       retriedWithUserId,
       scheduleDiagnostics,
       bookingRulesDiagnostics,
+      slotsSourceMessage: r.availabilityNote,
     };
   }
 
@@ -691,11 +697,13 @@ export class BookingSettingsService {
     productionSpec: ReturnType<typeof resolveGhlFreeSlotsProductionSpec>;
     variants: Array<{
       variantName: string;
-      apiVersion: string;
-      timestampUnit: GhlFreeSlotsTimestampUnit;
+      hostMode: GhlFreeSlotsProbeHostMode;
+      rangeMode: GhlFreeSlotsProbeRangeMode;
+      sendSeatsPerSlot: boolean;
+      version: string;
+      timestampUnit: GhlFreeSlotsTimestampUnit | 'ms';
       userParamMode: GhlFreeSlotsUserParamMode;
       timezoneIncluded: boolean;
-      rangeMode: 'fullLocalDay' | 'selectedToDayEnd';
       requestPath: string;
       startDateValue: string;
       endDateValue: string;
@@ -733,20 +741,15 @@ export class BookingSettingsService {
 
     const productionSpec = resolveGhlFreeSlotsProductionSpec();
 
-    const ranges: { mode: 'fullLocalDay' | 'selectedToDayEnd'; startMs: number; endMs: number }[] = [];
-    ranges.push({ mode: 'fullLocalDay', ...probeRangeFullLocalDay(crmTimezoneUsed, selectedDate) });
-    ranges.push({
-      mode: 'selectedToDayEnd',
-      ...probeRangeSelectedThroughDayEnd(crmTimezoneUsed, selectedDate, body.selectedTime ?? ''),
-    });
-
-    const variants: Array<{
+    type ProbeRow = {
       variantName: string;
-      apiVersion: string;
-      timestampUnit: GhlFreeSlotsTimestampUnit;
+      hostMode: GhlFreeSlotsProbeHostMode;
+      rangeMode: GhlFreeSlotsProbeRangeMode;
+      sendSeatsPerSlot: boolean;
+      version: string;
+      timestampUnit: GhlFreeSlotsTimestampUnit | 'ms';
       userParamMode: GhlFreeSlotsUserParamMode;
       timezoneIncluded: boolean;
-      rangeMode: 'fullLocalDay' | 'selectedToDayEnd';
       requestPath: string;
       startDateValue: string;
       endDateValue: string;
@@ -756,7 +759,50 @@ export class BookingSettingsService {
       slotsReturned: number;
       firstFewSlots: { startTime: string; endTime: string }[];
       errorExcerpt?: string;
-    }> = [];
+    };
+
+    const variants: ProbeRow[] = [];
+
+    const widgetBearerProbe = (process.env['GHL_FREE_SLOTS_WIDGET_PROBE_WITH_BEARER'] ?? 'false').trim().toLowerCase();
+    const widgetProbeUsesBearer = widgetBearerProbe === 'true' || widgetBearerProbe === '1';
+
+    const widgetExec = await client.executeWidgetCompatibleMonthRangeProbe({
+      calendarId,
+      selectedDateYmd: selectedDate,
+      crmTimezone: crmTimezoneUsed,
+      usePrivateIntegrationBearer: widgetProbeUsesBearer,
+    });
+    const wFirstFew = widgetExec.slots.slice(0, 3).map((s) => ({
+      startTime: s.startTime.length > 48 ? `${s.startTime.slice(0, 45)}…` : s.startTime,
+      endTime: s.endTime.length > 48 ? `${s.endTime.slice(0, 45)}…` : s.endTime,
+    }));
+    const wVersion = widgetExec.versionHeader ?? '2021-04-15';
+    variants.push({
+      variantName: `widgetCompatibleMonthRange|${widgetProbeUsesBearer ? 'bearer' : 'public'}|${wVersion}`,
+      hostMode: 'leadconnectorBackendWidget',
+      rangeMode: 'month',
+      sendSeatsPerSlot: Boolean(widgetExec.sendSeatsPerSlot),
+      version: wVersion,
+      timestampUnit: 'ms',
+      userParamMode: 'none',
+      timezoneIncluded: true,
+      requestPath: widgetExec.requestPath,
+      startDateValue: widgetExec.requestQuery?.['startDate'] ?? '',
+      endDateValue: widgetExec.requestQuery?.['endDate'] ?? '',
+      httpStatus: widgetExec.httpStatus,
+      responseShape: widgetExec.shapeSummary,
+      dateKeysReturned: widgetExec.dateKeys,
+      slotsReturned: widgetExec.slots.length,
+      firstFewSlots: wFirstFew,
+      errorExcerpt: widgetExec.error?.slice(0, 220),
+    });
+
+    const ranges: { mode: 'fullLocalDay' | 'selectedToDayEnd'; startMs: number; endMs: number }[] = [];
+    ranges.push({ mode: 'fullLocalDay', ...probeRangeFullLocalDay(crmTimezoneUsed, selectedDate) });
+    ranges.push({
+      mode: 'selectedToDayEnd',
+      ...probeRangeSelectedThroughDayEnd(crmTimezoneUsed, selectedDate, body.selectedTime ?? ''),
+    });
 
     for (const range of ranges) {
       for (const apiVersion of GHL_FREE_SLOTS_PROBE_API_VERSIONS) {
@@ -766,6 +812,8 @@ export class BookingSettingsService {
               const variantName = `${apiVersion}|${timestampUnit}|${userParamMode}|${includeTimezone ? 'tz' : 'noTz'}|${
                 range.mode
               }`;
+              const probeRangeMode: GhlFreeSlotsProbeRangeMode =
+                range.mode === 'fullLocalDay' ? 'fullLocalDay' : 'selectedToDayEnd';
               const exec = await client.executeFreeSlotsVariant({
                 calendarId,
                 startDateMs: range.startMs,
@@ -776,6 +824,7 @@ export class BookingSettingsService {
                 timestampUnit,
                 userParamMode,
                 includeTimezone,
+                variantMeta: { probeRangeMode },
               });
               const firstFew = exec.slots.slice(0, 3).map((s) => ({
                 startTime: s.startTime.length > 48 ? `${s.startTime.slice(0, 45)}…` : s.startTime,
@@ -783,11 +832,13 @@ export class BookingSettingsService {
               }));
               variants.push({
                 variantName,
-                apiVersion,
+                hostMode: 'servicesApi',
+                rangeMode: probeRangeMode,
+                sendSeatsPerSlot: false,
+                version: apiVersion,
                 timestampUnit,
                 userParamMode,
                 timezoneIncluded: includeTimezone,
-                rangeMode: range.mode,
                 requestPath: exec.requestPath,
                 startDateValue: exec.requestQuery?.['startDate'] ?? '',
                 endDateValue: exec.requestQuery?.['endDate'] ?? '',
@@ -804,11 +855,18 @@ export class BookingSettingsService {
       }
     }
 
+    const widgetMonthWin = variants.some(
+      (v) => v.hostMode === 'leadconnectorBackendWidget' && v.rangeMode === 'month' && v.slotsReturned > 0,
+    );
     const anySlotsReturned = variants.some((v) => v.slotsReturned > 0);
     const allVariantsZero = variants.length > 0 && !anySlotsReturned;
-    const message = allVariantsZero
-      ? 'GHL booking widget shows slots, but CRM API returned no free slots for all tested API variants. This may require GHL support or using a different endpoint/booking-link strategy.'
-      : undefined;
+    let message: string | undefined;
+    if (allVariantsZero) {
+      message =
+        'GHL booking widget shows slots, but CRM API returned no free slots for all tested API variants. This may require GHL support or using a different endpoint/booking-link strategy.';
+    } else if (widgetMonthWin) {
+      message = 'CRM returned slots using widget-compatible month range.';
+    }
 
     this.logger.log(
       `probeFreeSlotsSummary ${JSON.stringify({
@@ -817,7 +875,12 @@ export class BookingSettingsService {
         ghlLocationId,
         variantCount: variants.length,
         anySlotsReturned,
-        productionSpec,
+        widgetMonthWin,
+        productionSpec: {
+          hostMode: productionSpec.hostMode,
+          rangeMode: productionSpec.rangeMode,
+          apiVersion: productionSpec.apiVersion,
+        },
       })}`,
     );
 

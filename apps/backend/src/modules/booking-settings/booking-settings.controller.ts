@@ -5,7 +5,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { SessionUser } from '../../lib/supabase';
 import { GhlService } from '../ghl/ghl.service';
 import { BookingSettingsService } from './booking-settings.service';
-import { TestBookingSlotsDto, TestCalendarConnectionDto } from './dto/booking-tools.dto';
+import { TestBookingSlotsDto, TestCalendarConnectionDto, ProbeFreeSlotsDto } from './dto/booking-tools.dto';
 
 @ApiTags('booking-settings')
 @ApiBearerAuth()
@@ -71,5 +71,16 @@ export class BookingSettingsController {
   ) {
     await this.ghlService.ensureTenantAccessOrThrow(tenantId, user.id);
     return this.bookingSettingsService.testSlots(tenantId, user.id, body ?? {});
+  }
+
+  @Post('probe-free-slots')
+  @ApiOperation({ summary: 'Diagnostic: try multiple GHL free-slots request variants (safe summary only)' })
+  async probeFreeSlots(
+    @Param('tenantId') tenantId: string,
+    @CurrentUser() user: SessionUser,
+    @Body() body: ProbeFreeSlotsDto,
+  ) {
+    await this.ghlService.ensureTenantAccessOrThrow(tenantId, user.id);
+    return this.bookingSettingsService.probeFreeSlots(tenantId, user.id, body);
   }
 }

@@ -544,6 +544,57 @@ export interface TenantBookingRulesDiagnostics {
   warningCodes: string[];
 }
 
+export interface TenantFreeSlotsProbeVariant {
+  variantName: string;
+  apiVersion: string;
+  timestampUnit: string;
+  userParamMode: string;
+  timezoneIncluded: boolean;
+  rangeMode: string;
+  requestPath: string;
+  startDateValue: string;
+  endDateValue: string;
+  httpStatus?: number;
+  responseShape: string;
+  dateKeysReturned: string[];
+  slotsReturned: number;
+  firstFewSlots: { startTime: string; endTime: string }[];
+  errorExcerpt?: string;
+}
+
+export interface TenantFreeSlotsProbeResult {
+  crmTimezoneUsed: string;
+  teamUserIdProbe: string | null;
+  productionSpec: {
+    apiVersion: string;
+    timestampUnit: string;
+    includeTimezoneQuery: boolean;
+    retryAddsUserAs: string;
+  };
+  variants: TenantFreeSlotsProbeVariant[];
+  anySlotsReturned: boolean;
+  allVariantsZero: boolean;
+  message?: string;
+}
+
+export async function probeTenantBookingFreeSlots(
+  token: string,
+  tenantId: string,
+  body: {
+    calendarId: string;
+    selectedDate: string;
+    selectedTime?: string;
+    userId?: string;
+    timezone?: string;
+  },
+): Promise<TenantFreeSlotsProbeResult> {
+  return apiRequest(`/tenants/${tenantId}/booking-settings/probe-free-slots`, {
+    token,
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
 export async function testTenantBookingCalendar(
   token: string,
   tenantId: string,

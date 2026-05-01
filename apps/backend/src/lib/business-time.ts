@@ -132,3 +132,15 @@ export function wallClockInZoneToUtcMs(
   if (found) return best;
   return naive;
 }
+
+/** Normalize UTC instants so ISO logs show `.000Z` (no spurious sub-second noise from search midpoints). */
+export function snapUtcEpochMsToWholeSecond(ms: number): number {
+  return Math.floor(ms / 1000) * 1000;
+}
+
+/**
+ * Snap to an exact UTC minute boundary (floor). Use after wall-clock resolution when APIs expect clean epoch values.
+ */
+export function snapUtcEpochMsToWholeMinute(ms: number): number {
+  return Math.floor(ms / 60000) * 60000;
+}

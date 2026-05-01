@@ -195,6 +195,56 @@ export interface GhlCalendarSummary {
  */
 export const GHL_CALENDARS_LIST_API_VERSION = '2023-02-21';
 
+/** API `Version` header values used when probing free-slots compatibility. */
+export const GHL_FREE_SLOTS_PROBE_API_VERSIONS = ['2023-02-21', '2021-07-28', '2021-04-15'] as const;
+
+export type GhlFreeSlotsTimestampUnit = 'ms' | 's';
+export type GhlFreeSlotsUserParamMode = 'none' | 'userId' | 'userIds';
+
+export interface GhlFreeSlotsProductionSpec {
+  apiVersion: string;
+  timestampUnit: GhlFreeSlotsTimestampUnit;
+  includeTimezoneQuery: boolean;
+  /** How to attach staff id on retry when the first free-slots call returns zero slots. */
+  retryAddsUserAs: 'userId' | 'userIds';
+}
+
+export function formatFreeSlotsTimestamp(ms: number, unit: GhlFreeSlotsTimestampUnit): string {
+  const floored = Math.floor(ms);
+  return unit === 's' ? String(Math.floor(floored / 1000)) : String(floored);
+}
+
+/**
+ * Production free-slots query shape — override via env after running CRM probe when defaults return zero slots.
+ * - `GHL_FREE_SLOTS_API_VERSION` — default `2023-02-21`
+ * - `GHL_FREE_SLOTS_TIMESTAMP_UNIT` — `ms` or `s` (seconds)
+ * - `GHL_FREE_SLOTS_INCLUDE_TIMEZONE` — `true` / `false` (omit `timezone` query param when false)
+ * - `GHL_FREE_SLOTS_RETRY_USER_PARAM` — `userId` or `userIds` (staff retry query key)
+ */
+export function resolveGhlFreeSlotsProductionSpec(): GhlFreeSlotsProductionSpec {
+  const apiVersion = (process.env['GHL_FREE_SLOTS_API_VERSION'] ?? '').trim() || GHL_CALENDARS_LIST_API_VERSION;
+  const unitRaw = (process.env['GHL_FREE_SLOTS_TIMESTAMP_UNIT'] ?? 'ms').trim().toLowerCase();
+  const timestampUnit: GhlFreeSlotsTimestampUnit =
+    unitRaw === 's' || unitRaw === 'sec' || unitRaw === 'seconds' ? 's' : 'ms';
+  const tzRaw = (process.env['GHL_FREE_SLOTS_INCLUDE_TIMEZONE'] ?? 'true').trim().toLowerCase();
+  const includeTimezoneQuery = !(tzRaw === 'false' || tzRaw === '0' || tzRaw === 'no');
+  const retryRaw = (process.env['GHL_FREE_SLOTS_RETRY_USER_PARAM'] ?? 'userId').trim().toLowerCase();
+  const retryAddsUserAs: 'userId' | 'userIds' =
+    retryRaw === 'userids' || retryRaw === 'user_ids' ? 'userIds' : 'userId';
+  return { apiVersion, timestampUnit, includeTimezoneQuery, retryAddsUserAs };
+}
+
+export interface GhlFreeSlotsVariantExecution {
+  slots: GhlFreeSlot[];
+  dateKeys: string[];
+  shapeSummary: string;
+  error?: string;
+  httpStatus?: number;
+  responseBodyExcerpt?: string;
+  requestPath: string;
+  requestQuery: Record<string, string>;
+}
+
 export interface ListCalendarsResult {
   calendars: GhlCalendarSummary[];
   error?: string;
@@ -1274,44 +1324,36 @@ export class GhlClient {
   }
 
   /**
-   * Fetch free bookable slots for a calendar in a time range.
-   *
-   * GHL expects `startDate` and `endDate` as **Unix timestamps in milliseconds** (query strings),
-   * not `YYYY-MM-DD` — the latter yields HTTP 422 from the API.
-   * Response is often a **map keyed by YYYY-MM-DD**; see `parseGhlFreeSlotsResponse`.
+   * Execute one free-slots GET with an explicit request variant (probe / advanced).
+   * `startDate` / `endDate` are formatted per `timestampUnit` (ms vs seconds since epoch).
    */
-  async getFreeSlots(params: {
+  async executeFreeSlotsVariant(params: {
     calendarId: string;
-    /** Unix epoch milliseconds (inclusive start of range). */
     startDateMs: number;
-    /** Unix epoch milliseconds (inclusive end of range; GHL treats as range end). */
     endDateMs: number;
     timezone?: string;
-    /** Some calendars require a staff user for slot generation. */
-    userId?: string;
-  }): Promise<{
-    slots: GhlFreeSlot[];
-    dateKeys: string[];
-    shapeSummary: string;
-    error?: string;
-    httpStatus?: number;
-    responseBodyExcerpt?: string;
-    requestPath?: string;
-    requestQuery?: Record<string, string>;
-  }> {
+    teamUserId?: string | null;
+    apiVersion: string;
+    timestampUnit: GhlFreeSlotsTimestampUnit;
+    userParamMode: GhlFreeSlotsUserParamMode;
+    includeTimezone: boolean;
+  }): Promise<GhlFreeSlotsVariantExecution> {
     const requestPath = `/calendars/${encodeURIComponent(params.calendarId)}/free-slots`;
     const query: Record<string, string> = {
-      startDate: String(Math.floor(params.startDateMs)),
-      endDate: String(Math.floor(params.endDateMs)),
+      startDate: formatFreeSlotsTimestamp(params.startDateMs, params.timestampUnit),
+      endDate: formatFreeSlotsTimestamp(params.endDateMs, params.timestampUnit),
     };
-    if (params.timezone?.trim()) query['timezone'] = params.timezone.trim();
-    if (params.userId?.trim()) query['userId'] = params.userId.trim();
+    const tz = params.timezone?.trim();
+    if (params.includeTimezone && tz) query['timezone'] = tz;
+    const uid = params.teamUserId?.trim();
+    if (params.userParamMode === 'userId' && uid) query['userId'] = uid;
+    if (params.userParamMode === 'userIds' && uid) query['userIds'] = uid;
 
     try {
       const response = await this.client.get<unknown>(requestPath, {
         params: query,
         headers: {
-          Version: GHL_CALENDARS_LIST_API_VERSION,
+          Version: params.apiVersion.trim() || GHL_CALENDARS_LIST_API_VERSION,
           Accept: 'application/json',
         },
       });
@@ -1346,6 +1388,40 @@ export class GhlClient {
         requestQuery: query,
       };
     }
+  }
+
+  /**
+   * Fetch free bookable slots for a calendar in a time range (production defaults).
+   *
+   * Shape is controlled by `resolveGhlFreeSlotsProductionSpec()` / env vars.
+   * GHL expects `startDate` and `endDate` as Unix timestamps (typically **milliseconds**; some accounts need **seconds** — use probe + env).
+   */
+  async getFreeSlots(params: {
+    calendarId: string;
+    startDateMs: number;
+    endDateMs: number;
+    timezone?: string;
+    userId?: string;
+  }): Promise<GhlFreeSlotsVariantExecution> {
+    const prod = resolveGhlFreeSlotsProductionSpec();
+    const hasUser = Boolean(params.userId?.trim());
+    const userParamMode: GhlFreeSlotsUserParamMode = hasUser
+      ? prod.retryAddsUserAs === 'userIds'
+        ? 'userIds'
+        : 'userId'
+      : 'none';
+    const tz = prod.includeTimezoneQuery ? params.timezone?.trim() : undefined;
+    return this.executeFreeSlotsVariant({
+      calendarId: params.calendarId,
+      startDateMs: params.startDateMs,
+      endDateMs: params.endDateMs,
+      timezone: tz,
+      teamUserId: params.userId ?? null,
+      apiVersion: prod.apiVersion,
+      timestampUnit: prod.timestampUnit,
+      userParamMode,
+      includeTimezone: prod.includeTimezoneQuery,
+    });
   }
 
   /**

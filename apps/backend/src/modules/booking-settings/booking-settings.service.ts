@@ -1,13 +1,17 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { getSupabaseService } from '../../lib/supabase';
-import { resolveAppTimeZone, wallClockInZoneToUtcMs } from '../../lib/business-time';
+import { resolveAppTimeZone, snapUtcEpochMsToWholeMinute, snapUtcEpochMsToWholeSecond, wallClockInZoneToUtcMs } from '../../lib/business-time';
 import { GhlService } from '../ghl/ghl.service';
 import {
   GHL_CALENDARS_LIST_API_VERSION,
+  GHL_FREE_SLOTS_PROBE_API_VERSIONS,
   formatGhlCalendarDetailSummary,
+  resolveGhlFreeSlotsProductionSpec,
   type GhlCalendarDetailSummary,
   type GhlCalendarSummary,
   type GhlFreeSlot,
+  type GhlFreeSlotsTimestampUnit,
+  type GhlFreeSlotsUserParamMode,
 } from '@aisbp/ghl-client';
 import {
   computeBookingRulesDiagnostics,
@@ -103,8 +107,11 @@ function computeFreeSlotRangeMs(
   if (timeRaw) {
     const hm = parseHm(timeRaw);
     if (!hm) throw new BadRequestException('Invalid time. Use HH:MM (24-hour).');
-    const startMs = wallClockInZoneToUtcMs(crmTz, ymd.y, ymd.m, ymd.d, hm.hour, hm.minute);
-    const endMs = startMs + 3600 * 1000;
+    let startMs = wallClockInZoneToUtcMs(crmTz, ymd.y, ymd.m, ymd.d, hm.hour, hm.minute);
+    let endMs = startMs + 3600 * 1000;
+    startMs = snapUtcEpochMsToWholeSecond(startMs);
+    endMs = snapUtcEpochMsToWholeSecond(endMs);
+    startMs = snapUtcEpochMsToWholeMinute(startMs);
     return { startMs, endMs, selectedDate: dateStr, selectedTime: timeRaw };
   }
 
@@ -112,14 +119,60 @@ function computeFreeSlotRangeMs(
   if (endStr && endStr !== dateStr) {
     const endYmd = parseYmd(endStr);
     if (!endYmd) throw new BadRequestException('Invalid end date.');
-    const startMs = wallClockInZoneToUtcMs(crmTz, ymd.y, ymd.m, ymd.d, 0, 0);
-    const endMs = wallClockInZoneToUtcMs(crmTz, endYmd.y, endYmd.m, endYmd.d, 23, 59) + 60 * 1000 - 1;
+    let startMs = wallClockInZoneToUtcMs(crmTz, ymd.y, ymd.m, ymd.d, 0, 0);
+    let endMs = wallClockInZoneToUtcMs(crmTz, endYmd.y, endYmd.m, endYmd.d, 23, 59) + 60 * 1000 - 1;
+    startMs = snapUtcEpochMsToWholeSecond(startMs);
+    endMs = snapUtcEpochMsToWholeSecond(endMs);
+    startMs = snapUtcEpochMsToWholeMinute(startMs);
     return { startMs, endMs, selectedDate: dateStr, selectedTime: '' };
   }
 
-  const startMs = wallClockInZoneToUtcMs(crmTz, ymd.y, ymd.m, ymd.d, 0, 0);
-  const endMs = startMs + 86400000 - 1;
+  let startMs = wallClockInZoneToUtcMs(crmTz, ymd.y, ymd.m, ymd.d, 0, 0);
+  let endMs = startMs + 86400000 - 1;
+  startMs = snapUtcEpochMsToWholeSecond(startMs);
+  endMs = snapUtcEpochMsToWholeSecond(endMs);
+  startMs = snapUtcEpochMsToWholeMinute(startMs);
   return { startMs, endMs, selectedDate: dateStr, selectedTime: '' };
+}
+
+function probeRangeFullLocalDay(
+  crmTz: string,
+  dateStr: string,
+): { startMs: number; endMs: number } {
+  const ymd = parseYmd(dateStr.trim());
+  if (!ymd) throw new BadRequestException('Invalid date. Use YYYY-MM-DD.');
+  let startMs = wallClockInZoneToUtcMs(crmTz, ymd.y, ymd.m, ymd.d, 0, 0);
+  let endMs = startMs + 86400000 - 1;
+  startMs = snapUtcEpochMsToWholeSecond(startMs);
+  endMs = snapUtcEpochMsToWholeSecond(endMs);
+  startMs = snapUtcEpochMsToWholeMinute(startMs);
+  return { startMs, endMs };
+}
+
+/** selected local instant through end of that local calendar day */
+function probeRangeSelectedThroughDayEnd(
+  crmTz: string,
+  dateStr: string,
+  timeRaw: string,
+): { startMs: number; endMs: number } {
+  const ymd = parseYmd(dateStr.trim());
+  if (!ymd) throw new BadRequestException('Invalid date. Use YYYY-MM-DD.');
+  const t = timeRaw.trim();
+  let hour = 0;
+  let minute = 0;
+  if (t) {
+    const hm = parseHm(t);
+    if (!hm) throw new BadRequestException('Invalid time. Use HH:MM (24-hour).');
+    hour = hm.hour;
+    minute = hm.minute;
+  }
+  let startMs = wallClockInZoneToUtcMs(crmTz, ymd.y, ymd.m, ymd.d, hour, minute);
+  const dayStart = wallClockInZoneToUtcMs(crmTz, ymd.y, ymd.m, ymd.d, 0, 0);
+  let endMs = dayStart + 86400000 - 1;
+  startMs = snapUtcEpochMsToWholeSecond(startMs);
+  endMs = snapUtcEpochMsToWholeSecond(endMs);
+  startMs = snapUtcEpochMsToWholeMinute(startMs);
+  return { startMs, endMs };
 }
 
 function rowToDto(row: Record<string, unknown>): TenantBookingSettingsDto {
@@ -468,6 +521,8 @@ export class BookingSettingsService {
 
     const { client, ghlLocationId } = await this.ghlService.createGhlClientForConnectedTenantOrThrow(tenantId, profileId);
 
+    this.logger.log(`selectedFreeSlotsVariant ${JSON.stringify(resolveGhlFreeSlotsProductionSpec())}`);
+
     this.logger.log(
       `bookingTestSlotsRequest ${JSON.stringify({
         tenantId,
@@ -477,7 +532,7 @@ export class BookingSettingsService {
         generatedStartIso: new Date(startMs).toISOString(),
         generatedEndIso: new Date(endMs).toISOString(),
         crmTimezoneUsed,
-        requestShapeSentToGhl: 'GET /calendars/:calendarId/free-slots?startDate=<ms>&endDate=<ms>&timezone=<iana>',
+        requestShapeSentToGhl: 'GET /calendars/:calendarId/free-slots (shape from resolveGhlFreeSlotsProductionSpec / env)',
         ghlLocationId,
       })}`,
     );
@@ -617,6 +672,163 @@ export class BookingSettingsService {
       retriedWithUserId,
       scheduleDiagnostics,
       bookingRulesDiagnostics,
+    };
+  }
+
+  async probeFreeSlots(
+    tenantId: string,
+    profileId: string,
+    body: {
+      calendarId: string;
+      selectedDate: string;
+      selectedTime?: string;
+      userId?: string;
+      timezone?: string;
+    },
+  ): Promise<{
+    crmTimezoneUsed: string;
+    teamUserIdProbe: string | null;
+    productionSpec: ReturnType<typeof resolveGhlFreeSlotsProductionSpec>;
+    variants: Array<{
+      variantName: string;
+      apiVersion: string;
+      timestampUnit: GhlFreeSlotsTimestampUnit;
+      userParamMode: GhlFreeSlotsUserParamMode;
+      timezoneIncluded: boolean;
+      rangeMode: 'fullLocalDay' | 'selectedToDayEnd';
+      requestPath: string;
+      startDateValue: string;
+      endDateValue: string;
+      httpStatus?: number;
+      responseShape: string;
+      dateKeysReturned: string[];
+      slotsReturned: number;
+      firstFewSlots: { startTime: string; endTime: string }[];
+      errorExcerpt?: string;
+    }>;
+    anySlotsReturned: boolean;
+    allVariantsZero: boolean;
+    message?: string;
+  }> {
+    const calendarId = body.calendarId?.trim();
+    if (!calendarId) {
+      throw new BadRequestException('calendarId is required.');
+    }
+    const selectedDate = body.selectedDate?.trim();
+    if (!selectedDate) {
+      throw new BadRequestException('selectedDate is required (YYYY-MM-DD).');
+    }
+
+    const tenantTz = await this.loadTenantCrmTimezone(tenantId);
+    const crmTimezoneUsed = body.timezone?.trim() || tenantTz || resolveAppTimeZone();
+
+    const { client, ghlLocationId } = await this.ghlService.createGhlClientForConnectedTenantOrThrow(tenantId, profileId);
+
+    let teamUserId = body.userId?.trim() || null;
+    if (!teamUserId) {
+      const cal = await client.getCalendar(calendarId);
+      const ids = cal.summary?.teamMemberUserIds;
+      if (ids && ids.length > 0) teamUserId = ids[0]!;
+    }
+
+    const productionSpec = resolveGhlFreeSlotsProductionSpec();
+
+    const ranges: { mode: 'fullLocalDay' | 'selectedToDayEnd'; startMs: number; endMs: number }[] = [];
+    ranges.push({ mode: 'fullLocalDay', ...probeRangeFullLocalDay(crmTimezoneUsed, selectedDate) });
+    ranges.push({
+      mode: 'selectedToDayEnd',
+      ...probeRangeSelectedThroughDayEnd(crmTimezoneUsed, selectedDate, body.selectedTime ?? ''),
+    });
+
+    const variants: Array<{
+      variantName: string;
+      apiVersion: string;
+      timestampUnit: GhlFreeSlotsTimestampUnit;
+      userParamMode: GhlFreeSlotsUserParamMode;
+      timezoneIncluded: boolean;
+      rangeMode: 'fullLocalDay' | 'selectedToDayEnd';
+      requestPath: string;
+      startDateValue: string;
+      endDateValue: string;
+      httpStatus?: number;
+      responseShape: string;
+      dateKeysReturned: string[];
+      slotsReturned: number;
+      firstFewSlots: { startTime: string; endTime: string }[];
+      errorExcerpt?: string;
+    }> = [];
+
+    for (const range of ranges) {
+      for (const apiVersion of GHL_FREE_SLOTS_PROBE_API_VERSIONS) {
+        for (const timestampUnit of ['ms', 's'] as const) {
+          for (const userParamMode of ['none', 'userId', 'userIds'] as const) {
+            for (const includeTimezone of [true, false] as const) {
+              const variantName = `${apiVersion}|${timestampUnit}|${userParamMode}|${includeTimezone ? 'tz' : 'noTz'}|${
+                range.mode
+              }`;
+              const exec = await client.executeFreeSlotsVariant({
+                calendarId,
+                startDateMs: range.startMs,
+                endDateMs: range.endMs,
+                timezone: crmTimezoneUsed,
+                teamUserId,
+                apiVersion,
+                timestampUnit,
+                userParamMode,
+                includeTimezone,
+              });
+              const firstFew = exec.slots.slice(0, 3).map((s) => ({
+                startTime: s.startTime.length > 48 ? `${s.startTime.slice(0, 45)}…` : s.startTime,
+                endTime: s.endTime.length > 48 ? `${s.endTime.slice(0, 45)}…` : s.endTime,
+              }));
+              variants.push({
+                variantName,
+                apiVersion,
+                timestampUnit,
+                userParamMode,
+                timezoneIncluded: includeTimezone,
+                rangeMode: range.mode,
+                requestPath: exec.requestPath,
+                startDateValue: exec.requestQuery?.['startDate'] ?? '',
+                endDateValue: exec.requestQuery?.['endDate'] ?? '',
+                httpStatus: exec.httpStatus,
+                responseShape: exec.shapeSummary,
+                dateKeysReturned: exec.dateKeys,
+                slotsReturned: exec.slots.length,
+                firstFewSlots: firstFew,
+                errorExcerpt: exec.error?.slice(0, 220),
+              });
+            }
+          }
+        }
+      }
+    }
+
+    const anySlotsReturned = variants.some((v) => v.slotsReturned > 0);
+    const allVariantsZero = variants.length > 0 && !anySlotsReturned;
+    const message = allVariantsZero
+      ? 'GHL booking widget shows slots, but CRM API returned no free slots for all tested API variants. This may require GHL support or using a different endpoint/booking-link strategy.'
+      : undefined;
+
+    this.logger.log(
+      `probeFreeSlotsSummary ${JSON.stringify({
+        tenantId,
+        calendarId,
+        ghlLocationId,
+        variantCount: variants.length,
+        anySlotsReturned,
+        productionSpec,
+      })}`,
+    );
+
+    return {
+      crmTimezoneUsed,
+      teamUserIdProbe: teamUserId,
+      productionSpec,
+      variants,
+      anySlotsReturned,
+      allVariantsZero,
+      message,
     };
   }
 }

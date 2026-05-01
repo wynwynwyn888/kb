@@ -36,3 +36,24 @@ export class TestBookingSlotsDto {
   @IsString()
   calendarId?: string;
 }
+
+/** Diagnostic probe — tries multiple GHL free-slots API variants (no tokens returned). */
+export class ProbeFreeSlotsDto {
+  @IsString()
+  calendarId!: string;
+
+  @IsString()
+  selectedDate!: string;
+
+  @IsOptional()
+  @IsString()
+  selectedTime?: string;
+
+  @IsOptional()
+  @IsString()
+  userId?: string;
+
+  @IsOptional()
+  @IsString()
+  timezone?: string;
+}

@@ -192,6 +192,9 @@ export class WebhooksService {
       eventType: payload.event,
       dedupeKey,
       channelRaw: data.channel || null,
+      contactDisplayName: typeof data.contactName === 'string' && data.contactName.trim() ? data.contactName.trim() : null,
+      contactPhone: typeof data.phoneNumber === 'string' && data.phoneNumber.trim() ? data.phoneNumber.trim() : null,
+      contactEmail: typeof data.email === 'string' && data.email.trim() ? data.email.trim() : null,
     };
   }
 
@@ -275,6 +278,9 @@ export class WebhooksService {
       timestamp: payload.timestamp,
       webhookEventId,
       smokeImmediate: Boolean(opts?.smokeImmediate),
+      contactDisplayName: payload.contactDisplayName ?? undefined,
+      contactPhone: payload.contactPhone ?? undefined,
+      contactEmail: payload.contactEmail ?? undefined,
     };
 
     await this.inboundQueue.add('persist', jobData, {

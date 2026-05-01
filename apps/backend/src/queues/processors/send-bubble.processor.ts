@@ -115,8 +115,12 @@ export class SendBubbleProcessor extends WorkerHost {
       );
     }
 
-    // Step 4b: Execute deferred BOOK_SLOT intents only on successful outbound send
-    if (this.actionExecutor.shouldExecute({ succeeded: summary.succeeded, planStatus: replyPlan.planStatus }, contactId)) {
+    // Step 4b: Legacy deferred BOOK_SLOT (disabled unless AISBP_EXECUTE_DEFERRED_BOOK_SLOT=true).
+    // Live calendar creates are performed by ConversationBookingFlowService.
+    if (
+      process.env['AISBP_EXECUTE_DEFERRED_BOOK_SLOT'] === 'true' &&
+      this.actionExecutor.shouldExecute({ succeeded: summary.succeeded, planStatus: replyPlan.planStatus }, contactId)
+    ) {
       const bookResults = await this.actionExecutor.executeDeferredBookSlotActions(
         tenantId,
         conversationId,

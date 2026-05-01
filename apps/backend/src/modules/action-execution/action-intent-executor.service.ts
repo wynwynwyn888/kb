@@ -124,14 +124,6 @@ export class ActionIntentExecutorService {
     contactId: string,
     ghlLocationId: string,
   ): Promise<ExecutionResult[]> {
-    if (process.env['AISBP_EXECUTE_DEFERRED_BOOK_SLOT'] !== 'true') {
-      this.logger.debug(
-        'Deferred BOOK_SLOT execution disabled (set AISBP_EXECUTE_DEFERRED_BOOK_SLOT=true to enable). ' +
-          'Live calendar creates are owned by ConversationBookingFlowService.',
-      );
-      return [];
-    }
-
     const intents = await this.loadDeferredBookSlotIntents(conversationId);
     if (intents.length === 0) {
       this.logger.debug(`No deferred BOOK_SLOT intents for conversation=${conversationId}`);

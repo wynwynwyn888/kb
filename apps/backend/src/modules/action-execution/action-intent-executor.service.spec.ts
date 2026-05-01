@@ -1,6 +1,7 @@
 // ActionIntentExecutorService spec — TAG_CONTACT execution from deferred ActionIntents
 
 import { jest as jestGlobal } from '@jest/globals';
+import { Logger } from '@nestjs/common';
 import { ActionIntentExecutorService } from './action-intent-executor.service';
 import { createMockSupabase } from '../../test/mock-supabase';
 
@@ -224,6 +225,7 @@ describe('ActionIntentExecutorService', () => {
     it('no DEFERRED intents → returns empty array, no API call', async () => {
       mockLoadDeferredBookSlotIntents([]);
 
+      const warnSpy = jestGlobal.spyOn(Logger.prototype, 'warn');
       const results = await service.executeDeferredBookSlotActions(
         tenantId,
         conversationId,
@@ -233,6 +235,9 @@ describe('ActionIntentExecutorService', () => {
 
       expect(results).toHaveLength(0);
       expect(mockGhlClient.bookSlot).not.toHaveBeenCalled();
+      const joinedWarns = warnSpy.mock.calls.map(c => String(c[0] ?? '')).join(' ');
+      expect(joinedWarns).not.toMatch(/Deferred BOOK_SLOT.*disabled/i);
+      warnSpy.mockRestore();
     });
 
     it('valid DEFERRED intent → GHL bookSlot called, status updated to EXECUTED', async () => {

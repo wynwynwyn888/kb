@@ -6,26 +6,53 @@ import {
 import type { BookingSettingsService } from '../booking-settings/booking-settings.service';
 import type { GhlService } from '../ghl/ghl.service';
 
+const capturedActionIntentInserts: unknown[] = [];
+
 jest.mock('../../lib/supabase', () => ({
   getSupabaseService: () => ({
-    from: () => ({
-      select: () => ({
-        eq: () => ({
+    from: (table: string) => {
+      if (table === 'action_intents') {
+        return {
+          insert: (payload: unknown) => {
+            capturedActionIntentInserts.push(payload);
+            return { error: null };
+          },
+          select: () => ({
+            eq: () => ({
+              eq: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    contains: () => ({
+                      order: () => ({
+                        limit: () => ({ data: [], error: null }),
+                      }),
+                    }),
+                  }),
+                }),
+              }),
+            }),
+          }),
+        };
+      }
+      return {
+        select: () => ({
           eq: () => ({
             eq: () => ({
               eq: () => ({
-                contains: () => ({
-                  order: () => ({
-                    limit: () => ({ data: [], error: null }),
+                eq: () => ({
+                  contains: () => ({
+                    order: () => ({
+                      limit: () => ({ data: [], error: null }),
+                    }),
                   }),
                 }),
               }),
             }),
           }),
         }),
-      }),
-      insert: () => ({ error: null }),
-    }),
+        insert: () => ({ error: null }),
+      };
+    },
   }),
 }));
 
@@ -64,6 +91,10 @@ describe('isBookingFlowSupportedInboundText', () => {
 });
 
 describe('ConversationBookingFlowService', () => {
+  beforeEach(() => {
+    capturedActionIntentInserts.length = 0;
+  });
+
   it('skips before settings when inbound text is empty', async () => {
     const booking = { getBookingSettings: jest.fn(async () => baseSettings) } as unknown as BookingSettingsService;
     const ghl = {} as unknown as GhlService;
@@ -197,9 +228,22 @@ describe('ConversationBookingFlowService', () => {
     }
   });
 
-  it('parses hair colour, May 21, and 9am from first message', async () => {
+  it('parses hair colour, May 21, and 9am from first message; asks name before slots', async () => {
+    const fetchFree = jest.fn(async () => ({
+      slots: [],
+      calendarId: 'cal_1',
+      error: undefined as string | undefined,
+      retriedWithUserId: null,
+      crmTimezoneUsed: 'UTC',
+      selectedDate: '2026-05-21',
+      selectedTime: '',
+      startMs: 0,
+      endMs: 1,
+      ghlLocationId: 'loc',
+    }));
     const booking = {
       getBookingSettings: jest.fn(async () => baseSettings),
+      fetchFreeSlotsForAutomation: fetchFree,
     } as unknown as BookingSettingsService;
     const ghl = {} as unknown as GhlService;
     const r = await svc(booking, ghl).maybeHandleConversationBookingTurn({
@@ -213,10 +257,118 @@ describe('ConversationBookingFlowService', () => {
     });
     expect(r.handled).toBe(true);
     if (r.handled) {
+      expect(r.replyPlan.bubbles[0]!.text).toMatch(/Can I have your name for the booking/i);
+      expect(fetchFree).not.toHaveBeenCalled();
       const meta = (r.persistMetadata as { aisbp_booking?: Record<string, unknown> }).aisbp_booking;
       expect(meta?.['service']).toMatch(/hair colour/i);
       expect(meta?.['preferredDate']).toBe('2026-05-21');
       expect(meta?.['preferredTime']).toBe('09:00');
+    }
+  });
+
+  it('asks for phone before slots when phone is required and name is already known', async () => {
+    const fetchFree = jest.fn(async () => ({
+      slots: [],
+      calendarId: 'cal_1',
+      error: undefined as string | undefined,
+      retriedWithUserId: null,
+      crmTimezoneUsed: 'UTC',
+      selectedDate: '2026-05-10',
+      selectedTime: '',
+      startMs: 0,
+      endMs: 1,
+      ghlLocationId: 'loc',
+    }));
+    const booking = {
+      getBookingSettings: jest.fn(async () => baseSettings),
+      fetchFreeSlotsForAutomation: fetchFree,
+    } as unknown as BookingSettingsService;
+    const ghl = {} as unknown as GhlService;
+    const meta = {
+      aisbp_booking: {
+        status: 'collecting_details',
+        version: 1,
+        calendarId: 'cal_1',
+        customerName: 'Sam',
+        service: 'Haircut',
+        preferredDate: '2026-05-10',
+      },
+    };
+    const r = await svc(booking, ghl).maybeHandleConversationBookingTurn({
+      tenantId: 't1',
+      conversationId: 'c1',
+      contactId: 'ct_known',
+      channel: 'SMS',
+      combinedInboundText: 'I want to book',
+      latestInboundText: 'I want to book',
+      metadata: meta as Record<string, unknown>,
+    });
+    expect(r.handled).toBe(true);
+    if (r.handled) {
+      expect(r.replyPlan.bubbles[0]!.text).toMatch(/best phone number for the booking/i);
+      expect(fetchFree).not.toHaveBeenCalled();
+    }
+  });
+
+  it('contactId alone does not satisfy name when snapshot has no display name', async () => {
+    const fetchFree = jest.fn();
+    const booking = {
+      getBookingSettings: jest.fn(async () => baseSettings),
+      fetchFreeSlotsForAutomation: fetchFree,
+    } as unknown as BookingSettingsService;
+    const ghl = {} as unknown as GhlService;
+    const r = await svc(booking, ghl).maybeHandleConversationBookingTurn({
+      tenantId: 't1',
+      conversationId: 'c1',
+      contactId: 'ghl_contact_xyz',
+      channel: 'SMS',
+      combinedInboundText: 'book haircut tomorrow',
+      latestInboundText: 'book haircut tomorrow',
+      metadata: {},
+    });
+    expect(r.handled).toBe(true);
+    if (r.handled) {
+      expect(r.replyPlan.bubbles[0]!.text).toMatch(/Can I have your name for the booking/i);
+      expect(fetchFree).not.toHaveBeenCalled();
+    }
+  });
+
+  it('prefills name and phone from contact snapshot and proceeds to slot fetch when required fields satisfied', async () => {
+    const fetchFree = jest.fn(async () => ({
+      slots: [
+        { startTime: '2026-05-21T09:00:00.000Z', endTime: '2026-05-21T09:30:00.000Z' },
+        { startTime: '2026-05-21T09:30:00.000Z', endTime: '2026-05-21T10:00:00.000Z' },
+        { startTime: '2026-05-21T10:00:00.000Z', endTime: '2026-05-21T10:30:00.000Z' },
+      ],
+      calendarId: 'cal_1',
+      error: undefined as string | undefined,
+      retriedWithUserId: null,
+      crmTimezoneUsed: 'UTC',
+      selectedDate: '2026-05-21',
+      selectedTime: '',
+      startMs: 0,
+      endMs: 1,
+      ghlLocationId: 'loc',
+    }));
+    const booking = {
+      getBookingSettings: jest.fn(async () => baseSettings),
+      fetchFreeSlotsForAutomation: fetchFree,
+    } as unknown as BookingSettingsService;
+    const ghl = {} as unknown as GhlService;
+    const r = await svc(booking, ghl).maybeHandleConversationBookingTurn({
+      tenantId: 't1',
+      conversationId: 'c1',
+      contactId: 'ct1',
+      channel: 'SMS',
+      combinedInboundText: 'I want to book hair colour on 21 May around 9am',
+      latestInboundText: 'I want to book hair colour on 21 May around 9am',
+      metadata: {},
+      contactSnapshot: { displayName: 'Alex', phone: '+15551234567' },
+    });
+    expect(r.handled).toBe(true);
+    if (r.handled) {
+      expect(fetchFree).toHaveBeenCalled();
+      expect(r.replyPlan.bubbles[0]!.text.toLowerCase()).toMatch(/1\./);
     }
   });
 
@@ -498,7 +650,101 @@ describe('ConversationBookingFlowService', () => {
     expect(r.handled).toBe(true);
     if (r.handled) {
       expect(bookSlot).toHaveBeenCalled();
+      const bookArg = (bookSlot.mock.calls[0] ?? [])[0] as {
+        title?: string;
+        notes?: string;
+      };
+      expect(bookArg.title).toBe('Haircut');
+      const n = bookArg.notes ?? '';
+      expect(n).toContain('Service: Haircut');
+      expect(n).toContain('Name: Alex');
+      expect(n).toContain('Phone: +15551234567');
+      expect(n).toContain('Source: AISBP conversation booking');
+      expect(n).toContain('Conversation ID: c1');
       expect(r.replyPlan.bubbles[0]!.text.toLowerCase()).toMatch(/confirmed/);
+      const lastIntent = capturedActionIntentInserts.at(-1) as Record<string, unknown> | undefined;
+      expect(lastIntent?.['status']).toBe('EXECUTED');
+      expect(lastIntent?.['action_type']).toBe('UPDATE_CALENDAR');
+    }
+  });
+
+  it('uses title "Appointment" when service is unknown at confirm time', async () => {
+    const relaxedService = {
+      ...baseSettings,
+      coreFieldsJson: {
+        ...baseSettings.coreFieldsJson,
+        service: { enabled: true, required: false },
+      },
+    };
+    const slotRows = [
+      { startTime: '2026-05-10T10:00:00.000Z', endTime: '2026-05-10T10:30:00.000Z' },
+      { startTime: '2026-05-10T11:00:00.000Z', endTime: '2026-05-10T11:30:00.000Z' },
+    ];
+    const fetchFree = jest.fn(async () => ({
+      slots: slotRows,
+      calendarId: 'cal_1',
+      error: undefined as string | undefined,
+      retriedWithUserId: null,
+      crmTimezoneUsed: 'UTC',
+      selectedDate: '2026-05-10',
+      selectedTime: '',
+      startMs: 0,
+      endMs: 1,
+      ghlLocationId: 'loc',
+    }));
+    const bookSlot = jest.fn(async () => ({ success: true, appointmentId: 'ap_999' }));
+    const booking = {
+      getBookingSettings: jest.fn(async () => relaxedService),
+      fetchFreeSlotsForAutomation: fetchFree,
+    } as unknown as BookingSettingsService;
+    const ghl = {
+      createGhlClientForConnectedTenantWorkerOrThrow: jest.fn(async () => ({
+        client: { bookSlot },
+        ghlLocationId: 'loc1',
+      })),
+    } as unknown as GhlService;
+    const offeredSlots = [
+      {
+        option: 1,
+        startIso: '2026-05-10T10:00:00.000Z',
+        endIso: '2026-05-10T10:30:00.000Z',
+        displayText: '6:00 AM',
+        calendarId: 'cal_1',
+      },
+      {
+        option: 2,
+        startIso: '2026-05-10T11:00:00.000Z',
+        endIso: '2026-05-10T11:30:00.000Z',
+        displayText: '7:00 AM',
+        calendarId: 'cal_1',
+      },
+    ];
+    const meta = {
+      aisbp_booking: {
+        status: 'offered_slots',
+        version: 1,
+        calendarId: 'cal_1',
+        customerName: 'Pat',
+        phone: '+15550009999',
+        service: '',
+        preferredDate: '2026-05-10',
+        offeredSlots,
+        slotDurationMinutes: 30,
+      },
+    };
+    const r = await svc(booking, ghl).maybeHandleConversationBookingTurn({
+      tenantId: 't1',
+      conversationId: 'c_no_svc',
+      contactId: 'ct1',
+      channel: 'SMS',
+      combinedInboundText: '1',
+      latestInboundText: '1',
+      metadata: meta as Record<string, unknown>,
+    });
+    expect(r.handled).toBe(true);
+    if (r.handled) {
+      const bookArg = (bookSlot.mock.calls[0] ?? [])[0] as { title?: string };
+      expect(bookArg.title).toBe('Appointment');
     }
   });
 });

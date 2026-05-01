@@ -163,6 +163,8 @@ export class ConversationBookingFlowService {
     metadata: Record<string, unknown>;
     tenantDisplayName?: string;
     tenantTimeZone?: string;
+    /** GHL webhook / inbound job hints — prefill when present; never inferred from contactId alone. */
+    contactSnapshot?: { displayName?: string; phone?: string; email?: string };
   }): Promise<BookingFlowOrchestrationHookResult> {
     if (!isBookingFlowSupportedInboundText(params.latestInboundText, params.combinedInboundText)) {
       this.logger.log(
@@ -273,7 +275,9 @@ export class ConversationBookingFlowService {
       bookingMode: settings.bookingMode,
     };
 
-    if (booking.status === 'confirmed' && booking.appointmentId) {
+    this.applyContactSnapshot(booking, params.contactSnapshot);
+
+    if (booking.status === 'confirmed') {
       const ack = /^(thanks|thank\s+you|ok+|okay|great|perfect|cheers)\b/i.test(latest);
       if (ack) {
         this.logger.log(`bookingFlowSkipped ${JSON.stringify({ reason: 'already_confirmed_ack' })}`);
@@ -313,14 +317,14 @@ export class ConversationBookingFlowService {
 
     const fieldChanged = pendingAns.answered || this.snapshotBookingCore(booking) !== snapshotBefore;
 
-    const requiredMissingList = this.listRequiredMissingIds(settings, booking);
+    const blockingMissingList = this.listBlockingMissingFieldIds(settings, booking);
 
     this.logger.log(
       `bookingDetailsUpdated ${JSON.stringify({
         tenantId: params.tenantId,
         conversationId: params.conversationId,
         pendingFieldId: booking.pendingFieldId ?? null,
-        requiredMissing: requiredMissingList,
+        blockingMissing: blockingMissingList,
         hasName: Boolean(booking.customerName),
         hasPhone: Boolean(booking.phone),
         hasEmail: Boolean(booking.email),
@@ -330,23 +334,23 @@ export class ConversationBookingFlowService {
       })}`,
     );
 
-    const nextRequired = this.firstRequiredMissingId(settings, booking);
-    if (nextRequired) {
-      const baseQ = this.promptForMissingField(nextRequired, settings);
+    const nextBlocking = this.firstBlockingMissingFieldId(settings, booking);
+    if (nextBlocking) {
+      const baseQ = this.promptForMissingField(nextBlocking, settings);
       const fpBase = fingerprintBookingQuestion(baseQ);
-      const suppress = !fieldChanged && this.shouldSuppressRepeatQuestion(booking, nextRequired, fpBase);
-      const outQ = suppress ? this.clarifyRepeatedAsk(nextRequired) : baseQ;
+      const suppress = !fieldChanged && this.shouldSuppressRepeatQuestion(booking, nextBlocking, fpBase);
+      const outQ = suppress ? this.clarifyRepeatedAsk(nextBlocking) : baseQ;
 
-      booking.pendingFieldId = nextRequired;
+      booking.pendingFieldId = nextBlocking;
       booking.pendingFieldRequired = true;
-      booking.lastAskedFieldId = nextRequired;
+      booking.lastAskedFieldId = nextBlocking;
       booking.lastAskedAt = new Date().toISOString();
       booking.lastQuestionFingerprint = fpBase;
 
       this.logger.log(
         `bookingNextStepSelected ${JSON.stringify({
           step: 'ask_required',
-          fieldId: nextRequired,
+          fieldId: nextBlocking,
           suppressedDuplicate: suppress,
         })}`,
       );
@@ -486,9 +490,9 @@ export class ConversationBookingFlowService {
       this.logger.log(`bookingAppointmentCreateStarted ${JSON.stringify({ tenantId: params.tenantId, calendarId: picked.calendarId })}`);
 
       const { client, ghlLocationId } = await this.ghlService.createGhlClientForConnectedTenantWorkerOrThrow(params.tenantId);
-      const endIso = picked.endIso || slotEndIso({ startTime: picked.startIso, endTime: picked.endIso } as GhlFreeSlot, booking.slotDurationMinutes ?? 30);
-      const titleParts = [booking.service, booking.customerName].filter(Boolean);
-      const title = titleParts.length ? titleParts.join(' — ') : 'Appointment';
+      const title = booking.service?.trim() || 'Appointment';
+      const notes = this.buildGhlAppointmentNotes(params.conversationId, booking);
+      const endIso = picked.endIso;
 
       const bookRes = await client.bookSlot({
         locationId: ghlLocationId,
@@ -497,6 +501,7 @@ export class ConversationBookingFlowService {
         startTime: picked.startIso,
         endTime: endIso,
         title,
+        notes,
         timezone: recheck.crmTimezoneUsed,
         appointmentStatus: 'confirmed',
       });
@@ -714,6 +719,41 @@ export class ConversationBookingFlowService {
     return false;
   }
 
+  private applyContactSnapshot(
+    booking: AisbpBookingStateV1,
+    hint?: { displayName?: string; phone?: string; email?: string },
+  ): void {
+    if (!hint) return;
+    if (!booking.phone?.trim() && hint.phone?.trim()) {
+      const parsed = extractPhone(hint.phone);
+      const raw = hint.phone.replace(/\s+/g, ' ').trim();
+      const v = (parsed ?? raw).trim();
+      if (v.length >= 8 && /\d/.test(v)) booking.phone = v;
+    }
+    if (!booking.email?.trim() && hint.email?.trim()) {
+      const e = extractEmail(hint.email) ?? (/^\S+@\S+\.\S+$/.test(hint.email.trim()) ? hint.email.trim() : undefined);
+      if (e) booking.email = e;
+    }
+    if (!booking.customerName?.trim() && hint.displayName?.trim()) {
+      const raw = hint.displayName.replace(/\s+/g, ' ').trim();
+      if (raw.length >= 1 && raw.length <= 80 && !/^\d+$/.test(raw)) {
+        booking.customerName = raw;
+      }
+    }
+  }
+
+  private buildGhlAppointmentNotes(conversationId: string, booking: AisbpBookingStateV1): string {
+    const lines: string[] = [];
+    if (booking.service?.trim()) lines.push(`Service: ${booking.service.trim()}`);
+    if (booking.customerName?.trim()) lines.push(`Name: ${booking.customerName.trim()}`);
+    if (booking.phone?.trim()) lines.push(`Phone: ${booking.phone.trim()}`);
+    if (booking.email?.trim()) lines.push(`Email: ${booking.email.trim()}`);
+    if (booking.firstVisit?.trim()) lines.push(`First visit: ${booking.firstVisit.trim()}`);
+    lines.push('Source: AISBP conversation booking');
+    lines.push(`Conversation ID: ${conversationId}`);
+    return lines.join('\n');
+  }
+
   private snapshotBookingCore(booking: AisbpBookingStateV1): string {
     return JSON.stringify({
       n: booking.customerName ?? '',
@@ -727,7 +767,7 @@ export class ConversationBookingFlowService {
     });
   }
 
-  private listRequiredMissingIds(
+  private listBlockingMissingFieldIds(
     settings: { coreFieldsJson: Record<string, CoreFieldToggle>; customFieldsJson: CustomBookingFieldDto[] },
     booking: AisbpBookingStateV1,
   ): string[] {
@@ -748,11 +788,11 @@ export class ConversationBookingFlowService {
     return out;
   }
 
-  private firstRequiredMissingId(
+  private firstBlockingMissingFieldId(
     settings: { coreFieldsJson: Record<string, CoreFieldToggle>; customFieldsJson: CustomBookingFieldDto[] },
     booking: AisbpBookingStateV1,
   ): string | null {
-    const ids = this.listRequiredMissingIds(settings, booking);
+    const ids = this.listBlockingMissingFieldIds(settings, booking);
     return ids[0] ?? null;
   }
 
@@ -805,9 +845,9 @@ export class ConversationBookingFlowService {
     const key = fieldId as BookingCoreFieldKey;
     switch (key) {
       case 'name':
-        return "What's the best name for the booking?";
+        return 'Can I have your name for the booking?';
       case 'phone':
-        return "What's the best phone number to reach you on?";
+        return 'Can I have the best phone number for the booking?';
       case 'email':
         return 'What email should we use for your booking?';
       case 'service':
@@ -817,7 +857,7 @@ export class ConversationBookingFlowService {
       case 'preferred_time':
         return 'Do you prefer morning, afternoon, or a specific time?';
       case 'first_visit':
-        return 'Is this your first visit with us? (yes or no)';
+        return 'Is this your first visit with us?';
       default:
         return 'Could you share a bit more detail for your booking?';
     }

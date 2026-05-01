@@ -750,6 +750,8 @@ export interface BookSlotRequest {
   title?: string;
   timezone?: string;
   appointmentStatus?: string;
+  /** Customer-visible notes on the appointment (GHL accepts on create). */
+  notes?: string;
 }
 
 // GHL Client class for connection verification and outbound messaging
@@ -1051,6 +1053,7 @@ export class GhlClient {
         title: request.title,
         timezone: request.timezone,
         appointmentStatus: request.appointmentStatus,
+        ...(request.notes?.trim() ? { notes: request.notes.trim() } : {}),
       });
       if (process.env['NODE_ENV'] !== 'production') {
         console.debug(

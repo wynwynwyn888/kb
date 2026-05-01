@@ -8,6 +8,7 @@ export interface GhlInboundMessageData {
   id?: string;
   contactName?: string;
   phoneNumber?: string;
+  email?: string;
   channel?: string;
 }
 
@@ -30,4 +31,8 @@ export interface NormalizedWebhookPayload {
   eventType: string;
   dedupeKey: string;
   channelRaw: string | null;
+  /** From GHL inbound payload when present — used to prefill booking without re-asking. */
+  contactDisplayName?: string | null;
+  contactPhone?: string | null;
+  contactEmail?: string | null;
 }

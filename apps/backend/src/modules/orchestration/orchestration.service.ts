@@ -274,6 +274,16 @@ export class ConversationOrchestrationService {
         metadata: (input.conversation?.metadata as Record<string, unknown>) ?? {},
         tenantDisplayName: input.tenant?.name,
         tenantTimeZone: input.tenant?.timeZone,
+        contactSnapshot:
+          input.incomingMessage.contactDisplayName ||
+          input.incomingMessage.contactPhone ||
+          input.incomingMessage.contactEmail
+            ? {
+                displayName: input.incomingMessage.contactDisplayName ?? undefined,
+                phone: input.incomingMessage.contactPhone ?? undefined,
+                email: input.incomingMessage.contactEmail ?? undefined,
+              }
+            : undefined,
       });
 
       if (bookingHook.handled) {

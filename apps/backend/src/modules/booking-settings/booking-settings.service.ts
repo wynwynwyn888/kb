@@ -237,8 +237,38 @@ export class BookingSettingsService {
       this.logger.warn(`getBookingSettings: ${error.message}`);
       throw new BadRequestException('Could not load booking settings');
     }
-    if (!data) return { ...DEFAULT_SETTINGS };
-    return rowToDto(data as Record<string, unknown>);
+    if (!data) return this.normalizeLiveBookingCoreFields({ ...DEFAULT_SETTINGS });
+    return this.normalizeLiveBookingCoreFields(rowToDto(data as Record<string, unknown>));
+  }
+
+  /**
+   * Live assistant defaults + invalid-toggle repair:
+   * - If live booking is on and no core field is enabled, default service/date/time/name/phone as required asks.
+   * - If Required=true but Ask (enabled)=false, enable ask and log (required cannot be collected when hidden).
+   */
+  private normalizeLiveBookingCoreFields(dto: TenantBookingSettingsDto): TenantBookingSettingsDto {
+    const core: TenantCoreFieldsDto = { ...dto.coreFieldsJson };
+    const live =
+      dto.enabled && (dto.bookingMode === 'CHECK_AVAILABILITY' || dto.bookingMode === 'BOOK_AFTER_CONFIRMATION');
+    const noneAsked = BOOKING_CORE_FIELD_KEYS.every(k => !core[k]?.enabled);
+    if (live && noneAsked) {
+      this.logger.warn(
+        'tenant booking: live assistant enabled but no core fields asked — defaulting to service, preferred date/time, name, phone as required',
+      );
+      for (const k of ['service', 'preferred_date', 'preferred_time', 'name', 'phone'] as const) {
+        core[k] = { enabled: true, required: true };
+      }
+      core['email'] = { enabled: false, required: false };
+      core['first_visit'] = { enabled: false, required: false };
+    }
+    for (const k of BOOKING_CORE_FIELD_KEYS) {
+      const t = core[k];
+      if (t?.required && !t?.enabled) {
+        this.logger.warn(`tenant booking: core field "${k}" is required but not asked — enabling ask`);
+        core[k] = { enabled: true, required: true };
+      }
+    }
+    return { ...dto, coreFieldsJson: core };
   }
 
   async patchBookingSettings(

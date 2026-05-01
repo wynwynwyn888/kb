@@ -33,6 +33,9 @@ export interface InboundMessageJobData {
   webhookEventId?: string;
   /** When true, persist then run orchestration immediately (no 5s debounce). */
   smokeImmediate?: boolean;
+  contactDisplayName?: string;
+  contactPhone?: string;
+  contactEmail?: string;
 }
 
 export interface OrchestrateDebouncedJobData {
@@ -43,6 +46,9 @@ export interface OrchestrateDebouncedJobData {
   ghlConversationId: string;
   debounceVersion: number;
   webhookEventId?: string;
+  contactDisplayName?: string;
+  contactPhone?: string;
+  contactEmail?: string;
 }
 
 const DEBOUNCE_MS = INBOUND_DEBOUNCE_MS;
@@ -81,6 +87,9 @@ export class InboundMessageProcessor extends WorkerHost {
       timestamp,
       webhookEventId,
       smokeImmediate,
+      contactDisplayName,
+      contactPhone,
+      contactEmail,
     } = job.data;
 
     this.logger.log(
@@ -128,6 +137,9 @@ export class InboundMessageProcessor extends WorkerHost {
           ghlConversationId,
           webhookEventId,
           latestInboundText: messageContent,
+          contactDisplayName,
+          contactPhone,
+          contactEmail,
         });
         if (webhookEventId) await this.updateWebhookEventStatus(webhookEventId, 'COMPLETED');
         return;
@@ -157,6 +169,9 @@ export class InboundMessageProcessor extends WorkerHost {
           ghlConversationId,
           debounceVersion: newVersion,
           webhookEventId,
+          contactDisplayName,
+          contactPhone,
+          contactEmail,
         } satisfies OrchestrateDebouncedJobData,
         {
           delay: DEBOUNCE_MS,
@@ -185,7 +200,7 @@ export class InboundMessageProcessor extends WorkerHost {
   }
 
   private async runOrchestrationAfterDebounce(job: Job<OrchestrateDebouncedJobData>): Promise<void> {
-    const { tenantId, conversationId, locationId, ghlContactId, ghlConversationId, debounceVersion, webhookEventId } =
+    const { tenantId, conversationId, locationId, ghlContactId, ghlConversationId, debounceVersion, webhookEventId, contactDisplayName, contactPhone, contactEmail } =
       job.data;
 
     const { data: convRow, error: cErr } = await this.supabase
@@ -226,6 +241,9 @@ export class InboundMessageProcessor extends WorkerHost {
       webhookEventId,
       latestInboundText: latestText,
       recentInboundBatch: recentBatch,
+      contactDisplayName,
+      contactPhone,
+      contactEmail,
     });
   }
 
@@ -238,6 +256,9 @@ export class InboundMessageProcessor extends WorkerHost {
     webhookEventId?: string;
     latestInboundText: string;
     recentInboundBatch?: string[];
+    contactDisplayName?: string;
+    contactPhone?: string;
+    contactEmail?: string;
   }): Promise<void> {
     const {
       tenantId,
@@ -248,6 +269,9 @@ export class InboundMessageProcessor extends WorkerHost {
       webhookEventId,
       latestInboundText,
       recentInboundBatch,
+      contactDisplayName,
+      contactPhone,
+      contactEmail,
     } = ctx;
 
     if (
@@ -294,6 +318,9 @@ export class InboundMessageProcessor extends WorkerHost {
       eventType: 'inbound_message',
       dedupeKey: `orch:${conversationId}:${Date.now()}`,
       channelRaw: null,
+      contactDisplayName: contactDisplayName?.trim() || null,
+      contactPhone: contactPhone?.trim() || null,
+      contactEmail: contactEmail?.trim() || null,
     };
 
     const tenantContext = await this.orchestrationService.loadTenantContext(tenantId);

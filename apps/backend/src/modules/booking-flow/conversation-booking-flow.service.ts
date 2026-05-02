@@ -14,6 +14,7 @@ import type { ReplyDecision } from '../reply-planning/dto';
 import type { RoutingResponse } from '../orchestration/dto';
 import {
   emptyBookingState,
+  hasAisbpBookingFlowContinuation,
   mergeBookingIntoConversationMetadata,
   parseAisbpBookingState,
   type AisbpBookingStateV1,
@@ -235,6 +236,7 @@ export class ConversationBookingFlowService {
       (booking.status === 'collecting_details' ||
         booking.status === 'offered_slots' ||
         booking.status === 'creating');
+    const bookingFlowContinuation = hasAisbpBookingFlowContinuation(prevMeta);
 
     if (!eligible) {
       if (interest) {
@@ -259,7 +261,7 @@ export class ConversationBookingFlowService {
       return { handled: false };
     }
 
-    if (!interest && !activeSession) {
+    if (!interest && !activeSession && !bookingFlowContinuation) {
       return { handled: false };
     }
 
@@ -309,19 +311,44 @@ export class ConversationBookingFlowService {
 
     const pendingAns = applyPendingFieldAnswer({ booking, latest, todayYmd });
     if (pendingAns.answered) {
+      const nextRequiredMissing = this.listRequiredMissingFieldIds(settings, booking);
+      const nextOptionalPending = this.listOptionalAskPendingFieldIds(settings, booking);
       this.logger.log(
         `bookingPendingFieldAnswered ${JSON.stringify({
           tenantId: params.tenantId,
           conversationId: params.conversationId,
           fieldId: pendingAns.fieldId,
-          skippedOptional: Boolean(pendingAns.skippedOptional),
+          parsed: pendingAns.parsedValue === true,
+          skipped: Boolean(pendingAns.skippedOptional),
+          nextRequiredMissing,
+          nextOptionalPending,
         })}`,
       );
     }
 
     this.applyRichFieldExtraction(booking, settings, combined, latest, todayYmd);
 
-    this.clearStuckOptionalPendingAsk({ booking, latest, pendingAnswered: pendingAns.answered, settings });
+    const stuckClear = this.clearStuckOptionalPendingAsk({
+      booking,
+      latest,
+      pendingAnswered: pendingAns.answered,
+      settings,
+    });
+    if (stuckClear.clearedWithoutParse && stuckClear.fieldId) {
+      const nextRequiredMissing = this.listRequiredMissingFieldIds(settings, booking);
+      const nextOptionalPending = this.listOptionalAskPendingFieldIds(settings, booking);
+      this.logger.log(
+        `bookingPendingFieldAnswered ${JSON.stringify({
+          tenantId: params.tenantId,
+          conversationId: params.conversationId,
+          fieldId: stuckClear.fieldId,
+          parsed: false,
+          skipped: false,
+          nextRequiredMissing,
+          nextOptionalPending,
+        })}`,
+      );
+    }
 
     if (
       booking.pendingFieldId &&
@@ -847,16 +874,29 @@ export class ConversationBookingFlowService {
     latest: string;
     pendingAnswered: boolean;
     settings: { coreFieldsJson: Record<string, CoreFieldToggle>; customFieldsJson: CustomBookingFieldDto[] };
-  }): void {
+  }): { clearedWithoutParse: boolean; fieldId?: string } {
     const { booking, latest, pendingAnswered, settings } = params;
-    if (pendingAnswered) return;
+    if (pendingAnswered) return { clearedWithoutParse: false };
     const pid = booking.pendingFieldId?.trim();
-    if (!pid || !latest.trim()) return;
-    if (this.isAskFieldRequired(settings, pid)) return;
-    if (!this.isOptionalAsked(booking, pid)) return;
+    if (!pid || !latest.trim()) return { clearedWithoutParse: false };
+    if (this.isAskFieldRequired(settings, pid)) return { clearedWithoutParse: false };
+
+    const asked = this.isOptionalAsked(booking, pid);
+    const lastAskedAtMs = booking.lastAskedAt ? Date.parse(booking.lastAskedAt) : NaN;
+    const recentLastAsk =
+      booking.lastAskedFieldId === pid &&
+      Number.isFinite(lastAskedAtMs) &&
+      Date.now() - lastAskedAtMs < 30 * 60 * 1000;
+
+    if (!asked && !recentLastAsk) return { clearedWithoutParse: false };
+
+    if (!asked && recentLastAsk) {
+      booking.optionalAskedFieldIds = this.appendUniqueId(booking.optionalAskedFieldIds, pid);
+    }
     booking.pendingFieldId = undefined;
     booking.pendingFieldLabel = undefined;
     booking.pendingFieldRequired = undefined;
+    return { clearedWithoutParse: true, fieldId: pid };
   }
 
   private listRequiredMissingFieldIds(

@@ -10,6 +10,14 @@ import {
   resolveRelativeDayPhrase,
 } from './booking-intent-and-parse';
 
+export type ApplyPendingFieldAnswerResult = {
+  answered: boolean;
+  fieldId?: string;
+  skippedOptional?: boolean;
+  /** When answered=true: whether a concrete field value was stored (false for optional skip). */
+  parsedValue?: boolean;
+};
+
 /** Phrases that skip an optional Ask field (not a bare "no", which may answer first_visit). */
 export function isOptionalSkipIntent(line: string): boolean {
   const s = line.trim().toLowerCase();
@@ -28,6 +36,28 @@ function appendUnique(list: string[] | undefined, id: string): string[] {
 }
 
 /**
+ * Normalize a short yes/no style reply (e.g. strips trailing "?" from "yes?").
+ * Exported for unit tests.
+ */
+export function parseFirstVisitDirectAnswer(raw: string): 'yes' | 'no' | undefined {
+  let s = raw.trim().toLowerCase();
+  if (!s) return undefined;
+  s = s.replace(/^[\s"'“”‘’.,!?;:()[\]{}«»–—-]+|[\s"'“”‘’.,!?;:()[\]{}«»–—-]+$/g, '').trim();
+  while (s.length > 0 && /[.!?…]+$/.test(s)) {
+    s = s.replace(/[.!?…]+$/g, '').trim();
+  }
+  if (!s) return undefined;
+
+  if (/^(first\s*time|first\s*visit|new(\s+customer)?)$/.test(s)) return 'yes';
+  if (/^(returning(\s+customer)?|existing(\s+customer)?|been\s+before|regular(\s+customer)?)$/.test(s)) {
+    return 'no';
+  }
+  if (/^(y|yes|yep|yeah|yup|correct|absolutely|definitely|sure|indeed)$/.test(s)) return 'yes';
+  if (/^(n|no|nope|nah)$/.test(s)) return 'no';
+  return undefined;
+}
+
+/**
  * When the bot asked for a specific field (`pendingFieldId`), interpret the next inbound line
  * primarily as an answer to that field (not generic booking chatter).
  */
@@ -35,7 +65,7 @@ export function applyPendingFieldAnswer(params: {
   booking: AisbpBookingStateV1;
   latest: string;
   todayYmd: string;
-}): { answered: boolean; fieldId?: string; skippedOptional?: boolean } {
+}): ApplyPendingFieldAnswerResult {
   const pid = (params.booking.pendingFieldId ?? '').trim();
   if (!pid) return { answered: false };
 
@@ -55,7 +85,7 @@ export function applyPendingFieldAnswer(params: {
     booking.skippedFieldIds = appendUnique(booking.skippedFieldIds, pid);
     booking.optionalAskedFieldIds = appendUnique(booking.optionalAskedFieldIds, pid);
     clearPending();
-    return { answered: true, fieldId: pid, skippedOptional: true };
+    return { answered: true, fieldId: pid, skippedOptional: true, parsedValue: false };
   }
 
   if (pid === 'name') {
@@ -63,7 +93,7 @@ export function applyPendingFieldAnswer(params: {
     if (n) {
       booking.customerName = n;
       clearPending();
-      return { answered: true, fieldId: 'name' };
+      return { answered: true, fieldId: 'name', parsedValue: true };
     }
     return { answered: false };
   }
@@ -73,7 +103,7 @@ export function applyPendingFieldAnswer(params: {
     if (p) {
       booking.phone = p;
       clearPending();
-      return { answered: true, fieldId: 'phone' };
+      return { answered: true, fieldId: 'phone', parsedValue: true };
     }
     return { answered: false };
   }
@@ -83,7 +113,7 @@ export function applyPendingFieldAnswer(params: {
     if (e) {
       booking.email = e;
       clearPending();
-      return { answered: true, fieldId: 'email' };
+      return { answered: true, fieldId: 'email', parsedValue: true };
     }
     return { answered: false };
   }
@@ -93,7 +123,7 @@ export function applyPendingFieldAnswer(params: {
     if (s.length >= 2 && s.length <= 120) {
       booking.service = s;
       clearPending();
-      return { answered: true, fieldId: 'service' };
+      return { answered: true, fieldId: 'service', parsedValue: true };
     }
     return { answered: false };
   }
@@ -103,7 +133,7 @@ export function applyPendingFieldAnswer(params: {
     if (d) {
       booking.preferredDate = d;
       clearPending();
-      return { answered: true, fieldId: 'preferred_date' };
+      return { answered: true, fieldId: 'preferred_date', parsedValue: true };
     }
     return { answered: false };
   }
@@ -113,27 +143,23 @@ export function applyPendingFieldAnswer(params: {
     if (t) {
       booking.preferredTime = t;
       clearPending();
-      return { answered: true, fieldId: 'preferred_time' };
+      return { answered: true, fieldId: 'preferred_time', parsedValue: true };
     }
     return { answered: false };
   }
 
   if (pid === 'first_visit') {
-    const fv = extractFirstVisit(line);
-    if (fv) {
-      booking.firstVisit = fv;
+    const phrase = extractFirstVisit(line);
+    if (phrase) {
+      booking.firstVisit = phrase;
       clearPending();
-      return { answered: true, fieldId: 'first_visit' };
+      return { answered: true, fieldId: 'first_visit', parsedValue: true };
     }
-    if (/\b(yes|yep|yeah)\b/i.test(line) && !/\bno\b/i.test(line)) {
-      booking.firstVisit = 'yes';
+    const direct = parseFirstVisitDirectAnswer(line);
+    if (direct) {
+      booking.firstVisit = direct;
       clearPending();
-      return { answered: true, fieldId: 'first_visit' };
-    }
-    if (/\b(no|nope|nah)\b/i.test(line)) {
-      booking.firstVisit = 'no';
-      clearPending();
-      return { answered: true, fieldId: 'first_visit' };
+      return { answered: true, fieldId: 'first_visit', parsedValue: true };
     }
     return { answered: false };
   }
@@ -144,7 +170,7 @@ export function applyPendingFieldAnswer(params: {
     if (!booking.customAnswers) booking.customAnswers = {};
     booking.customAnswers[id] = line;
     clearPending();
-    return { answered: true, fieldId: pid };
+    return { answered: true, fieldId: pid, parsedValue: true };
   }
 
   return { answered: false };

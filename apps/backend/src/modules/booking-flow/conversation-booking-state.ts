@@ -71,18 +71,25 @@ export function parseAisbpBookingState(metadata: Record<string, unknown> | undef
   const raw = metadata[AISBP_BOOKING_METADATA_KEY];
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const o = raw as Record<string, unknown>;
+  const pendingRawEarly = typeof o['pendingFieldId'] === 'string' ? o['pendingFieldId'].trim() : '';
   const status = o['status'];
-  if (
-    status !== 'collecting_details' &&
-    status !== 'offered_slots' &&
-    status !== 'creating' &&
-    status !== 'confirmed' &&
-    status !== 'failed'
-  ) {
-    return null;
-  }
+  const statusOk =
+    status === 'collecting_details' ||
+    status === 'offered_slots' ||
+    status === 'creating' ||
+    status === 'confirmed' ||
+    status === 'failed';
   const calendarId = typeof o['calendarId'] === 'string' ? o['calendarId'].trim() : '';
   if (!calendarId) return null;
+  /** Tolerate missing/legacy `status` while a pending field answer is expected (short replies must still resume the session). */
+  let statusResolved: AisbpBookingStatus;
+  if (statusOk) {
+    statusResolved = status as AisbpBookingStatus;
+  } else if (pendingRawEarly) {
+    statusResolved = 'collecting_details';
+  } else {
+    return null;
+  }
   const version = typeof o['version'] === 'number' && Number.isFinite(o['version']) ? Math.floor(o['version']) : 1;
 
   const offeredSlots = Array.isArray(o['offeredSlots'])
@@ -143,7 +150,7 @@ export function parseAisbpBookingState(metadata: Record<string, unknown> | undef
   const skippedFieldIds = parseIdList(o['skippedFieldIds']);
 
   return {
-    status: status as AisbpBookingStatus,
+    status: statusResolved,
     version,
     calendarId,
     service: typeof o['service'] === 'string' ? o['service'] : undefined,
@@ -180,6 +187,24 @@ export function parseAisbpBookingState(metadata: Record<string, unknown> | undef
     optionalAskedFieldIds,
     skippedFieldIds,
   };
+}
+
+/**
+ * Raw metadata indicates an in-progress live booking session that should accept short replies
+ * (yes/no/skip/name/phone) without fresh booking keywords in the inbound text.
+ */
+export function hasAisbpBookingFlowContinuation(metadata: Record<string, unknown> | undefined): boolean {
+  if (!metadata || typeof metadata !== 'object') return false;
+  const raw = metadata[AISBP_BOOKING_METADATA_KEY];
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false;
+  const o = raw as Record<string, unknown>;
+  const calendarId = typeof o['calendarId'] === 'string' ? o['calendarId'].trim() : '';
+  if (!calendarId) return false;
+  const status = o['status'];
+  const okStatus =
+    status === 'collecting_details' || status === 'offered_slots' || status === 'creating';
+  const pid = typeof o['pendingFieldId'] === 'string' ? o['pendingFieldId'].trim() : '';
+  return okStatus || Boolean(pid);
 }
 
 export function mergeBookingIntoConversationMetadata(

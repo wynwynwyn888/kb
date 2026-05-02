@@ -941,4 +941,215 @@ describe('ConversationBookingFlowService', () => {
       }
     });
   });
+
+  describe('first_visit pending field and short UNKNOWN replies', () => {
+    const optionalWithFirstVisit = {
+      ...allOptionalAskSettings,
+      coreFieldsJson: {
+        ...allOptionalAskSettings.coreFieldsJson,
+        first_visit: { enabled: true, required: false },
+      },
+    };
+
+    const slotRow = { startTime: '2026-05-22T09:00:00.000Z', endTime: '2026-05-22T09:30:00.000Z' };
+
+    function fetchFreeFactory() {
+      return jest.fn(async () => ({
+        slots: [slotRow],
+        calendarId: 'cal_1',
+        error: undefined as string | undefined,
+        retriedWithUserId: null,
+        crmTimezoneUsed: 'UTC',
+        selectedDate: '2026-05-22',
+        selectedTime: '',
+        startMs: 0,
+        endMs: 1,
+        ghlLocationId: 'loc',
+      }));
+    }
+
+    function metaPendingFirstVisit(): Record<string, unknown> {
+      return {
+        aisbp_booking: {
+          status: 'collecting_details',
+          version: 1,
+          calendarId: 'cal_1',
+          service: 'Hair colour',
+          customerName: 'Lucy',
+          phone: '026234216',
+          preferredDate: '2026-05-22',
+          preferredTime: '09:00',
+          pendingFieldId: 'first_visit',
+          pendingFieldRequired: false,
+          optionalAskedFieldIds: ['first_visit'],
+          lastAskedFieldId: 'first_visit',
+          lastAskedAt: new Date().toISOString(),
+        },
+      };
+    }
+
+    it('A: pending first_visit "yes" => firstVisit yes, slots offered', async () => {
+      const fetchFree = fetchFreeFactory();
+      const booking = {
+        getBookingSettings: jest.fn(async () => optionalWithFirstVisit),
+        fetchFreeSlotsForAutomation: fetchFree,
+      } as unknown as BookingSettingsService;
+      const ghl = {} as unknown as GhlService;
+      const r = await svc(booking, ghl).maybeHandleConversationBookingTurn({
+        tenantId: 't1',
+        conversationId: 'c_fv_a',
+        contactId: 'ct1',
+        channel: 'SMS',
+        combinedInboundText: 'yes',
+        latestInboundText: 'yes',
+        metadata: metaPendingFirstVisit(),
+      });
+      expect(r.handled).toBe(true);
+      expect(fetchFree).toHaveBeenCalled();
+      if (r.handled) {
+        const b = (r.persistMetadata as Record<string, unknown>).aisbp_booking as Record<string, unknown>;
+        expect(b.firstVisit).toBe('yes');
+        expect(b.pendingFieldId).toBeUndefined();
+        expect(r.replyPlan.bubbles[0]!.text).toMatch(/1\./);
+      }
+    });
+
+    it('B: pending first_visit "yes?" => firstVisit yes, slots offered', async () => {
+      const fetchFree = fetchFreeFactory();
+      const booking = {
+        getBookingSettings: jest.fn(async () => optionalWithFirstVisit),
+        fetchFreeSlotsForAutomation: fetchFree,
+      } as unknown as BookingSettingsService;
+      const ghl = {} as unknown as GhlService;
+      const r = await svc(booking, ghl).maybeHandleConversationBookingTurn({
+        tenantId: 't1',
+        conversationId: 'c_fv_b',
+        contactId: 'ct1',
+        channel: 'SMS',
+        combinedInboundText: 'yes?',
+        latestInboundText: 'yes?',
+        metadata: metaPendingFirstVisit(),
+      });
+      expect(r.handled).toBe(true);
+      expect(fetchFree).toHaveBeenCalled();
+      if (r.handled) {
+        const b = (r.persistMetadata as Record<string, unknown>).aisbp_booking as Record<string, unknown>;
+        expect(b.firstVisit).toBe('yes');
+        expect(r.replyPlan.bubbles[0]!.text).toMatch(/1\./);
+      }
+    });
+
+    it('C: pending first_visit "no" => firstVisit no, slots offered', async () => {
+      const fetchFree = fetchFreeFactory();
+      const booking = {
+        getBookingSettings: jest.fn(async () => optionalWithFirstVisit),
+        fetchFreeSlotsForAutomation: fetchFree,
+      } as unknown as BookingSettingsService;
+      const ghl = {} as unknown as GhlService;
+      const r = await svc(booking, ghl).maybeHandleConversationBookingTurn({
+        tenantId: 't1',
+        conversationId: 'c_fv_c',
+        contactId: 'ct1',
+        channel: 'SMS',
+        combinedInboundText: 'no',
+        latestInboundText: 'no',
+        metadata: metaPendingFirstVisit(),
+      });
+      expect(r.handled).toBe(true);
+      expect(fetchFree).toHaveBeenCalled();
+      if (r.handled) {
+        const b = (r.persistMetadata as Record<string, unknown>).aisbp_booking as Record<string, unknown>;
+        expect(b.firstVisit).toBe('no');
+        expect(r.replyPlan.bubbles[0]!.text).toMatch(/1\./);
+      }
+    });
+
+    it('D: pending first_visit optional skip => skippedFieldIds includes first_visit, slots offered', async () => {
+      const fetchFree = fetchFreeFactory();
+      const booking = {
+        getBookingSettings: jest.fn(async () => optionalWithFirstVisit),
+        fetchFreeSlotsForAutomation: fetchFree,
+      } as unknown as BookingSettingsService;
+      const ghl = {} as unknown as GhlService;
+      const r = await svc(booking, ghl).maybeHandleConversationBookingTurn({
+        tenantId: 't1',
+        conversationId: 'c_fv_d',
+        contactId: 'ct1',
+        channel: 'SMS',
+        combinedInboundText: 'skip',
+        latestInboundText: 'skip',
+        metadata: metaPendingFirstVisit(),
+      });
+      expect(r.handled).toBe(true);
+      expect(fetchFree).toHaveBeenCalled();
+      if (r.handled) {
+        const b = (r.persistMetadata as Record<string, unknown>).aisbp_booking as Record<string, unknown>;
+        expect(b.skippedFieldIds).toEqual(expect.arrayContaining(['first_visit']));
+        expect(r.replyPlan.bubbles[0]!.text).toMatch(/1\./);
+      }
+    });
+
+    it('E: optional first_visit asked once, unclear answer => proceeds to slots without repeating first_visit', async () => {
+      const fetchFree = fetchFreeFactory();
+      const booking = {
+        getBookingSettings: jest.fn(async () => optionalWithFirstVisit),
+        fetchFreeSlotsForAutomation: fetchFree,
+      } as unknown as BookingSettingsService;
+      const ghl = {} as unknown as GhlService;
+      const r = await svc(booking, ghl).maybeHandleConversationBookingTurn({
+        tenantId: 't1',
+        conversationId: 'c_fv_e',
+        contactId: 'ct1',
+        channel: 'SMS',
+        combinedInboundText: '~~~confused~~~',
+        latestInboundText: '~~~confused~~~',
+        metadata: metaPendingFirstVisit(),
+      });
+      expect(r.handled).toBe(true);
+      expect(fetchFree).toHaveBeenCalled();
+      if (r.handled) {
+        expect(r.replyPlan.bubbles[0]!.text).toMatch(/1\./);
+        expect(r.replyPlan.bubbles[0]!.text.toLowerCase()).not.toMatch(/first visit/);
+      }
+    });
+
+    it('F: active booking + pendingFieldId without valid status + "yes" still parses (no booking keywords)', async () => {
+      const fetchFree = fetchFreeFactory();
+      const booking = {
+        getBookingSettings: jest.fn(async () => optionalWithFirstVisit),
+        fetchFreeSlotsForAutomation: fetchFree,
+      } as unknown as BookingSettingsService;
+      const ghl = {} as unknown as GhlService;
+      const raw = {
+        version: 1,
+        calendarId: 'cal_1',
+        service: 'Hair colour',
+        customerName: 'Lucy',
+        phone: '026234216',
+        preferredDate: '2026-05-22',
+        preferredTime: '09:00',
+        pendingFieldId: 'first_visit',
+        pendingFieldRequired: false,
+        optionalAskedFieldIds: ['first_visit'],
+        lastAskedFieldId: 'first_visit',
+        lastAskedAt: new Date().toISOString(),
+      } as Record<string, unknown>;
+      const r = await svc(booking, ghl).maybeHandleConversationBookingTurn({
+        tenantId: 't1',
+        conversationId: 'c_fv_f',
+        contactId: 'ct1',
+        channel: 'SMS',
+        combinedInboundText: 'yes',
+        latestInboundText: 'yes',
+        metadata: { aisbp_booking: raw },
+      });
+      expect(r.handled).toBe(true);
+      expect(fetchFree).toHaveBeenCalled();
+      if (r.handled) {
+        const b = (r.persistMetadata as Record<string, unknown>).aisbp_booking as Record<string, unknown>;
+        expect(b.firstVisit).toBe('yes');
+        expect(b.status).toBe('offered_slots');
+      }
+    });
+  });
 });

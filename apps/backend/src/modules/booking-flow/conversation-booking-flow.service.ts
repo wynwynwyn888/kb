@@ -1657,8 +1657,9 @@ export class ConversationBookingFlowService {
     }
   }
 
-  private isBareOfferedSlotIndexLine(latest: string, offeredSlots: AisbpOfferedSlot[]): boolean {
-    const latestClean = stripBookingFrustrationForParse(latest.replace(/\s+/g, ' ').trim()).cleaned;
+  private isBareOfferedSlotIndexLine(latestInboundText: string, offeredSlots?: AisbpOfferedSlot[]): boolean {
+    if (!offeredSlots?.length) return false;
+    const latestClean = stripBookingFrustrationForParse(latestInboundText.replace(/\s+/g, ' ').trim()).cleaned;
     if (!/^[123]$/.test(latestClean)) return false;
     const n = parseInt(latestClean, 10);
     return offeredSlots.some(o => o.option === n);

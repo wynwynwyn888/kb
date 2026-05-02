@@ -6,6 +6,7 @@ import {
 import type { BookingPostConfirmService } from './booking-post-confirm.service';
 import type { BookingSettingsService } from '../booking-settings/booking-settings.service';
 import type { GhlService } from '../ghl/ghl.service';
+import type { AisbpOfferedSlot } from './conversation-booking-state';
 
 const capturedActionIntentInserts: unknown[] = [];
 
@@ -108,6 +109,57 @@ describe('isBookingFlowSupportedInboundText', () => {
   it('is true when either side has non-whitespace', () => {
     expect(isBookingFlowSupportedInboundText('2', '')).toBe(true);
     expect(isBookingFlowSupportedInboundText('', 'book')).toBe(true);
+  });
+});
+
+type FlowBareSlot = ConversationBookingFlowService & {
+  isBareOfferedSlotIndexLine(latestInboundText: string, offeredSlots?: AisbpOfferedSlot[]): boolean;
+};
+
+describe('isBareOfferedSlotIndexLine', () => {
+  const bare = (flow: ConversationBookingFlowService) =>
+    (flow as unknown as FlowBareSlot).isBareOfferedSlotIndexLine.bind(flow);
+
+  it('returns false when offeredSlots is undefined (no crash)', () => {
+    const booking = { getBookingSettings: jest.fn(async () => baseSettings) } as unknown as BookingSettingsService;
+    const flow = svc(booking, {} as GhlService);
+    expect(bare(flow)('3', undefined)).toBe(false);
+  });
+
+  it('returns false when offeredSlots is empty', () => {
+    const booking = { getBookingSettings: jest.fn(async () => baseSettings) } as unknown as BookingSettingsService;
+    const flow = svc(booking, {} as GhlService);
+    expect(bare(flow)('3', [])).toBe(false);
+  });
+
+  it('returns true when message is exactly 3 and option 3 exists', () => {
+    const booking = { getBookingSettings: jest.fn(async () => baseSettings) } as unknown as BookingSettingsService;
+    const flow = svc(booking, {} as GhlService);
+    const slots: AisbpOfferedSlot[] = [
+      {
+        option: 3,
+        startIso: '2026-05-29T07:00:00.000Z',
+        endIso: '2026-05-29T07:30:00.000Z',
+        displayText: '3:00 PM',
+        calendarId: 'cal_1',
+      },
+    ];
+    expect(bare(flow)('3', slots)).toBe(true);
+  });
+
+  it('returns false when option digit has no matching slot', () => {
+    const booking = { getBookingSettings: jest.fn(async () => baseSettings) } as unknown as BookingSettingsService;
+    const flow = svc(booking, {} as GhlService);
+    const slots: AisbpOfferedSlot[] = [
+      {
+        option: 1,
+        startIso: '2026-05-29T04:00:00.000Z',
+        endIso: '2026-05-29T04:30:00.000Z',
+        displayText: '12:00 PM',
+        calendarId: 'cal_1',
+      },
+    ];
+    expect(bare(flow)('3', slots)).toBe(false);
   });
 });
 

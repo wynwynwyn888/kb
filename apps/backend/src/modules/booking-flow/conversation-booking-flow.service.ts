@@ -30,12 +30,13 @@ import {
   extractPreferredTimeWindow,
   extractServiceFromBookingMessage,
   extractServiceGuess,
-  filterFreeSlotsByTimeWindow,
-  matchOfferedByHm,
+  normalizedHmToMinutes,
   parseFirstVisitNaturalReply,
-  parseSlotSelection,
+  parseSlotSelectionOrTimeRevision,
+  rankSlotsForBookingOffer,
   resolveBookingCalendarDay,
   resolveRelativeDayPhrase,
+  slotStartLocalMinutes,
   stripBookingFrustrationForParse,
 } from './booking-intent-and-parse';
 import { applyPendingFieldAnswer, isOptionalSkipIntent } from './booking-pending-field';
@@ -59,15 +60,19 @@ import {
   copyClarifyPreferredDate,
   copyClarifyPreferredTime,
   copyClarifyService,
+  copyClosestSlotsWhenPreferredUnavailable,
   copyFrustrationRecoveryContinue,
   copyFrustrationRecoveryWithWindow,
   copyNoSlotsInWindow,
-  copyPickSlotNumeric,
+  copyPickSlotHelpSofter,
   copyRequiredFieldCannotSkip,
   copyRequiredFieldPoliteFinal,
+  copySingleExactTimeAvailable,
+  copySlotsAroundRequestedTime,
   copySlotsOfferedWithHumanDate,
   formatCustomFieldBookingQuestion,
   formatHumanDateFromYmd,
+  formatPreferredHmForDisplay,
   timeWindowDisplayLabel,
 } from './booking-conversation-copy';
 
@@ -154,39 +159,6 @@ function formatSlotLabel(iso: string, timeZone: string): string {
   }
 }
 
-function pickTopSlots(
-  slots: GhlFreeSlot[],
-  preferredHm: string | undefined,
-  max: number,
-  slotDurationFallback: number,
-): GhlFreeSlot[] {
-  const uniq = new Map<string, GhlFreeSlot>();
-  for (const s of slots) {
-    if (!uniq.has(s.startTime)) uniq.set(s.startTime, s);
-  }
-  const list = [...uniq.values()];
-  if (preferredHm) {
-    const parts = preferredHm.split(':');
-    const ph = parseInt(parts[0] ?? '', 10);
-    const pm = parseInt(parts[1] ?? '0', 10);
-    if (Number.isFinite(ph)) {
-      const target = ph * 60 + (Number.isFinite(pm) ? pm : 0);
-      list.sort((a, b) => {
-        const da = new Date(a.startTime);
-        const db = new Date(b.startTime);
-        const ta = da.getHours() * 60 + da.getMinutes();
-        const tb = db.getHours() * 60 + db.getMinutes();
-        return Math.abs(ta - target) - Math.abs(tb - target);
-      });
-    } else {
-      list.sort((a, b) => Date.parse(a.startTime) - Date.parse(b.startTime));
-    }
-  } else {
-    list.sort((a, b) => Date.parse(a.startTime) - Date.parse(b.startTime));
-  }
-  return list.slice(0, max);
-}
-
 @Injectable()
 export class ConversationBookingFlowService {
   private readonly logger = new Logger(ConversationBookingFlowService.name);
@@ -262,6 +234,7 @@ export class ConversationBookingFlowService {
         ...booking,
         status: 'collecting_details',
         offeredSlots: undefined,
+        offeredSlotsCrmTimeZone: undefined,
         lastOfferedAt: undefined,
         selectedSlot: undefined,
         lastError: undefined,
@@ -487,25 +460,169 @@ export class ConversationBookingFlowService {
       booking.pendingFieldId = undefined;
       booking.pendingFieldLabel = undefined;
       booking.pendingFieldRequired = undefined;
-      const sel = parseSlotSelection(latest, booking.offeredSlots);
-      let picked: AisbpOfferedSlot | undefined;
-      if (sel.kind === 'option') {
-        picked = booking.offeredSlots.find(o => o.option === sel.option);
-      } else if (sel.kind === 'time') {
-        const m = matchOfferedByHm(booking.offeredSlots, sel.normalizedHm);
-        if (m) {
-          picked = booking.offeredSlots.find(o => o.option === m.option);
-        }
+
+      let crmTzForPick = booking.offeredSlotsCrmTimeZone?.trim();
+      if (!crmTzForPick) {
+        const tzPeek = await this.bookingSettings.fetchFreeSlotsForAutomation(params.tenantId, {
+          calendarId: booking.calendarId,
+          selectedDate: booking.preferredDate!,
+          selectedTime: booking.preferredTime,
+        });
+        crmTzForPick = tzPeek.crmTimezoneUsed?.trim() || 'UTC';
       }
-      if (!picked) {
+
+      const selectionText = [latest, combined].filter(s => s?.trim()).join('\n');
+      const rev = parseSlotSelectionOrTimeRevision(
+        selectionText,
+        booking.offeredSlots,
+        crmTzForPick,
+        booking.preferredDate!,
+        todayYmd,
+      );
+
+      if (rev.kind === 'time_revision' || rev.kind === 'time_window_revision' || rev.kind === 'date_time_revision') {
+        if (rev.kind === 'time_revision') {
+          booking.preferredTime = rev.preferredTime;
+          booking.preferredTimeWindow = undefined;
+        } else if (rev.kind === 'time_window_revision') {
+          booking.preferredTimeWindow = rev.preferredTimeWindow;
+          booking.preferredTime = undefined;
+        } else {
+          booking.preferredDate = rev.preferredDate;
+          if (rev.preferredTime) {
+            booking.preferredTime = rev.preferredTime;
+            booking.preferredTimeWindow = undefined;
+          } else if (rev.preferredTimeWindow) {
+            booking.preferredTimeWindow = rev.preferredTimeWindow;
+            booking.preferredTime = undefined;
+          }
+        }
+        booking.offeredSlots = undefined;
+        booking.lastOfferedAt = undefined;
+        booking.offeredSlotsCrmTimeZone = undefined;
+
+        const slotFetch = await this.bookingSettings.fetchFreeSlotsForAutomation(params.tenantId, {
+          calendarId: booking.calendarId,
+          selectedDate: booking.preferredDate!,
+          selectedTime: booking.preferredTime,
+        });
+
+        if (slotFetch.error) {
+          this.logger.warn(`bookingSlotsFetched ${JSON.stringify({ tenantId: params.tenantId, error: true })}`);
+          const nextMeta = mergeBookingIntoConversationMetadata(prevMeta, { ...booking, status: 'collecting_details' });
+          return {
+            handled: true,
+            persistMetadata: nextMeta,
+            replyPlan: plan(
+              "I'm having trouble checking the live calendar right now. I'll pass your request to the team so they can help confirm the slot.",
+              'booking_slots_error',
+            ),
+            routing: stubRouting(),
+          };
+        }
+
+        const crmTz2 = slotFetch.crmTimezoneUsed?.trim() || crmTzForPick;
+        const win = booking.preferredTimeWindow;
+        const { ranked: top, usedWindowFallback } = rankSlotsForBookingOffer(slotFetch.slots, {
+          preferredHm: booking.preferredTime,
+          preferredWindow: win && win !== 'exact' ? win : undefined,
+          crmTimeZone: crmTz2,
+          max: 3,
+        });
+
+        if (top.length === 0) {
+          const nextMeta = mergeBookingIntoConversationMetadata(prevMeta, { ...booking, status: 'collecting_details' });
+          return {
+            handled: true,
+            persistMetadata: nextMeta,
+            replyPlan: plan(
+              "I couldn't find open slots for that date in the live calendar. Try another date, or the team can help find a time.",
+              'booking_no_slots',
+            ),
+            routing: stubRouting(),
+          };
+        }
+
+        const offered: AisbpOfferedSlot[] = top.map((s, i) => ({
+          option: i + 1,
+          startIso: s.startTime,
+          endIso: slotEndIso(s, booking.slotDurationMinutes ?? 30),
+          displayText: formatSlotLabel(s.startTime, slotFetch.crmTimezoneUsed),
+          calendarId: booking.calendarId,
+        }));
+
+        this.logger.log(
+          `bookingSlotsOffered ${JSON.stringify({
+            tenantId: params.tenantId,
+            conversationId: params.conversationId,
+            count: offered.length,
+            date: booking.preferredDate,
+            reason: 'time_preference_revision',
+          })}`,
+        );
+
+        const humanDate = formatHumanDateFromYmd(booking.preferredDate!.trim());
+        const displayLines = offered.map(o => o.displayText);
+        const prefHm = booking.preferredTime?.trim();
+        const hasExactInFull =
+          Boolean(prefHm) &&
+          slotFetch.slots.some(s => {
+            const sm = slotStartLocalMinutes(s.startTime, crmTz2);
+            const tm = normalizedHmToMinutes(prefHm!);
+            return sm !== undefined && tm !== undefined && sm === tm;
+          });
+
+        let body: string;
+        if (prefHm && hasExactInFull && top.length === 1) {
+          body = copySingleExactTimeAvailable(humanDate, displayLines[0]!);
+        } else if (prefHm && hasExactInFull && top.length > 1) {
+          body = copySlotsAroundRequestedTime(humanDate, formatPreferredHmForDisplay(prefHm), displayLines);
+        } else if (prefHm && !hasExactInFull && top.length > 0) {
+          body = copyClosestSlotsWhenPreferredUnavailable(humanDate, formatPreferredHmForDisplay(prefHm), displayLines);
+        } else if (usedWindowFallback && win && win !== 'exact') {
+          body = copyNoSlotsInWindow(humanDate, timeWindowDisplayLabel(win), displayLines);
+        } else {
+          body = copySlotsOfferedWithHumanDate(humanDate, displayLines);
+        }
+
+        const nextMeta = mergeBookingIntoConversationMetadata(prevMeta, {
+          ...booking,
+          status: 'offered_slots',
+          offeredSlots: offered,
+          offeredSlotsCrmTimeZone: crmTz2,
+          lastOfferedAt: new Date().toISOString(),
+          pendingFieldId: undefined,
+          pendingFieldLabel: undefined,
+          pendingFieldRequired: undefined,
+          lastAskedFieldId: undefined,
+          lastAskedAt: undefined,
+          lastQuestionFingerprint: undefined,
+          sameFieldPromptCount: undefined,
+          pendingParseFailureCount: undefined,
+        });
+
+        return {
+          handled: true,
+          persistMetadata: nextMeta,
+          replyPlan: plan(withTone(body), 'booking_slots_offered'),
+          routing: stubRouting(),
+        };
+      }
+
+      if (rev.kind !== 'selected_slot') {
         const nextMeta = mergeBookingIntoConversationMetadata(prevMeta, { ...booking });
         return {
           handled: true,
           persistMetadata: nextMeta,
-          replyPlan: plan(withTone(copyPickSlotNumeric()), 'booking_pick_slot'),
+          replyPlan: plan(withTone(copyPickSlotHelpSofter()), 'booking_pick_slot'),
           routing: stubRouting(),
         };
       }
+
+      const picked =
+        booking.offeredSlots.find(o => o.option === rev.slot.option && o.startIso === rev.slot.startIso) ??
+        booking.offeredSlots.find(o => o.option === rev.slot.option) ??
+        (rev.slot as AisbpOfferedSlot);
 
       const dup = await this.hasRecentExecutedBooking(params.tenantId, params.conversationId, picked.startIso, picked.calendarId);
       if (dup) {
@@ -547,6 +664,7 @@ export class ConversationBookingFlowService {
           ...booking,
           status: 'collecting_details',
           offeredSlots: undefined,
+          offeredSlotsCrmTimeZone: undefined,
           lastOfferedAt: undefined,
           selectedSlot: undefined,
         });
@@ -567,6 +685,7 @@ export class ConversationBookingFlowService {
           ...booking,
           status: 'collecting_details',
           offeredSlots: undefined,
+          offeredSlotsCrmTimeZone: undefined,
           lastOfferedAt: undefined,
           selectedSlot: undefined,
         });
@@ -720,6 +839,7 @@ export class ConversationBookingFlowService {
         appointmentId: bookRes.appointmentId,
         bookingConfirmedAt: new Date().toISOString(),
         offeredSlots: undefined,
+        offeredSlotsCrmTimeZone: undefined,
         lastOfferedAt: undefined,
         lastCreateError: undefined,
         lastError: undefined,
@@ -881,20 +1001,12 @@ export class ConversationBookingFlowService {
 
     const crmTz = slotFetch.crmTimezoneUsed?.trim() || 'UTC';
     const win = booking.preferredTimeWindow;
-    let pool = slotFetch.slots;
-    let usedWindowFallback = false;
-    if (win && win !== 'exact' && slotFetch.slots.length > 0) {
-      const filtered = filterFreeSlotsByTimeWindow(slotFetch.slots, win, crmTz);
-      if (filtered.length >= 1) pool = filtered;
-      else usedWindowFallback = true;
-    }
-
-    const top = pickTopSlots(
-      pool,
-      booking.preferredTime,
-      3,
-      booking.slotDurationMinutes ?? 30,
-    );
+    const { ranked: top, usedWindowFallback } = rankSlotsForBookingOffer(slotFetch.slots, {
+      preferredHm: booking.preferredTime,
+      preferredWindow: win && win !== 'exact' ? win : undefined,
+      crmTimeZone: crmTz,
+      max: 3,
+    });
     if (top.length === 0) {
       const nextMeta = mergeBookingIntoConversationMetadata(prevMeta, { ...booking, status: 'collecting_details' });
       return {
@@ -936,6 +1048,7 @@ export class ConversationBookingFlowService {
       ...booking,
       status: 'offered_slots',
       offeredSlots: offered,
+      offeredSlotsCrmTimeZone: crmTz,
       lastOfferedAt: new Date().toISOString(),
       pendingFieldId: undefined,
       pendingFieldLabel: undefined,

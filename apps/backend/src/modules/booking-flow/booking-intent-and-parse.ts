@@ -377,6 +377,71 @@ export function filterFreeSlotsByTimeWindow<T extends { startTime: string }>(
   });
 }
 
+/** Minutes from midnight for a CRM-local HH:MM preference string. */
+export function normalizedHmToMinutes(hm: string): number | undefined {
+  const parts = hm.trim().split(':');
+  const hh = parseInt(parts[0] ?? '', 10);
+  const mm = parseInt(parts[1] ?? '0', 10);
+  if (!Number.isFinite(hh)) return undefined;
+  return hh * 60 + (Number.isFinite(mm) ? mm : 0);
+}
+
+/** CRM-local minutes-from-midnight for a slot start ISO instant. */
+export function slotStartLocalMinutes(iso: string, crmTimeZone: string): number | undefined {
+  const hm = getSlotHourMinuteInZone(iso, crmTimeZone);
+  if (!hm) return undefined;
+  return minutesFromMidnight(hm.h, hm.m);
+}
+
+/**
+ * Rank real CRM slots for offer: optional window filter (with fallback to full list),
+ * then by exact preferred time first, then closest to preferred time, else chronological.
+ */
+export function rankSlotsForBookingOffer<T extends { startTime: string }>(
+  slots: T[],
+  opts: {
+    preferredHm?: string;
+    preferredWindow?: AisbpPreferredTimeWindow;
+    crmTimeZone: string;
+    max: number;
+  },
+): { ranked: T[]; usedWindowFallback: boolean; hasExactPreferredTimeMatch: boolean } {
+  const tz = opts.crmTimeZone?.trim() || 'UTC';
+  const uniq = new Map<string, T>();
+  for (const s of slots) {
+    if (!uniq.has(s.startTime)) uniq.set(s.startTime, s);
+  }
+  let pool = [...uniq.values()];
+  let usedWindowFallback = false;
+  const win = opts.preferredWindow;
+  if (win && win !== 'exact' && pool.length > 0) {
+    const filtered = filterFreeSlotsByTimeWindow(pool, win, tz);
+    if (filtered.length >= 1) pool = filtered;
+    else usedWindowFallback = true;
+  }
+  const targetMins = opts.preferredHm ? normalizedHmToMinutes(opts.preferredHm) : undefined;
+  let hasExactPreferredTimeMatch = false;
+  if (targetMins !== undefined && Number.isFinite(targetMins)) {
+    pool.sort((a, b) => {
+      const ta = slotStartLocalMinutes(a.startTime, tz);
+      const tb = slotStartLocalMinutes(b.startTime, tz);
+      if (ta === undefined || tb === undefined) return Date.parse(a.startTime) - Date.parse(b.startTime);
+      const exactA = ta === targetMins ? 1 : 0;
+      const exactB = tb === targetMins ? 1 : 0;
+      if (exactA !== exactB) return exactB - exactA;
+      const distA = Math.abs(ta - targetMins);
+      const distB = Math.abs(tb - targetMins);
+      if (distA !== distB) return distA - distB;
+      return ta - tb;
+    });
+    const firstM = pool[0] ? slotStartLocalMinutes(pool[0].startTime, tz) : undefined;
+    hasExactPreferredTimeMatch = firstM !== undefined && firstM === targetMins;
+  } else {
+    pool.sort((a, b) => Date.parse(a.startTime) - Date.parse(b.startTime));
+  }
+  return { ranked: pool.slice(0, opts.max), usedWindowFallback, hasExactPreferredTimeMatch };
+}
+
 export function extractServiceGuess(text: string): string | undefined {
   return extractServiceFromBookingMessage(text) ?? legacyExtractServiceGuess(text);
 }
@@ -506,6 +571,10 @@ export type SlotSelectionParse =
 export function parseSlotSelection(text: string, offered: { option: number; displayText: string; startIso: string }[]): SlotSelectionParse {
   const t = text.trim().toLowerCase();
   if (!t) return { kind: 'unclear' };
+  const hmEarly = extractPreferredTime(text);
+  if (hmEarly) {
+    return { kind: 'time', normalizedHm: hmEarly };
+  }
   if (/^1\b|^one\b|^first\b/.test(t)) return { kind: 'option', option: 1 };
   if (/^2\b|^two\b|^second\b/.test(t)) return { kind: 'option', option: 2 };
   if (/^3\b|^three\b|^third\b/.test(t)) return { kind: 'option', option: 3 };
@@ -514,10 +583,6 @@ export function parseSlotSelection(text: string, offered: { option: number; disp
     const n = parseInt(digit[1]!, 10);
     if (n >= 1 && n <= 3) return { kind: 'option', option: n };
   }
-  const hm = extractPreferredTime(text);
-  if (hm) {
-    return { kind: 'time', normalizedHm: hm };
-  }
   return { kind: 'unclear' };
 }
 
@@ -525,21 +590,92 @@ export function parseSlotSelection(text: string, offered: { option: number; disp
 export function matchOfferedByHm(
   offered: { option: number; displayText: string; startIso: string }[],
   normalizedHm: string,
+  crmTimeZone?: string,
 ): { option: number; displayText: string; startIso: string } | undefined {
-  const [hhRaw, mmRaw] = normalizedHm.split(':');
-  const hh = parseInt(hhRaw ?? '', 10);
-  const mm = parseInt(mmRaw ?? '0', 10);
-  if (!Number.isFinite(hh)) return undefined;
-  const mmSafe = Number.isFinite(mm) ? mm : 0;
-  const needle = new Date();
-  needle.setHours(hh, mmSafe, 0, 0);
-  const wantH = needle.getHours();
-  const wantM = needle.getMinutes();
+  const want = normalizedHmToMinutes(normalizedHm);
+  if (want === undefined) return undefined;
+  const tz = crmTimeZone?.trim();
   for (const o of offered) {
-    const d = new Date(o.startIso);
-    if (!Number.isFinite(d.getTime())) continue;
-    if (d.getHours() === wantH && d.getMinutes() === wantM) return o;
+    if (tz) {
+      const sm = slotStartLocalMinutes(o.startIso, tz);
+      if (sm === want) return o;
+    } else {
+      const [hhRaw, mmRaw] = normalizedHm.split(':');
+      const hh = parseInt(hhRaw ?? '', 10);
+      const mm = parseInt(mmRaw ?? '0', 10);
+      if (!Number.isFinite(hh)) continue;
+      const mmSafe = Number.isFinite(mm) ? mm : 0;
+      const needle = new Date();
+      needle.setHours(hh, mmSafe, 0, 0);
+      const wantH = needle.getHours();
+      const wantM = needle.getMinutes();
+      const d = new Date(o.startIso);
+      if (!Number.isFinite(d.getTime())) continue;
+      if (d.getHours() === wantH && d.getMinutes() === wantM) return o;
+    }
   }
   if (offered.length === 1) return offered[0];
   return undefined;
+}
+
+export type SlotSelectionOrTimeRevision =
+  | { kind: 'selected_slot'; slot: { option: number; displayText: string; startIso: string; calendarId?: string } }
+  | { kind: 'time_revision'; preferredTime: string }
+  | { kind: 'time_window_revision'; preferredTimeWindow: AisbpPreferredTimeWindow }
+  | {
+      kind: 'date_time_revision';
+      preferredDate: string;
+      preferredTime?: string;
+      preferredTimeWindow?: AisbpPreferredTimeWindow;
+    }
+  | { kind: 'unparseable' };
+
+export function resolveBookingDateFromInboundText(text: string, todayYmd: string): string | undefined {
+  return resolveRelativeDayPhrase(text, todayYmd) ?? resolveBookingCalendarDay(text, todayYmd);
+}
+
+/**
+ * In `offered_slots` state: detect picking a listed slot vs revising time/window/date for a fresh fetch.
+ */
+export function parseSlotSelectionOrTimeRevision(
+  message: string,
+  offeredSlots: { option: number; displayText: string; startIso: string; calendarId?: string }[],
+  crmTimezone: string,
+  currentPreferredDate: string,
+  todayYmd: string,
+): SlotSelectionOrTimeRevision {
+  const cleaned = stripBookingFrustrationForParse(message.replace(/\s+/g, ' ').trim()).cleaned;
+  if (!cleaned) return { kind: 'unparseable' };
+  const curDate = currentPreferredDate.trim();
+  const newDate = resolveBookingDateFromInboundText(cleaned, todayYmd);
+
+  const hm = extractPreferredTime(cleaned);
+  const winOnly = !hm ? extractPreferredTimeWindow(cleaned) : undefined;
+
+  if (newDate && newDate !== curDate) {
+    if (hm) return { kind: 'date_time_revision', preferredDate: newDate, preferredTime: hm };
+    if (winOnly) return { kind: 'date_time_revision', preferredDate: newDate, preferredTimeWindow: winOnly };
+    return { kind: 'unparseable' };
+  }
+
+  if (hm) {
+    const m = matchOfferedByHm(offeredSlots, hm, crmTimezone);
+    if (m) return { kind: 'selected_slot', slot: m };
+    return { kind: 'time_revision', preferredTime: hm };
+  }
+
+  if (winOnly) return { kind: 'time_window_revision', preferredTimeWindow: winOnly };
+
+  const sel = parseSlotSelection(cleaned, offeredSlots);
+  if (sel.kind === 'option') {
+    const slot = offeredSlots.find(o => o.option === sel.option);
+    if (slot) return { kind: 'selected_slot', slot };
+    return { kind: 'unparseable' };
+  }
+  if (sel.kind === 'time') {
+    const m2 = matchOfferedByHm(offeredSlots, sel.normalizedHm, crmTimezone);
+    if (m2) return { kind: 'selected_slot', slot: m2 };
+    return { kind: 'time_revision', preferredTime: sel.normalizedHm };
+  }
+  return { kind: 'unparseable' };
 }

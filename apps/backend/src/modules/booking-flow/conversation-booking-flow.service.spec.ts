@@ -1383,4 +1383,322 @@ describe('ConversationBookingFlowService', () => {
       }
     });
   });
+
+  describe('offered_slots selection and time revision', () => {
+    const offeredMorningUtc = [
+      {
+        option: 1,
+        startIso: '2026-05-10T12:00:00.000Z',
+        endIso: '2026-05-10T12:30:00.000Z',
+        displayText: '12:00 PM',
+        calendarId: 'cal_1',
+      },
+      {
+        option: 2,
+        startIso: '2026-05-10T12:30:00.000Z',
+        endIso: '2026-05-10T13:00:00.000Z',
+        displayText: '12:30 PM',
+        calendarId: 'cal_1',
+      },
+      {
+        option: 3,
+        startIso: '2026-05-10T13:00:00.000Z',
+        endIso: '2026-05-10T13:30:00.000Z',
+        displayText: '1:00 PM',
+        calendarId: 'cal_1',
+      },
+    ];
+
+    const slotFetchResponse = (slots: { startTime: string; endTime: string }[]) => ({
+      slots,
+      calendarId: 'cal_1',
+      error: undefined as string | undefined,
+      retriedWithUserId: null,
+      crmTimezoneUsed: 'UTC',
+      selectedDate: '2026-05-10',
+      selectedTime: '',
+      startMs: 0,
+      endMs: 1,
+      ghlLocationId: 'loc',
+    });
+
+    function baseOfferedMeta(offered: typeof offeredMorningUtc): Record<string, unknown> {
+      return {
+        aisbp_booking: {
+          status: 'offered_slots',
+          version: 1,
+          calendarId: 'cal_1',
+          customerName: 'Alex',
+          phone: '+15551234567',
+          service: 'Haircut',
+          preferredDate: '2026-05-10',
+          offeredSlots: offered,
+          offeredSlotsCrmTimeZone: 'UTC',
+          slotDurationMinutes: 30,
+        },
+      };
+    }
+
+    it('D: offered_slots "3" books the third listed slot', async () => {
+      const slotRows = [
+        { startTime: '2026-05-10T10:00:00.000Z', endTime: '2026-05-10T10:30:00.000Z' },
+        { startTime: '2026-05-10T11:00:00.000Z', endTime: '2026-05-10T11:30:00.000Z' },
+        { startTime: '2026-05-10T11:30:00.000Z', endTime: '2026-05-10T12:00:00.000Z' },
+      ];
+      const fetchFree = jest.fn(async () => slotFetchResponse(slotRows));
+      const bookSlot = jest.fn(async () => ({ success: true, appointmentId: 'ap_d3' }));
+      const offered = [
+        {
+          option: 1,
+          startIso: '2026-05-10T10:00:00.000Z',
+          endIso: '2026-05-10T10:30:00.000Z',
+          displayText: '6:00 AM',
+          calendarId: 'cal_1',
+        },
+        {
+          option: 2,
+          startIso: '2026-05-10T11:00:00.000Z',
+          endIso: '2026-05-10T11:30:00.000Z',
+          displayText: '7:00 AM',
+          calendarId: 'cal_1',
+        },
+        {
+          option: 3,
+          startIso: '2026-05-10T11:30:00.000Z',
+          endIso: '2026-05-10T12:00:00.000Z',
+          displayText: '7:30 AM',
+          calendarId: 'cal_1',
+        },
+      ];
+      const booking = {
+        getBookingSettings: jest.fn(async () => baseSettings),
+        fetchFreeSlotsForAutomation: fetchFree,
+      } as unknown as BookingSettingsService;
+      const ghl = {
+        createGhlClientForConnectedTenantWorkerOrThrow: jest.fn(async () => ({
+          client: {
+            bookSlot,
+            getContact: jest.fn(async () => ({ success: true, contact: {} })),
+            getCalendar: jest.fn(async () => ({ summary: {} })),
+            updateAppointmentNotes: jest.fn(async () => ({ success: true })),
+            addContactNote: jest.fn(async () => ({ success: true })),
+            findContactByPhone: jest.fn(async () => ({ success: true, contact: undefined })),
+            createContact: jest.fn(),
+            sendMessage: jest.fn(),
+          },
+          ghlLocationId: 'loc1',
+        })),
+      } as unknown as GhlService;
+      const r = await svc(booking, ghl).maybeHandleConversationBookingTurn({
+        tenantId: 't1',
+        conversationId: 'c_slot_d',
+        contactId: 'ct1',
+        channel: 'SMS',
+        combinedInboundText: '3',
+        latestInboundText: '3',
+        metadata: baseOfferedMeta(offered),
+      });
+      expect(r.handled).toBe(true);
+      expect(bookSlot).toHaveBeenCalled();
+      const arg = (bookSlot.mock.calls[0] ?? [])[0] as { startTime?: string };
+      expect(arg.startTime).toBe('2026-05-10T11:30:00.000Z');
+    });
+
+    it('A: offered_slots "2pm can?" does not send rigid numeric-only pick copy', async () => {
+      const afternoonSlots = [
+        { startTime: '2026-05-10T14:00:00.000Z', endTime: '2026-05-10T14:30:00.000Z' },
+        { startTime: '2026-05-10T14:30:00.000Z', endTime: '2026-05-10T15:00:00.000Z' },
+        { startTime: '2026-05-10T15:00:00.000Z', endTime: '2026-05-10T15:30:00.000Z' },
+      ];
+      const fetchFree = jest.fn(async () => slotFetchResponse(afternoonSlots));
+      const booking = {
+        getBookingSettings: jest.fn(async () => baseSettings),
+        fetchFreeSlotsForAutomation: fetchFree,
+      } as unknown as BookingSettingsService;
+      const r = await svc(booking, {} as GhlService).maybeHandleConversationBookingTurn({
+        tenantId: 't1',
+        conversationId: 'c_slot_a',
+        contactId: 'ct1',
+        channel: 'SMS',
+        combinedInboundText: '2pm can?',
+        latestInboundText: '2pm can?',
+        metadata: baseOfferedMeta(offeredMorningUtc),
+      });
+      expect(r.handled).toBe(true);
+      if (r.handled) {
+        expect(r.replyPlan.bubbles[0]!.text).not.toMatch(/Please reply with 1, 2, or 3/i);
+        expect(r.replyPlan.bubbles[0]!.text).toMatch(/2:00\s*PM/i);
+      }
+    });
+
+    it('B: offered_slots "I want 2pm" refetches with preferredTime 14:00', async () => {
+      const afternoonSlots = [
+        { startTime: '2026-05-10T14:00:00.000Z', endTime: '2026-05-10T14:30:00.000Z' },
+        { startTime: '2026-05-10T14:30:00.000Z', endTime: '2026-05-10T15:00:00.000Z' },
+      ];
+      const fetchFree = jest.fn(async () => slotFetchResponse(afternoonSlots));
+      const booking = {
+        getBookingSettings: jest.fn(async () => baseSettings),
+        fetchFreeSlotsForAutomation: fetchFree,
+      } as unknown as BookingSettingsService;
+      await svc(booking, {} as GhlService).maybeHandleConversationBookingTurn({
+        tenantId: 't1',
+        conversationId: 'c_slot_b',
+        contactId: 'ct1',
+        channel: 'SMS',
+        combinedInboundText: 'I want 2pm',
+        latestInboundText: 'I want 2pm',
+        metadata: baseOfferedMeta(offeredMorningUtc),
+      });
+      const last = fetchFree.mock.calls.at(-1)?.[1] as { selectedTime?: string } | undefined;
+      expect(last?.selectedTime).toBe('14:00');
+    });
+
+    it('C: offered_slots "afternoon" sets preferredTimeWindow and refetches', async () => {
+      const pool = [
+        { startTime: '2026-05-10T14:00:00.000Z', endTime: '2026-05-10T14:30:00.000Z' },
+        { startTime: '2026-05-10T15:00:00.000Z', endTime: '2026-05-10T15:30:00.000Z' },
+      ];
+      const fetchFree = jest.fn(async () => slotFetchResponse(pool));
+      const booking = {
+        getBookingSettings: jest.fn(async () => baseSettings),
+        fetchFreeSlotsForAutomation: fetchFree,
+      } as unknown as BookingSettingsService;
+      const r = await svc(booking, {} as GhlService).maybeHandleConversationBookingTurn({
+        tenantId: 't1',
+        conversationId: 'c_slot_c',
+        contactId: 'ct1',
+        channel: 'SMS',
+        combinedInboundText: 'afternoon',
+        latestInboundText: 'afternoon',
+        metadata: baseOfferedMeta(offeredMorningUtc),
+      });
+      expect(r.handled).toBe(true);
+      if (r.handled) {
+        const b = (r.persistMetadata as Record<string, unknown>).aisbp_booking as Record<string, unknown>;
+        expect(b.preferredTimeWindow).toBe('afternoon');
+        expect(b.preferredTime).toBeUndefined();
+      }
+    });
+
+    it('F: when 2pm exists in CRM, it is listed first after revision', async () => {
+      const slots = [
+        { startTime: '2026-05-10T14:00:00.000Z', endTime: '2026-05-10T14:30:00.000Z' },
+        { startTime: '2026-05-10T15:30:00.000Z', endTime: '2026-05-10T16:00:00.000Z' },
+        { startTime: '2026-05-10T16:00:00.000Z', endTime: '2026-05-10T16:30:00.000Z' },
+      ];
+      const fetchFree = jest.fn(async () => slotFetchResponse(slots));
+      const booking = {
+        getBookingSettings: jest.fn(async () => baseSettings),
+        fetchFreeSlotsForAutomation: fetchFree,
+      } as unknown as BookingSettingsService;
+      const r = await svc(booking, {} as GhlService).maybeHandleConversationBookingTurn({
+        tenantId: 't1',
+        conversationId: 'c_slot_f',
+        contactId: 'ct1',
+        channel: 'SMS',
+        combinedInboundText: '2pm',
+        latestInboundText: '2pm',
+        metadata: baseOfferedMeta(offeredMorningUtc),
+      });
+      expect(r.handled).toBe(true);
+      if (r.handled) {
+        const text = r.replyPlan.bubbles[0]!.text;
+        expect(text).toMatch(/1\.\s*2:00\s*PM/i);
+      }
+    });
+
+    it('G: when 2pm missing, copy mentions unavailable and closest slots', async () => {
+      const slots = [
+        { startTime: '2026-05-10T13:30:00.000Z', endTime: '2026-05-10T14:00:00.000Z' },
+        { startTime: '2026-05-10T14:30:00.000Z', endTime: '2026-05-10T15:00:00.000Z' },
+        { startTime: '2026-05-10T15:00:00.000Z', endTime: '2026-05-10T15:30:00.000Z' },
+      ];
+      const fetchFree = jest.fn(async () => slotFetchResponse(slots));
+      const booking = {
+        getBookingSettings: jest.fn(async () => baseSettings),
+        fetchFreeSlotsForAutomation: fetchFree,
+      } as unknown as BookingSettingsService;
+      const r = await svc(booking, {} as GhlService).maybeHandleConversationBookingTurn({
+        tenantId: 't1',
+        conversationId: 'c_slot_g',
+        contactId: 'ct1',
+        channel: 'SMS',
+        combinedInboundText: '2pm',
+        latestInboundText: '2pm',
+        metadata: baseOfferedMeta(offeredMorningUtc),
+      });
+      expect(r.handled).toBe(true);
+      if (r.handled) {
+        const t = r.replyPlan.bubbles[0]!.text;
+        expect(t.toLowerCase()).toMatch(/isn't available|not available/i);
+        expect(t).toMatch(/1\./);
+      }
+    });
+
+    it('H: gibberish still gets softer selection help copy', async () => {
+      const fetchFree = jest.fn(async () => slotFetchResponse([]));
+      const booking = {
+        getBookingSettings: jest.fn(async () => baseSettings),
+        fetchFreeSlotsForAutomation: fetchFree,
+      } as unknown as BookingSettingsService;
+      const r = await svc(booking, {} as GhlService).maybeHandleConversationBookingTurn({
+        tenantId: 't1',
+        conversationId: 'c_slot_h',
+        contactId: 'ct1',
+        channel: 'SMS',
+        combinedInboundText: 'asdfgh qwerty',
+        latestInboundText: 'asdfgh qwerty',
+        metadata: baseOfferedMeta(offeredMorningUtc),
+      });
+      expect(r.handled).toBe(true);
+      if (r.handled) {
+        expect(r.replyPlan.bubbles[0]!.text).toMatch(/listed times/i);
+        expect(r.replyPlan.bubbles[0]!.text).not.toMatch(/Please reply with 1, 2, or 3/i);
+      }
+    });
+
+    it('E: exact displayed time from offer books that slot', async () => {
+      const slotRows = [
+        { startTime: '2026-05-10T12:00:00.000Z', endTime: '2026-05-10T12:30:00.000Z' },
+        { startTime: '2026-05-10T12:30:00.000Z', endTime: '2026-05-10T13:00:00.000Z' },
+        { startTime: '2026-05-10T13:00:00.000Z', endTime: '2026-05-10T13:30:00.000Z' },
+      ];
+      const fetchFree = jest.fn(async () => slotFetchResponse(slotRows));
+      const bookSlot = jest.fn(async () => ({ success: true, appointmentId: 'ap_e' }));
+      const booking = {
+        getBookingSettings: jest.fn(async () => baseSettings),
+        fetchFreeSlotsForAutomation: fetchFree,
+      } as unknown as BookingSettingsService;
+      const ghl = {
+        createGhlClientForConnectedTenantWorkerOrThrow: jest.fn(async () => ({
+          client: {
+            bookSlot,
+            getContact: jest.fn(async () => ({ success: true, contact: {} })),
+            getCalendar: jest.fn(async () => ({ summary: {} })),
+            updateAppointmentNotes: jest.fn(async () => ({ success: true })),
+            addContactNote: jest.fn(async () => ({ success: true })),
+            findContactByPhone: jest.fn(async () => ({ success: true, contact: undefined })),
+            createContact: jest.fn(),
+            sendMessage: jest.fn(),
+          },
+          ghlLocationId: 'loc1',
+        })),
+      } as unknown as GhlService;
+      const r = await svc(booking, ghl).maybeHandleConversationBookingTurn({
+        tenantId: 't1',
+        conversationId: 'c_slot_e',
+        contactId: 'ct1',
+        channel: 'SMS',
+        combinedInboundText: '12:30 PM',
+        latestInboundText: '12:30 PM',
+        metadata: baseOfferedMeta(offeredMorningUtc),
+      });
+      expect(r.handled).toBe(true);
+      expect(bookSlot).toHaveBeenCalled();
+      if (r.handled) {
+        expect(r.replyPlan.bubbles[0]!.text.toLowerCase()).toMatch(/confirmed/);
+      }
+    });
+  });
 });

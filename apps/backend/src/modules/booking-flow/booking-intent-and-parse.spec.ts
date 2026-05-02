@@ -7,6 +7,8 @@ import {
   parseFirstVisitNaturalReply,
   parsePlainNameAnswerLine,
   parseSlotSelection,
+  parseSlotSelectionOrTimeRevision,
+  rankSlotsForBookingOffer,
   resolveBookingCalendarDay,
   resolveRelativeDayPhrase,
   stripBookingFrustrationForParse,
@@ -21,6 +23,10 @@ describe('parseSlotSelection', () => {
 
   it('maps "2" to second slot', () => {
     expect(parseSlotSelection('2', offered)).toEqual({ kind: 'option', option: 2 });
+  });
+
+  it('parses "2 pm" as a time, not option 2', () => {
+    expect(parseSlotSelection('2 pm can?', offered)).toEqual({ kind: 'time', normalizedHm: '14:00' });
   });
 });
 
@@ -117,5 +123,50 @@ describe('parseFirstVisitNaturalReply', () => {
     expect(parseFirstVisitNaturalReply('yes')).toBe('yes');
     expect(parseFirstVisitNaturalReply('no')).toBe('no');
     expect(parseFirstVisitNaturalReply('nope')).toBe('no');
+  });
+});
+
+describe('parseSlotSelectionOrTimeRevision', () => {
+  const offered = [
+    { option: 1, displayText: '12:00 PM', startIso: '2026-05-10T12:00:00.000Z' },
+    { option: 2, displayText: '12:30 PM', startIso: '2026-05-10T12:30:00.000Z' },
+    { option: 3, displayText: '1:00 PM', startIso: '2026-05-10T13:00:00.000Z' },
+  ];
+
+  it('returns time_revision when 2pm is not in the offer list', () => {
+    const r = parseSlotSelectionOrTimeRevision('2pm can?', offered, 'UTC', '2026-05-10', '2026-05-01');
+    expect(r).toEqual({ kind: 'time_revision', preferredTime: '14:00' });
+  });
+
+  it('returns selected_slot for numeric 3', () => {
+    const r = parseSlotSelectionOrTimeRevision('3', offered, 'UTC', '2026-05-10', '2026-05-01');
+    expect(r.kind).toBe('selected_slot');
+    if (r.kind === 'selected_slot') expect(r.slot.option).toBe(3);
+  });
+
+  it('returns date_time_revision for tomorrow 2pm', () => {
+    const r = parseSlotSelectionOrTimeRevision('tomorrow 2pm', offered, 'UTC', '2026-05-10', '2026-05-01');
+    expect(r.kind).toBe('date_time_revision');
+    if (r.kind === 'date_time_revision') {
+      expect(r.preferredDate).toBe('2026-05-02');
+      expect(r.preferredTime).toBe('14:00');
+    }
+  });
+});
+
+describe('rankSlotsForBookingOffer', () => {
+  it('orders exact preferred time first then closest', () => {
+    const slots = [
+      { startTime: '2026-05-10T13:00:00.000Z' },
+      { startTime: '2026-05-10T14:30:00.000Z' },
+      { startTime: '2026-05-10T14:00:00.000Z' },
+    ];
+    const { ranked, hasExactPreferredTimeMatch } = rankSlotsForBookingOffer(slots, {
+      preferredHm: '14:00',
+      crmTimeZone: 'UTC',
+      max: 3,
+    });
+    expect(hasExactPreferredTimeMatch).toBe(true);
+    expect(ranked[0]!.startTime).toBe('2026-05-10T14:00:00.000Z');
   });
 });

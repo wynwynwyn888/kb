@@ -59,6 +59,8 @@ export interface AisbpBookingStateV1 {
   /** Consecutive failed parses while the same optional `pendingFieldId` was set. */
   pendingParseFailureCount?: number;
   offeredSlots?: AisbpOfferedSlot[];
+  /** CRM IANA zone used when last offering slots (for parsing slot picks vs time revisions). */
+  offeredSlotsCrmTimeZone?: string;
   lastOfferedAt?: string;
   selectedSlot?: AisbpOfferedSlot;
   appointmentId?: string;
@@ -208,6 +210,8 @@ export function parseAisbpBookingState(metadata: Record<string, unknown> | undef
         ? Math.max(0, Math.floor(o['pendingParseFailureCount'] as number))
         : undefined,
     offeredSlots,
+    offeredSlotsCrmTimeZone:
+      typeof o['offeredSlotsCrmTimeZone'] === 'string' ? o['offeredSlotsCrmTimeZone'].trim() : undefined,
     lastOfferedAt: typeof o['lastOfferedAt'] === 'string' ? o['lastOfferedAt'] : undefined,
     selectedSlot: selected,
     appointmentId: typeof o['appointmentId'] === 'string' ? o['appointmentId'] : undefined,

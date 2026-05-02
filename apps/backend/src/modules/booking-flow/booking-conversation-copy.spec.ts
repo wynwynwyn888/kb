@@ -20,4 +20,18 @@ describe('formatCustomFieldBookingQuestion', () => {
     expect(t).toContain('Options: Male, Female, No preference');
     expect(t.toLowerCase()).toContain('skip');
   });
+
+  it('I: splits comma-joined option string into spaced list', () => {
+    const cf: CustomBookingFieldDto = {
+      id: 'f2',
+      label: 'Pick one',
+      fieldType: 'single_select',
+      required: false,
+      enabled: true,
+      displayOrder: 0,
+      options: ['Male,Female,Anything'],
+    };
+    const t = formatCustomFieldBookingQuestion(cf, false);
+    expect(t).toContain('Options: Male, Female, Anything');
+  });
 });

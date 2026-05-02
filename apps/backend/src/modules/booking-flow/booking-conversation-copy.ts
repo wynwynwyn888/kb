@@ -65,6 +65,34 @@ export function copySlotsOfferedWithHumanDate(humanDate: string, lines: string[]
   return `I found these available slots for ${humanDate}:\n\n${body}\n\nWhich one would you like me to reserve?`;
 }
 
+/** 24h HH:MM → en-US 12h label (deterministic, UTC wall clock for the time-of-day only). */
+export function formatPreferredHmForDisplay(hm: string): string {
+  const parts = hm.trim().split(':');
+  const h = parseInt(parts[0] ?? '', 10);
+  const m = parseInt(parts[1] ?? '0', 10);
+  if (!Number.isFinite(h) || h < 0 || h > 23) return hm.trim();
+  const d = new Date(Date.UTC(2000, 0, 1, h, Number.isFinite(m) ? m : 0, 0));
+  return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'UTC' });
+}
+
+export function copySlotsAroundRequestedTime(humanDate: string, requestedTimeLabel: string, lines: string[]): string {
+  const body = lines.map((ln, i) => `${i + 1}. ${ln}`).join('\n');
+  return `I found these available slots around ${requestedTimeLabel} for ${humanDate}:\n\n${body}\n\nWhich one would you like me to reserve?`;
+}
+
+export function copyClosestSlotsWhenPreferredUnavailable(
+  humanDate: string,
+  requestedTimeLabel: string,
+  lines: string[],
+): string {
+  const body = lines.map((ln, i) => `${i + 1}. ${ln}`).join('\n');
+  return `${requestedTimeLabel} isn't available for ${humanDate}. The closest options are:\n\n${body}\n\nWhich one would you like me to reserve?`;
+}
+
+export function copySingleExactTimeAvailable(humanDate: string, slotDisplay: string): string {
+  return `${slotDisplay} is available for ${humanDate}.\n\nWould you like me to reserve it?\n\nReply 1 to confirm, or tell me another time you prefer.`;
+}
+
 export function copyNoSlotsInWindow(humanDate: string, windowLabel: string, lines: string[]): string {
   const body = lines.map((ln, i) => `${i + 1}. ${ln}`).join('\n');
   return `I checked the ${windowLabel} slots for ${humanDate}, but they're fully booked. The nearest available options are:\n\n${body}\n\nWhich one would you like me to reserve?`;
@@ -87,7 +115,11 @@ export function copyRequiredFieldCannotSkip(): string {
 }
 
 export function copyPickSlotNumeric(): string {
-  return 'Please reply with 1, 2, or 3 to pick one of the listed times, or repeat the time exactly as shown.';
+  return copyPickSlotHelpSofter();
+}
+
+export function copyPickSlotHelpSofter(): string {
+  return 'Please choose one of the listed times, or tell me another time you prefer.';
 }
 
 function collapseWhitespace(s: string): string {
@@ -125,10 +157,16 @@ export function formatCustomFieldBookingQuestion(cf: CustomBookingFieldDto, opti
   const base = dedupeQuestionMarks(raw.replace(/[.!…]+$/g, '').trim());
   const suffix = optionalHint ? ' You can skip this if you prefer.' : '';
 
-  const opts =
+  const flatOpts =
     (cf.fieldType === 'single_select' || cf.fieldType === 'single_choice') && cf.options?.length
-      ? `\n\nOptions: ${cf.options.map(o => o.trim()).filter(Boolean).join(', ')}`
-      : '';
+      ? cf.options.flatMap(o =>
+          o
+            .split(',')
+            .map(x => x.trim())
+            .filter(Boolean),
+        )
+      : [];
+  const opts = flatOpts.length ? `\n\nOptions: ${flatOpts.join(', ')}` : '';
 
   const cleaned = sentenceCaseFromLabel(base);
   if (/\bpreference\b/i.test(cleaned) || (/\bmale\b/i.test(cleaned) && /\bfemale\b/i.test(cleaned))) {

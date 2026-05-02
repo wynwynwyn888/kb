@@ -22,6 +22,7 @@ const config: Config = {
     '^@aisbp/db$': '<rootDir>/../../packages/db/src',
     '^@aisbp/ghl-client$': '<rootDir>/../../packages/ghl-client/src',
     '^@aisbp/ai-router$': '<rootDir>/../../packages/ai-router/src',
+    '^@aisbp/ai-provider-openai$': '<rootDir>/../../packages/ai-provider-openai/src',
     '^@aisbp/formatter$': '<rootDir>/../../packages/formatter/src',
     // Allow TS source imports that use NodeNext-style ".js" suffixes when running under
     // Jest+ts-jest with classic CommonJS resolution.

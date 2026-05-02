@@ -3,10 +3,11 @@ import { BookingSettingsModule } from '../booking-settings/booking-settings.modu
 import { GhlModule } from '../ghl/ghl.module';
 import { BookingPostConfirmService } from './booking-post-confirm.service';
 import { ConversationBookingFlowService } from './conversation-booking-flow.service';
+import { BookingNluInterpreterService } from './booking-nlu-interpreter.service';
 
 @Module({
   imports: [BookingSettingsModule, GhlModule],
-  providers: [ConversationBookingFlowService, BookingPostConfirmService],
+  providers: [ConversationBookingFlowService, BookingPostConfirmService, BookingNluInterpreterService],
   exports: [ConversationBookingFlowService],
 })
 export class BookingFlowModule {}

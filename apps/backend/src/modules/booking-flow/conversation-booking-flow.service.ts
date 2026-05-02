@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { createHash, randomUUID } from 'crypto';
 import { formatPostgrestError } from '../../lib/format-postgrest-error';
 import { getSupabaseService } from '../../lib/supabase';
@@ -40,8 +40,15 @@ import {
 import {
   customSelectAnswerIsWholeOptionList,
   isAcceptedBookingServiceValue,
+  matchUserLineToMenuOption,
   resolveServiceFromBookingIntake,
 } from './booking-service-intake';
+import { BookingNluInterpreterService } from './booking-nlu-interpreter.service';
+import {
+  BOOKING_NLU_MIN_MERGE_CONFIDENCE,
+  mergeValidatedNluIntoBooking,
+} from './booking-nlu-merge';
+import type { BookingNluInterpretInput } from './booking-nlu.schema';
 import { applyPendingFieldAnswer, isOptionalSkipIntent } from './booking-pending-field';
 import { buildAppointmentCreateNotes } from './booking-summary';
 import { BookingPostConfirmService } from './booking-post-confirm.service';
@@ -172,6 +179,7 @@ export class ConversationBookingFlowService {
     private readonly bookingSettings: BookingSettingsService,
     private readonly ghlService: GhlService,
     private readonly bookingPostConfirm: BookingPostConfirmService,
+    @Optional() private readonly bookingNluInterpreter?: BookingNluInterpreterService,
   ) {}
 
   /**
@@ -325,8 +333,72 @@ export class ConversationBookingFlowService {
 
     const snapshotBefore = this.snapshotBookingCore(booking);
 
-    const hadFrustration =
-      stripBookingFrustrationForParse(latest).hadFrustration || stripBookingFrustrationForParse(combined).hadFrustration;
+    const stripLatestFr = stripBookingFrustrationForParse(latest);
+    const stripCombinedFr = stripBookingFrustrationForParse(combined);
+    const deterministicHadFrustration =
+      stripLatestFr.hadFrustration || stripCombinedFr.hadFrustration;
+
+    const bareSlotSkip =
+      booking.status === 'offered_slots' &&
+      Boolean(booking.offeredSlots?.length) &&
+      this.isBareOfferedSlotIndexLine(latest, booking.offeredSlots);
+
+    const skipBookingNlu = !latest.trim() || !this.bookingNluInterpreter || bareSlotSkip;
+
+    if (latest.trim() && !this.bookingNluInterpreter && !bareSlotSkip) {
+      this.logger.log(
+        `bookingNluUnavailable ${JSON.stringify({
+          tenantId: params.tenantId,
+          conversationId: params.conversationId,
+          reason: 'interpreter_not_configured',
+        })}`,
+      );
+    }
+
+    let clearedPendingFieldId: string | undefined;
+    let nluUserFrustrated = false;
+    if (!skipBookingNlu) {
+      const crmTzForNlu = booking.offeredSlotsCrmTimeZone?.trim() || tz;
+      const input = this.buildBookingNluInterpretInput({
+        tenantId: params.tenantId,
+        conversationId: params.conversationId,
+        latest,
+        combined,
+        booking,
+        settings,
+        crmTimezone: crmTzForNlu,
+      });
+      const out = await this.bookingNluInterpreter.interpret(input);
+      if (out) {
+        nluUserFrustrated = Boolean(out.userFrustrated);
+        const mergeResult = mergeValidatedNluIntoBooking(booking, settings, out, {
+          minConfidence: BOOKING_NLU_MIN_MERGE_CONFIDENCE,
+          pendingFieldId: booking.pendingFieldId,
+        });
+        const res = this.resolvePendingIfBookingValuesFilled(booking, settings);
+        if (res.clearedPendingFieldId) clearedPendingFieldId = res.clearedPendingFieldId;
+        if (mergeResult.mergedFieldKeys.length > 0) {
+          this.logger.log(
+            `bookingNluMergeApplied ${JSON.stringify({
+              tenantId: params.tenantId,
+              conversationId: params.conversationId,
+              mergedFieldKeys: mergeResult.mergedFieldKeys,
+              ...(clearedPendingFieldId ? { clearedPendingFieldId } : {}),
+            })}`,
+          );
+        } else if (mergeResult.skipReason) {
+          this.logger.log(
+            `bookingNluMergeSkipped ${JSON.stringify({
+              tenantId: params.tenantId,
+              conversationId: params.conversationId,
+              reason: mergeResult.skipReason,
+            })}`,
+          );
+        }
+      }
+    }
+
+    const hadFrustration = deterministicHadFrustration || nluUserFrustrated;
 
     const pendingCustomId = booking.pendingFieldId?.startsWith('custom:')
       ? booking.pendingFieldId.slice('custom:'.length)
@@ -343,6 +415,10 @@ export class ConversationBookingFlowService {
       customFieldDef: pendingCf,
       serviceMenuOptions: settings.serviceMenuOptions,
     });
+    if (clearedPendingFieldId) {
+      booking.pendingParseFailureCount = 0;
+      booking.sameFieldPromptCount = 0;
+    }
     if (pendingAns.answered) {
       booking.pendingParseFailureCount = 0;
       booking.sameFieldPromptCount = 0;
@@ -397,7 +473,7 @@ export class ConversationBookingFlowService {
     }
 
     let frustrationRecoveryPrefix: string | undefined;
-    if (pendingAns.answered && hadFrustration) {
+    if ((pendingAns.answered || clearedPendingFieldId) && hadFrustration) {
       if (
         pendingAns.fieldId === 'preferred_date' &&
         booking.preferredTimeWindow &&
@@ -895,7 +971,7 @@ export class ConversationBookingFlowService {
     }
 
     const fieldChanged =
-      pendingAns.answered || this.snapshotBookingCore(booking) !== snapshotBefore;
+      pendingAns.answered || Boolean(clearedPendingFieldId) || this.snapshotBookingCore(booking) !== snapshotBefore;
 
     const requiredMissing = this.listRequiredMissingFieldIds(settings, booking);
     const optionalPending = this.listOptionalAskPendingFieldIds(settings, booking);
@@ -935,13 +1011,7 @@ export class ConversationBookingFlowService {
       const finalRequired = suppress && fieldRequired && sc >= 2;
       let outQ: string;
       if (finalRequired) {
-        if (nextAsk.startsWith('custom:')) {
-          const cid = nextAsk.slice('custom:'.length);
-          const cf = settings.customFieldsJson.find(c => c.id === cid);
-          outQ = copyRequiredFieldPoliteFinal(cf?.label);
-        } else {
-          outQ = copyRequiredFieldPoliteFinal();
-        }
+        outQ = this.copyFinalRequiredFieldAsk(nextAsk, settings);
       } else if (suppress) {
         outQ = this.clarifyRepeatedAsk(nextAsk, settings);
       } else {
@@ -984,7 +1054,8 @@ export class ConversationBookingFlowService {
         booking.sameFieldPromptCount = 0;
       }
       const sc = booking.sameFieldPromptCount ?? 0;
-      const outQ = suppress && sc >= 2 ? copyRequiredFieldPoliteFinal() : suppress ? copyClarifyPreferredDate() : baseQ;
+      const outQ =
+        suppress && sc >= 2 ? this.copyFinalRequiredFieldAsk('preferred_date', settings) : suppress ? copyClarifyPreferredDate() : baseQ;
       booking.pendingFieldId = 'preferred_date';
       booking.pendingFieldRequired = true;
       booking.lastAskedFieldId = 'preferred_date';
@@ -1583,6 +1654,157 @@ export class ConversationBookingFlowService {
     }
     if (Object.keys(booking.customAnswers).length === 0) {
       booking.customAnswers = undefined;
+    }
+  }
+
+  private isBareOfferedSlotIndexLine(latest: string, offeredSlots: AisbpOfferedSlot[]): boolean {
+    const latestClean = stripBookingFrustrationForParse(latest.replace(/\s+/g, ' ').trim()).cleaned;
+    if (!/^[123]$/.test(latestClean)) return false;
+    const n = parseInt(latestClean, 10);
+    return offeredSlots.some(o => o.option === n);
+  }
+
+  private bookingStateForNluPayload(booking: AisbpBookingStateV1): Record<string, unknown> {
+    return {
+      status: booking.status,
+      service: booking.service ?? null,
+      preferredDate: booking.preferredDate ?? null,
+      preferredTime: booking.preferredTime ?? null,
+      preferredTimeWindow: booking.preferredTimeWindow ?? null,
+      firstVisit: booking.firstVisit ?? null,
+      customAnswerKeys: booking.customAnswers ? Object.keys(booking.customAnswers) : [],
+      hasCustomerName: Boolean(booking.customerName?.trim()),
+      hasPhone: Boolean(booking.phone?.trim()),
+      hasEmail: Boolean(booking.email?.trim()),
+    };
+  }
+
+  private buildBookingNluInterpretInput(params: {
+    tenantId: string;
+    conversationId: string;
+    latest: string;
+    combined: string;
+    booking: AisbpBookingStateV1;
+    settings: TenantBookingSettingsDto;
+    crmTimezone: string;
+  }): BookingNluInterpretInput {
+    const { tenantId, conversationId, latest, combined, booking, settings, crmTimezone } = params;
+    const requiredMissing = this.listRequiredMissingFieldIds(settings, booking);
+    const customFieldDefs = settings.customFieldsJson.map(cf => ({
+      id: cf.id,
+      label: cf.label,
+      fieldType: cf.fieldType,
+      required: cf.required,
+      options: cf.options,
+    }));
+    return {
+      tenantId,
+      conversationId,
+      latestInboundText: latest,
+      transcript: combined,
+      booking: this.bookingStateForNluPayload(booking),
+      settingsSummary: {
+        bookingMode: settings.bookingMode,
+        coreRequired: requiredMissing,
+        customFieldDefs,
+      },
+      pendingFieldId: booking.pendingFieldId ?? null,
+      requiredMissing,
+      serviceMenuOptions: settings.serviceMenuOptions,
+      crmTimezone,
+      offeredSlots:
+        booking.status === 'offered_slots' && booking.offeredSlots?.length
+          ? booking.offeredSlots.map(o => ({
+              option: o.option,
+              displayText: o.displayText,
+              startIso: o.startIso,
+            }))
+          : undefined,
+    };
+  }
+
+  private clearBookingAskPending(booking: AisbpBookingStateV1): void {
+    booking.pendingFieldId = undefined;
+    booking.pendingFieldLabel = undefined;
+    booking.pendingFieldRequired = undefined;
+  }
+
+  /** When NLU (or prior state) already satisfies the pending ask, clear pending so deterministic parse failure does not increment retries. */
+  private resolvePendingIfBookingValuesFilled(
+    booking: AisbpBookingStateV1,
+    settings: TenantBookingSettingsDto,
+  ): { cleared: boolean; clearedPendingFieldId?: string } {
+    const pid = booking.pendingFieldId?.trim();
+    if (!pid) return { cleared: false };
+    const cleared = (fid: string) => {
+      this.clearBookingAskPending(booking);
+      return { cleared: true as const, clearedPendingFieldId: fid };
+    };
+    if (pid === 'service' && isAcceptedBookingServiceValue(booking.service, settings.serviceMenuOptions)) {
+      return cleared(pid);
+    }
+    if (pid === 'preferred_date' && booking.preferredDate?.trim()) {
+      return cleared(pid);
+    }
+    if (pid === 'preferred_time') {
+      const hm = booking.preferredTime?.trim();
+      const win = booking.preferredTimeWindow?.trim();
+      if (hm || (win && win !== 'exact')) {
+        return cleared(pid);
+      }
+    }
+    if (pid === 'name' && booking.customerName?.trim()) {
+      return cleared(pid);
+    }
+    if (pid === 'phone' && booking.phone?.trim()) {
+      return cleared(pid);
+    }
+    if (pid === 'email' && booking.email?.trim()) {
+      return cleared(pid);
+    }
+    if (pid === 'first_visit' && booking.firstVisit?.trim()) {
+      return cleared(pid);
+    }
+    if (pid.startsWith('custom:')) {
+      const id = pid.slice('custom:'.length);
+      const ans = booking.customAnswers?.[id]?.trim();
+      if (!ans) return { cleared: false };
+      const cf = settings.customFieldsJson.find(c => c.id === id);
+      if (cf?.fieldType === 'single_select' || cf?.fieldType === 'single_choice') {
+        const m = matchUserLineToMenuOption(ans, cf.options);
+        if (m && !customSelectAnswerIsWholeOptionList(m, cf.options)) {
+          return cleared(pid);
+        }
+        return { cleared: false };
+      }
+      return cleared(pid);
+    }
+    return { cleared: false };
+  }
+
+  private copyFinalRequiredFieldAsk(nextAsk: string, settings: TenantBookingSettingsDto): string {
+    if (nextAsk.startsWith('custom:')) {
+      const cid = nextAsk.slice('custom:'.length);
+      const cf = settings.customFieldsJson.find(c => c.id === cid);
+      return copyRequiredFieldPoliteFinal(cf?.label);
+    }
+    switch (nextAsk as BookingCoreFieldKey) {
+      case 'name':
+        return copyRequiredFieldPoliteFinal('the booking name');
+      case 'phone':
+        return copyRequiredFieldPoliteFinal('a contact number');
+      case 'email':
+        return copyRequiredFieldPoliteFinal('your email address');
+      case 'service':
+        return copyRequiredFieldPoliteFinal('the service you want');
+      case 'preferred_date':
+        return copyRequiredFieldPoliteFinal('the date you prefer');
+      case 'preferred_time':
+        return copyRequiredFieldPoliteFinal('your preferred time');
+      case 'first_visit':
+        return copyRequiredFieldPoliteFinal('whether this is your first visit');
+      default:
+        return copyRequiredFieldCannotSkip();
     }
   }
 

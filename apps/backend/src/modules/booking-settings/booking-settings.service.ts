@@ -43,6 +43,10 @@ export interface TenantBookingSettingsDto {
   coreFieldsJson: TenantCoreFieldsDto;
   customFieldsJson: CustomBookingFieldDto[];
   maxBookingsPerSlot: number;
+  internalBookingAlertEnabled: boolean;
+  internalBookingAlertNumber: string | null;
+  internalBookingAlertChannel: string;
+  internalBookingAlertTemplate: string | null;
 }
 
 function defaultCoreFields(): TenantCoreFieldsDto {
@@ -61,6 +65,10 @@ const DEFAULT_SETTINGS: TenantBookingSettingsDto = {
   coreFieldsJson: defaultCoreFields(),
   customFieldsJson: [],
   maxBookingsPerSlot: 1,
+  internalBookingAlertEnabled: false,
+  internalBookingAlertNumber: null,
+  internalBookingAlertChannel: 'GHL_MESSAGE',
+  internalBookingAlertTemplate: null,
 };
 
 function parseYmd(s: string): { y: number; m: number; d: number } | null {
@@ -71,6 +79,12 @@ function parseYmd(s: string): { y: number; m: number; d: number } | null {
   const d = Number(m[3]);
   if (!Number.isFinite(y) || !Number.isFinite(mo) || !Number.isFinite(d)) return null;
   return { y, m: mo, d };
+}
+
+function normalizeInternalAlertNumber(raw: string | null | undefined): string | null {
+  if (raw === undefined || raw === null) return null;
+  const t = String(raw).trim().replace(/\s+/g, '');
+  return t.length ? t : null;
 }
 
 function parseHm(timeStr: string): { hour: number; minute: number } | null {
@@ -216,6 +230,16 @@ function rowToDto(row: Record<string, unknown>): TenantBookingSettingsDto {
     coreFieldsJson: merged,
     customFieldsJson,
     maxBookingsPerSlot,
+    internalBookingAlertEnabled: Boolean(row['internal_booking_alert_enabled']),
+    internalBookingAlertNumber:
+      row['internal_booking_alert_number'] === null || row['internal_booking_alert_number'] === undefined
+        ? null
+        : String(row['internal_booking_alert_number']).trim() || null,
+    internalBookingAlertChannel: String(row['internal_booking_alert_channel'] ?? 'GHL_MESSAGE').trim() || 'GHL_MESSAGE',
+    internalBookingAlertTemplate:
+      row['internal_booking_alert_template'] === null || row['internal_booking_alert_template'] === undefined
+        ? null
+        : String(row['internal_booking_alert_template']).trim() || null,
   };
 }
 
@@ -281,6 +305,10 @@ export class BookingSettingsService {
       coreFieldsJson: unknown;
       customFieldsJson: unknown;
       maxBookingsPerSlot: unknown;
+      internalBookingAlertEnabled: boolean;
+      internalBookingAlertNumber: string | null;
+      internalBookingAlertChannel: string;
+      internalBookingAlertTemplate: string | null;
     }>,
   ): Promise<TenantBookingSettingsDto> {
     const current = await this.getBookingSettings(tenantId);
@@ -315,6 +343,29 @@ export class BookingSettingsService {
         ? patch.defaultGhlCalendarName
         : current.defaultGhlCalendarName;
 
+    let internalBookingAlertEnabled =
+      patch.internalBookingAlertEnabled !== undefined
+        ? Boolean(patch.internalBookingAlertEnabled)
+        : current.internalBookingAlertEnabled;
+    let internalBookingAlertNumber =
+      patch.internalBookingAlertNumber !== undefined
+        ? normalizeInternalAlertNumber(patch.internalBookingAlertNumber)
+        : current.internalBookingAlertNumber;
+    let internalBookingAlertChannel =
+      patch.internalBookingAlertChannel !== undefined
+        ? String(patch.internalBookingAlertChannel).trim() || 'GHL_MESSAGE'
+        : current.internalBookingAlertChannel;
+    let internalBookingAlertTemplate =
+      patch.internalBookingAlertTemplate !== undefined
+        ? patch.internalBookingAlertTemplate === null
+          ? null
+          : String(patch.internalBookingAlertTemplate).trim() || null
+        : current.internalBookingAlertTemplate;
+
+    if (internalBookingAlertEnabled && !internalBookingAlertNumber?.trim()) {
+      throw new BadRequestException('Team notification number is required when internal booking alert is enabled');
+    }
+
     const now = new Date().toISOString();
 
     const { data: existing } = await this.supabase
@@ -332,6 +383,10 @@ export class BookingSettingsService {
       core_fields_json: coreFieldsJson,
       custom_fields_json: customFieldsJson,
       max_bookings_per_slot: maxBookingsPerSlot,
+      internal_booking_alert_enabled: internalBookingAlertEnabled,
+      internal_booking_alert_number: internalBookingAlertNumber,
+      internal_booking_alert_channel: internalBookingAlertChannel,
+      internal_booking_alert_template: internalBookingAlertTemplate,
       updated_at: now,
     };
 

@@ -34,6 +34,8 @@ import {
   resolveRelativeDayPhrase,
 } from './booking-intent-and-parse';
 import { applyPendingFieldAnswer, isOptionalSkipIntent } from './booking-pending-field';
+import { buildAppointmentCreateNotes } from './booking-summary';
+import { BookingPostConfirmService } from './booking-post-confirm.service';
 
 /**
  * Live booking path map (single owner: this service):
@@ -159,6 +161,7 @@ export class ConversationBookingFlowService {
   constructor(
     private readonly bookingSettings: BookingSettingsService,
     private readonly ghlService: GhlService,
+    private readonly bookingPostConfirm: BookingPostConfirmService,
   ) {}
 
   /**
@@ -475,7 +478,18 @@ export class ConversationBookingFlowService {
 
       const { client, ghlLocationId } = await this.ghlService.createGhlClientForConnectedTenantWorkerOrThrow(params.tenantId);
       const title = booking.service?.trim() || 'Appointment';
-      const notes = this.buildGhlAppointmentNotes(params.conversationId, booking);
+      const notes = buildAppointmentCreateNotes({
+        bookingStatusLabel: 'Confirming',
+        booking,
+        coreFieldsJson: settings.coreFieldsJson,
+        customFieldsJson: settings.customFieldsJson,
+        conversationId: params.conversationId,
+        calendarName: settings.defaultGhlCalendarName ?? undefined,
+        appointmentOwner: undefined,
+        contactPhoneFallback: params.contactSnapshot?.phone,
+        selectedSlot: picked,
+        crmTimeZone: recheck.crmTimezoneUsed,
+      });
       const endIso = picked.endIso;
 
       const bookRes = await client.bookSlot({
@@ -548,6 +562,18 @@ export class ConversationBookingFlowService {
           hasContactId: Boolean(params.contactId),
         })}`,
       );
+
+      await this.bookingPostConfirm.runAfterLiveBookingConfirmed({
+        tenantId: params.tenantId,
+        conversationId: params.conversationId,
+        customerContactId: params.contactId,
+        appointmentId: bookRes.appointmentId,
+        booking,
+        settings,
+        picked,
+        crmTimeZone: recheck.crmTimezoneUsed,
+        contactSnapshot: params.contactSnapshot,
+      });
 
       const biz = params.tenantDisplayName?.trim() || 'us';
       const confirmText =
@@ -810,18 +836,6 @@ export class ConversationBookingFlowService {
         booking.customerName = raw;
       }
     }
-  }
-
-  private buildGhlAppointmentNotes(conversationId: string, booking: AisbpBookingStateV1): string {
-    const lines: string[] = [];
-    if (booking.service?.trim()) lines.push(`Service: ${booking.service.trim()}`);
-    if (booking.customerName?.trim()) lines.push(`Name: ${booking.customerName.trim()}`);
-    if (booking.phone?.trim()) lines.push(`Phone: ${booking.phone.trim()}`);
-    if (booking.email?.trim()) lines.push(`Email: ${booking.email.trim()}`);
-    if (booking.firstVisit?.trim()) lines.push(`First visit: ${booking.firstVisit.trim()}`);
-    lines.push('Source: AISBP conversation booking');
-    lines.push(`Conversation ID: ${conversationId}`);
-    return lines.join('\n');
   }
 
   private snapshotBookingCore(booking: AisbpBookingStateV1): string {

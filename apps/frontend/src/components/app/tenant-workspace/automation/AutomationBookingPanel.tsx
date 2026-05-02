@@ -429,6 +429,10 @@ export function AutomationBookingPanel() {
 
   const saveBookingModule = async () => {
     if (!token || !tenantId || !booking) return;
+    if (booking.internalBookingAlertEnabled && !booking.internalBookingAlertNumber?.trim()) {
+      setSaveSettingsStatus('Team notification number is required when internal booking alert is enabled.');
+      return;
+    }
     setBusy('save-booking');
     setSaveSettingsStatus('');
     try {
@@ -440,6 +444,10 @@ export function AutomationBookingPanel() {
         coreFieldsJson: booking.coreFieldsJson,
         customFieldsJson: booking.customFieldsJson,
         maxBookingsPerSlot: booking.maxBookingsPerSlot,
+        internalBookingAlertEnabled: booking.internalBookingAlertEnabled,
+        internalBookingAlertNumber: booking.internalBookingAlertNumber,
+        internalBookingAlertChannel: booking.internalBookingAlertChannel,
+        internalBookingAlertTemplate: booking.internalBookingAlertTemplate,
       });
       setBooking(next);
       setCalendarForTest(next.defaultGhlCalendarId?.trim() ?? '');
@@ -623,6 +631,7 @@ export function AutomationBookingPanel() {
         label: 'New question',
         fieldType: 'short_text',
         required: false,
+        enabled: true,
         displayOrder: prev.customFieldsJson.length,
       };
       return { ...prev, customFieldsJson: [...prev.customFieldsJson, row] };
@@ -1169,6 +1178,14 @@ export function AutomationBookingPanel() {
                     />
                     Required
                   </label>
+                  <label style={{ fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                    <input
+                      type="checkbox"
+                      checked={cf.enabled !== false}
+                      onChange={e => updateCustomField(cf.id, { enabled: e.target.checked })}
+                    />
+                    Ask
+                  </label>
                   <button type="button" disabled={dim} onClick={() => removeCustomField(cf.id)} style={btn('danger', dim)}>
                     Remove
                   </button>
@@ -1194,6 +1211,44 @@ export function AutomationBookingPanel() {
             <button type="button" disabled={dim} onClick={() => addCustomField()} style={{ ...btn('secondary', dim), marginBottom: '1rem' }}>
               Add custom field
             </button>
+
+            <p style={{ fontSize: '0.82rem', fontWeight: 600, margin: '0 0 0.5rem' }}>Internal booking alert</p>
+            <label style={{ fontSize: '0.82rem', display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+              <input
+                type="checkbox"
+                checked={Boolean(booking.internalBookingAlertEnabled)}
+                onChange={e => setBooking({ ...booking, internalBookingAlertEnabled: e.target.checked })}
+                disabled={dim}
+              />
+              Send booking alert to team
+            </label>
+            <label style={{ ...mvpLabelStyle, display: 'block' }}>Team notification number</label>
+            <input
+              value={booking.internalBookingAlertNumber ?? ''}
+              onChange={e =>
+                setBooking({ ...booking, internalBookingAlertNumber: e.target.value.trim() ? e.target.value : null })
+              }
+              placeholder="+6512345678"
+              style={{ ...mvpInputStyle, maxWidth: 320, marginBottom: '0.35rem' }}
+              disabled={dim}
+            />
+            <p style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted)', margin: '0 0 0.75rem' }}>
+              After a booking is confirmed, AISBP sends the booking summary to this number.
+            </p>
+            <label style={{ ...mvpLabelStyle, display: 'block' }}>Optional message prefix</label>
+            <textarea
+              value={booking.internalBookingAlertTemplate ?? ''}
+              onChange={e =>
+                setBooking({
+                  ...booking,
+                  internalBookingAlertTemplate: e.target.value.length ? e.target.value : null,
+                })
+              }
+              placeholder="e.g. New booking —"
+              rows={2}
+              style={{ ...mvpInputStyle, width: '100%', maxWidth: 480, marginBottom: '0.75rem', fontSize: '0.8rem' }}
+              disabled={dim}
+            />
 
             <label style={{ ...mvpLabelStyle, display: 'block', maxWidth: 200 }}>
               Parallel bookings per slot

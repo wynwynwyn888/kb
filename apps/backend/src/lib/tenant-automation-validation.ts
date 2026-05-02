@@ -66,6 +66,8 @@ export interface CustomBookingFieldDto {
   fieldType: string;
   options?: string[];
   required: boolean;
+  /** When false, field is not collected and is omitted from staff booking summaries. Default true. */
+  enabled?: boolean;
   displayOrder: number;
 }
 
@@ -98,6 +100,7 @@ export function parseCustomFieldsJson(raw: unknown): CustomBookingFieldDto[] {
       throw new BadRequestException('single_select / single_choice fields require options');
     }
     const required = Boolean(o['required']);
+    const enabled = o['enabled'] === undefined ? true : Boolean(o['enabled']);
     const displayOrder =
       typeof o['displayOrder'] === 'number' && Number.isFinite(o['displayOrder'])
         ? Math.floor(o['displayOrder'])
@@ -110,6 +113,7 @@ export function parseCustomFieldsJson(raw: unknown): CustomBookingFieldDto[] {
       fieldType,
       options,
       required,
+      enabled,
       displayOrder,
     });
   }

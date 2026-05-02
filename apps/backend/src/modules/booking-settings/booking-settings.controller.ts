@@ -39,6 +39,10 @@ export class BookingSettingsController {
       coreFieldsJson: unknown;
       customFieldsJson: unknown;
       maxBookingsPerSlot: unknown;
+      internalBookingAlertEnabled: boolean;
+      internalBookingAlertNumber: string | null;
+      internalBookingAlertChannel: string;
+      internalBookingAlertTemplate: string | null;
     }>,
   ) {
     await this.ghlService.ensureTenantAccessOrThrow(tenantId, user.id);

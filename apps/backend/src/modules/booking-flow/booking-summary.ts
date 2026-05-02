@@ -1,0 +1,233 @@
+import type { BookingCoreFieldKey } from '../../lib/tenant-automation-constants';
+import type { CoreFieldToggle } from '../../lib/tenant-automation-validation';
+import type { CustomBookingFieldDto } from '../../lib/tenant-automation-validation';
+import type { AisbpBookingStateV1, AisbpOfferedSlot } from './conversation-booking-state';
+
+const MONTHS = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+] as const;
+
+export interface BuildBookingSummaryTextInput {
+  appointmentId?: string;
+  bookingStatusLabel: string;
+  booking: AisbpBookingStateV1;
+  coreFieldsJson: Record<string, CoreFieldToggle>;
+  customFieldsJson: CustomBookingFieldDto[];
+  conversationId: string;
+  calendarName?: string;
+  appointmentOwner?: string;
+  contactPhoneFallback?: string;
+  selectedSlot: AisbpOfferedSlot;
+  crmTimeZone?: string;
+}
+
+function parseYmd(ymd: string): { y: number; m: number; d: number } | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd.trim());
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
+  if (!Number.isFinite(y) || !Number.isFinite(mo) || !Number.isFinite(d)) return null;
+  return { y, m: mo, d };
+}
+
+function formatLongDateFromIso(iso: string, timeZone: string | undefined): string {
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) return iso;
+  try {
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone: timeZone && timeZone.trim() ? timeZone : 'UTC',
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+    }).formatToParts(d);
+    const day = parts.find(p => p.type === 'day')?.value ?? '';
+    const month = parts.find(p => p.type === 'month')?.value ?? '';
+    const year = parts.find(p => p.type === 'year')?.value ?? '';
+    if (day && month && year) return `${day} ${month} ${year}`;
+  } catch {
+    // fall through
+  }
+  return d.toISOString().slice(0, 10);
+}
+
+function formatTimeRange(startIso: string, endIso: string, timeZone: string | undefined): string {
+  const tz = timeZone && timeZone.trim() ? timeZone : 'UTC';
+  const opt: Intl.DateTimeFormatOptions = { hour: 'numeric', minute: '2-digit', timeZone: tz };
+  try {
+    const a = new Date(startIso);
+    const b = new Date(endIso);
+    if (!Number.isFinite(a.getTime()) || !Number.isFinite(b.getTime())) return '';
+    const t1 = a.toLocaleTimeString('en-US', opt);
+    const t2 = b.toLocaleTimeString('en-US', opt);
+    return `${t1} - ${t2}`;
+  } catch {
+    return '';
+  }
+}
+
+/** Title-case service string without lowercasing acronyms aggressively. */
+export function titleCaseServiceLine(raw: string): string {
+  const s = raw.replace(/\s+/g, ' ').trim();
+  if (!s) return s;
+  return s
+    .split(/\s+/)
+    .map(w => {
+      if (!w) return w;
+      return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+    })
+    .join(' ');
+}
+
+export function formatFirstVisitForSummary(booking: AisbpBookingStateV1): string {
+  if (booking.skippedFieldIds?.includes('first_visit')) return 'Skipped';
+  const v = booking.firstVisit?.trim().toLowerCase();
+  if (!v) return '-';
+  if (v === 'yes' || v === 'y') return 'Yes';
+  if (v === 'no' || v === 'n') return 'No';
+  return booking.firstVisit!.trim();
+}
+
+function coreAskOn(settings: Record<string, CoreFieldToggle>, key: BookingCoreFieldKey): boolean {
+  return Boolean(settings[key]?.enabled);
+}
+
+function customAskOn(cf: CustomBookingFieldDto): boolean {
+  return cf.enabled !== false;
+}
+
+function coreLine(
+  booking: AisbpBookingStateV1,
+  key: BookingCoreFieldKey,
+): { value: string; skipped: boolean } {
+  if (booking.skippedFieldIds?.includes(key)) return { value: 'Skipped', skipped: true };
+  switch (key) {
+    case 'name':
+      return { value: booking.customerName?.trim() || '-', skipped: false };
+    case 'phone':
+      return { value: booking.phone?.trim() || '-', skipped: false };
+    case 'email':
+      return { value: booking.email?.trim() || '-', skipped: false };
+    case 'service': {
+      const t = booking.service?.trim();
+      return { value: t ? titleCaseServiceLine(t) : '-', skipped: false };
+    }
+    case 'preferred_date': {
+      const ymd = booking.preferredDate?.trim();
+      if (!ymd) return { value: '-', skipped: false };
+      const p = parseYmd(ymd);
+      if (!p) return { value: ymd, skipped: false };
+      return { value: `${p.d} ${MONTHS[p.m - 1] ?? ''} ${p.y}`.trim(), skipped: false };
+    }
+    case 'preferred_time':
+      return { value: booking.preferredTime?.trim() || '-', skipped: false };
+    case 'first_visit':
+      return { value: '-', skipped: false };
+    default:
+      return { value: '-', skipped: false };
+  }
+}
+
+/**
+ * Staff-facing booking summary. Customer intake lines only when Ask (`enabled`) is true on core/custom.
+ * System footer lines always included.
+ */
+export function buildBookingSummaryText(input: BuildBookingSummaryTextInput): string {
+  const lines: string[] = [];
+  lines.push('New booking alert');
+  lines.push('');
+
+  const id = input.appointmentId?.trim();
+  if (id) lines.push(`Booking ID: ${id}`);
+  lines.push(`Booking status: ${(input.bookingStatusLabel || 'Confirmed').trim()}`);
+  lines.push('');
+
+  const core = input.coreFieldsJson;
+  const slot = input.selectedSlot;
+  const tz = input.crmTimeZone;
+
+  if (coreAskOn(core, 'service')) {
+    const { value, skipped } = coreLine(input.booking, 'service');
+    lines.push(`Service: ${skipped ? 'Skipped' : value}`);
+  }
+
+  const dateAsk = coreAskOn(core, 'preferred_date');
+  const timeAsk = coreAskOn(core, 'preferred_time');
+  if (dateAsk) {
+    lines.push(`Booking date: ${formatLongDateFromIso(slot.startIso, tz)}`);
+  }
+  if (timeAsk) {
+    const range = formatTimeRange(slot.startIso, slot.endIso || slot.startIso, tz);
+    lines.push(`Booking time: ${range || slot.displayText || '-'}`);
+  }
+
+  if (coreAskOn(core, 'name')) {
+    const { value, skipped } = coreLine(input.booking, 'name');
+    lines.push(`Customer name: ${skipped ? 'Skipped' : value}`);
+  }
+  if (coreAskOn(core, 'phone')) {
+    const { value, skipped } = coreLine(input.booking, 'phone');
+    const phone =
+      skipped ? 'Skipped' : value !== '-' ? value : input.contactPhoneFallback?.trim() || '-';
+    lines.push(`Phone: ${phone}`);
+  }
+  if (coreAskOn(core, 'email')) {
+    const { value, skipped } = coreLine(input.booking, 'email');
+    lines.push(`Email: ${skipped ? 'Skipped' : value}`);
+  }
+  if (coreAskOn(core, 'first_visit')) {
+    lines.push(`First visit: ${formatFirstVisitForSummary(input.booking)}`);
+  }
+
+  lines.push('');
+  lines.push(`Calendar: ${(input.calendarName ?? input.booking.calendarId ?? '-').trim() || '-'}`);
+  lines.push(`Appointment owner: ${(input.appointmentOwner ?? '-').trim() || '-'}`);
+  lines.push('Source: AISBP conversation booking');
+  lines.push(`Conversation ID: ${input.conversationId}`);
+
+  const customLines: string[] = [];
+  for (const cf of [...input.customFieldsJson].sort((a, b) => a.displayOrder - b.displayOrder)) {
+    if (!customAskOn(cf)) continue;
+    const ans = input.booking.customAnswers?.[cf.id]?.trim();
+    const skippedCustom = input.booking.skippedFieldIds?.includes(`custom:${cf.id}`);
+    const label = cf.label.trim() || cf.id;
+    if (skippedCustom) customLines.push(`- ${label}: Skipped`);
+    else customLines.push(`- ${label}: ${ans && ans.length ? ans : '-'}`);
+  }
+  if (customLines.length) {
+    lines.push('');
+    lines.push('Custom fields:');
+    lines.push(...customLines);
+  }
+
+  return lines.join('\n');
+}
+
+/** Max length for GHL appointment `notes` on create (defensive). */
+export function truncateForGhlNotes(text: string, maxLen = 3500): string {
+  const t = text.trim();
+  if (t.length <= maxLen) return t;
+  return `${t.slice(0, maxLen - 20)}\n…(truncated)`;
+}
+
+/** Notes on appointment create (no appointment id yet). */
+export function buildAppointmentCreateNotes(input: Omit<BuildBookingSummaryTextInput, 'appointmentId'>): string {
+  return truncateForGhlNotes(
+    buildBookingSummaryText({
+      ...input,
+      appointmentId: undefined,
+      bookingStatusLabel: 'Confirming',
+    }),
+  );
+}

@@ -75,6 +75,10 @@ describe('BookingSettingsService', () => {
       },
       customFieldsJson: [],
       maxBookingsPerSlot: 1,
+      internalBookingAlertEnabled: false,
+      internalBookingAlertNumber: null,
+      internalBookingAlertChannel: 'GHL_MESSAGE',
+      internalBookingAlertTemplate: null,
     });
 
     const r = await svc.testSlots('tenant-1', 'profile-1', {});
@@ -121,6 +125,10 @@ describe('BookingSettingsService', () => {
       },
       customFieldsJson: [],
       maxBookingsPerSlot: 1,
+      internalBookingAlertEnabled: false,
+      internalBookingAlertNumber: null,
+      internalBookingAlertChannel: 'GHL_MESSAGE',
+      internalBookingAlertTemplate: null,
     });
     await svc.testSlots('tenant-1', 'profile-1', {});
     expect(probeSpy).not.toHaveBeenCalled();

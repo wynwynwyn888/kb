@@ -1084,6 +1084,100 @@ export class GhlClient {
   }
 
   /**
+   * Fetch a contact by id (Private Integration — endpoint shape may vary; failures are non-fatal for callers).
+   */
+  async getContact(contactId: string): Promise<{ success: boolean; contact?: Record<string, unknown>; error?: string }> {
+    const id = contactId.trim();
+    if (!id) return { success: false, error: 'contactId required' };
+    try {
+      const response = await this.client.get<unknown>(`/contacts/${encodeURIComponent(id)}`);
+      const raw = response.data;
+      let c: Record<string, unknown> | undefined;
+      if (isRecord(raw) && isRecord(raw['contact'])) c = raw['contact'] as Record<string, unknown>;
+      else if (isRecord(raw)) c = raw;
+      return { success: true, contact: c };
+    } catch (error) {
+      return { success: false, error: this.extractGhlErrorMessage(error) ?? 'getContact failed' };
+    }
+  }
+
+  /**
+   * Update an existing contact (partial updates — omit keys you do not want to change).
+   * Best-effort: callers should catch/log and not fail primary flows.
+   */
+  async updateContact(
+    contactId: string,
+    payload: Record<string, unknown>,
+  ): Promise<{ success: boolean; error?: string }> {
+    const id = contactId.trim();
+    if (!id) return { success: false, error: 'contactId required' };
+    try {
+      await this.client.put(`/contacts/${encodeURIComponent(id)}`, payload);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: this.extractGhlErrorMessage(error) ?? 'updateContact failed' };
+    }
+  }
+
+  /**
+   * Create a contact in the current location.
+   */
+  async createContact(payload: Record<string, unknown>): Promise<{ success: boolean; contactId?: string; error?: string }> {
+    try {
+      const response = await this.client.post<unknown>('/contacts/', {
+        locationId: this.locationId,
+        ...payload,
+      });
+      const raw = response.data;
+      let cid: string | undefined;
+      if (isRecord(raw)) {
+        if (typeof raw['id'] === 'string') cid = raw['id'];
+        else if (isRecord(raw['contact']) && typeof raw['contact']['id'] === 'string') {
+          cid = raw['contact']['id'] as string;
+        }
+      }
+      return { success: true, contactId: cid };
+    } catch (error) {
+      return { success: false, error: this.extractGhlErrorMessage(error) ?? 'createContact failed' };
+    }
+  }
+
+  /**
+   * Append an internal note on a contact (best-effort; API path may differ by GHL version).
+   */
+  async addContactNote(contactId: string, body: string): Promise<{ success: boolean; error?: string }> {
+    const id = contactId.trim();
+    const text = body.trim();
+    if (!id) return { success: false, error: 'contactId required' };
+    if (!text) return { success: false, error: 'empty note' };
+    try {
+      await this.client.post(`/contacts/${encodeURIComponent(id)}/notes`, { body: text });
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: this.extractGhlErrorMessage(error) ?? 'addContactNote failed' };
+    }
+  }
+
+  /**
+   * Update appointment notes after create (best-effort; endpoint may 404 on some API versions).
+   */
+  async updateAppointmentNotes(
+    appointmentId: string,
+    notes: string,
+  ): Promise<{ success: boolean; error?: string }> {
+    const aid = appointmentId.trim();
+    const n = notes.trim();
+    if (!aid) return { success: false, error: 'appointmentId required' };
+    if (!n) return { success: false, error: 'empty notes' };
+    try {
+      await this.client.put(`/calendars/events/appointments/${encodeURIComponent(aid)}`, { notes: n });
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: this.extractGhlErrorMessage(error) ?? 'updateAppointmentNotes failed' };
+    }
+  }
+
+  /**
    * List calendars for the location.
    * HighLevel: `GET /calendars/?locationId=...` with `Version: 2023-02-21`, `Accept: application/json`.
    */

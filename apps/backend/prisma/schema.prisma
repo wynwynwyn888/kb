@@ -186,6 +186,11 @@ model TenantBookingSettings {
   coreFieldsJson           Json        @default("{}") @map("core_fields_json")
   customFieldsJson         Json        @default("[]") @map("custom_fields_json")
   maxBookingsPerSlot       Int         @default(1) @map("max_bookings_per_slot")
+  /// After live booking confirms, send booking summary SMS to this staff number (GHL).
+  internalBookingAlertEnabled Boolean @default(false) @map("internal_booking_alert_enabled")
+  internalBookingAlertNumber  String? @map("internal_booking_alert_number")
+  internalBookingAlertChannel String @default("GHL_MESSAGE") @map("internal_booking_alert_channel")
+  internalBookingAlertTemplate String? @map("internal_booking_alert_template")
   createdAt                DateTime    @default(now()) @map("created_at")
   updatedAt                DateTime    @updatedAt @map("updated_at")
 

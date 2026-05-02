@@ -3,6 +3,7 @@ import {
   ConversationBookingFlowService,
   isBookingFlowSupportedInboundText,
 } from './conversation-booking-flow.service';
+import type { BookingPostConfirmService } from './booking-post-confirm.service';
 import type { BookingSettingsService } from '../booking-settings/booking-settings.service';
 import type { GhlService } from '../ghl/ghl.service';
 
@@ -94,7 +95,8 @@ const allOptionalAskSettings = {
 };
 
 function svc(booking: BookingSettingsService, ghl: GhlService) {
-  return new ConversationBookingFlowService(booking, ghl);
+  const post = { runAfterLiveBookingConfirmed: jest.fn(async () => undefined) } as unknown as BookingPostConfirmService;
+  return new ConversationBookingFlowService(booking, ghl, post);
 }
 
 describe('isBookingFlowSupportedInboundText', () => {
@@ -680,7 +682,7 @@ describe('ConversationBookingFlowService', () => {
       expect(bookArg.title).toBe('Haircut');
       const n = bookArg.notes ?? '';
       expect(n).toContain('Service: Haircut');
-      expect(n).toContain('Name: Alex');
+      expect(n).toContain('Customer name: Alex');
       expect(n).toContain('Phone: +15551234567');
       expect(n).toContain('Source: AISBP conversation booking');
       expect(n).toContain('Conversation ID: c1');

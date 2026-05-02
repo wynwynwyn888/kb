@@ -383,6 +383,8 @@ export interface CustomBookingField {
   fieldType: string;
   options?: string[];
   required: boolean;
+  /** When false, field is hidden from staff booking summary. Default true. */
+  enabled?: boolean;
   displayOrder: number;
 }
 
@@ -394,6 +396,10 @@ export interface TenantBookingSettings {
   coreFieldsJson: Record<string, { enabled: boolean; required: boolean }>;
   customFieldsJson: CustomBookingField[];
   maxBookingsPerSlot: number;
+  internalBookingAlertEnabled: boolean;
+  internalBookingAlertNumber: string | null;
+  internalBookingAlertChannel: string;
+  internalBookingAlertTemplate: string | null;
 }
 
 export interface GhlCalendarOption {
@@ -490,6 +496,10 @@ export async function patchTenantBookingSettings(
     coreFieldsJson: Record<string, { enabled: boolean; required: boolean }>;
     customFieldsJson: CustomBookingField[];
     maxBookingsPerSlot: number;
+    internalBookingAlertEnabled?: boolean;
+    internalBookingAlertNumber?: string | null;
+    internalBookingAlertChannel?: string;
+    internalBookingAlertTemplate?: string | null;
   }>,
 ): Promise<TenantBookingSettings> {
   return apiRequest<TenantBookingSettings>(`/tenants/${tenantId}/booking-settings`, {

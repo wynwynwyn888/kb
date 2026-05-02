@@ -41,6 +41,71 @@ function isRecord(x: unknown): x is Record<string, unknown> {
   return typeof x === 'object' && x !== null;
 }
 
+/** Digits-only for phone equality (E.164 vs local formats). */
+export function digitsOnlyPhone(value: string): string {
+  return value.replace(/\D/g, '');
+}
+
+/** Minimal contact row from search — no tokens. */
+export interface GhlContactPhoneLookup {
+  id: string;
+  name?: string;
+  phone?: string;
+  email?: string;
+}
+
+function extractContactsSearchRows(raw: unknown): Record<string, unknown>[] {
+  if (!isRecord(raw)) return [];
+  const candidates: unknown[] = [
+    raw['contacts'],
+    raw['results'],
+    isRecord(raw['data']) ? raw['data']['contacts'] : undefined,
+    isRecord(raw['data']) ? raw['data']['results'] : undefined,
+  ];
+  for (const a of candidates) {
+    if (Array.isArray(a)) {
+      return a.filter((x): x is Record<string, unknown> => isRecord(x));
+    }
+  }
+  return [];
+}
+
+function mapSearchRowToLookup(row: Record<string, unknown>): GhlContactPhoneLookup | null {
+  const id = typeof row['id'] === 'string' ? row['id'].trim() : '';
+  if (!id) return null;
+  const fn = typeof row['firstName'] === 'string' ? row['firstName'].trim() : '';
+  const ln = typeof row['lastName'] === 'string' ? row['lastName'].trim() : '';
+  const combined = [fn, ln].filter(Boolean).join(' ').trim();
+  const name = combined || (typeof row['name'] === 'string' ? row['name'].trim() : undefined);
+  const phone =
+    typeof row['phone'] === 'string'
+      ? row['phone'].trim()
+      : typeof row['phoneNumber'] === 'string'
+        ? row['phoneNumber'].trim()
+        : typeof row['primaryPhone'] === 'string'
+          ? row['primaryPhone'].trim()
+          : undefined;
+  const email = typeof row['email'] === 'string' ? row['email'].trim() : undefined;
+  return { id, name: name || undefined, phone, email };
+}
+
+/** Prefer a row whose phone digits match `targetDigits` when length ≥ 8; else single-result heuristic. */
+export function pickContactByPhoneDigits(
+  rows: Record<string, unknown>[],
+  targetDigits: string,
+): GhlContactPhoneLookup | undefined {
+  const lookups = rows.map(mapSearchRowToLookup).filter((x): x is GhlContactPhoneLookup => Boolean(x));
+  if (targetDigits.length >= 8) {
+    for (const L of lookups) {
+      const pd = digitsOnlyPhone(L.phone ?? '');
+      if (pd && pd === targetDigits) return L;
+    }
+    return undefined;
+  }
+  if (lookups.length === 1) return lookups[0];
+  return undefined;
+}
+
 /** Official GHL (HighLevel) API host per current docs. */
 const GHL_API_BASE_DEFAULT = 'https://services.leadconnectorhq.com';
 
@@ -1081,6 +1146,33 @@ export class GhlClient {
       return { success: false, error: ghlMessage || error.message || 'Booking failed' };
     }
     return { success: false, error: 'Unknown error during booking' };
+  }
+
+  /**
+   * Search for an existing contact in a location by phone (POST /contacts/search).
+   * Returns a minimal row when a digit match is found (or a single search hit for short numbers).
+   */
+  async findContactByPhone(
+    locationId: string,
+    phone: string,
+  ): Promise<{ success: boolean; contact?: GhlContactPhoneLookup; error?: string }> {
+    const loc = locationId.trim();
+    const q = phone.trim();
+    if (!loc || !q) return { success: false, error: 'locationId and phone required' };
+    const targetDigits = digitsOnlyPhone(q);
+    try {
+      const response = await this.client.post<unknown>('/contacts/search', {
+        locationId: loc,
+        query: q,
+        pageLimit: 20,
+      });
+      const rows = extractContactsSearchRows(response.data);
+      const picked = pickContactByPhoneDigits(rows, targetDigits);
+      if (picked) return { success: true, contact: picked };
+      return { success: true, contact: undefined };
+    } catch (error) {
+      return { success: false, error: this.extractGhlErrorMessage(error) ?? 'findContactByPhone failed' };
+    }
   }
 
   /**

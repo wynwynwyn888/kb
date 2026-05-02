@@ -52,6 +52,7 @@ function clientBase() {
     getCalendar: jest.fn(async () => ({ summary: { name: 'Cal' } })),
     updateAppointmentNotes: jest.fn(async () => ({ success: true })),
     addContactNote: jest.fn(async () => ({ success: true })),
+    findContactByPhone: jest.fn(async () => ({ success: true, contact: undefined })),
     createContact: jest.fn(),
     sendMessage: jest.fn(),
   };
@@ -172,8 +173,49 @@ describe('BookingPostConfirmService', () => {
   it('internal alert enabled sends SMS to new staff contact', async () => {
     const sendMessage = jest.fn(async () => ({ success: true }));
     const createContact = jest.fn(async () => ({ success: true, contactId: 'staff_ct' }));
+    const findContactByPhone = jest.fn(async () => ({ success: true, contact: undefined }));
     const client = {
       ...clientBase(),
+      findContactByPhone,
+      createContact,
+      sendMessage,
+    };
+    const ghl = {
+      createGhlClientForConnectedTenantWorkerOrThrow: jest.fn(async () => ({ client, ghlLocationId: 'loc' })),
+    } as unknown as GhlService;
+    const svc = new BookingPostConfirmService(ghl);
+    await svc.runAfterLiveBookingConfirmed({
+      tenantId: 't1',
+      conversationId: 'c1',
+      customerContactId: 'ct1',
+      appointmentId: 'ap1',
+      booking: { ...booking, phone: '+6599888777' },
+      settings: {
+        ...baseDto,
+        internalBookingAlertEnabled: true,
+        internalBookingAlertNumber: '+6599990000',
+      },
+      picked: slot,
+      crmTimeZone: 'UTC',
+      contactSnapshot: { phone: '+6511110000' },
+    });
+    expect(findContactByPhone).toHaveBeenCalledWith('loc', '+6599990000');
+    expect(createContact).toHaveBeenCalled();
+    expect(sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ contactId: 'staff_ct', channel: 'SMS' }),
+    );
+  });
+
+  it('internal alert reuses existing GHL contact by phone (createContact not called)', async () => {
+    const sendMessage = jest.fn(async () => ({ success: true }));
+    const createContact = jest.fn();
+    const findContactByPhone = jest.fn(async () => ({
+      success: true,
+      contact: { id: 'existing_staff', phone: '+6599990000', name: 'Team' },
+    }));
+    const client = {
+      ...clientBase(),
+      findContactByPhone,
       createContact,
       sendMessage,
     };
@@ -187,26 +229,101 @@ describe('BookingPostConfirmService', () => {
       customerContactId: 'ct1',
       appointmentId: 'ap1',
       booking,
-      settings: {
-        ...baseDto,
-        internalBookingAlertEnabled: true,
-        internalBookingAlertNumber: '+6599990000',
-      },
+      settings: { ...baseDto, internalBookingAlertEnabled: true, internalBookingAlertNumber: '+6599990000' },
       picked: slot,
       crmTimeZone: 'UTC',
-      contactSnapshot: { phone: '+6511110000' },
+      contactSnapshot: { phone: '+6500000001' },
     });
-    expect(createContact).toHaveBeenCalled();
+    expect(findContactByPhone).toHaveBeenCalledWith('loc', '+6599990000');
+    expect(createContact).not.toHaveBeenCalled();
     expect(sendMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ contactId: 'staff_ct', channel: 'SMS' }),
+      expect.objectContaining({ contactId: 'existing_staff', channel: 'SMS' }),
     );
+  });
+
+  it('internal alert duplicate create recovers via second find by phone', async () => {
+    const sendMessage = jest.fn(async () => ({ success: true }));
+    const createContact = jest.fn(async () => ({
+      success: false,
+      error: 'This location does not allow duplicated contacts.',
+    }));
+    const findContactByPhone = jest
+      .fn()
+      .mockResolvedValueOnce({ success: true, contact: undefined })
+      .mockResolvedValueOnce({
+        success: true,
+        contact: { id: 'recovered_id', phone: '+6599990000' },
+      });
+    const client = {
+      ...clientBase(),
+      findContactByPhone,
+      createContact,
+      sendMessage,
+    };
+    const ghl = {
+      createGhlClientForConnectedTenantWorkerOrThrow: jest.fn(async () => ({ client, ghlLocationId: 'loc' })),
+    } as unknown as GhlService;
+    const svc = new BookingPostConfirmService(ghl);
+    await svc.runAfterLiveBookingConfirmed({
+      tenantId: 't1',
+      conversationId: 'c1',
+      customerContactId: 'ct1',
+      appointmentId: 'ap1',
+      booking,
+      settings: { ...baseDto, internalBookingAlertEnabled: true, internalBookingAlertNumber: '+6599990000' },
+      picked: slot,
+      crmTimeZone: 'UTC',
+      contactSnapshot: { phone: '+6511000000' },
+    });
+    expect(findContactByPhone).toHaveBeenCalledTimes(2);
+    expect(createContact).toHaveBeenCalledTimes(1);
+    expect(sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ contactId: 'recovered_id', channel: 'SMS' }),
+    );
+  });
+
+  it('internal alert duplicate create with no contact on retry does not send', async () => {
+    const sendMessage = jest.fn();
+    const createContact = jest.fn(async () => ({
+      success: false,
+      error: 'This location does not allow duplicated contacts.',
+    }));
+    const findContactByPhone = jest
+      .fn()
+      .mockResolvedValueOnce({ success: true, contact: undefined })
+      .mockResolvedValueOnce({ success: true, contact: undefined });
+    const client = {
+      ...clientBase(),
+      findContactByPhone,
+      createContact,
+      sendMessage,
+    };
+    const ghl = {
+      createGhlClientForConnectedTenantWorkerOrThrow: jest.fn(async () => ({ client, ghlLocationId: 'loc' })),
+    } as unknown as GhlService;
+    const svc = new BookingPostConfirmService(ghl);
+    await svc.runAfterLiveBookingConfirmed({
+      tenantId: 't1',
+      conversationId: 'c1',
+      customerContactId: 'ct1',
+      appointmentId: 'ap1',
+      booking,
+      settings: { ...baseDto, internalBookingAlertEnabled: true, internalBookingAlertNumber: '+6599990000' },
+      picked: slot,
+      crmTimeZone: 'UTC',
+      contactSnapshot: { phone: '+6511000000' },
+    });
+    expect(findContactByPhone).toHaveBeenCalledTimes(2);
+    expect(sendMessage).not.toHaveBeenCalled();
   });
 
   it('internal alert send failure does not call updateContact', async () => {
     const sendMessage = jest.fn(async () => ({ success: false, error: 'fail' }));
     const updateContact = jest.fn();
+    const findContactByPhone = jest.fn(async () => ({ success: true, contact: undefined }));
     const client = {
       ...clientBase(),
+      findContactByPhone,
       createContact: jest.fn(async () => ({ success: true, contactId: 's' })),
       sendMessage,
       updateContact,
@@ -260,8 +377,10 @@ describe('BookingPostConfirmService', () => {
   it('sends internal alert when team number equals booking intake phone but differs from conversation phone', async () => {
     const sendMessage = jest.fn(async () => ({ success: true }));
     const createContact = jest.fn(async () => ({ success: true, contactId: 'staff_x' }));
+    const findContactByPhone = jest.fn(async () => ({ success: true, contact: undefined }));
     const client = {
       ...clientBase(),
+      findContactByPhone,
       createContact,
       sendMessage,
     };

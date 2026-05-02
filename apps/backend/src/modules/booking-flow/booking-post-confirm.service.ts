@@ -7,6 +7,21 @@ import { digitsOnly, maskPhoneForLog } from './booking-contact-enrichment';
 import type { AisbpBookingStateV1, AisbpOfferedSlot } from './conversation-booking-state';
 import { buildBookingSummaryText, truncateForGhlNotes } from './booking-summary';
 
+function normalizeTeamAlertPhone(raw: string): string {
+  return raw.trim().replace(/\s+/g, '');
+}
+
+function isLikelyDuplicateContactError(message: string | undefined): boolean {
+  if (!message) return false;
+  const m = message.toLowerCase();
+  return (
+    m.includes('duplicate') ||
+    m.includes('already exists') ||
+    m.includes('unique constraint') ||
+    m.includes('not allow duplicated')
+  );
+}
+
 @Injectable()
 export class BookingPostConfirmService {
   private readonly logger = new Logger(BookingPostConfirmService.name);
@@ -127,6 +142,82 @@ export class BookingPostConfirmService {
     }
   }
 
+  /**
+   * Resolve GHL contact id for the configured team notification number only (find-or-create).
+   * Never uses booking intake phone for search/create.
+   */
+  private async resolveStaffAlertContactId(
+    client: GhlClient,
+    ghlLocationId: string,
+    teamPhone: string,
+    toMasked: string,
+  ): Promise<{ contactId?: string }> {
+    const findFirst = await client.findContactByPhone(ghlLocationId, teamPhone);
+    if (findFirst.success && findFirst.contact?.id) {
+      this.logger.log(
+        `bookingInternalAlertContactFound ${JSON.stringify({
+          toMasked,
+          contactIdPrefix: findFirst.contact.id.slice(0, 6),
+        })}`,
+      );
+      return { contactId: findFirst.contact.id };
+    }
+
+    const create = await client.createContact({
+      phone: teamPhone,
+      firstName: 'AISBP',
+      lastName: 'Staff alert',
+      source: 'AISBP_INTERNAL_BOOKING_ALERT',
+    });
+    if (create.success && create.contactId) {
+      this.logger.log(
+        `bookingInternalAlertContactCreated ${JSON.stringify({
+          toMasked,
+          contactIdPrefix: create.contactId.slice(0, 6),
+        })}`,
+      );
+      return { contactId: create.contactId };
+    }
+
+    const errMsg = create.error ?? '';
+    if (isLikelyDuplicateContactError(errMsg)) {
+      this.logger.log(
+        `bookingInternalAlertContactCreateDuplicate ${JSON.stringify({
+          toMasked,
+          error: errMsg.slice(0, 120),
+        })}`,
+      );
+      const findAfter = await client.findContactByPhone(ghlLocationId, teamPhone);
+      if (findAfter.success && findAfter.contact?.id) {
+        this.logger.log(
+          `bookingInternalAlertContactReused ${JSON.stringify({
+            reason: 'duplicate_create_recovered',
+            toMasked,
+            contactIdPrefix: findAfter.contact.id.slice(0, 6),
+          })}`,
+        );
+        return { contactId: findAfter.contact.id };
+      }
+      this.logger.log(
+        `bookingInternalAlertFailed ${JSON.stringify({
+          phase: 'duplicate_recovery',
+          toMasked,
+          error: (findAfter.error ?? 'contact_not_found_after_duplicate').slice(0, 120),
+        })}`,
+      );
+      return {};
+    }
+
+    this.logger.log(
+      `bookingInternalAlertFailed ${JSON.stringify({
+        phase: 'createContact',
+        toMasked,
+        error: errMsg.slice(0, 120),
+      })}`,
+    );
+    return {};
+  }
+
   private async sendInternalStaffAlert(
     client: GhlClient,
     ghlLocationId: string,
@@ -149,8 +240,10 @@ export class BookingPostConfirmService {
       return;
     }
 
-    const alertDigits = digitsOnly(rawNum);
-    const conversationDigits = digitsOnly(params.contactSnapshot?.phone);
+    const teamPhone = normalizeTeamAlertPhone(rawNum);
+    const toMasked = maskPhoneForLog(teamPhone);
+    const alertDigits = digitsOnly(teamPhone);
+    const conversationDigits = digitsOnly(params.contactSnapshot?.phone ?? '');
     if (
       alertDigits.length >= 8 &&
       conversationDigits.length >= 8 &&
@@ -159,7 +252,7 @@ export class BookingPostConfirmService {
       this.logger.warn(
         `bookingInternalAlertSkipped ${JSON.stringify({
           reason: 'same_as_conversation_contact_phone',
-          alertPhone: maskPhoneForLog(rawNum),
+          alertPhone: toMasked,
         })}`,
       );
       return;
@@ -172,18 +265,8 @@ export class BookingPostConfirmService {
 
     this.logger.log(`bookingInternalAlertQueued ${JSON.stringify({ channel: s.internalBookingAlertChannel })}`);
 
-    const create = await client.createContact({
-      phone: rawNum,
-      firstName: 'AISBP',
-      lastName: 'Staff alert',
-      source: 'AISBP_INTERNAL_BOOKING_ALERT',
-    });
-    if (!create.success || !create.contactId) {
-      this.logger.log(
-        `bookingInternalAlertFailed ${JSON.stringify({
-          error: (create.error ?? 'create_contact_failed').slice(0, 120),
-        })}`,
-      );
+    const { contactId } = await this.resolveStaffAlertContactId(client, ghlLocationId, teamPhone, toMasked);
+    if (!contactId) {
       return;
     }
 
@@ -193,19 +276,17 @@ export class BookingPostConfirmService {
     const body = `${header}${summary}`.trim();
     const send = await client.sendMessage({
       locationId: ghlLocationId,
-      contactId: create.contactId,
+      contactId,
       message: truncateForGhlNotes(body, 3500),
       channel: 'SMS',
     });
     if (send.success) {
-      this.logger.log(
-        `bookingInternalAlertSent ${JSON.stringify({
-          toMasked: maskPhoneForLog(rawNum),
-        })}`,
-      );
+      this.logger.log(`bookingInternalAlertSent ${JSON.stringify({ toMasked })}`);
     } else {
       this.logger.log(
         `bookingInternalAlertFailed ${JSON.stringify({
+          phase: 'sendMessage',
+          toMasked,
           error: (send.error ?? 'send_failed').slice(0, 120),
         })}`,
       );

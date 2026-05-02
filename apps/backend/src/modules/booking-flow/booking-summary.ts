@@ -18,16 +18,21 @@ const MONTHS = [
   'December',
 ] as const;
 
+/** Original GHL conversation contact (who messaged). Not booking intake. */
+export interface ConversationContactSnapshot {
+  displayName?: string;
+  phone?: string;
+}
+
 export interface BuildBookingSummaryTextInput {
   appointmentId?: string;
   bookingStatusLabel: string;
   booking: AisbpBookingStateV1;
   coreFieldsJson: Record<string, CoreFieldToggle>;
   customFieldsJson: CustomBookingFieldDto[];
-  conversationId: string;
+  /** CRM contact on the conversation thread — for "Contacted from" only. */
+  conversationContactSnapshot?: ConversationContactSnapshot;
   calendarName?: string;
-  appointmentOwner?: string;
-  contactPhoneFallback?: string;
   selectedSlot: AisbpOfferedSlot;
   crmTimeZone?: string;
 }
@@ -99,12 +104,18 @@ export function formatFirstVisitForSummary(booking: AisbpBookingStateV1): string
   return booking.firstVisit!.trim();
 }
 
-function coreAskOn(settings: Record<string, CoreFieldToggle>, key: BookingCoreFieldKey): boolean {
-  return Boolean(settings[key]?.enabled);
+/** Include intake line when Ask (enabled) OR Required — matches tenant normalization semantics. */
+export function coreFieldIncludedInSummary(
+  settings: Record<string, CoreFieldToggle>,
+  key: BookingCoreFieldKey,
+): boolean {
+  const t = settings[key];
+  if (!t) return false;
+  return Boolean(t.enabled || t.required);
 }
 
-function customAskOn(cf: CustomBookingFieldDto): boolean {
-  return cf.enabled !== false;
+export function customFieldIncludedInSummary(cf: CustomBookingFieldDto): boolean {
+  return cf.enabled !== false || Boolean(cf.required);
 }
 
 function coreLine(
@@ -140,8 +151,8 @@ function coreLine(
 }
 
 /**
- * Staff-facing booking summary. Customer intake lines only when Ask (`enabled`) is true on core/custom.
- * System footer lines always included.
+ * Staff-facing booking summary. Booking intake lines only when Ask OR Required.
+ * Always includes system header/footer (no GHL contact id, appointment owner, or conversation id).
  */
 export function buildBookingSummaryText(input: BuildBookingSummaryTextInput): string {
   const lines: string[] = [];
@@ -157,48 +168,46 @@ export function buildBookingSummaryText(input: BuildBookingSummaryTextInput): st
   const slot = input.selectedSlot;
   const tz = input.crmTimeZone;
 
-  if (coreAskOn(core, 'service')) {
+  if (coreFieldIncludedInSummary(core, 'service')) {
     const { value, skipped } = coreLine(input.booking, 'service');
     lines.push(`Service: ${skipped ? 'Skipped' : value}`);
   }
 
-  const dateAsk = coreAskOn(core, 'preferred_date');
-  const timeAsk = coreAskOn(core, 'preferred_time');
-  if (dateAsk) {
+  const dateIn = coreFieldIncludedInSummary(core, 'preferred_date');
+  const timeIn = coreFieldIncludedInSummary(core, 'preferred_time');
+  if (dateIn) {
     lines.push(`Booking date: ${formatLongDateFromIso(slot.startIso, tz)}`);
   }
-  if (timeAsk) {
+  if (timeIn) {
     const range = formatTimeRange(slot.startIso, slot.endIso || slot.startIso, tz);
     lines.push(`Booking time: ${range || slot.displayText || '-'}`);
   }
 
-  if (coreAskOn(core, 'name')) {
+  lines.push('');
+
+  if (coreFieldIncludedInSummary(core, 'name')) {
     const { value, skipped } = coreLine(input.booking, 'name');
-    lines.push(`Customer name: ${skipped ? 'Skipped' : value}`);
+    lines.push(`Booking name: ${skipped ? 'Skipped' : value}`);
   }
-  if (coreAskOn(core, 'phone')) {
+  if (coreFieldIncludedInSummary(core, 'phone')) {
     const { value, skipped } = coreLine(input.booking, 'phone');
-    const phone =
-      skipped ? 'Skipped' : value !== '-' ? value : input.contactPhoneFallback?.trim() || '-';
-    lines.push(`Phone: ${phone}`);
+    lines.push(`Booking phone: ${skipped ? 'Skipped' : value}`);
   }
-  if (coreAskOn(core, 'email')) {
+  if (coreFieldIncludedInSummary(core, 'email')) {
     const { value, skipped } = coreLine(input.booking, 'email');
-    lines.push(`Email: ${skipped ? 'Skipped' : value}`);
+    lines.push(`Booking email: ${skipped ? 'Skipped' : value}`);
   }
-  if (coreAskOn(core, 'first_visit')) {
+  if (coreFieldIncludedInSummary(core, 'first_visit')) {
     lines.push(`First visit: ${formatFirstVisitForSummary(input.booking)}`);
   }
 
   lines.push('');
   lines.push(`Calendar: ${(input.calendarName ?? input.booking.calendarId ?? '-').trim() || '-'}`);
-  lines.push(`Appointment owner: ${(input.appointmentOwner ?? '-').trim() || '-'}`);
-  lines.push('Source: AISBP conversation booking');
-  lines.push(`Conversation ID: ${input.conversationId}`);
+  lines.push('Source: AISBP booking assistant');
 
   const customLines: string[] = [];
   for (const cf of [...input.customFieldsJson].sort((a, b) => a.displayOrder - b.displayOrder)) {
-    if (!customAskOn(cf)) continue;
+    if (!customFieldIncludedInSummary(cf)) continue;
     const ans = input.booking.customAnswers?.[cf.id]?.trim();
     const skippedCustom = input.booking.skippedFieldIds?.includes(`custom:${cf.id}`);
     const label = cf.label.trim() || cf.id;
@@ -210,6 +219,15 @@ export function buildBookingSummaryText(input: BuildBookingSummaryTextInput): st
     lines.push('Custom fields:');
     lines.push(...customLines);
   }
+
+  const snap = input.conversationContactSnapshot;
+  const crmName = snap?.displayName?.trim() || '-';
+  const crmPhone = snap?.phone?.trim() || '-';
+
+  lines.push('');
+  lines.push('Contacted from:');
+  lines.push(`CRM contact name: ${crmName}`);
+  lines.push(`CRM contact phone: ${crmPhone}`);
 
   return lines.join('\n');
 }

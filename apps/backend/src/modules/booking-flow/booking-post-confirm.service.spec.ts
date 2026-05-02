@@ -47,21 +47,24 @@ const booking: AisbpBookingStateV1 = {
   preferredTime: '09:00',
 };
 
+function clientBase() {
+  return {
+    getCalendar: jest.fn(async () => ({ summary: { name: 'Cal' } })),
+    updateAppointmentNotes: jest.fn(async () => ({ success: true })),
+    addContactNote: jest.fn(async () => ({ success: true })),
+    createContact: jest.fn(),
+    sendMessage: jest.fn(),
+  };
+}
+
 describe('BookingPostConfirmService', () => {
-  it('calls updateContact when collected name/phone exist and existing name is empty', async () => {
-    const updateContact = jest.fn(async () => ({ success: true }));
-    const getContact = jest.fn(async () => ({
-      success: true,
-      contact: { firstName: '', lastName: '' },
-    }));
+  it('does not call updateContact or getContact (booking safety)', async () => {
+    const updateContact = jest.fn();
+    const getContact = jest.fn();
     const client = {
-      getCalendar: jest.fn(async () => ({ summary: { name: 'Cal' } })),
+      ...clientBase(),
       getContact,
       updateContact,
-      updateAppointmentNotes: jest.fn(async () => ({ success: true })),
-      addContactNote: jest.fn(async () => ({ success: true })),
-      createContact: jest.fn(),
-      sendMessage: jest.fn(),
     };
     const ghl = {
       createGhlClientForConnectedTenantWorkerOrThrow: jest.fn(async () => ({ client, ghlLocationId: 'loc' })),
@@ -76,54 +79,17 @@ describe('BookingPostConfirmService', () => {
       settings: baseDto,
       picked: slot,
       crmTimeZone: 'UTC',
+      contactSnapshot: { displayName: 'CRM User', phone: '+6590000000' },
     });
-    expect(updateContact).toHaveBeenCalled();
+    expect(updateContact).not.toHaveBeenCalled();
+    expect(getContact).not.toHaveBeenCalled();
   });
 
-  it('skips name update when existing contact has a real name', async () => {
-    const updateContact = jest.fn(async () => ({ success: true }));
-    const getContact = jest.fn(async () => ({
-      success: true,
-      contact: { firstName: 'Jordan', lastName: 'Lee' },
-    }));
-    const client = {
-      getCalendar: jest.fn(async () => ({ summary: {} })),
-      getContact,
-      updateContact,
-      updateAppointmentNotes: jest.fn(async () => ({ success: true })),
-      addContactNote: jest.fn(async () => ({ success: true })),
-      createContact: jest.fn(),
-      sendMessage: jest.fn(),
-    };
-    const ghl = {
-      createGhlClientForConnectedTenantWorkerOrThrow: jest.fn(async () => ({ client, ghlLocationId: 'loc' })),
-    } as unknown as GhlService;
-    const svc = new BookingPostConfirmService(ghl);
-    await svc.runAfterLiveBookingConfirmed({
-      tenantId: 't1',
-      conversationId: 'c1',
-      customerContactId: 'ct1',
-      appointmentId: 'ap1',
-      booking,
-      settings: baseDto,
-      picked: slot,
-      crmTimeZone: 'UTC',
-    });
-    const body = updateContact.mock.calls[0]?.[1] as Record<string, unknown> | undefined;
-    expect(body?.['firstName']).toBeUndefined();
-    expect(body?.['phone']).toBeDefined();
-  });
-
-  it('updateAppointmentNotes receives summary with appointment id', async () => {
+  it('updateAppointmentNotes receives summary with booking intake labels and Contacted from', async () => {
     const updateAppointmentNotes = jest.fn(async () => ({ success: true }));
     const client = {
-      getCalendar: jest.fn(async () => ({ summary: {} })),
-      getContact: jest.fn(async () => ({ success: true, contact: {} })),
-      updateContact: jest.fn(async () => ({ success: true })),
+      ...clientBase(),
       updateAppointmentNotes,
-      addContactNote: jest.fn(async () => ({ success: true })),
-      createContact: jest.fn(),
-      sendMessage: jest.fn(),
     };
     const ghl = {
       createGhlClientForConnectedTenantWorkerOrThrow: jest.fn(async () => ({ client, ghlLocationId: 'loc' })),
@@ -138,22 +104,29 @@ describe('BookingPostConfirmService', () => {
       settings: baseDto,
       picked: slot,
       crmTimeZone: 'UTC',
+      contactSnapshot: { displayName: 'Jordan', phone: '+6511111111' },
     });
     expect(updateAppointmentNotes).toHaveBeenCalled();
     const note = (updateAppointmentNotes.mock.calls[0] ?? [])[1] as string;
     expect(note).toContain('Booking ID: ap1');
+    expect(note).toContain('Booking name: Pat');
+    expect(note).toContain('Booking phone: 0262000111');
+    expect(note).toContain('Contacted from:');
+    expect(note).toContain('CRM contact name: Jordan');
+    expect(note).toContain('CRM contact phone: +6511111111');
+    expect(note).not.toMatch(/conversation id/i);
+    expect(note).not.toMatch(/appointment owner/i);
+    expect(note).not.toMatch(/contact id/i);
   });
 
-  it('when appointment note fails, tries contact note', async () => {
+  it('when appointment note fails, tries contact note without profile update', async () => {
     const addContactNote = jest.fn(async () => ({ success: true }));
+    const updateContact = jest.fn();
     const client = {
-      getCalendar: jest.fn(async () => ({ summary: {} })),
-      getContact: jest.fn(async () => ({ success: true, contact: {} })),
-      updateContact: jest.fn(async () => ({ success: true })),
+      ...clientBase(),
       updateAppointmentNotes: jest.fn(async () => ({ success: false, error: 'nope' })),
       addContactNote,
-      createContact: jest.fn(),
-      sendMessage: jest.fn(),
+      updateContact,
     };
     const ghl = {
       createGhlClientForConnectedTenantWorkerOrThrow: jest.fn(async () => ({ client, ghlLocationId: 'loc' })),
@@ -170,18 +143,14 @@ describe('BookingPostConfirmService', () => {
       crmTimeZone: 'UTC',
     });
     expect(addContactNote).toHaveBeenCalled();
+    expect(updateContact).not.toHaveBeenCalled();
   });
 
   it('internal alert disabled does not create staff contact', async () => {
     const createContact = jest.fn();
     const client = {
-      getCalendar: jest.fn(async () => ({ summary: {} })),
-      getContact: jest.fn(async () => ({ success: true, contact: {} })),
-      updateContact: jest.fn(async () => ({ success: true })),
-      updateAppointmentNotes: jest.fn(async () => ({ success: true })),
-      addContactNote: jest.fn(async () => ({ success: true })),
+      ...clientBase(),
       createContact,
-      sendMessage: jest.fn(),
     };
     const ghl = {
       createGhlClientForConnectedTenantWorkerOrThrow: jest.fn(async () => ({ client, ghlLocationId: 'loc' })),
@@ -204,11 +173,7 @@ describe('BookingPostConfirmService', () => {
     const sendMessage = jest.fn(async () => ({ success: true }));
     const createContact = jest.fn(async () => ({ success: true, contactId: 'staff_ct' }));
     const client = {
-      getCalendar: jest.fn(async () => ({ summary: {} })),
-      getContact: jest.fn(async () => ({ success: true, contact: {} })),
-      updateContact: jest.fn(async () => ({ success: true })),
-      updateAppointmentNotes: jest.fn(async () => ({ success: true })),
-      addContactNote: jest.fn(async () => ({ success: true })),
+      ...clientBase(),
       createContact,
       sendMessage,
     };
@@ -229,6 +194,7 @@ describe('BookingPostConfirmService', () => {
       },
       picked: slot,
       crmTimeZone: 'UTC',
+      contactSnapshot: { phone: '+6511110000' },
     });
     expect(createContact).toHaveBeenCalled();
     expect(sendMessage).toHaveBeenCalledWith(
@@ -236,17 +202,14 @@ describe('BookingPostConfirmService', () => {
     );
   });
 
-  it('internal alert send failure still completes contact update', async () => {
+  it('internal alert send failure does not call updateContact', async () => {
     const sendMessage = jest.fn(async () => ({ success: false, error: 'fail' }));
-    const updateContact = jest.fn(async () => ({ success: true }));
+    const updateContact = jest.fn();
     const client = {
-      getCalendar: jest.fn(async () => ({ summary: {} })),
-      getContact: jest.fn(async () => ({ success: true, contact: {} })),
-      updateContact,
-      updateAppointmentNotes: jest.fn(async () => ({ success: true })),
-      addContactNote: jest.fn(async () => ({ success: true })),
+      ...clientBase(),
       createContact: jest.fn(async () => ({ success: true, contactId: 's' })),
       sendMessage,
+      updateContact,
     };
     const ghl = {
       createGhlClientForConnectedTenantWorkerOrThrow: jest.fn(async () => ({ client, ghlLocationId: 'loc' })),
@@ -261,20 +224,44 @@ describe('BookingPostConfirmService', () => {
       settings: { ...baseDto, internalBookingAlertEnabled: true, internalBookingAlertNumber: '+6599900111' },
       picked: slot,
       crmTimeZone: 'UTC',
+      contactSnapshot: { phone: '+6500000001' },
     });
-    expect(updateContact).toHaveBeenCalled();
+    expect(updateContact).not.toHaveBeenCalled();
     expect(sendMessage).toHaveBeenCalled();
   });
 
-  it('skips internal alert when alert number matches customer phone digits', async () => {
+  it('skips internal alert when alert number matches conversation contact phone digits (not booking intake)', async () => {
     const sendMessage = jest.fn();
     const createContact = jest.fn();
     const client = {
-      getCalendar: jest.fn(async () => ({ summary: {} })),
-      getContact: jest.fn(async () => ({ success: true, contact: {} })),
-      updateContact: jest.fn(async () => ({ success: true })),
-      updateAppointmentNotes: jest.fn(async () => ({ success: true })),
-      addContactNote: jest.fn(async () => ({ success: true })),
+      ...clientBase(),
+      createContact,
+      sendMessage,
+    };
+    const ghl = {
+      createGhlClientForConnectedTenantWorkerOrThrow: jest.fn(async () => ({ client, ghlLocationId: 'loc' })),
+    } as unknown as GhlService;
+    const svc = new BookingPostConfirmService(ghl);
+    await svc.runAfterLiveBookingConfirmed({
+      tenantId: 't1',
+      conversationId: 'c1',
+      customerContactId: 'ct1',
+      appointmentId: 'ap1',
+      booking: { ...booking, phone: '+6599998888' },
+      settings: { ...baseDto, internalBookingAlertEnabled: true, internalBookingAlertNumber: '0262000111' },
+      picked: slot,
+      crmTimeZone: 'UTC',
+      contactSnapshot: { phone: '0262000111' },
+    });
+    expect(createContact).not.toHaveBeenCalled();
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('sends internal alert when team number equals booking intake phone but differs from conversation phone', async () => {
+    const sendMessage = jest.fn(async () => ({ success: true }));
+    const createContact = jest.fn(async () => ({ success: true, contactId: 'staff_x' }));
+    const client = {
+      ...clientBase(),
       createContact,
       sendMessage,
     };
@@ -291,8 +278,9 @@ describe('BookingPostConfirmService', () => {
       settings: { ...baseDto, internalBookingAlertEnabled: true, internalBookingAlertNumber: '0262000111' },
       picked: slot,
       crmTimeZone: 'UTC',
+      contactSnapshot: { phone: '+6590000001' },
     });
-    expect(createContact).not.toHaveBeenCalled();
-    expect(sendMessage).not.toHaveBeenCalled();
+    expect(createContact).toHaveBeenCalled();
+    expect(sendMessage).toHaveBeenCalled();
   });
 });

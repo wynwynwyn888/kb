@@ -3,13 +3,7 @@ import type { GhlClient } from '@aisbp/ghl-client';
 import { isChannelVerified } from '@aisbp/ghl-client';
 import type { TenantBookingSettingsDto } from '../booking-settings/booking-settings.service';
 import { GhlService } from '../ghl/ghl.service';
-import {
-  digitsOnly,
-  existingContactDisplayName,
-  maskPhoneForLog,
-  shouldSkipNameEnrichment,
-  splitNameForGhl,
-} from './booking-contact-enrichment';
+import { digitsOnly, maskPhoneForLog } from './booking-contact-enrichment';
 import type { AisbpBookingStateV1, AisbpOfferedSlot } from './conversation-booking-state';
 import { buildBookingSummaryText, truncateForGhlNotes } from './booking-summary';
 
@@ -21,6 +15,7 @@ export class BookingPostConfirmService {
 
   /**
    * Best-effort staff persistence after GHL appointment create succeeds.
+   * Never mutates the CRM conversation contact from booking intake (safety).
    * Never throws to the caller — failures are logged only.
    */
   async runAfterLiveBookingConfirmed(params: {
@@ -39,6 +34,13 @@ export class BookingPostConfirmService {
         params.tenantId,
       );
 
+      this.logger.log(
+        `bookingContactMutationSkipped ${JSON.stringify({
+          reason: 'disabled_for_booking_safety',
+          tenantId: params.tenantId,
+        })}`,
+      );
+
       let calendarName = params.settings.defaultGhlCalendarName ?? undefined;
       try {
         const cal = await client.getCalendar(params.booking.calendarId);
@@ -53,105 +55,36 @@ export class BookingPostConfirmService {
         booking: params.booking,
         coreFieldsJson: params.settings.coreFieldsJson,
         customFieldsJson: params.settings.customFieldsJson,
-        conversationId: params.conversationId,
+        conversationContactSnapshot: {
+          displayName: params.contactSnapshot?.displayName,
+          phone: params.contactSnapshot?.phone,
+        },
         calendarName,
-        appointmentOwner: undefined,
-        contactPhoneFallback: params.contactSnapshot?.phone,
         selectedSlot: params.picked,
         crmTimeZone: params.crmTimeZone,
       });
       const summaryForSend = truncateForGhlNotes(summary, 8000);
+      const alertEnabled = Boolean(params.settings.internalBookingAlertEnabled);
       this.logger.log(
         `bookingSummaryBuilt ${JSON.stringify({
           tenantId: params.tenantId,
           appointmentId: params.appointmentId,
-          conversationId: params.conversationId,
           length: summaryForSend.length,
+          hasBookingName: Boolean(params.booking.customerName?.trim()),
+          hasBookingPhone: Boolean(params.booking.phone?.trim()),
+          hasEmail: Boolean(params.booking.email?.trim()),
+          alertEnabled,
+          noteAttempted: true,
         })}`,
       );
 
-      await this.enrichCustomerContact(client, params);
       await this.persistSummaryNotes(client, params.customerContactId, params.appointmentId, summaryForSend);
       await this.sendInternalStaffAlert(client, ghlLocationId, params, summaryForSend);
     } catch (e) {
       this.logger.warn(
         `bookingPostConfirmFailed ${JSON.stringify({
           tenantId: params.tenantId,
-          conversationId: params.conversationId,
           message: e instanceof Error ? e.message : 'unknown',
-        })}`,
-      );
-    }
-  }
-
-  private async enrichCustomerContact(
-    client: GhlClient,
-    params: {
-      tenantId: string;
-      customerContactId: string;
-      booking: AisbpBookingStateV1;
-      contactSnapshot?: { displayName?: string; phone?: string; email?: string };
-    },
-  ): Promise<void> {
-    const cid = params.customerContactId?.trim();
-    if (!cid) {
-      this.logger.log(`contactEnrichmentSkipped ${JSON.stringify({ reason: 'no_contact_id' })}`);
-      return;
-    }
-
-    const gc = await client.getContact(cid);
-    if (!gc.success || !gc.contact) {
-      this.logger.log(
-        `contactEnrichmentFailed ${JSON.stringify({
-          reason: 'get_contact_failed',
-          contactIdPrefix: cid.slice(0, 6),
-        })}`,
-      );
-      return;
-    }
-
-    const existingName = existingContactDisplayName(gc.contact);
-    const collected = params.booking.customerName?.trim();
-    const payload: Record<string, unknown> = {};
-
-    if (collected) {
-      if (shouldSkipNameEnrichment(existingName)) {
-        this.logger.log(
-          `contactEnrichmentSkipped ${JSON.stringify({
-            reason: 'existing_name',
-            hasExisting: true,
-          })}`,
-        );
-      } else {
-        const { firstName, lastName } = splitNameForGhl(collected);
-        payload['firstName'] = firstName;
-        payload['lastName'] = lastName;
-      }
-    }
-
-    const p = params.booking.phone?.trim();
-    if (p) payload['phone'] = p;
-
-    const em = params.booking.email?.trim();
-    if (em) payload['email'] = em;
-
-    if (Object.keys(payload).length === 0) {
-      this.logger.log(`contactEnrichmentSkipped ${JSON.stringify({ reason: 'nothing_to_write' })}`);
-      return;
-    }
-
-    const up = await client.updateContact(cid, payload);
-    if (up.success) {
-      this.logger.log(
-        `contactEnrichmentSucceeded ${JSON.stringify({
-          keys: Object.keys(payload),
-          phoneLogged: p ? maskPhoneForLog(p) : undefined,
-        })}`,
-      );
-    } else {
-      this.logger.log(
-        `contactEnrichmentFailed ${JSON.stringify({
-          error: (up.error ?? 'unknown').slice(0, 120),
         })}`,
       );
     }
@@ -177,7 +110,7 @@ export class BookingPostConfirmService {
 
     const cid = customerContactId?.trim();
     if (!cid) {
-      this.logger.log(`bookingSummaryPersistenceSkipped ${JSON.stringify({ reason: 'no_contact_for_note' })}`);
+      this.logger.log(`bookingSummaryNoteSkipped ${JSON.stringify({ reason: 'no_contact_for_note' })}`);
       return;
     }
     const cn = await client.addContactNote(cid, summary);
@@ -190,7 +123,7 @@ export class BookingPostConfirmService {
           error: (cn.error ?? '').slice(0, 120),
         })}`,
       );
-      this.logger.log(`bookingSummaryPersistenceSkipped ${JSON.stringify({ reason: 'appointment_and_note_failed' })}`);
+      this.logger.log(`bookingSummaryNoteSkipped ${JSON.stringify({ reason: 'appointment_and_note_failed' })}`);
     }
   }
 
@@ -199,8 +132,6 @@ export class BookingPostConfirmService {
     ghlLocationId: string,
     params: {
       tenantId: string;
-      conversationId: string;
-      customerContactId: string;
       booking: AisbpBookingStateV1;
       settings: TenantBookingSettingsDto;
       contactSnapshot?: { displayName?: string; phone?: string; email?: string };
@@ -219,11 +150,15 @@ export class BookingPostConfirmService {
     }
 
     const alertDigits = digitsOnly(rawNum);
-    const customerDigits = digitsOnly(params.booking.phone) || digitsOnly(params.contactSnapshot?.phone);
-    if (alertDigits.length >= 8 && customerDigits.length >= 8 && alertDigits === customerDigits) {
+    const conversationDigits = digitsOnly(params.contactSnapshot?.phone);
+    if (
+      alertDigits.length >= 8 &&
+      conversationDigits.length >= 8 &&
+      alertDigits === conversationDigits
+    ) {
       this.logger.warn(
         `bookingInternalAlertSkipped ${JSON.stringify({
-          reason: 'same_as_customer_phone',
+          reason: 'same_as_conversation_contact_phone',
           alertPhone: maskPhoneForLog(rawNum),
         })}`,
       );
@@ -263,7 +198,11 @@ export class BookingPostConfirmService {
       channel: 'SMS',
     });
     if (send.success) {
-      this.logger.log(`bookingInternalAlertSent ${JSON.stringify({ contactIdPrefix: create.contactId.slice(0, 6) })}`);
+      this.logger.log(
+        `bookingInternalAlertSent ${JSON.stringify({
+          toMasked: maskPhoneForLog(rawNum),
+        })}`,
+      );
     } else {
       this.logger.log(
         `bookingInternalAlertFailed ${JSON.stringify({

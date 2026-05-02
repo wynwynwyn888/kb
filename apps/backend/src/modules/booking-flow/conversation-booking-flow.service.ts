@@ -483,10 +483,11 @@ export class ConversationBookingFlowService {
         booking,
         coreFieldsJson: settings.coreFieldsJson,
         customFieldsJson: settings.customFieldsJson,
-        conversationId: params.conversationId,
+        conversationContactSnapshot: {
+          displayName: params.contactSnapshot?.displayName,
+          phone: params.contactSnapshot?.phone,
+        },
         calendarName: settings.defaultGhlCalendarName ?? undefined,
-        appointmentOwner: undefined,
-        contactPhoneFallback: params.contactSnapshot?.phone,
         selectedSlot: picked,
         crmTimeZone: recheck.crmTimezoneUsed,
       });

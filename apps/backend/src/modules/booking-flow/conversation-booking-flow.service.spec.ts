@@ -682,10 +682,13 @@ describe('ConversationBookingFlowService', () => {
       expect(bookArg.title).toBe('Haircut');
       const n = bookArg.notes ?? '';
       expect(n).toContain('Service: Haircut');
-      expect(n).toContain('Customer name: Alex');
-      expect(n).toContain('Phone: +15551234567');
-      expect(n).toContain('Source: AISBP conversation booking');
-      expect(n).toContain('Conversation ID: c1');
+      expect(n).toContain('Booking name: Alex');
+      expect(n).toContain('Booking phone: +15551234567');
+      expect(n).toContain('Source: AISBP booking assistant');
+      expect(n).toContain('Contacted from:');
+      expect(n).toContain('CRM contact name: -');
+      expect(n).toContain('CRM contact phone: -');
+      expect(n).not.toMatch(/conversation id/i);
       expect(r.replyPlan.bubbles[0]!.text.toLowerCase()).toMatch(/confirmed/);
       const lastIntent = capturedActionIntentInserts.at(-1) as Record<string, unknown> | undefined;
       expect(lastIntent?.['status']).toBe('EXECUTED');

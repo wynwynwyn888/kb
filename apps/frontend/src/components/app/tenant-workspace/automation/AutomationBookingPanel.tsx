@@ -1233,7 +1233,8 @@ export function AutomationBookingPanel() {
               disabled={dim}
             />
             <p style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted)', margin: '0 0 0.75rem' }}>
-              After a booking is confirmed, AISBP sends the booking summary to this number.
+              Collected booking details are sent to your team. AISBP will not overwrite the CRM contact name or phone from
+              booking answers.
             </p>
             <label style={{ ...mvpLabelStyle, display: 'block' }}>Optional message prefix</label>
             <textarea

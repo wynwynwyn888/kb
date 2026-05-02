@@ -2,20 +2,23 @@ import { jest as jestGlobal } from '@jest/globals';
 
 import { OutboundSendService } from './outbound-send.service';
 import { createMockSupabase } from '../../test/mock-supabase';
+import * as encryption from '../../lib/encryption';
 
 const mockSupabase = createMockSupabase();
 jestGlobal.mock('../../lib/supabase', () => ({
   getSupabaseService: () => mockSupabase,
 }));
 
+const mockSendMessage = jestGlobal.fn(async ({ message }: { message: string }) => ({
+  success: true,
+  messageId: `ghl_${message.slice(0, 5)}`,
+  error: null,
+}));
+
 // Mock GHL client
 jestGlobal.mock('@aisbp/ghl-client', () => ({
   createGhlClient: jestGlobal.fn(() => ({
-    sendMessage: jestGlobal.fn(async ({ message }: { message: string }) => ({
-      success: true,
-      messageId: `ghl_${message.slice(0, 5)}`,
-      error: null,
-    })),
+    sendMessage: mockSendMessage,
   })) as never,
 }));
 
@@ -97,6 +100,69 @@ describe('OutboundSendService', () => {
       }));
       expect(result.succeeded).toBe(0);
       expect(result.quotaDebited).toBe(0);
+    });
+
+    it('sends GHL messages to the explicit contactId (conversation contact), not inferred from bubble text', async () => {
+      const decryptSpy = jestGlobal.spyOn(encryption, 'decrypt').mockReturnValue('plain_token');
+      try {
+        (mockSupabase.from as jest.Mock).mockImplementation((table: string) => {
+          if (table === 'tenant_ghl_connections') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    eq: () => ({
+                      single: async () => ({ data: { private_token_encrypted: 'cipher_blob' }, error: null }),
+                    }),
+                  }),
+                }),
+              }),
+            } as never;
+          }
+          if (table === 'messages') {
+            return { insert: jestGlobal.fn(async () => ({ data: null, error: null })) } as never;
+          }
+          if (table === 'conversations') {
+            return {
+              update: jestGlobal.fn(() => ({
+                eq: jestGlobal.fn(async () => ({ data: null, error: null })),
+              })),
+            } as never;
+          }
+          if (table === 'quota_wallets') {
+            return {
+              select: () => ({
+                eq: () => ({ single: async () => ({ data: { id: 'w1', total_quota: 100, used_quota: 50 }, error: null }) }),
+              }),
+              update: jestGlobal.fn(() => ({
+                eq: jestGlobal.fn(async () => ({ data: null, error: null })),
+              })),
+            } as never;
+          }
+          if (table === 'quota_ledgers') {
+            return { insert: jestGlobal.fn(async () => ({ data: null, error: null })) } as never;
+          }
+          return {} as never;
+        });
+
+        const wrongRecipientHint = '+19999999999';
+        await service.sendReply(
+          makeParams({
+            contactId: 'ghl_conversation_contact_aaa',
+            replyPlan: makeReplyPlan({
+              bubbles: [{ index: 0, text: `Confirmed — call ${wrongRecipientHint} if needed.` }],
+            }),
+          }),
+        );
+
+        expect(mockSendMessage).toHaveBeenCalledWith(
+          expect.objectContaining({
+            contactId: 'ghl_conversation_contact_aaa',
+          }),
+        );
+      } finally {
+        decryptSpy.mockRestore();
+      }
     });
   });
 

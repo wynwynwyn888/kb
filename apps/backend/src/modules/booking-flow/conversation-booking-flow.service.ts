@@ -44,11 +44,17 @@ import {
   resolveServiceFromBookingIntake,
 } from './booking-service-intake';
 import { BookingNluInterpreterService } from './booking-nlu-interpreter.service';
+import { BookingReplyComposerService } from './booking-reply-composer.service';
 import {
   BOOKING_NLU_MIN_MERGE_CONFIDENCE,
   mergeValidatedNluIntoBooking,
 } from './booking-nlu-merge';
 import type { BookingNluInterpretInput } from './booking-nlu.schema';
+import type { BookingReplyComposerNextStep } from './booking-reply-composer.types';
+import {
+  buildBookingReplyComposerNextStepForAsk,
+  buildOfferSlotsComposerStep,
+} from './booking-reply-composer-step';
 import { applyPendingFieldAnswer, isOptionalSkipIntent } from './booking-pending-field';
 import { buildAppointmentCreateNotes } from './booking-summary';
 import { BookingPostConfirmService } from './booking-post-confirm.service';
@@ -180,6 +186,7 @@ export class ConversationBookingFlowService {
     private readonly ghlService: GhlService,
     private readonly bookingPostConfirm: BookingPostConfirmService,
     @Optional() private readonly bookingNluInterpreter?: BookingNluInterpreterService,
+    @Optional() private readonly bookingReplyComposer?: BookingReplyComposerService,
   ) {}
 
   /**
@@ -530,10 +537,20 @@ export class ConversationBookingFlowService {
         `bookingNextStepSelected ${JSON.stringify({ step: 'required_skip_refused', fieldId: pid })}`,
       );
       const nextMeta = mergeBookingIntoConversationMetadata(prevMeta, { ...booking, status: 'collecting_details' });
+      const composedSkip = await this.composeBookingCustomerReply({
+        tenantId: params.tenantId,
+        conversationId: params.conversationId,
+        latestInboundText: latest,
+        combinedTranscript: combined,
+        booking,
+        nextStep: buildBookingReplyComposerNextStepForAsk(pid, settings, outQ),
+        userFrustrated: hadFrustration,
+        businessName: params.tenantDisplayName,
+      });
       return {
         handled: true,
         persistMetadata: nextMeta,
-        replyPlan: plan(withTone(outQ), 'booking_required_not_skippable'),
+        replyPlan: plan(withTone(composedSkip), 'booking_required_not_skippable'),
         routing: stubRouting(),
       };
     }
@@ -614,13 +631,22 @@ export class ConversationBookingFlowService {
 
         if (top.length === 0) {
           const nextMeta = mergeBookingIntoConversationMetadata(prevMeta, { ...booking, status: 'collecting_details' });
+          const noSlotMsg =
+            "I couldn't find open slots for that date in the live calendar. Try another date, or the team can help find a time.";
+          const composedNo = await this.composeBookingCustomerReply({
+            tenantId: params.tenantId,
+            conversationId: params.conversationId,
+            latestInboundText: latest,
+            combinedTranscript: combined,
+            booking,
+            nextStep: { type: 'no_slots', safeBaseMessage: noSlotMsg },
+            userFrustrated: hadFrustration,
+            businessName: params.tenantDisplayName,
+          });
           return {
             handled: true,
             persistMetadata: nextMeta,
-            replyPlan: plan(
-              "I couldn't find open slots for that date in the live calendar. Try another date, or the team can help find a time.",
-              'booking_no_slots',
-            ),
+            replyPlan: plan(withTone(composedNo), 'booking_no_slots'),
             routing: stubRouting(),
           };
         }
@@ -683,20 +709,42 @@ export class ConversationBookingFlowService {
           pendingParseFailureCount: undefined,
         });
 
+        const composedOffer = await this.composeBookingCustomerReply({
+          tenantId: params.tenantId,
+          conversationId: params.conversationId,
+          latestInboundText: latest,
+          combinedTranscript: combined,
+          booking,
+          nextStep: buildOfferSlotsComposerStep(body, offered),
+          userFrustrated: hadFrustration,
+          businessName: params.tenantDisplayName,
+        });
+
         return {
           handled: true,
           persistMetadata: nextMeta,
-          replyPlan: plan(withTone(body), 'booking_slots_offered'),
+          replyPlan: plan(withTone(composedOffer), 'booking_slots_offered'),
           routing: stubRouting(),
         };
       }
 
       if (rev.kind !== 'selected_slot') {
         const nextMeta = mergeBookingIntoConversationMetadata(prevMeta, { ...booking });
+        const pickHelp = copyPickSlotHelpSofter();
+        const composedPick = await this.composeBookingCustomerReply({
+          tenantId: params.tenantId,
+          conversationId: params.conversationId,
+          latestInboundText: latest,
+          combinedTranscript: combined,
+          booking,
+          nextStep: { type: 'confirm_slot', safeBaseMessage: pickHelp },
+          userFrustrated: hadFrustration,
+          businessName: params.tenantDisplayName,
+        });
         return {
           handled: true,
           persistMetadata: nextMeta,
-          replyPlan: plan(withTone(copyPickSlotHelpSofter()), 'booking_pick_slot'),
+          replyPlan: plan(withTone(composedPick), 'booking_pick_slot'),
           routing: stubRouting(),
         };
       }
@@ -802,10 +850,20 @@ export class ConversationBookingFlowService {
           lastOfferedAt: undefined,
           selectedSlot: undefined,
         });
+        const composedMissing = await this.composeBookingCustomerReply({
+          tenantId: params.tenantId,
+          conversationId: params.conversationId,
+          latestInboundText: latest,
+          combinedTranscript: combined,
+          booking,
+          nextStep: buildBookingReplyComposerNextStepForAsk(first, settings, baseQ),
+          userFrustrated: hadFrustration,
+          businessName: params.tenantDisplayName,
+        });
         return {
           handled: true,
           persistMetadata: nextMeta,
-          replyPlan: plan(withTone(baseQ), 'booking_required_before_confirm'),
+          replyPlan: plan(withTone(composedMissing), 'booking_required_before_confirm'),
           routing: stubRouting(),
         };
       }
@@ -942,6 +1000,16 @@ export class ConversationBookingFlowService {
         picked.displayText,
         calLabel,
       );
+      const composedConfirm = await this.composeBookingCustomerReply({
+        tenantId: params.tenantId,
+        conversationId: params.conversationId,
+        latestInboundText: latest,
+        combinedTranscript: combined,
+        booking,
+        nextStep: { type: 'booking_confirmed', safeBaseMessage: confirmText },
+        userFrustrated: hadFrustration,
+        businessName: params.tenantDisplayName,
+      });
 
       const nextMeta = mergeBookingIntoConversationMetadata(prevMeta, {
         ...booking,
@@ -965,7 +1033,7 @@ export class ConversationBookingFlowService {
       return {
         handled: true,
         persistMetadata: nextMeta,
-        replyPlan: plan(withTone(confirmText), 'booking_confirmed'),
+        replyPlan: plan(withTone(composedConfirm), 'booking_confirmed'),
         routing: stubRouting(),
       };
     }
@@ -1036,10 +1104,20 @@ export class ConversationBookingFlowService {
       );
 
       const nextMeta = mergeBookingIntoConversationMetadata(prevMeta, { ...booking, status: 'collecting_details' });
+      const composedAsk = await this.composeBookingCustomerReply({
+        tenantId: params.tenantId,
+        conversationId: params.conversationId,
+        latestInboundText: latest,
+        combinedTranscript: combined,
+        booking,
+        nextStep: buildBookingReplyComposerNextStepForAsk(nextAsk, settings, outQ),
+        userFrustrated: hadFrustration,
+        businessName: params.tenantDisplayName,
+      });
       return {
         handled: true,
         persistMetadata: nextMeta,
-        replyPlan: plan(withTone(outQ), suppress ? 'booking_ask_repeat_clarify' : 'booking_collect_field'),
+        replyPlan: plan(withTone(composedAsk), suppress ? 'booking_ask_repeat_clarify' : 'booking_collect_field'),
         routing: stubRouting(),
       };
     }
@@ -1068,10 +1146,20 @@ export class ConversationBookingFlowService {
         })}`,
       );
       const nextMeta = mergeBookingIntoConversationMetadata(prevMeta, { ...booking, status: 'collecting_details' });
+      const composedDate = await this.composeBookingCustomerReply({
+        tenantId: params.tenantId,
+        conversationId: params.conversationId,
+        latestInboundText: latest,
+        combinedTranscript: combined,
+        booking,
+        nextStep: buildBookingReplyComposerNextStepForAsk('preferred_date', settings, outQ),
+        userFrustrated: hadFrustration,
+        businessName: params.tenantDisplayName,
+      });
       return {
         handled: true,
         persistMetadata: nextMeta,
-        replyPlan: plan(withTone(outQ), suppress ? 'booking_ask_repeat_clarify' : 'booking_need_date'),
+        replyPlan: plan(withTone(composedDate), suppress ? 'booking_ask_repeat_clarify' : 'booking_need_date'),
         routing: stubRouting(),
       };
     }
@@ -1116,13 +1204,22 @@ export class ConversationBookingFlowService {
     });
     if (top.length === 0) {
       const nextMeta = mergeBookingIntoConversationMetadata(prevMeta, { ...booking, status: 'collecting_details' });
+      const noSlotMain =
+        "I couldn't find open slots for that date in the live calendar. Try another date, or the team can help find a time.";
+      const composedNoMain = await this.composeBookingCustomerReply({
+        tenantId: params.tenantId,
+        conversationId: params.conversationId,
+        latestInboundText: latest,
+        combinedTranscript: combined,
+        booking,
+        nextStep: { type: 'no_slots', safeBaseMessage: noSlotMain },
+        userFrustrated: hadFrustration,
+        businessName: params.tenantDisplayName,
+      });
       return {
         handled: true,
         persistMetadata: nextMeta,
-        replyPlan: plan(
-          "I couldn't find open slots for that date in the live calendar. Try another date, or the team can help find a time.",
-          'booking_no_slots',
-        ),
+        replyPlan: plan(withTone(composedNoMain), 'booking_no_slots'),
         routing: stubRouting(),
       };
     }
@@ -1167,10 +1264,21 @@ export class ConversationBookingFlowService {
       pendingParseFailureCount: undefined,
     });
 
+    const composedMainOffer = await this.composeBookingCustomerReply({
+      tenantId: params.tenantId,
+      conversationId: params.conversationId,
+      latestInboundText: latest,
+      combinedTranscript: combined,
+      booking,
+      nextStep: buildOfferSlotsComposerStep(body, offered),
+      userFrustrated: hadFrustration,
+      businessName: params.tenantDisplayName,
+    });
+
     return {
       handled: true,
       persistMetadata: nextMeta,
-      replyPlan: plan(withTone(body), 'booking_slots_offered'),
+      replyPlan: plan(withTone(composedMainOffer), 'booking_slots_offered'),
       routing: stubRouting(),
     };
   }
@@ -1663,6 +1771,30 @@ export class ConversationBookingFlowService {
     if (!/^[123]$/.test(latestClean)) return false;
     const n = parseInt(latestClean, 10);
     return offeredSlots.some(o => o.option === n);
+  }
+
+  private async composeBookingCustomerReply(p: {
+    tenantId: string;
+    conversationId: string;
+    latestInboundText: string;
+    combinedTranscript: string;
+    booking: AisbpBookingStateV1;
+    nextStep: BookingReplyComposerNextStep;
+    userFrustrated: boolean;
+    businessName?: string;
+  }): Promise<string> {
+    if (!this.bookingReplyComposer) return p.nextStep.safeBaseMessage;
+    return this.bookingReplyComposer.compose({
+      tenantId: p.tenantId,
+      conversationId: p.conversationId,
+      latestInboundText: p.latestInboundText,
+      recentTranscript: p.combinedTranscript,
+      currentBookingState: this.bookingStateForNluPayload(p.booking),
+      nextStep: p.nextStep,
+      businessName: p.businessName,
+      personaPrompt: undefined,
+      userFrustrated: p.userFrustrated,
+    });
   }
 
   private bookingStateForNluPayload(booking: AisbpBookingStateV1): Record<string, unknown> {

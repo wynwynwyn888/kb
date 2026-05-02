@@ -3,6 +3,11 @@
 #
 #   docker compose -f docker-compose.hostinger.yml --env-file .env.production up -d --build
 #
+# Backend `env_file: .env.production` injects that file into the container (e.g. GHL_FREE_SLOTS_*).
+# Do not add `GHL_FREE_SLOTS_*: ${GHL_FREE_SLOTS_*}` under `environment:` — empty host interpolation
+# would override those values. Keep GHL_FREE_SLOTS_* only in `.env.production` or pass them via
+# `docker compose --env-file .env.production` for `${...}` substitution on other keys.
+#
 # Required env (file or shell): DATABASE_URL, SUPABASE_*, JWT_SECRET, ENCRYPTION_KEY,
 # CORS_ORIGIN, NEXT_PUBLIC_SUPABASE_* (build args for the frontend image).
 
@@ -24,6 +29,8 @@ services:
         condition: service_started
     expose:
       - '3001'
+    env_file:
+      - .env.production
     environment:
       NODE_ENV: production
       PORT: '3001'

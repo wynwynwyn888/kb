@@ -2,6 +2,11 @@ import type { CustomBookingFieldDto } from '../../lib/tenant-automation-validati
 import type { AisbpPreferredTimeWindow } from './conversation-booking-state';
 import { expandBookingSelectOptions } from './booking-service-intake';
 
+/** Single line "A, B, C" for custom single_select options (handles comma-joined DB rows). */
+export function formatCustomSelectOptionsListForDisplay(options?: string[]): string {
+  return expandBookingSelectOptions(options).join(', ');
+}
+
 /** Human label for CRM time window (staff / customer copy). */
 export function timeWindowDisplayLabel(w: AisbpPreferredTimeWindow | undefined): string {
   switch (w) {
@@ -169,16 +174,11 @@ export function formatCustomFieldBookingQuestion(cf: CustomBookingFieldDto, opti
   const base = dedupeQuestionMarks(raw.replace(/[.!…]+$/g, '').trim());
   const suffix = optionalHint ? ' You can skip this if you prefer.' : '';
 
-  const flatOpts =
+  const optLine =
     (cf.fieldType === 'single_select' || cf.fieldType === 'single_choice') && cf.options?.length
-      ? cf.options.flatMap(o =>
-          o
-            .split(',')
-            .map(x => x.trim())
-            .filter(Boolean),
-        )
-      : [];
-  const opts = flatOpts.length ? `\n\nOptions: ${flatOpts.join(', ')}` : '';
+      ? formatCustomSelectOptionsListForDisplay(cf.options)
+      : '';
+  const opts = optLine.length ? `\n\nOptions: ${optLine}` : '';
 
   const cleaned = sentenceCaseFromLabel(base);
   if (/\bpreference\b/i.test(cleaned) || (/\bmale\b/i.test(cleaned) && /\bfemale\b/i.test(cleaned))) {

@@ -21,6 +21,7 @@ import {
   type AisbpOfferedSlot,
 } from './conversation-booking-state';
 import {
+  addCalendarDaysUtcYmd,
   detectLiveBookingInterest,
   extractEmail,
   extractFirstVisit,
@@ -47,6 +48,7 @@ import { BookingNluInterpreterService } from './booking-nlu-interpreter.service'
 import { BookingReplyComposerService } from './booking-reply-composer.service';
 import {
   BOOKING_NLU_MIN_MERGE_CONFIDENCE,
+  bookingUserTextHasExplicitFourDigitYear,
   mergeValidatedNluIntoBooking,
 } from './booking-nlu-merge';
 import type { BookingNluInterpretInput } from './booking-nlu.schema';
@@ -319,6 +321,9 @@ export class ConversationBookingFlowService {
       bookingMode: settings.bookingMode,
     };
 
+    const crmTzForBookingDay = booking.offeredSlotsCrmTimeZone?.trim() || tz;
+    const crmTodayYmd = getBusinessLocalNow(crmTzForBookingDay).localIso.slice(0, 10);
+
     this.applyContactSnapshot(booking, params.contactSnapshot);
 
     if (booking.status === 'confirmed') {
@@ -365,7 +370,6 @@ export class ConversationBookingFlowService {
     let clearedPendingFieldId: string | undefined;
     let nluUserFrustrated = false;
     if (!skipBookingNlu) {
-      const crmTzForNlu = booking.offeredSlotsCrmTimeZone?.trim() || tz;
       const input = this.buildBookingNluInterpretInput({
         tenantId: params.tenantId,
         conversationId: params.conversationId,
@@ -373,7 +377,7 @@ export class ConversationBookingFlowService {
         combined,
         booking,
         settings,
-        crmTimezone: crmTzForNlu,
+        crmTimezone: crmTzForBookingDay,
       });
       const out = await this.bookingNluInterpreter.interpret(input);
       if (out) {
@@ -381,9 +385,23 @@ export class ConversationBookingFlowService {
         const mergeResult = mergeValidatedNluIntoBooking(booking, settings, out, {
           minConfidence: BOOKING_NLU_MIN_MERGE_CONFIDENCE,
           pendingFieldId: booking.pendingFieldId,
+          crmTodayYmd,
+          latestInboundText: latest,
+          combinedInboundText: combined,
         });
         const res = this.resolvePendingIfBookingValuesFilled(booking, settings);
         if (res.clearedPendingFieldId) clearedPendingFieldId = res.clearedPendingFieldId;
+        if (mergeResult.dateRepair) {
+          this.logger.log(
+            `bookingNluDateRepaired ${JSON.stringify({
+              tenantId: params.tenantId,
+              conversationId: params.conversationId,
+              oldDate: mergeResult.dateRepair.oldDate,
+              newDate: mergeResult.dateRepair.newDate,
+              sourceText: mergeResult.dateRepair.sourceText,
+            })}`,
+          );
+        }
         if (mergeResult.mergedFieldKeys.length > 0) {
           this.logger.log(
             `bookingNluMergeApplied ${JSON.stringify({
@@ -463,6 +481,8 @@ export class ConversationBookingFlowService {
     }
 
     this.applyRichFieldExtraction(booking, settings, combined, latest, todayYmd);
+    this.syncNoSlotsFollowUpState(booking);
+    this.stripImplicitPastPreferredDateIfNeeded(booking, crmTodayYmd, latest, combined);
     this.sanitizeBookingIntake(booking, settings);
 
     const pidAuto = booking.pendingFieldId?.trim();
@@ -562,6 +582,7 @@ export class ConversationBookingFlowService {
 
       let crmTzForPick = booking.offeredSlotsCrmTimeZone?.trim();
       if (!crmTzForPick) {
+        this.stripImplicitPastPreferredDateIfNeeded(booking, crmTodayYmd, latest, combined);
         const tzPeek = await this.bookingSettings.fetchFreeSlotsForAutomation(params.tenantId, {
           calendarId: booking.calendarId,
           selectedDate: booking.preferredDate!,
@@ -600,6 +621,7 @@ export class ConversationBookingFlowService {
         booking.lastOfferedAt = undefined;
         booking.offeredSlotsCrmTimeZone = undefined;
 
+        this.stripImplicitPastPreferredDateIfNeeded(booking, crmTodayYmd, latest, combined);
         const slotFetch = await this.bookingSettings.fetchFreeSlotsForAutomation(params.tenantId, {
           calendarId: booking.calendarId,
           selectedDate: booking.preferredDate!,
@@ -630,9 +652,11 @@ export class ConversationBookingFlowService {
         });
 
         if (top.length === 0) {
+          booking.noSlotsForDateYmd = booking.preferredDate!.trim();
+          booking.noSlotsWideSearchDone = false;
           const nextMeta = mergeBookingIntoConversationMetadata(prevMeta, { ...booking, status: 'collecting_details' });
           const noSlotMsg =
-            "I couldn't find open slots for that date in the live calendar. Try another date, or the team can help find a time.";
+            "I couldn't find open slots for that date in the live calendar. Want to try another date or time?";
           const composedNo = await this.composeBookingCustomerReply({
             tenantId: params.tenantId,
             conversationId: params.conversationId,
@@ -707,6 +731,8 @@ export class ConversationBookingFlowService {
           lastQuestionFingerprint: undefined,
           sameFieldPromptCount: undefined,
           pendingParseFailureCount: undefined,
+          noSlotsForDateYmd: undefined,
+          noSlotsWideSearchDone: undefined,
         });
 
         const composedOffer = await this.composeBookingCustomerReply({
@@ -1164,7 +1190,22 @@ export class ConversationBookingFlowService {
       };
     }
 
+    const suggestWide = await this.maybeHandleNoSlotsSuggestWideRange({
+      tenantId: params.tenantId,
+      conversationId: params.conversationId,
+      tenantDisplayName: params.tenantDisplayName,
+      prevMeta,
+      booking,
+      settings,
+      latest,
+      combined,
+      hadFrustration,
+      withTone,
+    });
+    if (suggestWide) return suggestWide;
+
     this.sanitizeBookingIntake(booking, settings);
+    this.stripImplicitPastPreferredDateIfNeeded(booking, crmTodayYmd, latest, combined);
     const slotFetch = await this.bookingSettings.fetchFreeSlotsForAutomation(params.tenantId, {
       calendarId: booking.calendarId,
       selectedDate: booking.preferredDate!,
@@ -1203,9 +1244,11 @@ export class ConversationBookingFlowService {
       max: 3,
     });
     if (top.length === 0) {
+      booking.noSlotsForDateYmd = booking.preferredDate!.trim();
+      booking.noSlotsWideSearchDone = false;
       const nextMeta = mergeBookingIntoConversationMetadata(prevMeta, { ...booking, status: 'collecting_details' });
       const noSlotMain =
-        "I couldn't find open slots for that date in the live calendar. Try another date, or the team can help find a time.";
+        "I couldn't find open slots for that date in the live calendar. Want to try another date or time?";
       const composedNoMain = await this.composeBookingCustomerReply({
         tenantId: params.tenantId,
         conversationId: params.conversationId,
@@ -1262,6 +1305,8 @@ export class ConversationBookingFlowService {
       lastQuestionFingerprint: undefined,
       sameFieldPromptCount: undefined,
       pendingParseFailureCount: undefined,
+      noSlotsForDateYmd: undefined,
+      noSlotsWideSearchDone: undefined,
     });
 
     const composedMainOffer = await this.composeBookingCustomerReply({
@@ -1744,6 +1789,188 @@ export class ConversationBookingFlowService {
         }
       }
     }
+  }
+
+  private isSuggestAlternativesAfterNoSlotsInbound(latest: string): boolean {
+    const t = latest.trim().toLowerCase();
+    if (!t) return false;
+    return /\b(suggest|suggestions?|recommend|alternatives?|other\s+(day|date|time)s?|next\s+available|what\s+(dates|times)|any\s+openings?|show\s+(me\s+)?(times|dates|slots)?)\b/.test(
+      t,
+    );
+  }
+
+  private syncNoSlotsFollowUpState(booking: AisbpBookingStateV1): void {
+    const d = booking.preferredDate?.trim();
+    const ns = booking.noSlotsForDateYmd?.trim();
+    if (d && ns && d !== ns) {
+      booking.noSlotsForDateYmd = undefined;
+      booking.noSlotsWideSearchDone = undefined;
+    }
+  }
+
+  private stripImplicitPastPreferredDateIfNeeded(
+    booking: AisbpBookingStateV1,
+    crmTodayYmd: string,
+    latest: string,
+    combined: string,
+  ): void {
+    const ymd = booking.preferredDate?.trim();
+    if (!ymd || !/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return;
+    if (ymd >= crmTodayYmd) return;
+    if (bookingUserTextHasExplicitFourDigitYear(latest) || bookingUserTextHasExplicitFourDigitYear(combined)) return;
+    this.logger.log(
+      `bookingSlotFetchBlocked ${JSON.stringify({ reason: 'implicit_past_date', ymd, crmTodayYmd })}`,
+    );
+    booking.preferredDate = undefined;
+    booking.noSlotsForDateYmd = undefined;
+    booking.noSlotsWideSearchDone = undefined;
+  }
+
+  private async maybeHandleNoSlotsSuggestWideRange(p: {
+    tenantId: string;
+    conversationId: string;
+    tenantDisplayName?: string;
+    prevMeta: Record<string, unknown>;
+    booking: AisbpBookingStateV1;
+    settings: TenantBookingSettingsDto;
+    latest: string;
+    combined: string;
+    hadFrustration: boolean;
+    withTone: (msg: string) => string;
+  }): Promise<BookingFlowOrchestrationHookResult | null> {
+    if (!this.isSuggestAlternativesAfterNoSlotsInbound(p.latest)) return null;
+    const pd = p.booking.preferredDate?.trim();
+    const ns = p.booking.noSlotsForDateYmd?.trim();
+    if (!pd || !ns || pd !== ns) return null;
+    if (p.booking.noSlotsWideSearchDone) return null;
+
+    p.booking.noSlotsWideSearchDone = true;
+    const endWide = addCalendarDaysUtcYmd(pd, 14);
+    if (!endWide) return null;
+
+    this.logger.log(
+      `bookingNoSlotsWideSearch ${JSON.stringify({
+        tenantId: p.tenantId,
+        conversationId: p.conversationId,
+        fromDate: pd,
+        toDate: endWide,
+      })}`,
+    );
+
+    const slotFetch = await this.bookingSettings.fetchFreeSlotsForAutomation(p.tenantId, {
+      calendarId: p.booking.calendarId,
+      selectedDate: pd,
+      endDate: endWide,
+    });
+
+    const honestNoWide =
+      "I checked a wider window in the live calendar but still couldn't find openings to list. I can check another date for you. What date would you like me to try?";
+
+    if (slotFetch.error || slotFetch.slots.length === 0) {
+      const nextMeta = mergeBookingIntoConversationMetadata(p.prevMeta, { ...p.booking, status: 'collecting_details' });
+      const composed = await this.composeBookingCustomerReply({
+        tenantId: p.tenantId,
+        conversationId: p.conversationId,
+        latestInboundText: p.latest,
+        combinedTranscript: p.combined,
+        booking: p.booking,
+        nextStep: { type: 'no_slots', safeBaseMessage: honestNoWide },
+        userFrustrated: p.hadFrustration,
+        businessName: p.tenantDisplayName,
+      });
+      return {
+        handled: true,
+        persistMetadata: nextMeta,
+        replyPlan: plan(p.withTone(composed), 'booking_no_slots_wide_empty'),
+        routing: stubRouting(),
+      };
+    }
+
+    const crmTz = slotFetch.crmTimezoneUsed?.trim() || 'UTC';
+    const { ranked: top } = rankSlotsForBookingOffer(slotFetch.slots, {
+      crmTimeZone: crmTz,
+      max: 5,
+    });
+    const top3 = top.slice(0, 3);
+    if (top3.length === 0) {
+      const nextMeta = mergeBookingIntoConversationMetadata(p.prevMeta, { ...p.booking, status: 'collecting_details' });
+      const composed = await this.composeBookingCustomerReply({
+        tenantId: p.tenantId,
+        conversationId: p.conversationId,
+        latestInboundText: p.latest,
+        combinedTranscript: p.combined,
+        booking: p.booking,
+        nextStep: { type: 'no_slots', safeBaseMessage: honestNoWide },
+        userFrustrated: p.hadFrustration,
+        businessName: p.tenantDisplayName,
+      });
+      return {
+        handled: true,
+        persistMetadata: nextMeta,
+        replyPlan: plan(p.withTone(composed), 'booking_no_slots_wide_empty'),
+        routing: stubRouting(),
+      };
+    }
+
+    const offered: AisbpOfferedSlot[] = top3.map((s, i) => ({
+      option: i + 1,
+      startIso: s.startTime,
+      endIso: slotEndIso(s, p.booking.slotDurationMinutes ?? 30),
+      displayText: formatSlotLabel(s.startTime, slotFetch.crmTimezoneUsed),
+      calendarId: p.booking.calendarId,
+    }));
+
+    p.booking.noSlotsForDateYmd = undefined;
+    p.booking.noSlotsWideSearchDone = undefined;
+
+    const displayLines = offered.map(o => o.displayText);
+    const body = `I looked a bit further ahead in the live calendar and found these next openings:\n\n${displayLines
+      .map((ln, i) => `${i + 1}. ${ln}`)
+      .join('\n')}\n\nWhich one would you like me to reserve?`;
+
+    this.logger.log(
+      `bookingSlotsOffered ${JSON.stringify({
+        tenantId: p.tenantId,
+        conversationId: p.conversationId,
+        count: offered.length,
+        date: pd,
+        reason: 'no_slots_wide_followup',
+      })}`,
+    );
+
+    const nextMeta = mergeBookingIntoConversationMetadata(p.prevMeta, {
+      ...p.booking,
+      status: 'offered_slots',
+      offeredSlots: offered,
+      offeredSlotsCrmTimeZone: crmTz,
+      lastOfferedAt: new Date().toISOString(),
+      pendingFieldId: undefined,
+      pendingFieldLabel: undefined,
+      pendingFieldRequired: undefined,
+      lastAskedFieldId: undefined,
+      lastAskedAt: undefined,
+      lastQuestionFingerprint: undefined,
+      sameFieldPromptCount: undefined,
+      pendingParseFailureCount: undefined,
+    });
+
+    const composedOffer = await this.composeBookingCustomerReply({
+      tenantId: p.tenantId,
+      conversationId: p.conversationId,
+      latestInboundText: p.latest,
+      combinedTranscript: p.combined,
+      booking: p.booking,
+      nextStep: buildOfferSlotsComposerStep(body, offered),
+      userFrustrated: p.hadFrustration,
+      businessName: p.tenantDisplayName,
+    });
+
+    return {
+      handled: true,
+      persistMetadata: nextMeta,
+      replyPlan: plan(p.withTone(composedOffer), 'booking_slots_offered_wide'),
+      routing: stubRouting(),
+    };
   }
 
   private sanitizeBookingIntake(booking: AisbpBookingStateV1, settings: TenantBookingSettingsDto): void {

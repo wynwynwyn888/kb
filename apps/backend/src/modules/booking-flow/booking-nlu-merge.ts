@@ -8,7 +8,7 @@ import {
   matchUserLineToMenuOption,
   resolveServiceFromUserReplyLine,
 } from './booking-service-intake';
-import { extractPhone } from './booking-intent-and-parse';
+import { extractPhone, resolveBookingCalendarDay, resolveRelativeDayPhrase } from './booking-intent-and-parse';
 
 /** NLU below this confidence is ignored; deterministic intake still runs. */
 export const BOOKING_NLU_MIN_MERGE_CONFIDENCE = 0.55;
@@ -19,12 +19,15 @@ export type BookingNluMergeSkipReason =
   | 'generic_service'
   | 'invalid_service'
   | 'invalid_custom_option'
+  | 'invalid_past_date'
   | 'invalid_date'
   | 'invalid_time';
 
 export type BookingNluMergeResult = {
   mergedFieldKeys: string[];
   skipReason?: BookingNluMergeSkipReason;
+  /** Caller should log `bookingNluDateRepaired` when set. */
+  dateRepair?: { oldDate: string; newDate: string; sourceText: string };
 };
 
 const HM = /^([01]?\d|2[0-3]):([0-5]\d)$/;
@@ -74,15 +77,30 @@ function pickMergeSkipReason(flags: {
   genericService: boolean;
   invalidService: boolean;
   invalidCustomOption: boolean;
+  invalidPastDate: boolean;
   invalidDate: boolean;
   invalidTime: boolean;
 }): BookingNluMergeSkipReason {
   if (flags.genericService) return 'generic_service';
   if (flags.invalidService) return 'invalid_service';
   if (flags.invalidCustomOption) return 'invalid_custom_option';
+  if (flags.invalidPastDate) return 'invalid_past_date';
   if (flags.invalidDate) return 'invalid_date';
   if (flags.invalidTime) return 'invalid_time';
   return 'no_fields';
+}
+
+/** True when the user message includes a four-digit year (19xx / 20xx). */
+export function bookingUserTextHasExplicitFourDigitYear(text: string): boolean {
+  return /\b(19|20)\d{2}\b/.test((text ?? '').trim());
+}
+
+function deterministicDateFromUserLines(latest: string, combined: string, crmTodayYmd: string): string | undefined {
+  const tryOne = (s: string) =>
+    resolveRelativeDayPhrase(s, crmTodayYmd) ?? resolveBookingCalendarDay(s, crmTodayYmd);
+  const lt = latest.trim();
+  const cb = combined.trim();
+  return tryOne(lt) ?? (cb && cb !== lt ? tryOne(cb) : undefined);
 }
 
 /**
@@ -94,7 +112,14 @@ export function mergeValidatedNluIntoBooking(
   booking: AisbpBookingStateV1,
   settings: TenantBookingSettingsDto,
   nlu: BookingNluOutput,
-  opts: { minConfidence: number; pendingFieldId?: string | null },
+  opts: {
+    minConfidence: number;
+    pendingFieldId?: string | null;
+    /** CRM (or tenant) local `YYYY-MM-DD` — used to repair / reject NLU dates. */
+    crmTodayYmd: string;
+    latestInboundText: string;
+    combinedInboundText: string;
+  },
 ): BookingNluMergeResult {
   if (nlu.confidence < opts.minConfidence) {
     return { mergedFieldKeys: [], skipReason: 'low_confidence' };
@@ -105,10 +130,12 @@ export function mergeValidatedNluIntoBooking(
     genericService: false,
     invalidService: false,
     invalidCustomOption: false,
+    invalidPastDate: false,
     invalidDate: false,
     invalidTime: false,
   };
   const mergedFieldKeys: string[] = [];
+  let dateRepair: BookingNluMergeResult['dateRepair'];
 
   if (!booking.service?.trim() && f.service?.trim()) {
     const s = f.service.trim();
@@ -126,12 +153,46 @@ export function mergeValidatedNluIntoBooking(
   }
 
   if (!booking.preferredDate?.trim() && f.preferredDate?.trim()) {
-    const d = f.preferredDate.trim();
-    if (parseYmd(d)) {
-      booking.preferredDate = d;
-      mergedFieldKeys.push('preferredDate');
-    } else {
+    const rawNlu = f.preferredDate.trim();
+    if (!parseYmd(rawNlu)) {
       flags.invalidDate = true;
+    } else {
+      const explicitYear =
+        bookingUserTextHasExplicitFourDigitYear(opts.latestInboundText) ||
+        bookingUserTextHasExplicitFourDigitYear(opts.combinedInboundText);
+      const det = deterministicDateFromUserLines(
+        opts.latestInboundText,
+        opts.combinedInboundText,
+        opts.crmTodayYmd,
+      );
+      let chosen: string | undefined;
+      if (!explicitYear) {
+        if (det) {
+          chosen = det;
+          if (det !== rawNlu) {
+            dateRepair = {
+              oldDate: rawNlu,
+              newDate: det,
+              sourceText: opts.latestInboundText.trim().slice(0, 240),
+            };
+          }
+        } else if (rawNlu < opts.crmTodayYmd) {
+          flags.invalidPastDate = true;
+        } else {
+          chosen = rawNlu;
+        }
+      } else {
+        chosen = rawNlu;
+      }
+      if (chosen !== undefined && !explicitYear && chosen < opts.crmTodayYmd) {
+        flags.invalidPastDate = true;
+        chosen = undefined;
+        dateRepair = undefined;
+      }
+      if (chosen !== undefined && !flags.invalidPastDate) {
+        booking.preferredDate = chosen;
+        mergedFieldKeys.push('preferredDate');
+      }
     }
   }
 
@@ -231,7 +292,7 @@ export function mergeValidatedNluIntoBooking(
   }
 
   if (mergedFieldKeys.length > 0) {
-    return { mergedFieldKeys };
+    return { mergedFieldKeys, ...(dateRepair ? { dateRepair } : {}) };
   }
 
   const extractedKeys = listNluExtractedFieldKeysForLog(nlu);

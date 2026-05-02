@@ -1,5 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 import {
+  addCalendarDaysUtcYmd,
   extractPreferredTime,
   extractPreferredTimeWindow,
   extractServiceFromBookingMessage,
@@ -215,5 +216,11 @@ describe('rankSlotsForBookingOffer', () => {
     });
     expect(hasExactPreferredTimeMatch).toBe(true);
     expect(ranked[0]!.startTime).toBe('2026-05-10T14:00:00.000Z');
+  });
+});
+
+describe('addCalendarDaysUtcYmd', () => {
+  it('adds days across month boundary', () => {
+    expect(addCalendarDaysUtcYmd('2026-05-29', 14)).toBe('2026-06-12');
   });
 });

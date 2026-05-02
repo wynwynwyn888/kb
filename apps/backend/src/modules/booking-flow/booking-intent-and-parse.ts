@@ -209,6 +209,14 @@ function parseYmd(s: string): { y: number; m: number; d: number } | null {
   return { y: Number(m[1]), m: Number(m[2]), d: Number(m[3]) };
 }
 
+/** Add whole calendar days to a `YYYY-MM-DD` string (UTC calendar math; matches other booking date helpers). */
+export function addCalendarDaysUtcYmd(ymd: string, deltaDays: number): string | undefined {
+  const p = parseYmd(ymd.trim());
+  if (!p) return undefined;
+  const dt = new Date(Date.UTC(p.y, p.m - 1, p.d + deltaDays));
+  return formatYmd(dt);
+}
+
 function formatYmd(d: Date): string {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
 }

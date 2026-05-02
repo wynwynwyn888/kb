@@ -1,10 +1,21 @@
 import { describe, expect, it } from '@jest/globals';
-import { mergeValidatedNluIntoBooking, BOOKING_NLU_MIN_MERGE_CONFIDENCE } from './booking-nlu-merge';
+import {
+  mergeValidatedNluIntoBooking,
+  BOOKING_NLU_MIN_MERGE_CONFIDENCE,
+  bookingUserTextHasExplicitFourDigitYear,
+} from './booking-nlu-merge';
 import type { TenantBookingSettingsDto } from '../booking-settings/booking-settings.service';
 import type { AisbpBookingStateV1 } from './conversation-booking-state';
 import type { BookingNluOutput } from './booking-nlu.schema';
 
 const STYLIST_ID = 'cf_stylist';
+
+const mergeOpts = (latest: string, combined: string, crmTodayYmd: string) => ({
+  minConfidence: BOOKING_NLU_MIN_MERGE_CONFIDENCE,
+  crmTodayYmd,
+  latestInboundText: latest,
+  combinedInboundText: combined,
+});
 
 const settings = (): TenantBookingSettingsDto => ({
   enabled: true,
@@ -72,7 +83,7 @@ describe('mergeValidatedNluIntoBooking', () => {
       calendarId: 'cal_1',
     };
     const r = mergeValidatedNluIntoBooking(booking, settings(), out({ confidence: 0.3, fields: { service: 'Haircut' } }), {
-      minConfidence: BOOKING_NLU_MIN_MERGE_CONFIDENCE,
+      ...mergeOpts('', '', '2026-05-03'),
     });
     expect(booking.service).toBeUndefined();
     expect(r.mergedFieldKeys).toEqual([]);
@@ -91,7 +102,7 @@ describe('mergeValidatedNluIntoBooking', () => {
       out({
         fields: { service: 'Haircut', preferredDate: '2026-05-29', preferredTime: '15:30' },
       }),
-      { minConfidence: BOOKING_NLU_MIN_MERGE_CONFIDENCE },
+      mergeOpts('', '', '2026-05-03'),
     );
     expect(booking.service).toBe('Haircut');
     expect(booking.preferredDate).toBe('2026-05-29');
@@ -114,7 +125,7 @@ describe('mergeValidatedNluIntoBooking', () => {
           customAnswers: { [STYLIST_ID]: 'Anything' },
         },
       }),
-      { minConfidence: BOOKING_NLU_MIN_MERGE_CONFIDENCE, pendingFieldId: `custom:${STYLIST_ID}` },
+      { ...mergeOpts('', '', '2026-05-03'), pendingFieldId: `custom:${STYLIST_ID}` },
     );
     expect(booking.customAnswers?.[STYLIST_ID]).toBe('Anything');
     expect(r.mergedFieldKeys).toContain(`customAnswers:${STYLIST_ID}`);
@@ -130,9 +141,94 @@ describe('mergeValidatedNluIntoBooking', () => {
       booking,
       settings(),
       out({ fields: { preferredDate: '29 May' } }),
-      { minConfidence: BOOKING_NLU_MIN_MERGE_CONFIDENCE },
+      mergeOpts('29 May', '29 May', '2026-05-03'),
     );
     expect(booking.preferredDate).toBeUndefined();
     expect(r.skipReason).toBe('invalid_date');
+  });
+
+  it('A: repairs NLU wrong year from "29th may" to next May 29 in CRM year', () => {
+    const booking: AisbpBookingStateV1 = { status: 'collecting_details', version: 1, calendarId: 'cal_1' };
+    const latest = '29th may';
+    const r = mergeValidatedNluIntoBooking(
+      booking,
+      settings(),
+      out({ fields: { preferredDate: '2023-05-29' } }),
+      mergeOpts(latest, latest, '2026-05-03'),
+    );
+    expect(booking.preferredDate).toBe('2026-05-29');
+    expect(r.dateRepair?.oldDate).toBe('2023-05-29');
+    expect(r.dateRepair?.newDate).toBe('2026-05-29');
+    expect(r.mergedFieldKeys).toContain('preferredDate');
+  });
+
+  it('B: "1st june" with NLU wrong year resolves to upcoming June 1', () => {
+    const booking: AisbpBookingStateV1 = { status: 'collecting_details', version: 1, calendarId: 'cal_1' };
+    const latest = '1st june?';
+    const r = mergeValidatedNluIntoBooking(
+      booking,
+      settings(),
+      out({ fields: { preferredDate: '2023-06-01' } }),
+      mergeOpts(latest, latest, '2026-05-03'),
+    );
+    expect(booking.preferredDate).toBe('2026-06-01');
+    expect(r.dateRepair).toBeDefined();
+    expect(r.mergedFieldKeys).toContain('preferredDate');
+  });
+
+  it('C: NLU 2023-05-29 + user text "29th may" => 2026-05-29', () => {
+    const booking: AisbpBookingStateV1 = { status: 'collecting_details', version: 1, calendarId: 'cal_1' };
+    const latest = '29th may';
+    mergeValidatedNluIntoBooking(
+      booking,
+      settings(),
+      out({ fields: { preferredDate: '2023-05-29' } }),
+      mergeOpts(latest, latest, '2026-05-03'),
+    );
+    expect(booking.preferredDate).toBe('2026-05-29');
+  });
+
+  it('D: keeps explicit past calendar year from NLU when user typed that year', () => {
+    const booking: AisbpBookingStateV1 = { status: 'collecting_details', version: 1, calendarId: 'cal_1' };
+    const latest = 'book 15 Jan 2020 please';
+    mergeValidatedNluIntoBooking(
+      booking,
+      settings(),
+      out({ fields: { preferredDate: '2020-01-15' } }),
+      mergeOpts(latest, latest, '2026-05-03'),
+    );
+    expect(booking.preferredDate).toBe('2020-01-15');
+  });
+
+  it('E: "29th may 330pm" => date 2026-05-29 + preferredTime 15:30 when NLU sends wrong year', () => {
+    const booking: AisbpBookingStateV1 = { status: 'collecting_details', version: 1, calendarId: 'cal_1' };
+    const latest = '29th may 330pm';
+    mergeValidatedNluIntoBooking(
+      booking,
+      settings(),
+      out({ fields: { preferredDate: '2023-05-29', preferredTime: '15:30' } }),
+      mergeOpts(latest, latest, '2026-05-03'),
+    );
+    expect(booking.preferredDate).toBe('2026-05-29');
+    expect(booking.preferredTime).toBe('15:30');
+  });
+
+  it('rejects implicit past ISO when text has no parseable date and no year', () => {
+    const booking: AisbpBookingStateV1 = { status: 'collecting_details', version: 1, calendarId: 'cal_1' };
+    const r = mergeValidatedNluIntoBooking(
+      booking,
+      settings(),
+      out({ fields: { preferredDate: '2023-05-29' } }),
+      mergeOpts('thanks', 'thanks', '2026-05-03'),
+    );
+    expect(booking.preferredDate).toBeUndefined();
+    expect(r.skipReason).toBe('invalid_past_date');
+  });
+});
+
+describe('bookingUserTextHasExplicitFourDigitYear', () => {
+  it('detects four-digit years', () => {
+    expect(bookingUserTextHasExplicitFourDigitYear('15 Jan 2020')).toBe(true);
+    expect(bookingUserTextHasExplicitFourDigitYear('29th may')).toBe(false);
   });
 });

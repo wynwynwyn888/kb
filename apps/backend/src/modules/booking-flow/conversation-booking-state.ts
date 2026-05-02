@@ -75,6 +75,10 @@ export interface AisbpBookingStateV1 {
   optionalAskedFieldIds?: string[];
   /** Core keys or `custom:<id>` the user explicitly skipped (optional Ask only). */
   skippedFieldIds?: string[];
+  /** `YYYY-MM-DD` we last returned `booking_no_slots` for (wide follow-up UX). */
+  noSlotsForDateYmd?: string;
+  /** After a no-slots reply, set false; flipped true once a multi-day widen search was attempted. */
+  noSlotsWideSearchDone?: boolean;
 }
 
 export function emptyBookingState(): AisbpBookingStateV1 {
@@ -229,6 +233,9 @@ export function parseAisbpBookingState(metadata: Record<string, unknown> | undef
           : undefined,
     optionalAskedFieldIds,
     skippedFieldIds,
+    noSlotsForDateYmd: typeof o['noSlotsForDateYmd'] === 'string' ? o['noSlotsForDateYmd'].trim() : undefined,
+    noSlotsWideSearchDone:
+      typeof o['noSlotsWideSearchDone'] === 'boolean' ? (o['noSlotsWideSearchDone'] as boolean) : undefined,
   };
 }
 

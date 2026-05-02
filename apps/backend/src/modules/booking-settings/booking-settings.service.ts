@@ -784,7 +784,7 @@ export class BookingSettingsService {
    */
   async fetchFreeSlotsForAutomation(
     tenantId: string,
-    body: { calendarId: string; selectedDate: string; selectedTime?: string },
+    body: { calendarId: string; selectedDate: string; selectedTime?: string; endDate?: string },
   ): Promise<{
     slots: GhlFreeSlot[];
     calendarId: string;

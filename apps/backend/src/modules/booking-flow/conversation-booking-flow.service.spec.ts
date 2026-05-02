@@ -1701,4 +1701,141 @@ describe('ConversationBookingFlowService', () => {
       }
     });
   });
+
+  describe('service intake validation', () => {
+    const settingsWithServiceMenu = { ...baseSettings, serviceMenuOptions: ['Haircut', 'Colour', 'Scalp Treatment'] };
+
+    it('A: "I want to book" does not persist generic text as service', async () => {
+      const fetchFree = jest.fn();
+      const booking = {
+        getBookingSettings: jest.fn(async () => settingsWithServiceMenu),
+        fetchFreeSlotsForAutomation: fetchFree,
+      } as unknown as BookingSettingsService;
+      const ghl = {} as unknown as GhlService;
+      const r = await svc(booking, ghl).maybeHandleConversationBookingTurn({
+        tenantId: 't1',
+        conversationId: 'c_svc_a',
+        contactId: 'ct1',
+        channel: 'SMS',
+        combinedInboundText: 'I want to book',
+        latestInboundText: 'I want to book',
+        metadata: {} as Record<string, unknown>,
+      });
+      expect(r.handled).toBe(true);
+      expect(fetchFree).not.toHaveBeenCalled();
+      if (r.handled) {
+        const b = (r.persistMetadata as Record<string, unknown>).aisbp_booking as Record<string, unknown>;
+        expect(String(b.service ?? '').trim()).toBe('');
+        expect(r.replyPlan.bubbles[0]!.text).toMatch(/A\)\s*Haircut/i);
+        expect(r.replyPlan.bubbles[0]!.text).not.toMatch(/What date would you prefer/i);
+      }
+    });
+
+    it('B: required service prompt comes before date when only generic booking intent is sent', async () => {
+      const fetchFree = jest.fn();
+      const booking = {
+        getBookingSettings: jest.fn(async () => settingsWithServiceMenu),
+        fetchFreeSlotsForAutomation: fetchFree,
+      } as unknown as BookingSettingsService;
+      const ghl = {} as unknown as GhlService;
+      const r = await svc(booking, ghl).maybeHandleConversationBookingTurn({
+        tenantId: 't1',
+        conversationId: 'c_svc_b',
+        contactId: 'ct1',
+        channel: 'SMS',
+        combinedInboundText: 'I want to book',
+        latestInboundText: 'I want to book',
+        metadata: {} as Record<string, unknown>,
+      });
+      expect(r.handled).toBe(true);
+      if (r.handled) {
+        expect(r.replyPlan.bubbles[0]!.text).not.toMatch(/What date would you prefer/i);
+      }
+    });
+
+    it('E: offered slot pick does not create appointment when stored service is generic', async () => {
+      const slotRows = [
+        { startTime: '2026-05-10T10:00:00.000Z', endTime: '2026-05-10T10:30:00.000Z' },
+        { startTime: '2026-05-10T11:00:00.000Z', endTime: '2026-05-10T11:30:00.000Z' },
+        { startTime: '2026-05-10T11:30:00.000Z', endTime: '2026-05-10T12:00:00.000Z' },
+      ];
+      const fetchFree = jest.fn(async () => ({
+        slots: slotRows,
+        calendarId: 'cal_1',
+        error: undefined as string | undefined,
+        retriedWithUserId: null,
+        crmTimezoneUsed: 'UTC',
+        selectedDate: '2026-05-10',
+        selectedTime: '',
+        startMs: 0,
+        endMs: 1,
+        ghlLocationId: 'loc',
+      }));
+      const bookSlot = jest.fn(async () => ({ success: true, appointmentId: 'ap_should_not' }));
+      const booking = {
+        getBookingSettings: jest.fn(async () => baseSettings),
+        fetchFreeSlotsForAutomation: fetchFree,
+      } as unknown as BookingSettingsService;
+      const ghl = {
+        createGhlClientForConnectedTenantWorkerOrThrow: jest.fn(async () => ({
+          client: { bookSlot },
+          ghlLocationId: 'loc1',
+        })),
+      } as unknown as GhlService;
+      const offeredSlots = [
+        {
+          option: 1,
+          startIso: '2026-05-10T10:00:00.000Z',
+          endIso: '2026-05-10T10:30:00.000Z',
+          displayText: '6:00 AM',
+          calendarId: 'cal_1',
+        },
+        {
+          option: 2,
+          startIso: '2026-05-10T11:00:00.000Z',
+          endIso: '2026-05-10T11:30:00.000Z',
+          displayText: '7:00 AM',
+          calendarId: 'cal_1',
+        },
+        {
+          option: 3,
+          startIso: '2026-05-10T11:30:00.000Z',
+          endIso: '2026-05-10T12:00:00.000Z',
+          displayText: '7:30 AM',
+          calendarId: 'cal_1',
+        },
+      ];
+      const meta = {
+        aisbp_booking: {
+          status: 'offered_slots',
+          version: 1,
+          calendarId: 'cal_1',
+          customerName: 'Alex',
+          phone: '+15551234567',
+          service: 'I want to book',
+          preferredDate: '2026-05-10',
+          offeredSlots,
+          offeredSlotsCrmTimeZone: 'UTC',
+          slotDurationMinutes: 30,
+        },
+      };
+      const r = await svc(booking, ghl).maybeHandleConversationBookingTurn({
+        tenantId: 't1',
+        conversationId: 'c_svc_e',
+        contactId: 'ct1',
+        channel: 'SMS',
+        combinedInboundText: '1',
+        latestInboundText: '1',
+        metadata: meta as Record<string, unknown>,
+      });
+      expect(r.handled).toBe(true);
+      expect(bookSlot).not.toHaveBeenCalled();
+      if (r.handled) {
+        expect(r.replyPlan.rationale).toBe('booking_required_before_confirm');
+        const b = (r.persistMetadata as Record<string, unknown>).aisbp_booking as Record<string, unknown>;
+        expect(b.status).toBe('collecting_details');
+        expect(b.pendingFieldId).toBe('service');
+      }
+    });
+  });
 });

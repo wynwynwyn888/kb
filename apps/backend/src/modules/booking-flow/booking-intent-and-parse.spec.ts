@@ -134,23 +134,70 @@ describe('parseSlotSelectionOrTimeRevision', () => {
   ];
 
   it('returns time_revision when 2pm is not in the offer list', () => {
-    const r = parseSlotSelectionOrTimeRevision('2pm can?', offered, 'UTC', '2026-05-10', '2026-05-01');
+    const r = parseSlotSelectionOrTimeRevision('2pm can?', '', offered, 'UTC', '2026-05-10', '2026-05-01');
     expect(r).toEqual({ kind: 'time_revision', preferredTime: '14:00' });
   });
 
   it('returns selected_slot for numeric 3', () => {
-    const r = parseSlotSelectionOrTimeRevision('3', offered, 'UTC', '2026-05-10', '2026-05-01');
+    const r = parseSlotSelectionOrTimeRevision('3', '', offered, 'UTC', '2026-05-10', '2026-05-01');
     expect(r.kind).toBe('selected_slot');
     if (r.kind === 'selected_slot') expect(r.slot.option).toBe(3);
   });
 
   it('returns date_time_revision for tomorrow 2pm', () => {
-    const r = parseSlotSelectionOrTimeRevision('tomorrow 2pm', offered, 'UTC', '2026-05-10', '2026-05-01');
+    const r = parseSlotSelectionOrTimeRevision('tomorrow 2pm', '', offered, 'UTC', '2026-05-10', '2026-05-01');
     expect(r.kind).toBe('date_time_revision');
     if (r.kind === 'date_time_revision') {
       expect(r.preferredDate).toBe('2026-05-02');
       expect(r.preferredTime).toBe('14:00');
     }
+  });
+
+  it('A: combined has 3pm but latest is bare "3" => option 3, not 3pm from thread', () => {
+    const threePmOffered = [
+      { option: 1, displayText: '3:00 PM', startIso: '2026-05-10T15:00:00.000Z' },
+      { option: 2, displayText: '3:30 PM', startIso: '2026-05-10T15:30:00.000Z' },
+      { option: 3, displayText: '4:00 PM', startIso: '2026-05-10T16:00:00.000Z' },
+    ];
+    const combined = 'I want 3pm if possible';
+    const r = parseSlotSelectionOrTimeRevision('3', combined, threePmOffered, 'UTC', '2026-05-10', '2026-05-01');
+    expect(r.kind).toBe('selected_slot');
+    if (r.kind === 'selected_slot') {
+      expect(r.slot.option).toBe(3);
+      expect(r.slot.startIso).toBe('2026-05-10T16:00:00.000Z');
+    }
+  });
+
+  it('B: combined has 3pm; latest "told you 3pm" => time match or revision to 15:00 (not bare index)', () => {
+    const threePmOffered = [
+      { option: 1, displayText: '3:00 PM', startIso: '2026-05-10T15:00:00.000Z' },
+      { option: 2, displayText: '3:30 PM', startIso: '2026-05-10T15:30:00.000Z' },
+      { option: 3, displayText: '4:00 PM', startIso: '2026-05-10T16:00:00.000Z' },
+    ];
+    const r = parseSlotSelectionOrTimeRevision('told you 3pm', 'earlier 3pm', threePmOffered, 'UTC', '2026-05-10', '2026-05-01');
+    expect(r.kind).toBe('selected_slot');
+    if (r.kind === 'selected_slot') expect(r.slot.option).toBe(1);
+  });
+
+  it('C: combined has 2pm; latest bare "2" => option 2, not 14:00 revision', () => {
+    const offered = [
+      { option: 1, displayText: '12:00 PM', startIso: '2026-05-10T12:00:00.000Z' },
+      { option: 2, displayText: '12:30 PM', startIso: '2026-05-10T12:30:00.000Z' },
+      { option: 3, displayText: '1:00 PM', startIso: '2026-05-10T13:00:00.000Z' },
+    ];
+    const r = parseSlotSelectionOrTimeRevision('2', 'I said 2pm earlier', offered, 'UTC', '2026-05-10', '2026-05-01');
+    expect(r.kind).toBe('selected_slot');
+    if (r.kind === 'selected_slot') expect(r.slot.option).toBe(2);
+  });
+
+  it('D: latest "2pm can?" => time_revision, not option 2', () => {
+    const offered = [
+      { option: 1, displayText: '12:00 PM', startIso: '2026-05-10T12:00:00.000Z' },
+      { option: 2, displayText: '12:30 PM', startIso: '2026-05-10T12:30:00.000Z' },
+      { option: 3, displayText: '1:00 PM', startIso: '2026-05-10T13:00:00.000Z' },
+    ];
+    const r = parseSlotSelectionOrTimeRevision('2pm can?', '2pm', offered, 'UTC', '2026-05-10', '2026-05-01');
+    expect(r).toEqual({ kind: 'time_revision', preferredTime: '14:00' });
   });
 });
 

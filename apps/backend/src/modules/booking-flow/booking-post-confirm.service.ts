@@ -70,6 +70,7 @@ export class BookingPostConfirmService {
         booking: params.booking,
         coreFieldsJson: params.settings.coreFieldsJson,
         customFieldsJson: params.settings.customFieldsJson,
+        serviceMenuOptions: params.settings.serviceMenuOptions,
         conversationContactSnapshot: {
           displayName: params.contactSnapshot?.displayName,
           phone: params.contactSnapshot?.phone,

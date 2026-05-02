@@ -1,5 +1,6 @@
 import type { CustomBookingFieldDto } from '../../lib/tenant-automation-validation';
 import type { AisbpPreferredTimeWindow } from './conversation-booking-state';
+import { expandBookingSelectOptions } from './booking-service-intake';
 
 /** Human label for CRM time window (staff / customer copy). */
 export function timeWindowDisplayLabel(w: AisbpPreferredTimeWindow | undefined): string {
@@ -49,6 +50,17 @@ export function copyAskEmail(): string {
 
 export function copyAskService(): string {
   return 'What service would you like to book?';
+}
+
+export function formatServiceAskWithOptionalMenu(menu?: string[]): string {
+  if (!menu?.length) return copyAskService();
+  const opts = expandBookingSelectOptions(menu);
+  if (!opts.length) return copyAskService();
+  const lines = opts.map((m, i) => {
+    const prefix = i < 26 ? `${String.fromCharCode(65 + i)})` : `${i + 1})`;
+    return `${prefix} ${m}`;
+  });
+  return `What service are you interested in?\n\n${lines.join('\n')}\n\nReply with a letter, pick from the list, or describe another service.`;
 }
 
 export function copyNeedDateForSlots(): string {

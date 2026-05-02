@@ -42,6 +42,8 @@ export interface TenantBookingSettingsDto {
   defaultGhlCalendarName: string | null;
   coreFieldsJson: TenantCoreFieldsDto;
   customFieldsJson: CustomBookingFieldDto[];
+  /** Optional menu labels for core `service` intake (A/B/C style prompts + strict matching when set). */
+  serviceMenuOptions?: string[];
   maxBookingsPerSlot: number;
   internalBookingAlertEnabled: boolean;
   internalBookingAlertNumber: string | null;
@@ -216,6 +218,15 @@ function rowToDto(row: Record<string, unknown>): TenantBookingSettingsDto {
   const cap = Number(row['max_bookings_per_slot'] ?? 1);
   const maxBookingsPerSlot = Number.isFinite(cap) && cap >= 1 ? Math.floor(cap) : 1;
 
+  let serviceMenuOptions: string[] | undefined;
+  const smRaw = row['service_menu_options'];
+  if (Array.isArray(smRaw)) {
+    serviceMenuOptions = smRaw
+      .filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
+      .map(x => String(x).trim());
+    if (!serviceMenuOptions.length) serviceMenuOptions = undefined;
+  }
+
   return {
     enabled: Boolean(row['enabled']),
     bookingMode: String(row['booking_mode'] ?? 'COLLECT_DETAILS_ONLY') as BookingMode,
@@ -229,6 +240,7 @@ function rowToDto(row: Record<string, unknown>): TenantBookingSettingsDto {
         : String(row['default_ghl_calendar_name']),
     coreFieldsJson: merged,
     customFieldsJson,
+    serviceMenuOptions,
     maxBookingsPerSlot,
     internalBookingAlertEnabled: Boolean(row['internal_booking_alert_enabled']),
     internalBookingAlertNumber:

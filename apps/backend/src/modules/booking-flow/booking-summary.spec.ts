@@ -204,4 +204,31 @@ describe('buildBookingSummaryText', () => {
       formatFirstVisitForSummary({ ...baseBooking, firstVisit: undefined, skippedFieldIds: ['first_visit'] }),
     ).toBe('Skipped');
   });
+
+  it('F: Service line shows dash when stored value is only generic booking intent', () => {
+    const b = { ...baseBooking, service: 'I want to book' };
+    const t = buildBookingSummaryText({
+      ...baseInput(),
+      booking: b,
+      serviceMenuOptions: ['Haircut', 'Colour'],
+    });
+    expect(t).toContain('Service: -');
+    expect(t).not.toMatch(/Service:\s*I\s+Want\s+To\s+Book/i);
+  });
+
+  it('H: custom single_select summary shows the chosen answer only', () => {
+    const cf: CustomBookingFieldDto = {
+      id: 'cf_stylist',
+      label: 'Preference',
+      fieldType: 'single_select',
+      required: true,
+      enabled: true,
+      displayOrder: 0,
+      options: ['Male', 'Female', 'Anything'],
+    };
+    const b = { ...baseBooking, customAnswers: { cf_stylist: 'Male' } };
+    const t = buildBookingSummaryText({ ...baseInput(), booking: b, customFieldsJson: [cf] });
+    expect(t).toContain('- Preference: Male');
+    expect(t).not.toContain('Male,Female');
+  });
 });

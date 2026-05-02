@@ -156,4 +156,67 @@ describe('applyPendingFieldAnswer first_visit', () => {
     expect(booking.preferredTimeWindow).toBe('morning');
     expect(booking.pendingFieldId).toBeUndefined();
   });
+
+  it('pending service + menu: generic line is not accepted', () => {
+    const booking = {
+      status: 'collecting_details' as const,
+      version: 1,
+      calendarId: 'cal_1',
+      pendingFieldId: 'service' as const,
+      pendingFieldRequired: true,
+    };
+    const r = applyPendingFieldAnswer({
+      booking,
+      latest: 'I want to book',
+      todayYmd: '2026-05-01',
+      serviceMenuOptions: ['Haircut', 'Colour'],
+    });
+    expect(r.answered).toBe(false);
+    expect(booking.service).toBeUndefined();
+  });
+
+  it('pending service + menu: haircut resolves to Haircut', () => {
+    const booking = {
+      status: 'collecting_details' as const,
+      version: 1,
+      calendarId: 'cal_1',
+      pendingFieldId: 'service' as const,
+      pendingFieldRequired: true,
+    };
+    const r = applyPendingFieldAnswer({
+      booking,
+      latest: 'haircut',
+      todayYmd: '2026-05-01',
+      serviceMenuOptions: ['Haircut', 'Colour'],
+    });
+    expect(r.answered).toBe(true);
+    expect(booking.service).toBe('Haircut');
+  });
+
+  it('G: pending custom single_select with CSV options + male stores Male', () => {
+    const booking = {
+      status: 'collecting_details' as const,
+      version: 1,
+      calendarId: 'cal_1',
+      pendingFieldId: 'custom:stylist_pref',
+      pendingFieldRequired: true,
+    };
+    const cf = {
+      id: 'stylist_pref',
+      label: 'Preference',
+      fieldType: 'single_select',
+      required: true,
+      enabled: true,
+      displayOrder: 0,
+      options: ['Male,Female,Anything'],
+    };
+    const r = applyPendingFieldAnswer({
+      booking,
+      latest: 'male',
+      todayYmd: '2026-05-01',
+      customFieldDef: cf,
+    });
+    expect(r.answered).toBe(true);
+    expect(booking.customAnswers?.['stylist_pref']).toBe('Male');
+  });
 });

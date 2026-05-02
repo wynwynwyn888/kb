@@ -1,6 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 import type { CustomBookingFieldDto } from '../../lib/tenant-automation-validation';
-import { formatCustomFieldBookingQuestion } from './booking-conversation-copy';
+import { formatCustomFieldBookingQuestion, formatServiceAskWithOptionalMenu } from './booking-conversation-copy';
 
 describe('formatCustomFieldBookingQuestion', () => {
   it('polishes awkward stylist label and lists single_select options', () => {
@@ -33,5 +33,11 @@ describe('formatCustomFieldBookingQuestion', () => {
     };
     const t = formatCustomFieldBookingQuestion(cf, false);
     expect(t).toContain('Options: Male, Female, Anything');
+  });
+
+  it('I: formatServiceAskWithOptionalMenu lists each service on its own line', () => {
+    const t = formatServiceAskWithOptionalMenu(['Haircut', 'Colour']);
+    expect(t).toMatch(/A\)\s*Haircut/);
+    expect(t).toMatch(/B\)\s*Colour/);
   });
 });

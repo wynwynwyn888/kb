@@ -13,6 +13,7 @@ import {
   parseFirstVisitNaturalReply,
   stripBookingFrustrationForParse,
 } from './booking-intent-and-parse';
+import { matchUserLineToMenuOption, resolveServiceFromUserReplyLine } from './booking-service-intake';
 
 export type ApplyPendingFieldAnswerResult = {
   answered: boolean;
@@ -73,6 +74,8 @@ export function applyPendingFieldAnswer(params: {
   combinedHint?: string;
   /** When `pendingFieldId` is `custom:<id>`, used to validate single-select answers. */
   customFieldDef?: CustomBookingFieldDto | null;
+  /** When `pendingFieldId` is `service`, optional tenant menu for strict resolution. */
+  serviceMenuOptions?: string[];
 }): ApplyPendingFieldAnswerResult {
   const pid = (params.booking.pendingFieldId ?? '').trim();
   if (!pid) return { answered: false };
@@ -128,9 +131,9 @@ export function applyPendingFieldAnswer(params: {
   }
 
   if (pid === 'service') {
-    const s = line.replace(/\s+/g, ' ').trim();
-    if (s.length >= 2 && s.length <= 120) {
-      booking.service = s;
+    const resolved = resolveServiceFromUserReplyLine(line, params.serviceMenuOptions);
+    if (resolved) {
+      booking.service = resolved;
       clearPending();
       return { answered: true, fieldId: 'service', parsedValue: true };
     }
@@ -201,16 +204,7 @@ export function applyPendingFieldAnswer(params: {
     if (!id) return { answered: false };
     const cf = params.customFieldDef;
     if (cf && (cf.fieldType === 'single_select' || cf.fieldType === 'single_choice') && cf.options?.length) {
-      const lt = line.trim().toLowerCase();
-      let matched: string | undefined;
-      for (const o of cf.options) {
-        const ot = o.trim().toLowerCase();
-        if (!ot) continue;
-        if (lt === ot || lt.includes(ot) || ot.includes(lt)) {
-          matched = o.trim();
-          break;
-        }
-      }
+      const matched = matchUserLineToMenuOption(line, cf.options);
       if (matched) {
         if (!booking.customAnswers) booking.customAnswers = {};
         booking.customAnswers[id] = matched;

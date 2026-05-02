@@ -636,15 +636,30 @@ export function resolveBookingDateFromInboundText(text: string, todayYmd: string
 
 /**
  * In `offered_slots` state: detect picking a listed slot vs revising time/window/date for a fresh fetch.
+ *
+ * @param latestInboundText — Current user line only. When it is exactly `1`, `2`, or `3` (after trim + frustration strip),
+ *   that line alone selects the listed option index — combined thread is not scanned for times (avoids `3pm` in history
+ *   stealing a bare `3`).
+ * @param combinedThreadForRevision — Earlier transcript lines for date/time revision when the latest line is not a bare option index.
  */
 export function parseSlotSelectionOrTimeRevision(
-  message: string,
+  latestInboundText: string,
+  combinedThreadForRevision: string,
   offeredSlots: { option: number; displayText: string; startIso: string; calendarId?: string }[],
   crmTimezone: string,
   currentPreferredDate: string,
   todayYmd: string,
 ): SlotSelectionOrTimeRevision {
-  const cleaned = stripBookingFrustrationForParse(message.replace(/\s+/g, ' ').trim()).cleaned;
+  const latestClean = stripBookingFrustrationForParse(latestInboundText.replace(/\s+/g, ' ').trim()).cleaned;
+  if (/^[123]$/.test(latestClean)) {
+    const n = parseInt(latestClean, 10);
+    const slot = offeredSlots.find(o => o.option === n);
+    if (slot) return { kind: 'selected_slot', slot };
+    return { kind: 'unparseable' };
+  }
+
+  const selectionText = [latestInboundText, combinedThreadForRevision].filter(s => s?.trim()).join('\n');
+  const cleaned = stripBookingFrustrationForParse(selectionText.replace(/\s+/g, ' ').trim()).cleaned;
   if (!cleaned) return { kind: 'unparseable' };
   const curDate = currentPreferredDate.trim();
   const newDate = resolveBookingDateFromInboundText(cleaned, todayYmd);

@@ -7,7 +7,7 @@ import type { BookingCoreFieldKey } from '../../lib/tenant-automation-constants'
 import { BOOKING_CORE_FIELD_KEYS, type BookingMode } from '../../lib/tenant-automation-constants';
 import type { CoreFieldToggle } from '../../lib/tenant-automation-validation';
 import type { CustomBookingFieldDto } from '../../lib/tenant-automation-validation';
-import { BookingSettingsService } from '../booking-settings/booking-settings.service';
+import { BookingSettingsService, type TenantBookingSettingsDto } from '../booking-settings/booking-settings.service';
 import { GhlService } from '../ghl/ghl.service';
 import type { GhlFreeSlot } from '@aisbp/ghl-client';
 import type { ReplyDecision } from '../reply-planning/dto';
@@ -28,8 +28,6 @@ import {
   extractPhone,
   extractPreferredTime,
   extractPreferredTimeWindow,
-  extractServiceFromBookingMessage,
-  extractServiceGuess,
   normalizedHmToMinutes,
   parseFirstVisitNaturalReply,
   parseSlotSelectionOrTimeRevision,
@@ -39,6 +37,11 @@ import {
   slotStartLocalMinutes,
   stripBookingFrustrationForParse,
 } from './booking-intent-and-parse';
+import {
+  customSelectAnswerIsWholeOptionList,
+  isAcceptedBookingServiceValue,
+  resolveServiceFromBookingIntake,
+} from './booking-service-intake';
 import { applyPendingFieldAnswer, isOptionalSkipIntent } from './booking-pending-field';
 import { buildAppointmentCreateNotes } from './booking-summary';
 import { BookingPostConfirmService } from './booking-post-confirm.service';
@@ -73,6 +76,7 @@ import {
   formatCustomFieldBookingQuestion,
   formatHumanDateFromYmd,
   formatPreferredHmForDisplay,
+  formatServiceAskWithOptionalMenu,
   timeWindowDisplayLabel,
 } from './booking-conversation-copy';
 
@@ -337,6 +341,7 @@ export class ConversationBookingFlowService {
       combinedHint: combined,
       todayYmd,
       customFieldDef: pendingCf,
+      serviceMenuOptions: settings.serviceMenuOptions,
     });
     if (pendingAns.answered) {
       booking.pendingParseFailureCount = 0;
@@ -375,6 +380,7 @@ export class ConversationBookingFlowService {
     }
 
     this.applyRichFieldExtraction(booking, settings, combined, latest, todayYmd);
+    this.sanitizeBookingIntake(booking, settings);
 
     const pidAuto = booking.pendingFieldId?.trim();
     if (
@@ -471,9 +477,9 @@ export class ConversationBookingFlowService {
         crmTzForPick = tzPeek.crmTimezoneUsed?.trim() || 'UTC';
       }
 
-      const selectionText = [latest, combined].filter(s => s?.trim()).join('\n');
       const rev = parseSlotSelectionOrTimeRevision(
-        selectionText,
+        latest,
+        combined,
         booking.offeredSlots,
         crmTzForPick,
         booking.preferredDate!,
@@ -700,6 +706,34 @@ export class ConversationBookingFlowService {
         };
       }
 
+      this.sanitizeBookingIntake(booking, settings);
+      const missingBeforeCreate = this.listRequiredMissingFieldIds(settings, booking);
+      if (missingBeforeCreate.length > 0) {
+        const first = missingBeforeCreate[0]!;
+        const fieldRequired = this.isAskFieldRequired(settings, first);
+        booking.pendingFieldId = first;
+        booking.pendingFieldRequired = fieldRequired;
+        booking.lastAskedFieldId = first;
+        booking.lastAskedAt = new Date().toISOString();
+        booking.lastQuestionFingerprint = undefined;
+        booking.sameFieldPromptCount = 0;
+        const baseQ = this.promptForMissingField(first, settings, !fieldRequired);
+        const nextMeta = mergeBookingIntoConversationMetadata(prevMeta, {
+          ...booking,
+          status: 'collecting_details',
+          offeredSlots: undefined,
+          offeredSlotsCrmTimeZone: undefined,
+          lastOfferedAt: undefined,
+          selectedSlot: undefined,
+        });
+        return {
+          handled: true,
+          persistMetadata: nextMeta,
+          replyPlan: plan(withTone(baseQ), 'booking_required_before_confirm'),
+          routing: stubRouting(),
+        };
+      }
+
       this.logger.log(`bookingAppointmentCreateStarted ${JSON.stringify({ tenantId: params.tenantId, calendarId: picked.calendarId })}`);
 
       const { client, ghlLocationId } = await this.ghlService.createGhlClientForConnectedTenantWorkerOrThrow(params.tenantId);
@@ -727,6 +761,7 @@ export class ConversationBookingFlowService {
         booking,
         coreFieldsJson: settings.coreFieldsJson,
         customFieldsJson: settings.customFieldsJson,
+        serviceMenuOptions: settings.serviceMenuOptions,
         conversationContactSnapshot: {
           displayName: resolvedConversationContact.displayName,
           phone: resolvedConversationContact.phone,
@@ -970,6 +1005,7 @@ export class ConversationBookingFlowService {
       };
     }
 
+    this.sanitizeBookingIntake(booking, settings);
     const slotFetch = await this.bookingSettings.fetchFreeSlotsForAutomation(params.tenantId, {
       calendarId: booking.calendarId,
       selectedDate: booking.preferredDate!,
@@ -1432,7 +1468,7 @@ export class ConversationBookingFlowService {
 
   private promptForMissingField(
     fieldId: string,
-    settings: { coreFieldsJson: Record<string, CoreFieldToggle>; customFieldsJson: CustomBookingFieldDto[] },
+    settings: TenantBookingSettingsDto,
     optionalAllowSkipHint: boolean,
   ): string {
     if (fieldId.startsWith('custom:')) {
@@ -1449,7 +1485,7 @@ export class ConversationBookingFlowService {
       case 'email':
         return copyAskEmail() + (optionalAllowSkipHint ? ' You can skip this if you prefer.' : '');
       case 'service':
-        return copyAskService() + (optionalAllowSkipHint ? ' You can skip this if you prefer.' : '');
+        return formatServiceAskWithOptionalMenu(settings.serviceMenuOptions) + (optionalAllowSkipHint ? ' You can skip this if you prefer.' : '');
       case 'preferred_date':
         return copyAskPreferredDate() + (optionalAllowSkipHint ? ' You can skip this if you prefer.' : '');
       case 'preferred_time':
@@ -1463,21 +1499,14 @@ export class ConversationBookingFlowService {
 
   private applyRichFieldExtraction(
     booking: AisbpBookingStateV1,
-    settings: {
-      coreFieldsJson: Record<string, CoreFieldToggle>;
-      customFieldsJson: CustomBookingFieldDto[];
-    },
+    settings: TenantBookingSettingsDto,
     combined: string,
     latest: string,
     todayYmd: string,
   ): void {
     const text = `${combined}\n${latest}`;
     if (!booking.service) {
-      const g =
-        extractServiceFromBookingMessage(combined) ||
-        extractServiceFromBookingMessage(latest) ||
-        extractServiceFromBookingMessage(text) ||
-        extractServiceGuess(text);
+      const g = resolveServiceFromBookingIntake(combined, latest, settings.serviceMenuOptions);
       if (g) booking.service = g;
     }
     if (!booking.customerName) {
@@ -1535,6 +1564,25 @@ export class ConversationBookingFlowService {
           booking.customAnswers[cf.id] = /\bno\b/i.test(latest) ? 'no' : 'yes';
         }
       }
+    }
+  }
+
+  private sanitizeBookingIntake(booking: AisbpBookingStateV1, settings: TenantBookingSettingsDto): void {
+    const menu = settings.serviceMenuOptions;
+    if (booking.service?.trim() && !isAcceptedBookingServiceValue(booking.service, menu)) {
+      booking.service = undefined;
+    }
+    if (!booking.customAnswers) return;
+    for (const cf of settings.customFieldsJson) {
+      if (cf.fieldType !== 'single_select' && cf.fieldType !== 'single_choice') continue;
+      const a = booking.customAnswers[cf.id]?.trim();
+      if (!a) continue;
+      if (customSelectAnswerIsWholeOptionList(a, cf.options)) {
+        delete booking.customAnswers[cf.id];
+      }
+    }
+    if (Object.keys(booking.customAnswers).length === 0) {
+      booking.customAnswers = undefined;
     }
   }
 

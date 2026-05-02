@@ -2,6 +2,7 @@ import type { BookingCoreFieldKey } from '../../lib/tenant-automation-constants'
 import type { CoreFieldToggle } from '../../lib/tenant-automation-validation';
 import type { CustomBookingFieldDto } from '../../lib/tenant-automation-validation';
 import type { AisbpBookingStateV1, AisbpOfferedSlot } from './conversation-booking-state';
+import { customSelectAnswerIsWholeOptionList, isAcceptedBookingServiceValue } from './booking-service-intake';
 
 const MONTHS = [
   'January',
@@ -35,6 +36,8 @@ export interface BuildBookingSummaryTextInput {
   calendarName?: string;
   selectedSlot: AisbpOfferedSlot;
   crmTimeZone?: string;
+  /** When set, invalid / generic `booking.service` values render as "-" in staff summaries. */
+  serviceMenuOptions?: string[];
 }
 
 function parseYmd(ymd: string): { y: number; m: number; d: number } | null {
@@ -121,6 +124,7 @@ export function customFieldIncludedInSummary(cf: CustomBookingFieldDto): boolean
 function coreLine(
   booking: AisbpBookingStateV1,
   key: BookingCoreFieldKey,
+  serviceMenuOptions: string[] | undefined,
 ): { value: string; skipped: boolean } {
   if (booking.skippedFieldIds?.includes(key)) return { value: 'Skipped', skipped: true };
   switch (key) {
@@ -132,7 +136,8 @@ function coreLine(
       return { value: booking.email?.trim() || '-', skipped: false };
     case 'service': {
       const t = booking.service?.trim();
-      return { value: t ? titleCaseServiceLine(t) : '-', skipped: false };
+      if (!t || !isAcceptedBookingServiceValue(t, serviceMenuOptions)) return { value: '-', skipped: false };
+      return { value: titleCaseServiceLine(t), skipped: false };
     }
     case 'preferred_date': {
       const ymd = booking.preferredDate?.trim();
@@ -167,9 +172,10 @@ export function buildBookingSummaryText(input: BuildBookingSummaryTextInput): st
   const core = input.coreFieldsJson;
   const slot = input.selectedSlot;
   const tz = input.crmTimeZone;
+  const svcMenu = input.serviceMenuOptions;
 
   if (coreFieldIncludedInSummary(core, 'service')) {
-    const { value, skipped } = coreLine(input.booking, 'service');
+    const { value, skipped } = coreLine(input.booking, 'service', svcMenu);
     lines.push(`Service: ${skipped ? 'Skipped' : value}`);
   }
 
@@ -186,15 +192,15 @@ export function buildBookingSummaryText(input: BuildBookingSummaryTextInput): st
   lines.push('');
 
   if (coreFieldIncludedInSummary(core, 'name')) {
-    const { value, skipped } = coreLine(input.booking, 'name');
+    const { value, skipped } = coreLine(input.booking, 'name', svcMenu);
     lines.push(`Booking name: ${skipped ? 'Skipped' : value}`);
   }
   if (coreFieldIncludedInSummary(core, 'phone')) {
-    const { value, skipped } = coreLine(input.booking, 'phone');
+    const { value, skipped } = coreLine(input.booking, 'phone', svcMenu);
     lines.push(`Booking phone: ${skipped ? 'Skipped' : value}`);
   }
   if (coreFieldIncludedInSummary(core, 'email')) {
-    const { value, skipped } = coreLine(input.booking, 'email');
+    const { value, skipped } = coreLine(input.booking, 'email', svcMenu);
     lines.push(`Booking email: ${skipped ? 'Skipped' : value}`);
   }
   if (coreFieldIncludedInSummary(core, 'first_visit')) {
@@ -208,7 +214,15 @@ export function buildBookingSummaryText(input: BuildBookingSummaryTextInput): st
   const customLines: string[] = [];
   for (const cf of [...input.customFieldsJson].sort((a, b) => a.displayOrder - b.displayOrder)) {
     if (!customFieldIncludedInSummary(cf)) continue;
-    const ans = input.booking.customAnswers?.[cf.id]?.trim();
+    const ansRaw = input.booking.customAnswers?.[cf.id]?.trim();
+    let ans = ansRaw;
+    if (
+      ans &&
+      (cf.fieldType === 'single_select' || cf.fieldType === 'single_choice') &&
+      customSelectAnswerIsWholeOptionList(ans, cf.options)
+    ) {
+      ans = undefined;
+    }
     const skippedCustom = input.booking.skippedFieldIds?.includes(`custom:${cf.id}`);
     const label = cf.label.trim() || cf.id;
     if (skippedCustom) customLines.push(`- ${label}: Skipped`);

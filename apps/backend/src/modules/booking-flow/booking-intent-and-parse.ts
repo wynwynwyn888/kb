@@ -221,6 +221,65 @@ function formatYmd(d: Date): string {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
 }
 
+/**
+ * When the user writes an ordinal day ("28th") without a month name, infer the next upcoming
+ * calendar date for that day-of-month in CRM-local space (same rolling logic as named months).
+ */
+export function tryInferUpcomingOrdinalDayYmd(text: string, crmTodayYmd: string): string | undefined {
+  const ref = parseYmd(crmTodayYmd.trim());
+  if (!ref) return undefined;
+
+  const tryBuild = (y: number, m: number, d: number): string | undefined => {
+    if (m < 1 || m > 12 || d < 1 || d > 31) return undefined;
+    const dt = new Date(Date.UTC(y, m - 1, d));
+    if (dt.getUTCMonth() !== m - 1 || dt.getUTCDate() !== d) return undefined;
+    return formatYmd(dt);
+  };
+
+  const mOrd = /\b(\d{1,2})(?:st|nd|rd|th)\b/i.exec(text);
+  if (!mOrd) return undefined;
+  const day = parseInt(mOrd[1]!, 10);
+  if (!Number.isFinite(day) || day < 1 || day > 31) return undefined;
+  const tail = text.slice((mOrd.index ?? 0) + mOrd[0].length, (mOrd.index ?? 0) + mOrd[0].length + 96);
+  if (
+    /\b(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)\b/i.test(
+      tail,
+    )
+  ) {
+    return undefined;
+  }
+
+  let y = ref.y;
+  let mo = ref.m;
+  for (let i = 0; i < 14; i++) {
+    const cand = tryBuild(y, mo, day);
+    if (cand && cand >= crmTodayYmd.trim()) return cand;
+    mo += 1;
+    if (mo > 12) {
+      mo = 1;
+      y += 1;
+    }
+  }
+  return undefined;
+}
+
+/** Ordinal day number when no trailing month token (for clarification copy). */
+export function extractOrdinalDayWithoutMonthName(text: string): number | undefined {
+  const mOrd = /\b(\d{1,2})(?:st|nd|rd|th)\b/i.exec(text);
+  if (!mOrd) return undefined;
+  const day = parseInt(mOrd[1]!, 10);
+  if (!Number.isFinite(day) || day < 1 || day > 31) return undefined;
+  const tail = text.slice((mOrd.index ?? 0) + mOrd[0].length, (mOrd.index ?? 0) + mOrd[0].length + 96);
+  if (
+    /\b(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)\b/i.test(
+      tail,
+    )
+  ) {
+    return undefined;
+  }
+  return day;
+}
+
 export function extractEmail(text: string): string | undefined {
   const m = text.match(EMAIL);
   return m ? m[0]!.trim() : undefined;

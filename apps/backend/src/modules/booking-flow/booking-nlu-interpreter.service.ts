@@ -5,6 +5,7 @@ import { getSupabaseService } from '../../lib/supabase';
 import { isUsableOpenAiFallbackKey } from '../../lib/ai-live-model-resolve';
 import { bookingNluOutputSchema, type BookingNluInterpretInput, type BookingNluOutput } from './booking-nlu.schema';
 import { listNluExtractedFieldKeysForLog } from './booking-nlu-merge';
+import { softenBookingNluParsedJson } from './booking-nlu-soften';
 
 type ProviderRow = {
   provider: string;
@@ -107,6 +108,7 @@ export class BookingNluInterpreterService {
       '- "afternoon la" => preferredTimeWindow afternoon.',
       '- "haircut can?" => service Haircut when that matches menu.',
       '- "anything also can" / "anything" => if a pending custom field has option "Anything", put it in customAnswers under that field id.',
+      '- "no. anything will do" with pending custom single_select => customAnswers for that field id only (value Anything); do not set firstVisit.',
       '- If pendingFieldId is preferred_time, prioritise extracting preferredTime or preferredTimeWindow from messy text.',
       '- slotSelection is advisory only; the host app may ignore it for safety.',
     ].join('\n');
@@ -142,7 +144,8 @@ export class BookingNluInterpreterService {
         );
         return null;
       }
-      const safe = bookingNluOutputSchema.safeParse(parsed);
+      const softened = softenBookingNluParsedJson(input, parsed);
+      const safe = bookingNluOutputSchema.safeParse(softened);
       if (!safe.success) {
         this.logger.log(
           `bookingNluMergeSkipped ${JSON.stringify({

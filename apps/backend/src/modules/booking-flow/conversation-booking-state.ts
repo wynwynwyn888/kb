@@ -79,6 +79,8 @@ export interface AisbpBookingStateV1 {
   noSlotsForDateYmd?: string;
   /** After a no-slots reply, set false; flipped true once a multi-day widen search was attempted. */
   noSlotsWideSearchDone?: boolean;
+  /** When we asked "do you mean …?" for an inferred date, store the YYYY-MM-DD until the user confirms. */
+  pendingSuggestedDateYmd?: string;
 }
 
 export function emptyBookingState(): AisbpBookingStateV1 {
@@ -236,6 +238,8 @@ export function parseAisbpBookingState(metadata: Record<string, unknown> | undef
     noSlotsForDateYmd: typeof o['noSlotsForDateYmd'] === 'string' ? o['noSlotsForDateYmd'].trim() : undefined,
     noSlotsWideSearchDone:
       typeof o['noSlotsWideSearchDone'] === 'boolean' ? (o['noSlotsWideSearchDone'] as boolean) : undefined,
+    pendingSuggestedDateYmd:
+      typeof o['pendingSuggestedDateYmd'] === 'string' ? o['pendingSuggestedDateYmd'].trim() : undefined,
   };
 }
 

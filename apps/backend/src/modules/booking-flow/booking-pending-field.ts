@@ -204,7 +204,10 @@ export function applyPendingFieldAnswer(params: {
     if (!id) return { answered: false };
     const cf = params.customFieldDef;
     if (cf && (cf.fieldType === 'single_select' || cf.fieldType === 'single_choice') && cf.options?.length) {
-      const matched = matchUserLineToMenuOption(line, cf.options);
+      const wide = [line, params.combinedHint?.trim()].filter(Boolean).join('\n');
+      const matched =
+        matchUserLineToMenuOption(wide, cf.options) ??
+        matchUserLineToMenuOption(line.replace(/^no[.,!\s]+/i, '').trim(), cf.options);
       if (matched) {
         if (!booking.customAnswers) booking.customAnswers = {};
         booking.customAnswers[id] = matched;

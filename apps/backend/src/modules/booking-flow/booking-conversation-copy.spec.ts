@@ -1,6 +1,10 @@
 import { describe, expect, it } from '@jest/globals';
 import type { CustomBookingFieldDto } from '../../lib/tenant-automation-validation';
-import { formatCustomFieldBookingQuestion, formatServiceAskWithOptionalMenu } from './booking-conversation-copy';
+import {
+  buildPreferredDateNeedAsk,
+  formatCustomFieldBookingQuestion,
+  formatServiceAskWithOptionalMenu,
+} from './booking-conversation-copy';
 
 describe('formatCustomFieldBookingQuestion', () => {
   it('polishes awkward stylist label and lists single_select options', () => {
@@ -14,7 +18,8 @@ describe('formatCustomFieldBookingQuestion', () => {
       options: ['Male', 'Female', 'No preference'],
     };
     const t = formatCustomFieldBookingQuestion(cf, true);
-    expect(t).toContain('Do you have a preference for a male or female stylist');
+    expect(t).toContain('Do you have any stylist preference');
+    expect(t).toContain('male, female, or no preference');
     expect(t).not.toMatch(/Quick one/i);
     expect(t).not.toContain('??');
     expect(t).toContain('Options: Male, Female, No preference');
@@ -41,3 +46,34 @@ describe('formatCustomFieldBookingQuestion', () => {
     expect(t).toMatch(/B\)\s*Colour/);
   });
 });
+
+describe('buildPreferredDateNeedAsk', () => {
+  it('confirms inferred May 28 when service, name, and time are present', () => {
+    const combined = 'i want to book 28th 9am morning, for hair colour, my name is quickesta';
+    const r = buildPreferredDateNeedAsk({
+      combined,
+      latest: combined,
+      crmTodayYmd: '2026-05-03',
+      service: 'Hair Colour',
+      customerName: 'Quickesta',
+      phone: '01492391',
+      preferredTime: '09:00',
+    });
+    expect(r.suggestedYmd).toBe('2026-05-28');
+    expect(r.baseMessage).toContain('Hair Colour');
+    expect(r.baseMessage).toContain('Quickesta');
+    expect(r.baseMessage).toContain('28 May');
+    expect(r.baseMessage).toMatch(/9:00/i);
+  });
+
+  it('falls back to generic date ask without rich context', () => {
+    const r = buildPreferredDateNeedAsk({
+      combined: 'when can i come',
+      latest: 'when can i come',
+      crmTodayYmd: '2026-05-03',
+    });
+    expect(r.baseMessage).toContain('What date');
+    expect(r.suggestedYmd).toBeUndefined();
+  });
+});
+

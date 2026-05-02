@@ -219,4 +219,32 @@ describe('applyPendingFieldAnswer first_visit', () => {
     expect(r.answered).toBe(true);
     expect(booking.customAnswers?.['stylist_pref']).toBe('Male');
   });
+
+  it('pending stylist preference + "no. anything will do" => Anything', () => {
+    const booking = {
+      status: 'collecting_details' as const,
+      version: 1,
+      calendarId: 'cal_1',
+      pendingFieldId: 'custom:stylist_pref' as const,
+      pendingFieldRequired: true,
+    };
+    const cf = {
+      id: 'stylist_pref',
+      label: 'Stylist',
+      fieldType: 'single_select' as const,
+      required: true,
+      enabled: true,
+      displayOrder: 0,
+      options: ['Male', 'Female', 'Anything'],
+    };
+    const r = applyPendingFieldAnswer({
+      booking,
+      latest: 'no. anything will do',
+      combinedHint: 'no. anything will do',
+      todayYmd: '2026-05-01',
+      customFieldDef: cf,
+    });
+    expect(r.answered).toBe(true);
+    expect(booking.customAnswers?.['stylist_pref']).toBe('Anything');
+  });
 });

@@ -88,6 +88,7 @@ import {
   copySingleExactTimeAvailable,
   copySlotsAroundRequestedTime,
   copySlotsOfferedWithHumanDate,
+  buildPreferredDateNeedAsk,
   formatCustomFieldBookingQuestion,
   formatHumanDateFromYmd,
   formatPreferredHmForDisplay,
@@ -423,6 +424,8 @@ export class ConversationBookingFlowService {
       }
     }
 
+    this.tryApplySuggestedPreferredDateConfirmation(booking, latest, combined, crmTodayYmd);
+
     const hadFrustration = deterministicHadFrustration || nluUserFrustrated;
 
     const pendingCustomId = booking.pendingFieldId?.startsWith('custom:')
@@ -447,6 +450,9 @@ export class ConversationBookingFlowService {
     if (pendingAns.answered) {
       booking.pendingParseFailureCount = 0;
       booking.sameFieldPromptCount = 0;
+      if (pendingAns.fieldId === 'preferred_date') {
+        booking.pendingSuggestedDateYmd = undefined;
+      }
       const nextRequiredMissing = this.listRequiredMissingFieldIds(settings, booking);
       const nextOptionalPending = this.listOptionalAskPendingFieldIds(settings, booking);
       this.logger.log(
@@ -1149,7 +1155,22 @@ export class ConversationBookingFlowService {
     }
 
     if (!booking.preferredDate?.trim()) {
-      const baseQ = copyAskPreferredDate();
+      const dateAsk = buildPreferredDateNeedAsk({
+        combined,
+        latest,
+        crmTodayYmd,
+        service: booking.service,
+        customerName: booking.customerName,
+        phone: booking.phone,
+        preferredTime: booking.preferredTime,
+        preferredTimeWindow: booking.preferredTimeWindow,
+      });
+      const baseQ = dateAsk.baseMessage;
+      if (dateAsk.suggestedYmd) {
+        booking.pendingSuggestedDateYmd = dateAsk.suggestedYmd;
+      } else {
+        booking.pendingSuggestedDateYmd = undefined;
+      }
       const fpBase = fingerprintBookingQuestion(baseQ);
       const suppress = !fieldChanged && this.shouldSuppressRepeatQuestion(booking, 'preferred_date', fpBase);
       if (suppress) {
@@ -1808,6 +1829,44 @@ export class ConversationBookingFlowService {
     }
   }
 
+  private tryApplySuggestedPreferredDateConfirmation(
+    booking: AisbpBookingStateV1,
+    latest: string,
+    combined: string,
+    crmTodayYmd: string,
+  ): void {
+    const sug = booking.pendingSuggestedDateYmd?.trim();
+    if (!sug || !latest.trim()) return;
+    const pid = booking.pendingFieldId?.trim();
+    if (pid && pid !== 'preferred_date') return;
+
+    const line = stripBookingFrustrationForParse(latest).cleaned.trim();
+    if (!line) return;
+
+    const wide = `${combined}\n${latest}`.trim();
+    const alt = resolveBookingCalendarDay(wide, crmTodayYmd) ?? resolveRelativeDayPhrase(wide, crmTodayYmd);
+    if (alt && alt !== sug) {
+      booking.pendingSuggestedDateYmd = undefined;
+      return;
+    }
+
+    if (!this.isAffirmativeBookingDateConfirm(line)) return;
+
+    booking.preferredDate = sug;
+    booking.pendingSuggestedDateYmd = undefined;
+    if (booking.pendingFieldId === 'preferred_date') {
+      booking.pendingFieldId = undefined;
+      booking.pendingFieldLabel = undefined;
+      booking.pendingFieldRequired = undefined;
+    }
+  }
+
+  private isAffirmativeBookingDateConfirm(line: string): boolean {
+    const s = line.trim().toLowerCase().replace(/[.!?…]+$/g, '').trim();
+    if (!s) return false;
+    return /^(yes|yeah|yep|yup|correct|that'?s\s+right|sure|ok|okay|please\s+do|go\s+ahead)$/.test(s);
+  }
+
   private stripImplicitPastPreferredDateIfNeeded(
     booking: AisbpBookingStateV1,
     crmTodayYmd: string,
@@ -1822,6 +1881,7 @@ export class ConversationBookingFlowService {
       `bookingSlotFetchBlocked ${JSON.stringify({ reason: 'implicit_past_date', ymd, crmTodayYmd })}`,
     );
     booking.preferredDate = undefined;
+    booking.pendingSuggestedDateYmd = undefined;
     booking.noSlotsForDateYmd = undefined;
     booking.noSlotsWideSearchDone = undefined;
   }

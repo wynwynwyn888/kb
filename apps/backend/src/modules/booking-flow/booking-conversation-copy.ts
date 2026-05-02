@@ -1,5 +1,12 @@
 import type { CustomBookingFieldDto } from '../../lib/tenant-automation-validation';
 import type { AisbpPreferredTimeWindow } from './conversation-booking-state';
+import {
+  extractOrdinalDayWithoutMonthName,
+  extractPreferredTime,
+  resolveBookingCalendarDay,
+  resolveRelativeDayPhrase,
+  tryInferUpcomingOrdinalDayYmd,
+} from './booking-intent-and-parse';
 import { expandBookingSelectOptions } from './booking-service-intake';
 
 /** Single line "A, B, C" for custom single_select options (handles comma-joined DB rows). */
@@ -70,6 +77,108 @@ export function formatServiceAskWithOptionalMenu(menu?: string[]): string {
 
 export function copyNeedDateForSlots(): string {
   return copyAskPreferredDate();
+}
+
+function ordinalSuffix(day: number): string {
+  const d = Math.floor(day);
+  if (d % 10 === 1 && d % 100 !== 11) return 'st';
+  if (d % 10 === 2 && d % 100 !== 12) return 'nd';
+  if (d % 10 === 3 && d % 100 !== 13) return 'rd';
+  return 'th';
+}
+
+export function copyPreferredDateRichConfirm(p: {
+  service?: string;
+  customerName?: string;
+  humanDate: string;
+  timeLabel?: string | undefined;
+}): string {
+  const svc = (p.service ?? '').trim() || 'your visit';
+  const nm = (p.customerName ?? '').trim();
+  const timeL = (p.timeLabel ?? '').trim();
+  const nameBit = nm ? ` for ${nm}` : '';
+  const timeBit = timeL ? ` at ${timeL}` : '';
+  return collapseWhitespace(`Sure, I've got ${svc}${nameBit}. Just to confirm, do you mean ${p.humanDate}${timeBit}?`);
+}
+
+export function copyPreferredDateDayNeedsMonth(p: {
+  service?: string;
+  customerName?: string;
+  day: number;
+  timeLabel?: string | undefined;
+}): string {
+  const svc = (p.service ?? '').trim() || 'your visit';
+  const nm = (p.customerName ?? '').trim();
+  const nameBit = nm ? ` for ${nm}` : '';
+  const timeBit = (p.timeLabel ?? '').trim() ? ` at ${(p.timeLabel ?? '').trim()}` : '';
+  const ord = `${p.day}${ordinalSuffix(p.day)}`;
+  return collapseWhitespace(`I've got ${svc}${nameBit}${timeBit}. Which month should I use for the ${ord}?`);
+}
+
+/**
+ * When the booking engine still needs a calendar date, prefer a concise confirmation question
+ * if we already inferred a day from the thread (ordinal without month, slash date, etc.).
+ */
+export function buildPreferredDateNeedAsk(p: {
+  combined: string;
+  latest: string;
+  crmTodayYmd: string;
+  service?: string;
+  customerName?: string;
+  phone?: string;
+  preferredTime?: string;
+  preferredTimeWindow?: AisbpPreferredTimeWindow;
+}): { baseMessage: string; suggestedYmd?: string } {
+  const wide = `${p.combined}\n${p.latest}`.trim();
+  const resolved =
+    resolveBookingCalendarDay(wide, p.crmTodayYmd) ??
+    resolveRelativeDayPhrase(wide, p.crmTodayYmd) ??
+    resolveBookingCalendarDay(p.latest, p.crmTodayYmd) ??
+    resolveRelativeDayPhrase(p.latest, p.crmTodayYmd);
+  const suggested = resolved ?? tryInferUpcomingOrdinalDayYmd(wide, p.crmTodayYmd);
+
+  const hmStored = p.preferredTime?.trim();
+  let timeLabel: string | undefined;
+  if (hmStored) timeLabel = formatPreferredHmForDisplay(hmStored);
+  else if (p.preferredTimeWindow && p.preferredTimeWindow !== 'exact') timeLabel = timeWindowDisplayLabel(p.preferredTimeWindow);
+  else {
+    const ext = extractPreferredTime(wide);
+    if (ext) timeLabel = formatPreferredHmForDisplay(ext);
+  }
+
+  const svcOk = Boolean((p.service ?? '').trim());
+  const nmOk = Boolean((p.customerName ?? '').trim());
+  const phoneOk = Boolean((p.phone ?? '').trim());
+  const timeOk = Boolean(
+    hmStored || (p.preferredTimeWindow && p.preferredTimeWindow !== 'exact') || extractPreferredTime(wide),
+  );
+  const hasRich = svcOk && (nmOk || phoneOk || timeOk);
+
+  if (suggested && hasRich) {
+    return {
+      baseMessage: copyPreferredDateRichConfirm({
+        service: p.service,
+        customerName: p.customerName,
+        humanDate: formatHumanDateFromYmd(suggested),
+        timeLabel,
+      }),
+      suggestedYmd: suggested,
+    };
+  }
+  if (hasRich && !suggested) {
+    const dom = extractOrdinalDayWithoutMonthName(wide);
+    if (dom !== undefined) {
+      return {
+        baseMessage: copyPreferredDateDayNeedsMonth({
+          service: p.service,
+          customerName: p.customerName,
+          day: dom,
+          timeLabel,
+        }),
+      };
+    }
+  }
+  return { baseMessage: copyAskPreferredDate() };
 }
 
 export function copySlotsOffered(dateYmd: string, lines: string[]): string {
@@ -144,7 +253,13 @@ function collapseWhitespace(s: string): string {
 }
 
 function stripQuickOne(s: string): string {
-  return collapseWhitespace(s.replace(/^\s*quick\s+one\s*:\s*/i, '').replace(/^\s*quick\s+one\s+/i, ''));
+  return collapseWhitespace(
+    s
+      .replace(/^\s*quick\s+one\s*:\s*/i, '')
+      .replace(/^\s*quick\s+one\s+/i, '')
+      .replace(/^\s*quick\s+question\s*[!.:]*\s*/i, '')
+      .replace(/^\s*quick\s+question\s+for\s+you\s*[!.:]*\s*/i, ''),
+  );
 }
 
 function dedupeQuestionMarks(s: string): string {
@@ -182,7 +297,9 @@ export function formatCustomFieldBookingQuestion(cf: CustomBookingFieldDto, opti
 
   const cleaned = sentenceCaseFromLabel(base);
   if (/\bpreference\b/i.test(cleaned) || (/\bmale\b/i.test(cleaned) && /\bfemale\b/i.test(cleaned))) {
-    return collapseWhitespace(`Do you have a preference for a male or female stylist?${suffix}${opts}`);
+    return collapseWhitespace(
+      `Do you have any stylist preference — male, female, or no preference?${suffix}${opts}`,
+    );
   }
 
   if (labelLooksLikeQuestion(base)) {

@@ -278,7 +278,7 @@ describe('ConversationBookingFlowService', () => {
     });
     expect(r.handled).toBe(true);
     if (r.handled) {
-      expect(r.replyPlan.bubbles[0]!.text).toMatch(/Can I have your name for the booking/i);
+      expect(r.replyPlan.bubbles[0]!.text).toMatch(/May I have the booking name/i);
       expect(r.replyPlan.bubbles[0]!.text).toMatch(/skip this if you prefer/i);
       expect(fetchFree).not.toHaveBeenCalled();
       const meta = (r.persistMetadata as { aisbp_booking?: Record<string, unknown> }).aisbp_booking;
@@ -327,7 +327,7 @@ describe('ConversationBookingFlowService', () => {
     });
     expect(r.handled).toBe(true);
     if (r.handled) {
-      expect(r.replyPlan.bubbles[0]!.text).toMatch(/best phone number for the booking/i);
+      expect(r.replyPlan.bubbles[0]!.text).toMatch(/best contact number/i);
       expect(r.replyPlan.bubbles[0]!.text).not.toMatch(/skip this if you prefer/i);
       expect(fetchFree).not.toHaveBeenCalled();
     }
@@ -351,7 +351,7 @@ describe('ConversationBookingFlowService', () => {
     });
     expect(r.handled).toBe(true);
     if (r.handled) {
-      expect(r.replyPlan.bubbles[0]!.text).toMatch(/Can I have your name for the booking/i);
+      expect(r.replyPlan.bubbles[0]!.text).toMatch(/May I have the booking name/i);
       expect(fetchFree).not.toHaveBeenCalled();
     }
   });
@@ -1037,7 +1037,7 @@ describe('ConversationBookingFlowService', () => {
         metadata: meta,
       });
       expect(r.handled).toBe(true);
-      expect(r.replyPlan.bubbles[0]!.text).toMatch(/name for the booking/i);
+      expect(r.replyPlan.bubbles[0]!.text).toMatch(/booking name/i);
       meta = r.persistMetadata as Record<string, unknown>;
 
       r = await svc(booking, ghl).maybeHandleConversationBookingTurn({
@@ -1049,7 +1049,7 @@ describe('ConversationBookingFlowService', () => {
         latestInboundText: 'Lucy',
         metadata: meta,
       });
-      expect(r.replyPlan.bubbles[0]!.text).toMatch(/phone/i);
+      expect(r.replyPlan.bubbles[0]!.text).toMatch(/contact number/i);
       meta = r.persistMetadata as Record<string, unknown>;
 
       r = await svc(booking, ghl).maybeHandleConversationBookingTurn({
@@ -1105,8 +1105,8 @@ describe('ConversationBookingFlowService', () => {
         latestInboundText: '???',
         metadata: meta,
       });
-      expect(r.replyPlan.bubbles[0]!.text.toLowerCase()).toMatch(/phone/);
-      expect(r.replyPlan.bubbles[0]!.text.toLowerCase()).not.toMatch(/name for the booking/);
+      expect(r.replyPlan.bubbles[0]!.text.toLowerCase()).toMatch(/contact number/);
+        expect(r.replyPlan.bubbles[0]!.text.toLowerCase()).not.toMatch(/booking name/);
     });
 
     it('refuses skip when phone is required', async () => {
@@ -1139,7 +1139,7 @@ describe('ConversationBookingFlowService', () => {
       });
       expect(r.handled).toBe(true);
       if (r.handled) {
-        expect(r.replyPlan.bubbles[0]!.text.toLowerCase()).toMatch(/need a phone|can.?t be skipped/);
+        expect(r.replyPlan.bubbles[0]!.text.toLowerCase()).toMatch(/i'll need.*booking/);
       }
     });
 

@@ -19,6 +19,17 @@ export interface AisbpOfferedSlot {
 
 export type AisbpCustomAnswers = Record<string, string>;
 
+/** Broad time-of-day preference for slot ranking (CRM-local interpretation). */
+export type AisbpPreferredTimeWindow =
+  | 'morning'
+  | 'afternoon'
+  | 'evening'
+  | 'noon'
+  | 'lunch'
+  | 'after_work'
+  | 'before_lunch'
+  | 'exact';
+
 export interface AisbpBookingStateV1 {
   status: AisbpBookingStatus;
   version: number;
@@ -32,6 +43,8 @@ export interface AisbpBookingStateV1 {
   firstVisit?: string;
   preferredDate?: string;
   preferredTime?: string;
+  /** When set without an exact `preferredTime`, filters / ranks offered slots in CRM local time. */
+  preferredTimeWindow?: AisbpPreferredTimeWindow;
   customAnswers?: AisbpCustomAnswers;
   /** Next inbound line is interpreted as an answer to this field (`name`, `preferred_date`, or `custom:<id>`). */
   pendingFieldId?: string;
@@ -41,6 +54,10 @@ export interface AisbpBookingStateV1 {
   lastAskedAt?: string | null;
   /** Hash of the last outbound booking question (duplicate suppression). */
   lastQuestionFingerprint?: string | null;
+  /** How many times we re-prompted the same field without a parse (optional escape hatch). */
+  sameFieldPromptCount?: number;
+  /** Consecutive failed parses while the same optional `pendingFieldId` was set. */
+  pendingParseFailureCount?: number;
   offeredSlots?: AisbpOfferedSlot[];
   lastOfferedAt?: string;
   selectedSlot?: AisbpOfferedSlot;
@@ -149,6 +166,19 @@ export function parseAisbpBookingState(metadata: Record<string, unknown> | undef
   const optionalAskedFieldIds = parseIdList(o['optionalAskedFieldIds']);
   const skippedFieldIds = parseIdList(o['skippedFieldIds']);
 
+  const WINDOW_SET = new Set<string>([
+    'morning',
+    'afternoon',
+    'evening',
+    'noon',
+    'lunch',
+    'after_work',
+    'before_lunch',
+    'exact',
+  ]);
+  const wRaw = typeof o['preferredTimeWindow'] === 'string' ? o['preferredTimeWindow'].trim() : '';
+  const preferredTimeWindow = WINDOW_SET.has(wRaw) ? (wRaw as AisbpPreferredTimeWindow) : undefined;
+
   return {
     status: statusResolved,
     version,
@@ -160,6 +190,7 @@ export function parseAisbpBookingState(metadata: Record<string, unknown> | undef
     firstVisit: typeof o['firstVisit'] === 'string' ? o['firstVisit'] : undefined,
     preferredDate: typeof o['preferredDate'] === 'string' ? o['preferredDate'] : undefined,
     preferredTime: typeof o['preferredTime'] === 'string' ? o['preferredTime'] : undefined,
+    preferredTimeWindow,
     customAnswers,
     bookingMode: typeof o['bookingMode'] === 'string' ? o['bookingMode'] : undefined,
     pendingFieldId: typeof o['pendingFieldId'] === 'string' ? o['pendingFieldId'] : undefined,
@@ -168,6 +199,14 @@ export function parseAisbpBookingState(metadata: Record<string, unknown> | undef
     lastAskedFieldId: typeof o['lastAskedFieldId'] === 'string' ? o['lastAskedFieldId'] : undefined,
     lastAskedAt: typeof o['lastAskedAt'] === 'string' ? o['lastAskedAt'] : undefined,
     lastQuestionFingerprint: typeof o['lastQuestionFingerprint'] === 'string' ? o['lastQuestionFingerprint'] : undefined,
+    sameFieldPromptCount:
+      typeof o['sameFieldPromptCount'] === 'number' && Number.isFinite(o['sameFieldPromptCount'])
+        ? Math.max(0, Math.floor(o['sameFieldPromptCount'] as number))
+        : undefined,
+    pendingParseFailureCount:
+      typeof o['pendingParseFailureCount'] === 'number' && Number.isFinite(o['pendingParseFailureCount'])
+        ? Math.max(0, Math.floor(o['pendingParseFailureCount'] as number))
+        : undefined,
     offeredSlots,
     lastOfferedAt: typeof o['lastOfferedAt'] === 'string' ? o['lastOfferedAt'] : undefined,
     selectedSlot: selected,

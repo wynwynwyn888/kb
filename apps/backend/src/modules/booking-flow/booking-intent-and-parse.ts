@@ -3,6 +3,8 @@
  * Avoids over-triggering on generic price questions without booking language.
  */
 
+import type { AisbpPreferredTimeWindow } from './conversation-booking-state';
+
 const BOOKING_LEX = new RegExp(
   [
     '\\bbook(ing)?\\b',
@@ -71,8 +73,40 @@ export function resolveRelativeDayPhrase(text: string, todayYmd: string): string
     const dt = new Date(Date.UTC(base!.y, base!.m - 1, base!.d + n));
     return formatYmd(dt);
   };
+  const ref = new Date(Date.UTC(base.y, base.m - 1, base.d));
+  const curDow = ref.getUTCDay();
+
+  const dowIndex = (name: string): number | undefined => {
+    const n = name.toLowerCase();
+    const map: Record<string, number> = {
+      sunday: 0,
+      monday: 1,
+      tuesday: 2,
+      wednesday: 3,
+      thursday: 4,
+      friday: 5,
+      saturday: 6,
+    };
+    return map[n];
+  };
+
+  const thisNext = /\b(this|next)\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/i.exec(text);
+  if (thisNext) {
+    const which = thisNext[1]!.toLowerCase();
+    const dTarget = dowIndex(thisNext[2]!);
+    if (dTarget === undefined) return undefined;
+    let delta = (dTarget - curDow + 7) % 7;
+    if (which === 'this') {
+      if (delta === 0) return todayYmd;
+      return addDays(delta);
+    }
+    if (delta === 0) return addDays(7);
+    return addDays(delta + 7);
+  }
+
   if (/\btoday\b/.test(t)) return todayYmd;
   if (/\btomorrow\b/.test(t)) return addDays(1);
+
   const dow = [
     { re: /\bmonday\b/, d: 1 },
     { re: /\btuesday\b/, d: 2 },
@@ -82,15 +116,14 @@ export function resolveRelativeDayPhrase(text: string, todayYmd: string): string
     { re: /\bsaturday\b/, d: 6 },
     { re: /\bsunday\b/, d: 0 },
   ] as const;
-  const ref = new Date(Date.UTC(base.y, base.m - 1, base.d));
-  const curDow = ref.getUTCDay();
   for (const { re, d } of dow) {
     if (re.test(t)) {
-      let delta = (d - curDow + 7) % 7;
-      if (delta === 0) delta = 7;
+      const delta = (d - curDow + 7) % 7;
+      if (delta === 0) return todayYmd;
       return addDays(delta);
     }
   }
+
   const m = YMD.exec(text);
   if (m) return `${m[1]}-${m[2]}-${m[3]}`;
   return resolveBookingCalendarDay(text, todayYmd);
@@ -127,11 +160,11 @@ export function resolveBookingCalendarDay(text: string, todayYmd: string): strin
     let month: number;
     let day: number;
     if (a > 12) {
-      month = a;
-      day = b;
-    } else if (b > 12) {
       day = a;
       month = b;
+    } else if (b > 12) {
+      month = a;
+      day = b;
     } else {
       day = a;
       month = b;
@@ -190,9 +223,37 @@ export function extractPhone(text: string): string | undefined {
   return m ? m[0]!.replace(/\s+/g, ' ').trim() : undefined;
 }
 
-/** HH:MM 24h or 3pm / 3:30pm */
+/** HH:MM 24h, 3pm, 2.30pm, around 10 / around 10am — trailing fillers stripped. */
 export function extractPreferredTime(text: string): string | undefined {
-  const t = text.trim();
+  let t = text.replace(/\s+/g, ' ').trim();
+  if (!t) return undefined;
+  t = t.replace(/\b(man|please|thanks|thank you|sir|madam|buddy|mate)\b/gi, ' ').replace(/\s+/g, ' ').trim();
+
+  const around = /\baround\s+(\d{1,2})(?::(\d{2}))?(?:\s*(am|pm))?\b/i.exec(t);
+  if (around) {
+    let h = parseInt(around[1]!, 10);
+    const mm = around[2] ? parseInt(around[2]!, 10) : 0;
+    const ap = around[3]?.toLowerCase();
+    if (!ap && h >= 1 && h <= 12) {
+      return `${String(h).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+    }
+    if (ap === 'pm' && h < 12) h += 12;
+    if (ap === 'am' && h === 12) h = 0;
+    if (ap === 'pm' || ap === 'am') {
+      return `${String(h).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+    }
+  }
+
+  const dotPm = /\b(\d{1,2})\.(\d{2})\s*(am|pm)\b/i.exec(t);
+  if (dotPm) {
+    let h = parseInt(dotPm[1]!, 10);
+    const mm = parseInt(dotPm[2]!, 10);
+    const ap = dotPm[3]!.toLowerCase();
+    if (ap === 'pm' && h < 12) h += 12;
+    if (ap === 'am' && h === 12) h = 0;
+    return `${String(h).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+  }
+
   const m24 = /\b(\d{1,2}):(\d{2})\b/.exec(t);
   if (m24) {
     const h = Math.min(23, parseInt(m24[1]!, 10));
@@ -209,6 +270,111 @@ export function extractPreferredTime(text: string): string | undefined {
     return `${String(h).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
   }
   return undefined;
+}
+
+/** Broad time-of-day phrases (CRM-local windows applied when offering slots). */
+export function extractPreferredTimeWindow(text: string): AisbpPreferredTimeWindow | undefined {
+  const t = text.toLowerCase();
+  if (/\b(before\s+lunch|prior\s+to\s+lunch)\b/.test(t)) return 'before_lunch';
+  if (/\b(lunch\s*time|lunchtime)\b/.test(t)) return 'lunch';
+  if (/\b(after\s+work|afterwork)\b/.test(t)) return 'after_work';
+  if (/\bnoon\b/.test(t)) return 'noon';
+  if (/\blunch\b/.test(t)) return 'lunch';
+  if (/\bevening\b/.test(t)) return 'evening';
+  if (/\bafternoon\b/.test(t)) return 'afternoon';
+  if (/\bmorning\b/.test(t)) return 'morning';
+  return undefined;
+}
+
+export function stripBookingFrustrationForParse(raw: string): { cleaned: string; hadFrustration: boolean } {
+  let s = raw.replace(/\s+/g, ' ').trim();
+  if (!s) return { cleaned: '', hadFrustration: false };
+  const patterns = [
+    /\bi\s+told\s+you\b\.?/gi,
+    /\bi\s+told\s+u\b\.?/gi,
+    /\balready\s+said\b/gi,
+    /\bwhy\s+ask\s+again\b/gi,
+    /\bare\s+you\s+stupid\b/gi,
+    /\bcan\s+you\s+read\b/gi,
+    /\bi\s+said\s+already\b/gi,
+    /\bright\s*\?/gi,
+    /\bagain\?\s*/gi,
+  ];
+  let had = false;
+  for (const re of patterns) {
+    if (re.test(s)) {
+      had = true;
+      s = s.replace(re, ' ');
+    }
+  }
+  s = s.replace(/\bright\s*$/gi, ' ').replace(/\s+/g, ' ').trim();
+  return { cleaned: s, hadFrustration: had };
+}
+
+export function getSlotHourMinuteInZone(iso: string, timeZone: string): { h: number; m: number } | undefined {
+  const d = new Date(iso);
+  if (!Number.isFinite(d.getTime())) return undefined;
+  const tz = timeZone?.trim() || 'UTC';
+  try {
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone: tz,
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).formatToParts(d);
+    const hh = parts.find(p => p.type === 'hour')?.value;
+    const mm = parts.find(p => p.type === 'minute')?.value;
+    if (hh === undefined || mm === undefined) return undefined;
+    const h = parseInt(hh, 10);
+    const m = parseInt(mm, 10);
+    if (!Number.isFinite(h) || !Number.isFinite(m)) return undefined;
+    return { h, m };
+  } catch {
+    return undefined;
+  }
+}
+
+export function minutesFromMidnight(h: number, m: number): number {
+  return h * 60 + m;
+}
+
+export function timeWindowLocalRangeMinutes(
+  window: AisbpPreferredTimeWindow,
+): { start: number; end: number } | undefined {
+  switch (window) {
+    case 'morning':
+      return { start: 8 * 60, end: 11 * 60 + 59 };
+    case 'afternoon':
+      return { start: 12 * 60, end: 17 * 60 + 59 };
+    case 'evening':
+      return { start: 18 * 60, end: 21 * 60 };
+    case 'noon':
+    case 'lunch':
+      return { start: 12 * 60, end: 14 * 60 };
+    case 'after_work':
+      return { start: 17 * 60, end: 21 * 60 };
+    case 'before_lunch':
+      return { start: 8 * 60, end: 12 * 60 };
+    default:
+      return undefined;
+  }
+}
+
+/** Filter free slots whose local start time falls inside the window (inclusive). */
+export function filterFreeSlotsByTimeWindow<T extends { startTime: string }>(
+  slots: T[],
+  window: AisbpPreferredTimeWindow,
+  crmTimeZone: string,
+): T[] {
+  if (window === 'exact') return slots;
+  const r = timeWindowLocalRangeMinutes(window);
+  if (!r) return slots;
+  return slots.filter(s => {
+    const hm = getSlotHourMinuteInZone(s.startTime, crmTimeZone);
+    if (!hm) return true;
+    const mins = minutesFromMidnight(hm.h, hm.m);
+    return mins >= r.start && mins <= r.end;
+  });
 }
 
 export function extractServiceGuess(text: string): string | undefined {

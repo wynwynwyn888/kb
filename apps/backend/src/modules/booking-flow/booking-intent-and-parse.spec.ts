@@ -1,10 +1,15 @@
 import { describe, expect, it } from '@jest/globals';
 import {
+  extractPreferredTime,
+  extractPreferredTimeWindow,
   extractServiceFromBookingMessage,
+  filterFreeSlotsByTimeWindow,
   parseFirstVisitNaturalReply,
   parsePlainNameAnswerLine,
   parseSlotSelection,
   resolveBookingCalendarDay,
+  resolveRelativeDayPhrase,
+  stripBookingFrustrationForParse,
 } from './booking-intent-and-parse';
 
 describe('parseSlotSelection', () => {
@@ -31,8 +36,56 @@ describe('resolveBookingCalendarDay', () => {
     expect(resolveBookingCalendarDay('on 21 May around 9am', '2026-05-01')).toBe('2026-05-21');
   });
 
+  it('parses day-first 30/5 as upcoming May 30', () => {
+    expect(resolveBookingCalendarDay('30/5 morning', '2026-05-01')).toBe('2026-05-30');
+    expect(resolveBookingCalendarDay('i want booking on 30/5 can?', '2026-05-01')).toBe('2026-05-30');
+  });
+
   it('rolls to next year when day-month is in the past', () => {
     expect(resolveBookingCalendarDay('21 May', '2026-06-01')).toBe('2027-05-21');
+  });
+});
+
+describe('resolveRelativeDayPhrase', () => {
+  it('parses this Friday and next Friday from a fixed Wednesday', () => {
+    expect(resolveRelativeDayPhrase('this Friday', '2026-05-20')).toBe('2026-05-22');
+    expect(resolveRelativeDayPhrase('next Friday', '2026-05-20')).toBe('2026-05-29');
+  });
+});
+
+describe('extractPreferredTime', () => {
+  it('parses dotted pm, around, and trailing filler', () => {
+    expect(extractPreferredTime('2.30pm')).toBe('14:30');
+    expect(extractPreferredTime('around 10')).toBe('10:00');
+    expect(extractPreferredTime('around 10am')).toBe('10:00');
+    expect(extractPreferredTime('10am man')).toBe('10:00');
+  });
+});
+
+describe('extractPreferredTimeWindow', () => {
+  it('detects broad windows', () => {
+    expect(extractPreferredTimeWindow('morning please')).toBe('morning');
+    expect(extractPreferredTimeWindow('after work')).toBe('after_work');
+    expect(extractPreferredTimeWindow('before lunch')).toBe('before_lunch');
+  });
+});
+
+describe('stripBookingFrustrationForParse', () => {
+  it('strips frustration but leaves parseable time words', () => {
+    const r = stripBookingFrustrationForParse('i told you morning right');
+    expect(r.hadFrustration).toBe(true);
+    expect(r.cleaned.toLowerCase()).toContain('morning');
+  });
+});
+
+describe('filterFreeSlotsByTimeWindow', () => {
+  it('keeps only morning-local starts in UTC morning window', () => {
+    const slots = [
+      { startTime: '2026-05-10T09:00:00.000Z' },
+      { startTime: '2026-05-10T14:00:00.000Z' },
+    ];
+    const f = filterFreeSlotsByTimeWindow(slots, 'morning', 'UTC');
+    expect(f.map(s => s.startTime)).toEqual(['2026-05-10T09:00:00.000Z']);
   });
 });
 

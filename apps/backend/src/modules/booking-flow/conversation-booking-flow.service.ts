@@ -27,17 +27,49 @@ import {
   extractNameGuess,
   extractPhone,
   extractPreferredTime,
+  extractPreferredTimeWindow,
   extractServiceFromBookingMessage,
   extractServiceGuess,
+  filterFreeSlotsByTimeWindow,
   matchOfferedByHm,
   parseFirstVisitNaturalReply,
   parseSlotSelection,
+  resolveBookingCalendarDay,
   resolveRelativeDayPhrase,
+  stripBookingFrustrationForParse,
 } from './booking-intent-and-parse';
 import { applyPendingFieldAnswer, isOptionalSkipIntent } from './booking-pending-field';
 import { buildAppointmentCreateNotes } from './booking-summary';
 import { BookingPostConfirmService } from './booking-post-confirm.service';
 import { maskPhoneForLog } from './booking-contact-enrichment';
+import {
+  copyAskBookingName,
+  copyAskBookingPhone,
+  copyAskEmail,
+  copyAskFirstVisit,
+  copyAskPreferredDate,
+  copyAskPreferredTime,
+  copyAskService,
+  copyBookingConfirmed,
+  copyClarifyCustomField,
+  copyClarifyEmail,
+  copyClarifyFirstVisit,
+  copyClarifyName,
+  copyClarifyPhone,
+  copyClarifyPreferredDate,
+  copyClarifyPreferredTime,
+  copyClarifyService,
+  copyFrustrationRecoveryContinue,
+  copyFrustrationRecoveryWithWindow,
+  copyNoSlotsInWindow,
+  copyPickSlotNumeric,
+  copyRequiredFieldCannotSkip,
+  copyRequiredFieldPoliteFinal,
+  copySlotsOfferedWithHumanDate,
+  formatCustomFieldBookingQuestion,
+  formatHumanDateFromYmd,
+  timeWindowDisplayLabel,
+} from './booking-conversation-copy';
 
 /**
  * Live booking path map (single owner: this service):
@@ -316,8 +348,26 @@ export class ConversationBookingFlowService {
 
     const snapshotBefore = this.snapshotBookingCore(booking);
 
-    const pendingAns = applyPendingFieldAnswer({ booking, latest, todayYmd });
+    const hadFrustration =
+      stripBookingFrustrationForParse(latest).hadFrustration || stripBookingFrustrationForParse(combined).hadFrustration;
+
+    const pendingCustomId = booking.pendingFieldId?.startsWith('custom:')
+      ? booking.pendingFieldId.slice('custom:'.length)
+      : undefined;
+    const pendingCf = pendingCustomId
+      ? settings.customFieldsJson.find(c => c.id === pendingCustomId)
+      : undefined;
+
+    const pendingAns = applyPendingFieldAnswer({
+      booking,
+      latest,
+      combinedHint: combined,
+      todayYmd,
+      customFieldDef: pendingCf,
+    });
     if (pendingAns.answered) {
+      booking.pendingParseFailureCount = 0;
+      booking.sameFieldPromptCount = 0;
       const nextRequiredMissing = this.listRequiredMissingFieldIds(settings, booking);
       const nextOptionalPending = this.listOptionalAskPendingFieldIds(settings, booking);
       this.logger.log(
@@ -347,7 +397,49 @@ export class ConversationBookingFlowService {
       }
     }
 
+    if (booking.pendingFieldId && !pendingAns.answered && latest.trim()) {
+      booking.pendingParseFailureCount = (booking.pendingParseFailureCount ?? 0) + 1;
+    }
+
     this.applyRichFieldExtraction(booking, settings, combined, latest, todayYmd);
+
+    const pidAuto = booking.pendingFieldId?.trim();
+    if (
+      pidAuto?.startsWith('custom:') &&
+      !this.isAskFieldRequired(settings, pidAuto) &&
+      (booking.pendingParseFailureCount ?? 0) >= 2
+    ) {
+      booking.skippedFieldIds = this.appendUniqueId(booking.skippedFieldIds, pidAuto);
+      booking.optionalAskedFieldIds = this.appendUniqueId(booking.optionalAskedFieldIds, pidAuto);
+      booking.pendingFieldId = undefined;
+      booking.pendingFieldLabel = undefined;
+      booking.pendingFieldRequired = undefined;
+      booking.pendingParseFailureCount = 0;
+    }
+
+    let frustrationRecoveryPrefix: string | undefined;
+    if (pendingAns.answered && hadFrustration) {
+      if (
+        pendingAns.fieldId === 'preferred_date' &&
+        booking.preferredTimeWindow &&
+        booking.preferredTimeWindow !== 'exact' &&
+        booking.preferredDate?.trim()
+      ) {
+        frustrationRecoveryPrefix = copyFrustrationRecoveryWithWindow(
+          formatHumanDateFromYmd(booking.preferredDate.trim()),
+          timeWindowDisplayLabel(booking.preferredTimeWindow),
+        );
+      } else if (pendingAns.fieldId === 'preferred_time' && booking.preferredTimeWindow && booking.preferredDate?.trim()) {
+        frustrationRecoveryPrefix = copyFrustrationRecoveryWithWindow(
+          formatHumanDateFromYmd(booking.preferredDate.trim()),
+          timeWindowDisplayLabel(booking.preferredTimeWindow),
+        );
+      } else if (hadFrustration) {
+        frustrationRecoveryPrefix = copyFrustrationRecoveryContinue();
+      }
+    }
+
+    const withTone = (msg: string) => (frustrationRecoveryPrefix ? `${frustrationRecoveryPrefix}\n\n${msg}` : msg);
 
     const stuckClear = this.clearStuckOptionalPendingAsk({
       booking,
@@ -386,7 +478,7 @@ export class ConversationBookingFlowService {
       return {
         handled: true,
         persistMetadata: nextMeta,
-        replyPlan: plan(outQ, 'booking_required_not_skippable'),
+        replyPlan: plan(withTone(outQ), 'booking_required_not_skippable'),
         routing: stubRouting(),
       };
     }
@@ -410,10 +502,7 @@ export class ConversationBookingFlowService {
         return {
           handled: true,
           persistMetadata: nextMeta,
-          replyPlan: plan(
-            `Please reply with 1, 2, or 3 to pick one of the listed times, or repeat the time exactly as shown.`,
-            'booking_pick_slot',
-          ),
+          replyPlan: plan(withTone(copyPickSlotNumeric()), 'booking_pick_slot'),
           routing: stubRouting(),
         };
       }
@@ -617,8 +706,12 @@ export class ConversationBookingFlowService {
       });
 
       const biz = params.tenantDisplayName?.trim() || 'us';
-      const confirmText =
-        `Done — your appointment is confirmed for ${booking.preferredDate} at ${picked.displayText}.\n\nWe'll see you at ${biz}.`;
+      const calLabel = settings.defaultGhlCalendarName?.trim() || biz;
+      const confirmText = copyBookingConfirmed(
+        formatHumanDateFromYmd(booking.preferredDate!.trim()),
+        picked.displayText,
+        calLabel,
+      );
 
       const nextMeta = mergeBookingIntoConversationMetadata(prevMeta, {
         ...booking,
@@ -641,7 +734,7 @@ export class ConversationBookingFlowService {
       return {
         handled: true,
         persistMetadata: nextMeta,
-        replyPlan: plan(confirmText, 'booking_confirmed'),
+        replyPlan: plan(withTone(confirmText), 'booking_confirmed'),
         routing: stubRouting(),
       };
     }
@@ -668,7 +761,7 @@ export class ConversationBookingFlowService {
         hasEmail: Boolean(booking.email),
         hasService: Boolean(booking.service),
         hasPreferredDate: Boolean(booking.preferredDate),
-        hasPreferredTime: Boolean(booking.preferredTime),
+        hasPreferredTime: Boolean(booking.preferredTime?.trim() || booking.preferredTimeWindow),
       })}`,
     );
 
@@ -677,8 +770,28 @@ export class ConversationBookingFlowService {
       const fieldRequired = this.isAskFieldRequired(settings, nextAsk);
       const baseQ = this.promptForMissingField(nextAsk, settings, !fieldRequired);
       const fpBase = fingerprintBookingQuestion(baseQ);
-      const suppress = fieldRequired && !fieldChanged && this.shouldSuppressRepeatQuestion(booking, nextAsk, fpBase);
-      const outQ = suppress ? this.clarifyRepeatedAsk(nextAsk) : baseQ;
+      const suppress = !fieldChanged && this.shouldSuppressRepeatQuestion(booking, nextAsk, fpBase);
+      if (suppress) {
+        booking.sameFieldPromptCount = (booking.sameFieldPromptCount ?? 0) + 1;
+      } else {
+        booking.sameFieldPromptCount = 0;
+      }
+      const sc = booking.sameFieldPromptCount ?? 0;
+      const finalRequired = suppress && fieldRequired && sc >= 2;
+      let outQ: string;
+      if (finalRequired) {
+        if (nextAsk.startsWith('custom:')) {
+          const cid = nextAsk.slice('custom:'.length);
+          const cf = settings.customFieldsJson.find(c => c.id === cid);
+          outQ = copyRequiredFieldPoliteFinal(cf?.label);
+        } else {
+          outQ = copyRequiredFieldPoliteFinal();
+        }
+      } else if (suppress) {
+        outQ = this.clarifyRepeatedAsk(nextAsk, settings);
+      } else {
+        outQ = baseQ;
+      }
 
       booking.pendingFieldId = nextAsk;
       booking.pendingFieldRequired = fieldRequired;
@@ -701,17 +814,22 @@ export class ConversationBookingFlowService {
       return {
         handled: true,
         persistMetadata: nextMeta,
-        replyPlan: plan(outQ, suppress ? 'booking_ask_repeat_clarify' : 'booking_collect_field'),
+        replyPlan: plan(withTone(outQ), suppress ? 'booking_ask_repeat_clarify' : 'booking_collect_field'),
         routing: stubRouting(),
       };
     }
 
     if (!booking.preferredDate?.trim()) {
-      const baseQ =
-        'What date should I check for available times? You can say a date like 21 May, or today / tomorrow.';
+      const baseQ = copyAskPreferredDate();
       const fpBase = fingerprintBookingQuestion(baseQ);
       const suppress = !fieldChanged && this.shouldSuppressRepeatQuestion(booking, 'preferred_date', fpBase);
-      const outQ = suppress ? this.clarifyRepeatedAsk('preferred_date') : baseQ;
+      if (suppress) {
+        booking.sameFieldPromptCount = (booking.sameFieldPromptCount ?? 0) + 1;
+      } else {
+        booking.sameFieldPromptCount = 0;
+      }
+      const sc = booking.sameFieldPromptCount ?? 0;
+      const outQ = suppress && sc >= 2 ? copyRequiredFieldPoliteFinal() : suppress ? copyClarifyPreferredDate() : baseQ;
       booking.pendingFieldId = 'preferred_date';
       booking.pendingFieldRequired = true;
       booking.lastAskedFieldId = 'preferred_date';
@@ -727,7 +845,7 @@ export class ConversationBookingFlowService {
       return {
         handled: true,
         persistMetadata: nextMeta,
-        replyPlan: plan(outQ, suppress ? 'booking_ask_repeat_clarify' : 'booking_need_date'),
+        replyPlan: plan(withTone(outQ), suppress ? 'booking_ask_repeat_clarify' : 'booking_need_date'),
         routing: stubRouting(),
       };
     }
@@ -761,8 +879,18 @@ export class ConversationBookingFlowService {
       })}`,
     );
 
+    const crmTz = slotFetch.crmTimezoneUsed?.trim() || 'UTC';
+    const win = booking.preferredTimeWindow;
+    let pool = slotFetch.slots;
+    let usedWindowFallback = false;
+    if (win && win !== 'exact' && slotFetch.slots.length > 0) {
+      const filtered = filterFreeSlotsByTimeWindow(slotFetch.slots, win, crmTz);
+      if (filtered.length >= 1) pool = filtered;
+      else usedWindowFallback = true;
+    }
+
     const top = pickTopSlots(
-      slotFetch.slots,
+      pool,
       booking.preferredTime,
       3,
       booking.slotDurationMinutes ?? 30,
@@ -797,8 +925,12 @@ export class ConversationBookingFlowService {
       })}`,
     );
 
-    const lines = offered.map(o => `${o.option}. ${o.displayText}`).join('\n');
-    const body = `I found these available slots for ${booking.preferredDate}:\n\n${lines}\n\nWhich one should I book for you?`;
+    const humanDate = formatHumanDateFromYmd(booking.preferredDate!.trim());
+    const displayLines = offered.map(o => o.displayText);
+    const body =
+      usedWindowFallback && win && win !== 'exact'
+        ? copyNoSlotsInWindow(humanDate, timeWindowDisplayLabel(win), displayLines)
+        : copySlotsOfferedWithHumanDate(humanDate, displayLines);
 
     const nextMeta = mergeBookingIntoConversationMetadata(prevMeta, {
       ...booking,
@@ -811,12 +943,14 @@ export class ConversationBookingFlowService {
       lastAskedFieldId: undefined,
       lastAskedAt: undefined,
       lastQuestionFingerprint: undefined,
+      sameFieldPromptCount: undefined,
+      pendingParseFailureCount: undefined,
     });
 
     return {
       handled: true,
       persistMetadata: nextMeta,
-      replyPlan: plan(body, 'booking_slots_offered'),
+      replyPlan: plan(withTone(body), 'booking_slots_offered'),
       routing: stubRouting(),
     };
   }
@@ -965,6 +1099,7 @@ export class ConversationBookingFlowService {
       s: booking.service ?? '',
       fd: booking.preferredDate ?? '',
       ft: booking.preferredTime ?? '',
+      fw: booking.preferredTimeWindow ?? '',
       fv: booking.firstVisit ?? '',
       ca: booking.customAnswers ?? {},
       oa: booking.optionalAskedFieldIds ?? [],
@@ -1127,64 +1262,58 @@ export class ConversationBookingFlowService {
     if (fieldId.startsWith('custom:')) {
       const id = fieldId.slice('custom:'.length);
       const cf = settings.customFieldsJson.find(c => c.id === id);
-      return cf
-        ? `I need an answer for "${cf.label}" to complete the booking — it can't be skipped.`
-        : "I need that detail to complete the booking — it can't be skipped.";
+      return cf ? copyRequiredFieldPoliteFinal(cf.label) : copyRequiredFieldCannotSkip();
     }
     switch (fieldId as BookingCoreFieldKey) {
       case 'name':
-        return "Can I have your name for the booking? This one can't be skipped — a first name is fine.";
       case 'phone':
-        return 'I need a phone number we can use for the booking — please share your best number (with country code if outside your country).';
       case 'email':
-        return 'I need an email address for the booking — please send a valid one (like name@example.com).';
       case 'service':
-        return 'Which service would you like? I need that to continue — for example colour, haircut, or treatment.';
       case 'preferred_date':
-        return 'Which day would you like? Please share a date (for example 21 May, or today / tomorrow).';
       case 'preferred_time':
-        return 'What time of day works best? Please share morning, afternoon, or a specific time.';
       case 'first_visit':
-        return 'Is this your first visit with us? Please answer yes or no — I need that for the booking.';
+        return copyRequiredFieldCannotSkip();
       default:
-        return "I still need that detail to complete the booking — it can't be skipped.";
+        return copyRequiredFieldCannotSkip();
     }
   }
 
   private shouldSuppressRepeatQuestion(
     booking: AisbpBookingStateV1,
     nextFieldId: string,
-    canonicalQuestionFp: string,
+    _canonicalQuestionFp: string,
   ): boolean {
-    if (!booking.lastAskedAt || !booking.lastQuestionFingerprint || !booking.lastAskedFieldId) return false;
+    if (!booking.lastAskedAt || !booking.lastAskedFieldId) return false;
     if (booking.lastAskedFieldId !== nextFieldId) return false;
-    if (booking.lastQuestionFingerprint !== canonicalQuestionFp) return false;
     const ageMs = Date.now() - Date.parse(booking.lastAskedAt);
     if (!Number.isFinite(ageMs) || ageMs > 120_000) return false;
     return true;
   }
 
-  private clarifyRepeatedAsk(fieldId: string): string {
+  private clarifyRepeatedAsk(
+    fieldId: string,
+    _settings: { coreFieldsJson: Record<string, CoreFieldToggle>; customFieldsJson: CustomBookingFieldDto[] },
+  ): string {
     switch (fieldId) {
       case 'phone':
-        return 'I still need a mobile number with digits (for example +61 400 000 000) so we can confirm your booking.';
+        return copyClarifyPhone();
       case 'email':
-        return 'Could you send a valid email address (something like name@example.com)?';
+        return copyClarifyEmail();
       case 'preferred_date':
-        return 'Which day works for you? You can say a date like 21 May, or today / tomorrow.';
+        return copyClarifyPreferredDate();
       case 'name':
-        return 'Thanks — what name should I use on the booking? A first name is fine.';
+        return copyClarifyName();
       case 'service':
-        return 'What service would you like — for example colour, haircut, or treatment?';
+        return copyClarifyService();
       case 'preferred_time':
-        return 'Do you prefer morning, afternoon, or a specific time (like 2:30pm)?';
+        return copyClarifyPreferredTime();
       case 'first_visit':
-        return 'Is this your first visit with us? A quick yes or no is perfect.';
+        return copyClarifyFirstVisit();
       default:
         if (fieldId.startsWith('custom:')) {
-          return "I've got that — could you answer the previous question one more time?";
+          return copyClarifyCustomField();
         }
-        return "I've got that. Let me check available slots now.";
+        return copyClarifyPreferredDate();
     }
   }
 
@@ -1193,40 +1322,30 @@ export class ConversationBookingFlowService {
     settings: { coreFieldsJson: Record<string, CoreFieldToggle>; customFieldsJson: CustomBookingFieldDto[] },
     optionalAllowSkipHint: boolean,
   ): string {
-    const suffix = optionalAllowSkipHint ? ' You can skip this if you prefer.' : '';
     if (fieldId.startsWith('custom:')) {
       const id = fieldId.slice('custom:'.length);
       const cf = settings.customFieldsJson.find(c => c.id === id);
-      return (cf ? `Quick one: ${cf.label}?` : 'Could you share a bit more detail for your booking?') + suffix;
+      return cf ? formatCustomFieldBookingQuestion(cf, optionalAllowSkipHint) : copyAskService();
     }
     const key = fieldId as BookingCoreFieldKey;
-    let base: string;
     switch (key) {
       case 'name':
-        base = 'Can I have your name for the booking?';
-        break;
+        return copyAskBookingName() + (optionalAllowSkipHint ? ' You can skip this if you prefer.' : '');
       case 'phone':
-        base = 'Can I have the best phone number for the booking?';
-        break;
+        return copyAskBookingPhone() + (optionalAllowSkipHint ? ' You can skip this if you prefer.' : '');
       case 'email':
-        base = 'What email should we use for your booking?';
-        break;
+        return copyAskEmail() + (optionalAllowSkipHint ? ' You can skip this if you prefer.' : '');
       case 'service':
-        base = 'Sure — what service would you like to book?';
-        break;
+        return copyAskService() + (optionalAllowSkipHint ? ' You can skip this if you prefer.' : '');
       case 'preferred_date':
-        base = 'What date works best for you?';
-        break;
+        return copyAskPreferredDate() + (optionalAllowSkipHint ? ' You can skip this if you prefer.' : '');
       case 'preferred_time':
-        base = 'Do you prefer morning, afternoon, or a specific time?';
-        break;
+        return copyAskPreferredTime() + (optionalAllowSkipHint ? ' You can skip this if you prefer.' : '');
       case 'first_visit':
-        base = 'Is this your first visit with us?';
-        break;
+        return copyAskFirstVisit();
       default:
-        base = 'Could you share a bit more detail for your booking?';
+        return copyAskService();
     }
-    return base + suffix;
   }
 
   private applyRichFieldExtraction(
@@ -1261,12 +1380,29 @@ export class ConversationBookingFlowService {
       if (e) booking.email = e;
     }
     if (!booking.preferredDate) {
-      const d = resolveRelativeDayPhrase(text, todayYmd);
+      const d =
+        resolveRelativeDayPhrase(text, todayYmd) ||
+        resolveBookingCalendarDay(text, todayYmd) ||
+        resolveRelativeDayPhrase(combined, todayYmd) ||
+        resolveBookingCalendarDay(combined, todayYmd) ||
+        resolveRelativeDayPhrase(latest, todayYmd) ||
+        resolveBookingCalendarDay(latest, todayYmd);
       if (d) booking.preferredDate = d;
     }
     if (!booking.preferredTime) {
-      const t = extractPreferredTime(latest) || extractPreferredTime(combined) || extractPreferredTime(text);
-      if (t) booking.preferredTime = t;
+      const t =
+        extractPreferredTime(text) || extractPreferredTime(combined) || extractPreferredTime(latest);
+      if (t) {
+        booking.preferredTime = t;
+        booking.preferredTimeWindow = 'exact';
+      }
+    }
+    if (!booking.preferredTime && !booking.preferredTimeWindow) {
+      const tw =
+        extractPreferredTimeWindow(text) ||
+        extractPreferredTimeWindow(combined) ||
+        extractPreferredTimeWindow(latest);
+      if (tw) booking.preferredTimeWindow = tw;
     }
     if (!booking.firstVisit) {
       const fv =
@@ -1302,7 +1438,7 @@ export class ConversationBookingFlowService {
       case 'preferred_date':
         return booking.preferredDate;
       case 'preferred_time':
-        return booking.preferredTime;
+        return booking.preferredTime?.trim() || booking.preferredTimeWindow?.trim();
       case 'first_visit':
         return booking.firstVisit;
       default:

@@ -1,14 +1,17 @@
 import type { AisbpBookingStateV1 } from './conversation-booking-state';
+import type { CustomBookingFieldDto } from '../../lib/tenant-automation-validation';
 import {
   extractEmail,
   extractFirstVisit,
   extractNameGuess,
   extractPhone,
   extractPreferredTime,
+  extractPreferredTimeWindow,
   parsePlainNameAnswerLine,
   resolveBookingCalendarDay,
   resolveRelativeDayPhrase,
   parseFirstVisitNaturalReply,
+  stripBookingFrustrationForParse,
 } from './booking-intent-and-parse';
 
 export type ApplyPendingFieldAnswerResult = {
@@ -66,11 +69,16 @@ export function applyPendingFieldAnswer(params: {
   booking: AisbpBookingStateV1;
   latest: string;
   todayYmd: string;
+  /** Extra inbound text (e.g. full thread) for date/time answers that span messages. */
+  combinedHint?: string;
+  /** When `pendingFieldId` is `custom:<id>`, used to validate single-select answers. */
+  customFieldDef?: CustomBookingFieldDto | null;
 }): ApplyPendingFieldAnswerResult {
   const pid = (params.booking.pendingFieldId ?? '').trim();
   if (!pid) return { answered: false };
 
-  const line = params.latest.trim();
+  const stripped = stripBookingFrustrationForParse(params.latest);
+  const line = stripped.cleaned.trim() || params.latest.trim();
   if (!line) return { answered: false };
 
   const { booking, todayYmd } = params;
@@ -130,9 +138,18 @@ export function applyPendingFieldAnswer(params: {
   }
 
   if (pid === 'preferred_date') {
-    const d = resolveRelativeDayPhrase(line, todayYmd) ?? resolveBookingCalendarDay(line, todayYmd);
+    const wide = [line, params.combinedHint?.trim()].filter(Boolean).join('\n');
+    const d = resolveRelativeDayPhrase(wide, todayYmd) ?? resolveBookingCalendarDay(wide, todayYmd);
     if (d) {
       booking.preferredDate = d;
+      const t = extractPreferredTime(wide) || extractPreferredTime(line);
+      const tw = extractPreferredTimeWindow(wide) || extractPreferredTimeWindow(line);
+      if (t) {
+        booking.preferredTime = t;
+        booking.preferredTimeWindow = 'exact';
+      } else if (tw) {
+        booking.preferredTimeWindow = tw;
+      }
       clearPending();
       return { answered: true, fieldId: 'preferred_date', parsedValue: true };
     }
@@ -140,9 +157,17 @@ export function applyPendingFieldAnswer(params: {
   }
 
   if (pid === 'preferred_time') {
-    const t = extractPreferredTime(line);
+    const wide = [line, params.combinedHint?.trim()].filter(Boolean).join('\n');
+    const t = extractPreferredTime(wide) || extractPreferredTime(line);
     if (t) {
       booking.preferredTime = t;
+      booking.preferredTimeWindow = 'exact';
+      clearPending();
+      return { answered: true, fieldId: 'preferred_time', parsedValue: true };
+    }
+    const tw = extractPreferredTimeWindow(wide) || extractPreferredTimeWindow(line);
+    if (tw) {
+      booking.preferredTimeWindow = tw;
       clearPending();
       return { answered: true, fieldId: 'preferred_time', parsedValue: true };
     }
@@ -174,8 +199,28 @@ export function applyPendingFieldAnswer(params: {
   if (pid.startsWith('custom:')) {
     const id = pid.slice('custom:'.length);
     if (!id) return { answered: false };
+    const cf = params.customFieldDef;
+    if (cf && (cf.fieldType === 'single_select' || cf.fieldType === 'single_choice') && cf.options?.length) {
+      const lt = line.trim().toLowerCase();
+      let matched: string | undefined;
+      for (const o of cf.options) {
+        const ot = o.trim().toLowerCase();
+        if (!ot) continue;
+        if (lt === ot || lt.includes(ot) || ot.includes(lt)) {
+          matched = o.trim();
+          break;
+        }
+      }
+      if (matched) {
+        if (!booking.customAnswers) booking.customAnswers = {};
+        booking.customAnswers[id] = matched;
+        clearPending();
+        return { answered: true, fieldId: pid, parsedValue: true };
+      }
+      return { answered: false };
+    }
     if (!booking.customAnswers) booking.customAnswers = {};
-    booking.customAnswers[id] = line;
+    booking.customAnswers[id] = line.trim();
     clearPending();
     return { answered: true, fieldId: pid, parsedValue: true };
   }

@@ -123,4 +123,37 @@ describe('applyPendingFieldAnswer first_visit', () => {
     ).toBe(true);
     expect(b2.firstVisit).toBe('no');
   });
+
+  it('pending preferred_date + 30/5 morning sets date, morning window, clears pending', () => {
+    const booking = {
+      status: 'collecting_details' as const,
+      version: 1,
+      calendarId: 'cal_1',
+      pendingFieldId: 'preferred_date' as const,
+      pendingFieldRequired: true,
+    };
+    const r = applyPendingFieldAnswer({
+      booking,
+      latest: '30/5 morning',
+      todayYmd: '2026-05-01',
+    });
+    expect(r.answered).toBe(true);
+    expect(booking.preferredDate).toBe('2026-05-30');
+    expect(booking.preferredTimeWindow).toBe('morning');
+    expect(booking.pendingFieldId).toBeUndefined();
+  });
+
+  it('pending preferred_time + morning sets window only', () => {
+    const booking = {
+      status: 'collecting_details' as const,
+      version: 1,
+      calendarId: 'cal_1',
+      pendingFieldId: 'preferred_time' as const,
+      pendingFieldRequired: true,
+    };
+    const r = applyPendingFieldAnswer({ booking, latest: 'morning', todayYmd: '2026-05-01' });
+    expect(r.answered).toBe(true);
+    expect(booking.preferredTimeWindow).toBe('morning');
+    expect(booking.pendingFieldId).toBeUndefined();
+  });
 });

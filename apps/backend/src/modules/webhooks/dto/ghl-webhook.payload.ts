@@ -31,7 +31,8 @@ export interface NormalizedWebhookPayload {
   eventType: string;
   dedupeKey: string;
   channelRaw: string | null;
-  /** From GHL inbound payload when present — used to prefill booking without re-asking. */
+  /** When true, contact display/phone used snake_case or alternate GHL webhook keys (not only contactName/phoneNumber). */
+  contactFieldsFromExtendedWebhook?: boolean | null;
   contactDisplayName?: string | null;
   contactPhone?: string | null;
   contactEmail?: string | null;

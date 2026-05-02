@@ -1,6 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 import {
   extractServiceFromBookingMessage,
+  parseFirstVisitNaturalReply,
   parsePlainNameAnswerLine,
   parseSlotSelection,
   resolveBookingCalendarDay,
@@ -42,5 +43,26 @@ describe('parsePlainNameAnswerLine', () => {
 
   it('strips frustrated preamble', () => {
     expect(parsePlainNameAnswerLine('i told u Lucy')).toBe('Lucy');
+  });
+});
+
+describe('parseFirstVisitNaturalReply', () => {
+  it('treats polite first-visit phrases as yes', () => {
+    expect(parseFirstVisitNaturalReply('yes first visit dear')).toBe('yes');
+    expect(parseFirstVisitNaturalReply('YES, first visit — thanks!')).toBe('yes');
+    expect(parseFirstVisitNaturalReply('this is my first visit')).toBe('yes');
+    expect(parseFirstVisitNaturalReply('new customer here please')).toBe('yes');
+  });
+
+  it('treats returning / negated phrases as no', () => {
+    expect(parseFirstVisitNaturalReply('not my first visit')).toBe('no');
+    expect(parseFirstVisitNaturalReply('returning customer')).toBe('no');
+    expect(parseFirstVisitNaturalReply('been before, thanks')).toBe('no');
+  });
+
+  it('accepts bare yes/no after normalization', () => {
+    expect(parseFirstVisitNaturalReply('yes')).toBe('yes');
+    expect(parseFirstVisitNaturalReply('no')).toBe('no');
+    expect(parseFirstVisitNaturalReply('nope')).toBe('no');
   });
 });

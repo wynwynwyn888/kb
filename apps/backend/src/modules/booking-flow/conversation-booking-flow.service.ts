@@ -30,12 +30,14 @@ import {
   extractServiceFromBookingMessage,
   extractServiceGuess,
   matchOfferedByHm,
+  parseFirstVisitNaturalReply,
   parseSlotSelection,
   resolveRelativeDayPhrase,
 } from './booking-intent-and-parse';
 import { applyPendingFieldAnswer, isOptionalSkipIntent } from './booking-pending-field';
 import { buildAppointmentCreateNotes } from './booking-summary';
 import { BookingPostConfirmService } from './booking-post-confirm.service';
+import { maskPhoneForLog } from './booking-contact-enrichment';
 
 /**
  * Live booking path map (single owner: this service):
@@ -180,6 +182,8 @@ export class ConversationBookingFlowService {
     tenantTimeZone?: string;
     /** GHL webhook / inbound job hints — prefill when present; never inferred from contactId alone. */
     contactSnapshot?: { displayName?: string; phone?: string; email?: string };
+    /** True when contact snapshot fields used alternate GHL webhook keys (see NormalizedWebhookPayload). */
+    contactFieldsFromExtendedWebhook?: boolean;
   }): Promise<BookingFlowOrchestrationHookResult> {
     if (!isBookingFlowSupportedInboundText(params.latestInboundText, params.combinedInboundText)) {
       this.logger.log(
@@ -327,6 +331,20 @@ export class ConversationBookingFlowService {
           nextOptionalPending,
         })}`,
       );
+      if (pendingAns.fieldId === 'first_visit') {
+        const fvRaw = booking.firstVisit?.trim().toLowerCase() ?? '';
+        let value: 'yes' | 'no' | null = null;
+        if (pendingAns.parsedValue === true) {
+          if (fvRaw === 'yes' || fvRaw === 'y' || fvRaw === 'yeah' || fvRaw === 'yup' || fvRaw === 'yep') value = 'yes';
+          else if (fvRaw === 'no' || fvRaw === 'n' || fvRaw === 'nope' || fvRaw === 'nah') value = 'no';
+        }
+        this.logger.log(
+          `bookingFirstVisitParsed ${JSON.stringify({
+            parsed: pendingAns.parsedValue === true,
+            value,
+          })}`,
+        );
+      }
     }
 
     this.applyRichFieldExtraction(booking, settings, combined, latest, todayYmd);
@@ -477,6 +495,24 @@ export class ConversationBookingFlowService {
       this.logger.log(`bookingAppointmentCreateStarted ${JSON.stringify({ tenantId: params.tenantId, calendarId: picked.calendarId })}`);
 
       const { client, ghlLocationId } = await this.ghlService.createGhlClientForConnectedTenantWorkerOrThrow(params.tenantId);
+      const resolvedConversationContact = await this.resolveStaffContactSnapshotForAlert({
+        tenantId: params.tenantId,
+        contactId: params.contactId,
+        hint: params.contactSnapshot,
+        inboundContactFromExtendedWebhook: params.contactFieldsFromExtendedWebhook === true,
+      });
+      this.logger.log(
+        `bookingConversationContactSnapshotResolved ${JSON.stringify({
+          source: resolvedConversationContact.source,
+          hasName: Boolean(resolvedConversationContact.displayName?.trim()),
+          hasPhone: Boolean(resolvedConversationContact.phone?.trim()),
+          hasContactId: Boolean(params.contactId?.trim()),
+          phoneLogged: resolvedConversationContact.phone?.trim()
+            ? maskPhoneForLog(resolvedConversationContact.phone.trim())
+            : undefined,
+        })}`,
+      );
+
       const title = booking.service?.trim() || 'Appointment';
       const notes = buildAppointmentCreateNotes({
         bookingStatusLabel: 'Confirming',
@@ -484,8 +520,8 @@ export class ConversationBookingFlowService {
         coreFieldsJson: settings.coreFieldsJson,
         customFieldsJson: settings.customFieldsJson,
         conversationContactSnapshot: {
-          displayName: params.contactSnapshot?.displayName,
-          phone: params.contactSnapshot?.phone,
+          displayName: resolvedConversationContact.displayName,
+          phone: resolvedConversationContact.phone,
         },
         calendarName: settings.defaultGhlCalendarName ?? undefined,
         selectedSlot: picked,
@@ -573,7 +609,11 @@ export class ConversationBookingFlowService {
         settings,
         picked,
         crmTimeZone: recheck.crmTimezoneUsed,
-        contactSnapshot: params.contactSnapshot,
+        contactSnapshot: {
+          displayName: resolvedConversationContact.displayName,
+          phone: resolvedConversationContact.phone,
+          email: resolvedConversationContact.email,
+        },
       });
 
       const biz = params.tenantDisplayName?.trim() || 'us';
@@ -814,6 +854,84 @@ export class ConversationBookingFlowService {
       if (p?.['calendarId'] === calendarId && p?.['startTime'] === startIso) return true;
     }
     return false;
+  }
+
+  private snapshotFromGhlContactRecord(c: Record<string, unknown>): {
+    displayName?: string;
+    phone?: string;
+    email?: string;
+  } {
+    const fn = typeof c['firstName'] === 'string' ? c['firstName'].trim() : '';
+    const ln = typeof c['lastName'] === 'string' ? c['lastName'].trim() : '';
+    const composed = [fn, ln].filter(Boolean).join(' ').trim();
+    const displayName =
+      (typeof c['name'] === 'string' && c['name'].trim()) ||
+      (typeof c['contactName'] === 'string' && c['contactName'].trim()) ||
+      composed ||
+      undefined;
+    const phone =
+      (typeof c['phone'] === 'string' && c['phone'].trim()) ||
+      (typeof c['phoneNumber'] === 'string' && c['phoneNumber'].trim()) ||
+      undefined;
+    const email = typeof c['email'] === 'string' ? c['email'].trim() : undefined;
+    return { displayName, phone, email };
+  }
+
+  /**
+   * Read-only CRM contact snapshot for staff alert / appointment notes (never booking intake).
+   * Uses inbound hint first; fills gaps with GHL getContact when contactId is known.
+   */
+  private async resolveStaffContactSnapshotForAlert(params: {
+    tenantId: string;
+    contactId: string;
+    hint?: { displayName?: string; phone?: string; email?: string };
+    inboundContactFromExtendedWebhook?: boolean;
+  }): Promise<{
+    displayName?: string;
+    phone?: string;
+    email?: string;
+    source: 'params' | 'webhook' | 'ghl_contact_lookup' | 'missing';
+  }> {
+    const hintDn = params.hint?.displayName?.trim();
+    const hintPh = params.hint?.phone?.trim();
+    const hintEm = params.hint?.email?.trim();
+    let displayName = hintDn;
+    let phone = hintPh;
+    let email = hintEm;
+    const cid = params.contactId?.trim();
+    const needLookup = Boolean(cid) && (!displayName || !phone);
+    let usedGhl = false;
+
+    if (needLookup) {
+      try {
+        const { client } = await this.ghlService.createGhlClientForConnectedTenantWorkerOrThrow(params.tenantId);
+        const gc = await client.getContact(cid);
+        if (gc.success && gc.contact && typeof gc.contact === 'object') {
+          const snap = this.snapshotFromGhlContactRecord(gc.contact as Record<string, unknown>);
+          if (!displayName && snap.displayName?.trim()) displayName = snap.displayName.trim();
+          if (!phone && snap.phone?.trim()) phone = snap.phone.trim();
+          if (!email && snap.email?.trim()) email = snap.email.trim();
+          usedGhl = true;
+        }
+      } catch {
+        // non-fatal — booking confirmation must proceed
+      }
+    }
+
+    const hasName = Boolean(displayName);
+    const hasPhone = Boolean(phone);
+    let source: 'params' | 'webhook' | 'ghl_contact_lookup' | 'missing';
+    if (!hasName && !hasPhone) {
+      source = 'missing';
+    } else if (usedGhl) {
+      source = 'ghl_contact_lookup';
+    } else if (params.inboundContactFromExtendedWebhook) {
+      source = 'webhook';
+    } else {
+      source = 'params';
+    }
+
+    return { displayName, phone, email, source };
   }
 
   private applyContactSnapshot(
@@ -1151,7 +1269,11 @@ export class ConversationBookingFlowService {
       if (t) booking.preferredTime = t;
     }
     if (!booking.firstVisit) {
-      const fv = extractFirstVisit(text);
+      const fv =
+        parseFirstVisitNaturalReply(latest) ||
+        parseFirstVisitNaturalReply(combined) ||
+        parseFirstVisitNaturalReply(text) ||
+        extractFirstVisit(text);
       if (fv) booking.firstVisit = fv;
     }
 

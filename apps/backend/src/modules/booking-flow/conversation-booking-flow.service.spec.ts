@@ -696,6 +696,215 @@ describe('ConversationBookingFlowService', () => {
     }
   });
 
+  it('live book fills Contacted from via getContact when contactSnapshot is missing', async () => {
+    const slotRows = [
+      { startTime: '2026-05-10T10:00:00.000Z', endTime: '2026-05-10T10:30:00.000Z' },
+      { startTime: '2026-05-10T11:00:00.000Z', endTime: '2026-05-10T11:30:00.000Z' },
+      { startTime: '2026-05-10T11:30:00.000Z', endTime: '2026-05-10T12:00:00.000Z' },
+    ];
+    const fetchFree = jest.fn(async () => ({
+      slots: slotRows,
+      calendarId: 'cal_1',
+      error: undefined as string | undefined,
+      retriedWithUserId: null,
+      crmTimezoneUsed: 'UTC',
+      selectedDate: '2026-05-10',
+      selectedTime: '',
+      startMs: 0,
+      endMs: 1,
+      ghlLocationId: 'loc',
+    }));
+    const getContact = jest.fn(async () => ({
+      success: true,
+      contact: { firstName: 'GHL', lastName: 'User', phone: '+19997776666' },
+    }));
+    const bookSlot = jest.fn(async () => ({ success: true, appointmentId: 'ap_lookup' }));
+    const booking = {
+      getBookingSettings: jest.fn(async () => baseSettings),
+      fetchFreeSlotsForAutomation: fetchFree,
+    } as unknown as BookingSettingsService;
+    const ghl = {
+      createGhlClientForConnectedTenantWorkerOrThrow: jest.fn(async () => ({
+        client: {
+          bookSlot,
+          getContact,
+          getCalendar: jest.fn(async () => ({ summary: {} })),
+          updateAppointmentNotes: jest.fn(async () => ({ success: true })),
+          addContactNote: jest.fn(async () => ({ success: true })),
+          findContactByPhone: jest.fn(async () => ({ success: true, contact: undefined })),
+          createContact: jest.fn(),
+          sendMessage: jest.fn(),
+        },
+        ghlLocationId: 'loc1',
+      })),
+    } as unknown as GhlService;
+    const post = { runAfterLiveBookingConfirmed: jest.fn(async () => undefined) } as unknown as BookingPostConfirmService;
+    const flow = new ConversationBookingFlowService(booking, ghl, post);
+    const offeredSlots = [
+      {
+        option: 1,
+        startIso: '2026-05-10T10:00:00.000Z',
+        endIso: '2026-05-10T10:30:00.000Z',
+        displayText: '6:00 AM',
+        calendarId: 'cal_1',
+      },
+      {
+        option: 2,
+        startIso: '2026-05-10T11:00:00.000Z',
+        endIso: '2026-05-10T11:30:00.000Z',
+        displayText: '7:00 AM',
+        calendarId: 'cal_1',
+      },
+      {
+        option: 3,
+        startIso: '2026-05-10T11:30:00.000Z',
+        endIso: '2026-05-10T12:00:00.000Z',
+        displayText: '7:30 AM',
+        calendarId: 'cal_1',
+      },
+    ];
+    const meta = {
+      aisbp_booking: {
+        status: 'offered_slots',
+        version: 1,
+        calendarId: 'cal_1',
+        customerName: 'Alex',
+        phone: '+15551234567',
+        service: 'Haircut',
+        preferredDate: '2026-05-10',
+        offeredSlots,
+        slotDurationMinutes: 30,
+      },
+    };
+    await flow.maybeHandleConversationBookingTurn({
+      tenantId: 't1',
+      conversationId: 'c1',
+      contactId: 'ct_lookup',
+      channel: 'SMS',
+      combinedInboundText: '2',
+      latestInboundText: '2',
+      metadata: meta as Record<string, unknown>,
+    });
+    expect(getContact).toHaveBeenCalledWith('ct_lookup');
+    const bookArg = (bookSlot.mock.calls[0] ?? [])[0] as { notes?: string };
+    expect(bookArg.notes).toContain('CRM contact name: GHL User');
+    expect(bookArg.notes).toContain('CRM contact phone: +19997776666');
+    expect(post.runAfterLiveBookingConfirmed).toHaveBeenCalledWith(
+      expect.objectContaining({
+        contactSnapshot: expect.objectContaining({
+          displayName: 'GHL User',
+          phone: '+19997776666',
+        }),
+      }),
+    );
+  });
+
+  it('live book still confirms when getContact fails; Contacted from shows dashes', async () => {
+    const slotRows = [
+      { startTime: '2026-05-10T10:00:00.000Z', endTime: '2026-05-10T10:30:00.000Z' },
+      { startTime: '2026-05-10T11:00:00.000Z', endTime: '2026-05-10T11:30:00.000Z' },
+      { startTime: '2026-05-10T11:30:00.000Z', endTime: '2026-05-10T12:00:00.000Z' },
+    ];
+    const fetchFree = jest.fn(async () => ({
+      slots: slotRows,
+      calendarId: 'cal_1',
+      error: undefined as string | undefined,
+      retriedWithUserId: null,
+      crmTimezoneUsed: 'UTC',
+      selectedDate: '2026-05-10',
+      selectedTime: '',
+      startMs: 0,
+      endMs: 1,
+      ghlLocationId: 'loc',
+    }));
+    const getContact = jest.fn(async () => ({ success: false, contact: undefined }));
+    const bookSlot = jest.fn(async () => ({ success: true, appointmentId: 'ap_fail_lookup' }));
+    const booking = {
+      getBookingSettings: jest.fn(async () => baseSettings),
+      fetchFreeSlotsForAutomation: fetchFree,
+    } as unknown as BookingSettingsService;
+    const ghl = {
+      createGhlClientForConnectedTenantWorkerOrThrow: jest.fn(async () => ({
+        client: {
+          bookSlot,
+          getContact,
+          getCalendar: jest.fn(async () => ({ summary: {} })),
+          updateAppointmentNotes: jest.fn(async () => ({ success: true })),
+          addContactNote: jest.fn(async () => ({ success: true })),
+          findContactByPhone: jest.fn(async () => ({ success: true, contact: undefined })),
+          createContact: jest.fn(),
+          sendMessage: jest.fn(),
+        },
+        ghlLocationId: 'loc1',
+      })),
+    } as unknown as GhlService;
+    const post = { runAfterLiveBookingConfirmed: jest.fn(async () => undefined) } as unknown as BookingPostConfirmService;
+    const flow = new ConversationBookingFlowService(booking, ghl, post);
+    const offeredSlots = [
+      {
+        option: 1,
+        startIso: '2026-05-10T10:00:00.000Z',
+        endIso: '2026-05-10T10:30:00.000Z',
+        displayText: '6:00 AM',
+        calendarId: 'cal_1',
+      },
+      {
+        option: 2,
+        startIso: '2026-05-10T11:00:00.000Z',
+        endIso: '2026-05-10T11:30:00.000Z',
+        displayText: '7:00 AM',
+        calendarId: 'cal_1',
+      },
+      {
+        option: 3,
+        startIso: '2026-05-10T11:30:00.000Z',
+        endIso: '2026-05-10T12:00:00.000Z',
+        displayText: '7:30 AM',
+        calendarId: 'cal_1',
+      },
+    ];
+    const meta = {
+      aisbp_booking: {
+        status: 'offered_slots',
+        version: 1,
+        calendarId: 'cal_1',
+        customerName: 'Alex',
+        phone: '+15551234567',
+        service: 'Haircut',
+        preferredDate: '2026-05-10',
+        offeredSlots,
+        slotDurationMinutes: 30,
+      },
+    };
+    const r = await flow.maybeHandleConversationBookingTurn({
+      tenantId: 't1',
+      conversationId: 'c1',
+      contactId: 'ct_bad',
+      channel: 'SMS',
+      combinedInboundText: '2',
+      latestInboundText: '2',
+      metadata: meta as Record<string, unknown>,
+    });
+    expect(getContact).toHaveBeenCalledWith('ct_bad');
+    expect(r.handled).toBe(true);
+    if (r.handled) {
+      expect(bookSlot).toHaveBeenCalled();
+      const bookArg = (bookSlot.mock.calls[0] ?? [])[0] as { notes?: string };
+      expect(bookArg.notes).toContain('CRM contact name: -');
+      expect(bookArg.notes).toContain('CRM contact phone: -');
+      expect(bookArg.notes).toContain('Booking name: Alex');
+      expect(bookArg.notes).toContain('Booking phone: +15551234567');
+    }
+    expect(post.runAfterLiveBookingConfirmed).toHaveBeenCalledWith(
+      expect.objectContaining({
+        contactSnapshot: expect.objectContaining({
+          displayName: undefined,
+          phone: undefined,
+        }),
+      }),
+    );
+  });
+
   it('uses title "Appointment" when service is unknown at confirm time', async () => {
     const relaxedService = {
       ...baseSettings,
@@ -720,6 +929,10 @@ describe('ConversationBookingFlowService', () => {
       endMs: 1,
       ghlLocationId: 'loc',
     }));
+    const getContact = jest.fn(async () => ({
+      success: true,
+      contact: { firstName: 'X', lastName: 'Y', phone: '+18880001111' },
+    }));
     const bookSlot = jest.fn(async () => ({ success: true, appointmentId: 'ap_999' }));
     const booking = {
       getBookingSettings: jest.fn(async () => relaxedService),
@@ -727,7 +940,16 @@ describe('ConversationBookingFlowService', () => {
     } as unknown as BookingSettingsService;
     const ghl = {
       createGhlClientForConnectedTenantWorkerOrThrow: jest.fn(async () => ({
-        client: { bookSlot },
+        client: {
+          bookSlot,
+          getContact,
+          getCalendar: jest.fn(async () => ({ summary: {} })),
+          updateAppointmentNotes: jest.fn(async () => ({ success: true })),
+          addContactNote: jest.fn(async () => ({ success: true })),
+          findContactByPhone: jest.fn(async () => ({ success: true, contact: undefined })),
+          createContact: jest.fn(),
+          sendMessage: jest.fn(),
+        },
         ghlLocationId: 'loc1',
       })),
     } as unknown as GhlService;
@@ -768,11 +990,15 @@ describe('ConversationBookingFlowService', () => {
       combinedInboundText: '1',
       latestInboundText: '1',
       metadata: meta as Record<string, unknown>,
+      contactSnapshot: { displayName: 'Snap Person', phone: '+15550001111' },
     });
     expect(r.handled).toBe(true);
     if (r.handled) {
-      const bookArg = (bookSlot.mock.calls[0] ?? [])[0] as { title?: string };
+      expect(getContact).not.toHaveBeenCalled();
+      const bookArg = (bookSlot.mock.calls[0] ?? [])[0] as { title?: string; notes?: string };
       expect(bookArg.title).toBe('Appointment');
+      expect(bookArg.notes).toContain('CRM contact name: Snap Person');
+      expect(bookArg.notes).toContain('CRM contact phone: +15550001111');
     }
   });
 

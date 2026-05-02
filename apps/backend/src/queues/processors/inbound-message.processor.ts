@@ -36,6 +36,7 @@ export interface InboundMessageJobData {
   contactDisplayName?: string;
   contactPhone?: string;
   contactEmail?: string;
+  contactFieldsFromExtendedWebhook?: boolean;
 }
 
 export interface OrchestrateDebouncedJobData {
@@ -49,6 +50,7 @@ export interface OrchestrateDebouncedJobData {
   contactDisplayName?: string;
   contactPhone?: string;
   contactEmail?: string;
+  contactFieldsFromExtendedWebhook?: boolean;
 }
 
 const DEBOUNCE_MS = INBOUND_DEBOUNCE_MS;
@@ -90,6 +92,7 @@ export class InboundMessageProcessor extends WorkerHost {
       contactDisplayName,
       contactPhone,
       contactEmail,
+      contactFieldsFromExtendedWebhook,
     } = job.data;
 
     this.logger.log(
@@ -140,6 +143,7 @@ export class InboundMessageProcessor extends WorkerHost {
           contactDisplayName,
           contactPhone,
           contactEmail,
+          contactFieldsFromExtendedWebhook,
         });
         if (webhookEventId) await this.updateWebhookEventStatus(webhookEventId, 'COMPLETED');
         return;
@@ -172,6 +176,7 @@ export class InboundMessageProcessor extends WorkerHost {
           contactDisplayName,
           contactPhone,
           contactEmail,
+          contactFieldsFromExtendedWebhook,
         } satisfies OrchestrateDebouncedJobData,
         {
           delay: DEBOUNCE_MS,
@@ -200,8 +205,19 @@ export class InboundMessageProcessor extends WorkerHost {
   }
 
   private async runOrchestrationAfterDebounce(job: Job<OrchestrateDebouncedJobData>): Promise<void> {
-    const { tenantId, conversationId, locationId, ghlContactId, ghlConversationId, debounceVersion, webhookEventId, contactDisplayName, contactPhone, contactEmail } =
-      job.data;
+    const {
+      tenantId,
+      conversationId,
+      locationId,
+      ghlContactId,
+      ghlConversationId,
+      debounceVersion,
+      webhookEventId,
+      contactDisplayName,
+      contactPhone,
+      contactEmail,
+      contactFieldsFromExtendedWebhook,
+    } = job.data;
 
     const { data: convRow, error: cErr } = await this.supabase
       .from('conversations')
@@ -244,6 +260,7 @@ export class InboundMessageProcessor extends WorkerHost {
       contactDisplayName,
       contactPhone,
       contactEmail,
+      contactFieldsFromExtendedWebhook,
     });
   }
 
@@ -259,6 +276,7 @@ export class InboundMessageProcessor extends WorkerHost {
     contactDisplayName?: string;
     contactPhone?: string;
     contactEmail?: string;
+    contactFieldsFromExtendedWebhook?: boolean;
   }): Promise<void> {
     const {
       tenantId,
@@ -272,6 +290,7 @@ export class InboundMessageProcessor extends WorkerHost {
       contactDisplayName,
       contactPhone,
       contactEmail,
+      contactFieldsFromExtendedWebhook,
     } = ctx;
 
     if (
@@ -321,6 +340,7 @@ export class InboundMessageProcessor extends WorkerHost {
       contactDisplayName: contactDisplayName?.trim() || null,
       contactPhone: contactPhone?.trim() || null,
       contactEmail: contactEmail?.trim() || null,
+      contactFieldsFromExtendedWebhook: contactFieldsFromExtendedWebhook ?? null,
     };
 
     const tenantContext = await this.orchestrationService.loadTenantContext(tenantId);

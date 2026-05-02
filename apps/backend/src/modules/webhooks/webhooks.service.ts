@@ -17,6 +17,7 @@ import {
 } from './dto/ghl-webhook.payload';
 import { formatPostgrestError } from '../../lib/format-postgrest-error';
 import { extractGhlInboundDedupeKeys } from './ghl-webhook-dedupe';
+import { extractInboundContactFields } from './ghl-inbound-contact-extract';
 
 @Injectable()
 export class WebhooksService {
@@ -179,22 +180,24 @@ export class WebhooksService {
     externalEventId: string,
     dedupeKey: string,
   ): NormalizedWebhookPayload {
-    const data = payload.data || {};
+    const data = (payload.data || {}) as unknown as Record<string, unknown>;
+    const extracted = extractInboundContactFields(data);
 
     return {
       ghlLocationId: payload.locationId,
-      ghlConversationId: data.conversationId || '',
-      ghlContactId: data.contactId || '',
-      messageContent: data.message || '',
-      messageType: this.mapMessageType(data.messageType),
+      ghlConversationId: (typeof data['conversationId'] === 'string' && data['conversationId']) || '',
+      ghlContactId: (typeof data['contactId'] === 'string' && data['contactId']) || '',
+      messageContent: (typeof data['message'] === 'string' && data['message']) || '',
+      messageType: this.mapMessageType(typeof data['messageType'] === 'string' ? data['messageType'] : undefined),
       timestamp: payload.timestamp || new Date().toISOString(),
       externalEventId,
       eventType: payload.event,
       dedupeKey,
-      channelRaw: data.channel || null,
-      contactDisplayName: typeof data.contactName === 'string' && data.contactName.trim() ? data.contactName.trim() : null,
-      contactPhone: typeof data.phoneNumber === 'string' && data.phoneNumber.trim() ? data.phoneNumber.trim() : null,
-      contactEmail: typeof data.email === 'string' && data.email.trim() ? data.email.trim() : null,
+      channelRaw: (typeof data['channel'] === 'string' && data['channel']) || null,
+      contactFieldsFromExtendedWebhook: extracted.fromExtendedWebhookKeys,
+      contactDisplayName: extracted.displayName,
+      contactPhone: extracted.phone,
+      contactEmail: extracted.email,
     };
   }
 
@@ -281,6 +284,7 @@ export class WebhooksService {
       contactDisplayName: payload.contactDisplayName ?? undefined,
       contactPhone: payload.contactPhone ?? undefined,
       contactEmail: payload.contactEmail ?? undefined,
+      contactFieldsFromExtendedWebhook: Boolean(payload.contactFieldsFromExtendedWebhook),
     };
 
     await this.inboundQueue.add('persist', jobData, {

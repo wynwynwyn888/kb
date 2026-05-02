@@ -175,6 +175,25 @@ describe('buildBookingSummaryText', () => {
     expect(t).toContain('CRM contact phone: -');
   });
 
+  it('Contacted from never substitutes booking intake name or phone', () => {
+    const b: AisbpBookingStateV1 = {
+      ...baseBooking,
+      customerName: 'Intake Only Name',
+      phone: '+19998887777',
+    };
+    const t = buildBookingSummaryText({
+      ...baseInput(),
+      booking: b,
+      conversationContactSnapshot: undefined,
+    });
+    expect(t).toContain('Booking name: Intake Only Name');
+    expect(t).toContain('Booking phone: +19998887777');
+    expect(t).toContain('CRM contact name: -');
+    expect(t).toContain('CRM contact phone: -');
+    expect(t).not.toContain('CRM contact name: Intake Only Name');
+    expect(t).not.toContain('CRM contact phone: +19998887777');
+  });
+
   it('titleCaseServiceLine title-cases words', () => {
     expect(titleCaseServiceLine('HAIR COLOUR')).toBe('Hair Colour');
   });

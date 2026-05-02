@@ -284,6 +284,7 @@ export class ConversationOrchestrationService {
                 email: input.incomingMessage.contactEmail ?? undefined,
               }
             : undefined,
+        contactFieldsFromExtendedWebhook: Boolean(input.incomingMessage.contactFieldsFromExtendedWebhook),
       });
 
       if (bookingHook.handled) {

@@ -93,4 +93,34 @@ describe('applyPendingFieldAnswer first_visit', () => {
     expect(applyPendingFieldAnswer({ booking, latest: 'no', todayYmd: '2026-05-01' }).answered).toBe(true);
     expect(booking.firstVisit).toBe('no');
   });
+
+  it('maps natural yes replies including fillers', () => {
+    const booking = baseBooking();
+    expect(
+      applyPendingFieldAnswer({ booking, latest: 'yes first visit dear', todayYmd: '2026-05-01' }).answered,
+    ).toBe(true);
+    expect(booking.firstVisit).toBe('yes');
+  });
+
+  it('maps natural affirmative first-visit sentences', () => {
+    const booking = baseBooking();
+    expect(
+      applyPendingFieldAnswer({ booking, latest: 'this is my first visit', todayYmd: '2026-05-01' }).answered,
+    ).toBe(true);
+    expect(booking.firstVisit).toBe('yes');
+  });
+
+  it('maps natural no / returning replies', () => {
+    const b1 = baseBooking();
+    expect(applyPendingFieldAnswer({ booking: b1, latest: 'not my first visit', todayYmd: '2026-05-01' }).answered).toBe(
+      true,
+    );
+    expect(b1.firstVisit).toBe('no');
+
+    const b2 = baseBooking();
+    expect(
+      applyPendingFieldAnswer({ booking: b2, latest: 'returning customer', todayYmd: '2026-05-01' }).answered,
+    ).toBe(true);
+    expect(b2.firstVisit).toBe('no');
+  });
 });

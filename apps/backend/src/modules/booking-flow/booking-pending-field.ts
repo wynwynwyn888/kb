@@ -8,6 +8,7 @@ import {
   parsePlainNameAnswerLine,
   resolveBookingCalendarDay,
   resolveRelativeDayPhrase,
+  parseFirstVisitNaturalReply,
 } from './booking-intent-and-parse';
 
 export type ApplyPendingFieldAnswerResult = {
@@ -149,6 +150,12 @@ export function applyPendingFieldAnswer(params: {
   }
 
   if (pid === 'first_visit') {
+    const natural = parseFirstVisitNaturalReply(line);
+    if (natural) {
+      booking.firstVisit = natural;
+      clearPending();
+      return { answered: true, fieldId: 'first_visit', parsedValue: true };
+    }
     const phrase = extractFirstVisit(line);
     if (phrase) {
       booking.firstVisit = phrase;

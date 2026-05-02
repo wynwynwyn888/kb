@@ -270,6 +270,67 @@ export function extractFirstVisit(text: string): string | undefined {
   return undefined;
 }
 
+/**
+ * Natural-language first-visit answers when `pendingFieldId === first_visit`.
+ * Lowercases, strips punctuation, tolerates polite fillers (dear, thanks, …).
+ */
+export function parseFirstVisitNaturalReply(raw: string): 'yes' | 'no' | undefined {
+  let s = raw.trim().toLowerCase();
+  if (!s) return undefined;
+  s = s.replace(/[''`´]/g, ' ');
+  s = s.replace(/[^a-z0-9\s]/gi, ' ');
+  s = s.replace(/\b(dear|thanks|thank you|please|sir|madam|hello|hi|hey)\b/g, ' ');
+  s = s.replace(/\s+/g, ' ').trim();
+  if (!s) return undefined;
+
+  const noPhrases = [
+    'not my first visit',
+    'not my first time',
+    'not first visit',
+    'not a first visit',
+    'not the first time',
+    'returning customer',
+    'returning client',
+    'existing customer',
+    'existing client',
+    'been before',
+    'came before',
+    'regular customer',
+    'regular client',
+    'i am returning',
+    "i'm returning",
+    'im returning',
+  ];
+  for (const p of noPhrases) {
+    if (s.includes(p)) return 'no';
+  }
+
+  const yesPhrases = [
+    'first time',
+    'first visit',
+    'new customer',
+    'new client',
+    'this is my first visit',
+    'my first visit',
+    'i am new',
+    "i'm new",
+    'im new',
+    'first timer',
+  ];
+  for (const p of yesPhrases) {
+    if (s.includes(p)) return 'yes';
+  }
+
+  if (/\b(yes|yeah|yup|yep|correct|absolutely|definitely|sure)\b/.test(s) && /\bfirst\b/.test(s) && /\b(visit|time)\b/.test(s)) {
+    return 'yes';
+  }
+
+  if (/^(y|yes|yeah|yup|yep|correct|absolutely|definitely|sure)\b/.test(s)) return 'yes';
+  if (/^(n|no|nope|nah)\b/.test(s)) return 'no';
+
+  return undefined;
+}
+
 export type SlotSelectionParse =
   | { kind: 'option'; option: number }
   | { kind: 'time'; normalizedHm: string }

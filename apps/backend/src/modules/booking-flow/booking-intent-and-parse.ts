@@ -353,6 +353,62 @@ export function extractPreferredTimeWindow(text: string): AisbpPreferredTimeWind
   return undefined;
 }
 
+/** User complains about being asked to pick again — do not treat embedded time as an implicit slot confirmation. */
+export function shouldSuppressImplicitSlotPickFromFrustration(latestInboundText: string): boolean {
+  const t = latestInboundText.replace(/\s+/g, ' ').trim().toLowerCase();
+  if (!t) return false;
+  if (
+    /\b(why\s+(do\s+)?you\s+still\s+ask|why\s+u\s+still\s+ask|still\s+ask(\s+me)?|stop\s+asking)\b/i.test(t)
+  ) {
+    return true;
+  }
+  if (/\bwhy\b.*\b(still\s+)?ask/i.test(t) && /\b(i\s+said|already\s+said|told\s+you)\b/i.test(t)) return true;
+  return false;
+}
+
+/** Single-slot “reserve this time?” confirmation line — must not fire on multi-option lists. */
+export function parseExactSlotReservationAffirmative(latestInboundText: string): boolean {
+  const s = stripBookingFrustrationForParse(latestInboundText.replace(/\s+/g, ' ').trim()).cleaned.toLowerCase();
+  if (!s) return false;
+  if (/^(y|yes|yeah|yep|yup|ok|okay|sure|confirm|pls|please|can)\s*[!.?]*$/i.test(s)) return true;
+  if (/^(ok|yes|yeah)\s+(thanks|thank\s+you)\s*[!.?]*$/i.test(s)) return true;
+  if (/\b(book\s+it|please\s+reserve|reserve\s+(it|please)|go\s+ahead)\b/i.test(s)) return true;
+  return false;
+}
+
+export function parseExactSlotReservationNegative(latestInboundText: string): boolean {
+  const s = stripBookingFrustrationForParse(latestInboundText.replace(/\s+/g, ' ').trim()).cleaned.toLowerCase();
+  if (!s) return false;
+  if (/^(no|nope|nah)\s*[!.?]*$/i.test(s)) return true;
+  if (/\b(another\s+time|different\s+time|not\s+that|something\s+else)\b/i.test(s)) return true;
+  return false;
+}
+
+/** First / all-in-one message asked whether a time is available (prefer “Shall I reserve…” confirmation tone). */
+export function userCombinedMessageAskedAvailabilityQuestion(text: string): boolean {
+  const t = text.replace(/\s+/g, ' ').trim().toLowerCase();
+  if (!t) return false;
+  if (/\b(is\s+)?(this|that)\s+timing\s+available\b/i.test(t)) return true;
+  if (/\b(is\s+)?(it|that)\s+available\b/i.test(t) && /\b(time|slot|timing)\b/i.test(t)) return true;
+  if (/\bany\s+(opening|availability)\b/i.test(t) && /\?/.test(t)) return true;
+  return false;
+}
+
+/** First free slot whose CRM-local start matches normalized HH:MM (when the calendar has that exact start). */
+export function findExactSlotMatchingPreferredHm<T extends { startTime: string }>(
+  slots: T[],
+  preferredHm: string,
+  crmTimeZone: string,
+): T | undefined {
+  const tm = normalizedHmToMinutes(preferredHm);
+  if (tm === undefined) return undefined;
+  for (const s of slots) {
+    const sm = slotStartLocalMinutes(s.startTime, crmTimeZone);
+    if (sm === tm) return s;
+  }
+  return undefined;
+}
+
 export function stripBookingFrustrationForParse(raw: string): { cleaned: string; hadFrustration: boolean } {
   let s = raw.replace(/\s+/g, ' ').trim();
   if (!s) return { cleaned: '', hadFrustration: false };
@@ -725,6 +781,10 @@ export function parseSlotSelectionOrTimeRevision(
     return { kind: 'unparseable' };
   }
 
+  if (offeredSlots.length === 1 && parseExactSlotReservationAffirmative(latestInboundText)) {
+    return { kind: 'selected_slot', slot: offeredSlots[0]! };
+  }
+
   const selectionText = [latestInboundText, combinedThreadForRevision].filter(s => s?.trim()).join('\n');
   const cleaned = stripBookingFrustrationForParse(selectionText.replace(/\s+/g, ' ').trim()).cleaned;
   if (!cleaned) return { kind: 'unparseable' };
@@ -741,6 +801,9 @@ export function parseSlotSelectionOrTimeRevision(
   }
 
   if (hm) {
+    if (shouldSuppressImplicitSlotPickFromFrustration(latestInboundText)) {
+      return { kind: 'unparseable' };
+    }
     const m = matchOfferedByHm(offeredSlots, hm, crmTimezone);
     if (m) return { kind: 'selected_slot', slot: m };
     return { kind: 'time_revision', preferredTime: hm };

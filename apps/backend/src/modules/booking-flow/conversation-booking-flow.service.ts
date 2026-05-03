@@ -29,14 +29,19 @@ import {
   extractPhone,
   extractPreferredTime,
   extractPreferredTimeWindow,
+  findExactSlotMatchingPreferredHm,
+  matchOfferedByHm,
   normalizedHmToMinutes,
+  parseExactSlotReservationNegative,
   parseFirstVisitNaturalReply,
   parseSlotSelectionOrTimeRevision,
   rankSlotsForBookingOffer,
   resolveBookingCalendarDay,
   resolveRelativeDayPhrase,
+  shouldSuppressImplicitSlotPickFromFrustration,
   slotStartLocalMinutes,
   stripBookingFrustrationForParse,
+  userCombinedMessageAskedAvailabilityQuestion,
 } from './booking-intent-and-parse';
 import {
   customSelectAnswerIsWholeOptionList,
@@ -81,12 +86,12 @@ import {
   copyClosestSlotsWhenPreferredUnavailable,
   copyFrustrationRecoveryContinue,
   copyFrustrationRecoveryWithWindow,
+  copyFrustrationAcknowledgeExactSlotAvailable,
   copyNoSlotsInWindow,
   copyPickSlotHelpSofter,
   copyRequiredFieldCannotSkip,
   copyRequiredFieldPoliteFinal,
   copySingleExactTimeAvailable,
-  copySlotsAroundRequestedTime,
   copySlotsOfferedWithHumanDate,
   buildPreferredDateNeedAsk,
   formatCustomFieldBookingQuestion,
@@ -342,6 +347,20 @@ export class ConversationBookingFlowService {
           routing: stubRouting(),
         };
       }
+      const wantsNewBooking = detectLiveBookingInterest(combined);
+      const wantsReschedule = /\b(reschedule|rebook|change\s+my\s+appointment|cancel(\s+my)?\s+appointment)\b/i.test(
+        combined,
+      );
+      if (!wantsNewBooking && !wantsReschedule) {
+        return { handled: false };
+      }
+      booking = {
+        ...emptyBookingState(),
+        calendarId: settings.defaultGhlCalendarId!.trim(),
+        version: (booking.version ?? 1) + 1,
+        bookingMode: settings.bookingMode,
+      };
+      this.applyContactSnapshot(booking, params.contactSnapshot);
     }
 
     const snapshotBefore = this.snapshotBookingCore(booking);
@@ -597,6 +616,33 @@ export class ConversationBookingFlowService {
         crmTzForPick = tzPeek.crmTimezoneUsed?.trim() || 'UTC';
       }
 
+      if (booking.offeredSlots.length === 1 && parseExactSlotReservationNegative(latest)) {
+        booking.offeredSlots = undefined;
+        booking.offeredSlotsCrmTimeZone = undefined;
+        booking.lastOfferedAt = undefined;
+        booking.selectedSlot = undefined;
+        booking.preferredTime = undefined;
+        booking.preferredTimeWindow = undefined;
+        const nextMeta = mergeBookingIntoConversationMetadata(prevMeta, { ...booking, status: 'collecting_details' });
+        const baseQ = copyAskPreferredTime();
+        const composedNeg = await this.composeBookingCustomerReply({
+          tenantId: params.tenantId,
+          conversationId: params.conversationId,
+          latestInboundText: latest,
+          combinedTranscript: combined,
+          booking,
+          nextStep: buildBookingReplyComposerNextStepForAsk('preferred_time', settings, baseQ),
+          userFrustrated: hadFrustration,
+          businessName: params.tenantDisplayName,
+        });
+        return {
+          handled: true,
+          persistMetadata: nextMeta,
+          replyPlan: plan(withTone(composedNeg), 'booking_decline_exact_offer'),
+          routing: stubRouting(),
+        };
+      }
+
       const rev = parseSlotSelectionOrTimeRevision(
         latest,
         combined,
@@ -681,13 +727,60 @@ export class ConversationBookingFlowService {
           };
         }
 
-        const offered: AisbpOfferedSlot[] = top.map((s, i) => ({
-          option: i + 1,
-          startIso: s.startTime,
-          endIso: slotEndIso(s, booking.slotDurationMinutes ?? 30),
-          displayText: formatSlotLabel(s.startTime, slotFetch.crmTimezoneUsed),
-          calendarId: booking.calendarId,
-        }));
+        const humanDate = formatHumanDateFromYmd(booking.preferredDate!.trim());
+        const prefHm = booking.preferredTime?.trim();
+        const hasExactInFull =
+          Boolean(prefHm) &&
+          slotFetch.slots.some(s => {
+            const sm = slotStartLocalMinutes(s.startTime, crmTz2);
+            const tm = normalizedHmToMinutes(prefHm!);
+            return sm !== undefined && tm !== undefined && sm === tm;
+          });
+
+        let offered: AisbpOfferedSlot[];
+        let body: string;
+        if (prefHm && hasExactInFull) {
+          const exact = findExactSlotMatchingPreferredHm(slotFetch.slots, prefHm, crmTz2);
+          if (!exact) {
+            offered = top.map((s, i) => ({
+              option: i + 1,
+              startIso: s.startTime,
+              endIso: slotEndIso(s, booking.slotDurationMinutes ?? 30),
+              displayText: formatSlotLabel(s.startTime, slotFetch.crmTimezoneUsed),
+              calendarId: booking.calendarId,
+            }));
+            body = copySlotsOfferedWithHumanDate(humanDate, offered.map(o => o.displayText));
+          } else {
+            offered = [
+              {
+                option: 1,
+                startIso: exact.startTime,
+                endIso: slotEndIso(exact, booking.slotDurationMinutes ?? 30),
+                displayText: formatSlotLabel(exact.startTime, slotFetch.crmTimezoneUsed),
+                calendarId: booking.calendarId,
+              },
+            ];
+            body = copySingleExactTimeAvailable(humanDate, offered[0]!.displayText, {
+              availabilityQuestionTone: userCombinedMessageAskedAvailabilityQuestion(combined),
+            });
+          }
+        } else {
+          offered = top.map((s, i) => ({
+            option: i + 1,
+            startIso: s.startTime,
+            endIso: slotEndIso(s, booking.slotDurationMinutes ?? 30),
+            displayText: formatSlotLabel(s.startTime, slotFetch.crmTimezoneUsed),
+            calendarId: booking.calendarId,
+          }));
+          const displayLines = offered.map(o => o.displayText);
+          if (prefHm && !hasExactInFull && top.length > 0) {
+            body = copyClosestSlotsWhenPreferredUnavailable(humanDate, formatPreferredHmForDisplay(prefHm), displayLines);
+          } else if (usedWindowFallback && win && win !== 'exact') {
+            body = copyNoSlotsInWindow(humanDate, timeWindowDisplayLabel(win), displayLines);
+          } else {
+            body = copySlotsOfferedWithHumanDate(humanDate, displayLines);
+          }
+        }
 
         this.logger.log(
           `bookingSlotsOffered ${JSON.stringify({
@@ -698,30 +791,6 @@ export class ConversationBookingFlowService {
             reason: 'time_preference_revision',
           })}`,
         );
-
-        const humanDate = formatHumanDateFromYmd(booking.preferredDate!.trim());
-        const displayLines = offered.map(o => o.displayText);
-        const prefHm = booking.preferredTime?.trim();
-        const hasExactInFull =
-          Boolean(prefHm) &&
-          slotFetch.slots.some(s => {
-            const sm = slotStartLocalMinutes(s.startTime, crmTz2);
-            const tm = normalizedHmToMinutes(prefHm!);
-            return sm !== undefined && tm !== undefined && sm === tm;
-          });
-
-        let body: string;
-        if (prefHm && hasExactInFull && top.length === 1) {
-          body = copySingleExactTimeAvailable(humanDate, displayLines[0]!);
-        } else if (prefHm && hasExactInFull && top.length > 1) {
-          body = copySlotsAroundRequestedTime(humanDate, formatPreferredHmForDisplay(prefHm), displayLines);
-        } else if (prefHm && !hasExactInFull && top.length > 0) {
-          body = copyClosestSlotsWhenPreferredUnavailable(humanDate, formatPreferredHmForDisplay(prefHm), displayLines);
-        } else if (usedWindowFallback && win && win !== 'exact') {
-          body = copyNoSlotsInWindow(humanDate, timeWindowDisplayLabel(win), displayLines);
-        } else {
-          body = copySlotsOfferedWithHumanDate(humanDate, displayLines);
-        }
 
         const nextMeta = mergeBookingIntoConversationMetadata(prevMeta, {
           ...booking,
@@ -761,6 +830,55 @@ export class ConversationBookingFlowService {
       }
 
       if (rev.kind !== 'selected_slot') {
+        const prefHmRecovery = booking.preferredTime?.trim();
+        const exactForPref =
+          prefHmRecovery && booking.offeredSlots?.length
+            ? matchOfferedByHm(booking.offeredSlots, prefHmRecovery, crmTzForPick)
+            : undefined;
+        if (rev.kind === 'unparseable' && exactForPref && shouldSuppressImplicitSlotPickFromFrustration(latest)) {
+          const fullSlot = booking.offeredSlots!.find(o => o.startIso === exactForPref.startIso)!;
+          const humanDateFr = formatHumanDateFromYmd(booking.preferredDate!.trim());
+          const bodyFr = copyFrustrationAcknowledgeExactSlotAvailable(humanDateFr, fullSlot.displayText);
+          const offeredSingle: AisbpOfferedSlot[] = [
+            {
+              ...fullSlot,
+              option: 1,
+              calendarId: fullSlot.calendarId ?? booking.calendarId,
+            },
+          ];
+          const nextMetaFr = mergeBookingIntoConversationMetadata(prevMeta, {
+            ...booking,
+            status: 'offered_slots',
+            offeredSlots: offeredSingle,
+            offeredSlotsCrmTimeZone: crmTzForPick,
+            lastOfferedAt: new Date().toISOString(),
+            pendingFieldId: undefined,
+            pendingFieldLabel: undefined,
+            pendingFieldRequired: undefined,
+            lastAskedFieldId: undefined,
+            lastAskedAt: undefined,
+            lastQuestionFingerprint: undefined,
+            sameFieldPromptCount: undefined,
+            pendingParseFailureCount: undefined,
+          });
+          const composedFr = await this.composeBookingCustomerReply({
+            tenantId: params.tenantId,
+            conversationId: params.conversationId,
+            latestInboundText: latest,
+            combinedTranscript: combined,
+            booking,
+            nextStep: buildOfferSlotsComposerStep(bodyFr, offeredSingle),
+            userFrustrated: true,
+            businessName: params.tenantDisplayName,
+          });
+          return {
+            handled: true,
+            persistMetadata: nextMetaFr,
+            replyPlan: plan(composedFr, 'booking_slots_offered'),
+            routing: stubRouting(),
+          };
+        }
+
         const nextMeta = mergeBookingIntoConversationMetadata(prevMeta, { ...booking });
         const pickHelp = copyPickSlotHelpSofter();
         const composedPick = await this.composeBookingCustomerReply({
@@ -1288,13 +1406,60 @@ export class ConversationBookingFlowService {
       };
     }
 
-    const offered: AisbpOfferedSlot[] = top.map((s, i) => ({
-      option: i + 1,
-      startIso: s.startTime,
-      endIso: slotEndIso(s, booking.slotDurationMinutes ?? 30),
-      displayText: formatSlotLabel(s.startTime, slotFetch.crmTimezoneUsed),
-      calendarId: booking.calendarId,
-    }));
+    const humanDate = formatHumanDateFromYmd(booking.preferredDate!.trim());
+    const prefHmMain = booking.preferredTime?.trim();
+    const hasExactInFullMain =
+      Boolean(prefHmMain) &&
+      slotFetch.slots.some(s => {
+        const sm = slotStartLocalMinutes(s.startTime, crmTz);
+        const tm = normalizedHmToMinutes(prefHmMain!);
+        return sm !== undefined && tm !== undefined && sm === tm;
+      });
+
+    let offered: AisbpOfferedSlot[];
+    let body: string;
+    if (prefHmMain && hasExactInFullMain) {
+      const exact = findExactSlotMatchingPreferredHm(slotFetch.slots, prefHmMain, crmTz);
+      if (!exact) {
+        offered = top.map((s, i) => ({
+          option: i + 1,
+          startIso: s.startTime,
+          endIso: slotEndIso(s, booking.slotDurationMinutes ?? 30),
+          displayText: formatSlotLabel(s.startTime, slotFetch.crmTimezoneUsed),
+          calendarId: booking.calendarId,
+        }));
+        body = copySlotsOfferedWithHumanDate(humanDate, offered.map(o => o.displayText));
+      } else {
+        offered = [
+          {
+            option: 1,
+            startIso: exact.startTime,
+            endIso: slotEndIso(exact, booking.slotDurationMinutes ?? 30),
+            displayText: formatSlotLabel(exact.startTime, slotFetch.crmTimezoneUsed),
+            calendarId: booking.calendarId,
+          },
+        ];
+        body = copySingleExactTimeAvailable(humanDate, offered[0]!.displayText, {
+          availabilityQuestionTone: userCombinedMessageAskedAvailabilityQuestion(combined),
+        });
+      }
+    } else {
+      offered = top.map((s, i) => ({
+        option: i + 1,
+        startIso: s.startTime,
+        endIso: slotEndIso(s, booking.slotDurationMinutes ?? 30),
+        displayText: formatSlotLabel(s.startTime, slotFetch.crmTimezoneUsed),
+        calendarId: booking.calendarId,
+      }));
+      const displayLines = offered.map(o => o.displayText);
+      if (prefHmMain && !hasExactInFullMain && top.length > 0) {
+        body = copyClosestSlotsWhenPreferredUnavailable(humanDate, formatPreferredHmForDisplay(prefHmMain), displayLines);
+      } else if (usedWindowFallback && win && win !== 'exact') {
+        body = copyNoSlotsInWindow(humanDate, timeWindowDisplayLabel(win), displayLines);
+      } else {
+        body = copySlotsOfferedWithHumanDate(humanDate, displayLines);
+      }
+    }
 
     this.logger.log(
       `bookingSlotsOffered ${JSON.stringify({
@@ -1304,13 +1469,6 @@ export class ConversationBookingFlowService {
         date: booking.preferredDate,
       })}`,
     );
-
-    const humanDate = formatHumanDateFromYmd(booking.preferredDate!.trim());
-    const displayLines = offered.map(o => o.displayText);
-    const body =
-      usedWindowFallback && win && win !== 'exact'
-        ? copyNoSlotsInWindow(humanDate, timeWindowDisplayLabel(win), displayLines)
-        : copySlotsOfferedWithHumanDate(humanDate, displayLines);
 
     const nextMeta = mergeBookingIntoConversationMetadata(prevMeta, {
       ...booking,

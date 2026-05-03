@@ -91,6 +91,7 @@ export class BookingReplyComposerService {
       '- Use personaPrompt and businessName only for tone; do not contradict facts.',
       '- Short, natural, not corporate; no long essays.',
       '- Keep any A)/B)/C) option letters if present in safeBaseMessage; you may lightly rephrase the intro line.',
+      '- Do not invent a street address, postal address, neighborhood, or MRT/transit station unless it appears verbatim in safeBaseMessage.',
     ].join('\n');
 
     const adapter = new OpenAiProviderAdapter();

@@ -443,7 +443,10 @@ describe('ConversationBookingFlowService', () => {
     expect(r.handled).toBe(true);
     if (r.handled) {
       expect(fetchFree).toHaveBeenCalled();
-      expect(r.replyPlan.bubbles[0]!.text.toLowerCase()).toMatch(/1\./);
+      const out = r.replyPlan.bubbles[0]!.text.toLowerCase();
+      expect(out).toMatch(/9:00/);
+      expect(out).not.toMatch(/which one would you like me to reserve/);
+      expect(out).not.toMatch(/\n1\.\s/);
     }
   });
 
@@ -1114,7 +1117,9 @@ describe('ConversationBookingFlowService', () => {
         metadata: meta,
       });
       expect(fetchFree).toHaveBeenCalled();
-      expect(r.replyPlan.bubbles[0]!.text).toMatch(/1\./);
+      const slotText = r.replyPlan.bubbles[0]!.text.toLowerCase();
+      expect(slotText).toMatch(/9:00|available for|reserve/);
+      expect(slotText).not.toMatch(/which one would you like me to reserve/);
     });
 
     it('after a non-answer to optional name, asks phone instead of repeating name', async () => {
@@ -1293,7 +1298,8 @@ describe('ConversationBookingFlowService', () => {
         const b = (r.persistMetadata as Record<string, unknown>).aisbp_booking as Record<string, unknown>;
         expect(b.firstVisit).toBe('yes');
         expect(b.pendingFieldId).toBeUndefined();
-        expect(r.replyPlan.bubbles[0]!.text).toMatch(/1\./);
+        expect(r.replyPlan.bubbles[0]!.text.toLowerCase()).toMatch(/9:00|available for|reserve/);
+        expect(r.replyPlan.bubbles[0]!.text.toLowerCase()).not.toMatch(/\n1\.\s/);
       }
     });
 
@@ -1318,7 +1324,8 @@ describe('ConversationBookingFlowService', () => {
       if (r.handled) {
         const b = (r.persistMetadata as Record<string, unknown>).aisbp_booking as Record<string, unknown>;
         expect(b.firstVisit).toBe('yes');
-        expect(r.replyPlan.bubbles[0]!.text).toMatch(/1\./);
+        expect(r.replyPlan.bubbles[0]!.text.toLowerCase()).toMatch(/9:00|available for|reserve/);
+        expect(r.replyPlan.bubbles[0]!.text.toLowerCase()).not.toMatch(/\n1\.\s/);
       }
     });
 
@@ -1343,7 +1350,8 @@ describe('ConversationBookingFlowService', () => {
       if (r.handled) {
         const b = (r.persistMetadata as Record<string, unknown>).aisbp_booking as Record<string, unknown>;
         expect(b.firstVisit).toBe('no');
-        expect(r.replyPlan.bubbles[0]!.text).toMatch(/1\./);
+        expect(r.replyPlan.bubbles[0]!.text.toLowerCase()).toMatch(/9:00|available for|reserve/);
+        expect(r.replyPlan.bubbles[0]!.text.toLowerCase()).not.toMatch(/\n1\.\s/);
       }
     });
 
@@ -1368,7 +1376,8 @@ describe('ConversationBookingFlowService', () => {
       if (r.handled) {
         const b = (r.persistMetadata as Record<string, unknown>).aisbp_booking as Record<string, unknown>;
         expect(b.skippedFieldIds).toEqual(expect.arrayContaining(['first_visit']));
-        expect(r.replyPlan.bubbles[0]!.text).toMatch(/1\./);
+        expect(r.replyPlan.bubbles[0]!.text.toLowerCase()).toMatch(/9:00|available for|reserve/);
+        expect(r.replyPlan.bubbles[0]!.text.toLowerCase()).not.toMatch(/\n1\.\s/);
       }
     });
 
@@ -1391,7 +1400,8 @@ describe('ConversationBookingFlowService', () => {
       expect(r.handled).toBe(true);
       expect(fetchFree).toHaveBeenCalled();
       if (r.handled) {
-        expect(r.replyPlan.bubbles[0]!.text).toMatch(/1\./);
+        expect(r.replyPlan.bubbles[0]!.text.toLowerCase()).toMatch(/9:00|available for|reserve/);
+        expect(r.replyPlan.bubbles[0]!.text.toLowerCase()).not.toMatch(/\n1\.\s/);
         expect(r.replyPlan.bubbles[0]!.text.toLowerCase()).not.toMatch(/first visit/);
       }
     });
@@ -1656,7 +1666,7 @@ describe('ConversationBookingFlowService', () => {
       expect(r.handled).toBe(true);
       if (r.handled) {
         const text = r.replyPlan.bubbles[0]!.text;
-        expect(text).toMatch(/1\.\s*2:00\s*PM/i);
+        expect(text).toMatch(/2:00\s*PM is available/i);
       }
     });
 

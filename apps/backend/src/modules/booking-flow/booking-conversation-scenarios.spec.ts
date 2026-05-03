@@ -183,9 +183,9 @@ describe('Booking conversation scenarios (harness)', () => {
     expect(r.handled).toBe(true);
     expect(h.bookingState()?.['preferredDate']).toBe('2026-05-29');
 
-    r = await h.say('3pm');
+    r = await h.say('11am');
     expect(r.handled).toBe(true);
-    expect(h.bookingState()?.['preferredTime']).toBe('15:00');
+    expect(h.bookingState()?.['preferredTime']).toBe('11:00');
 
     r = await h.say('weewang');
     expect(r.handled).toBe(true);

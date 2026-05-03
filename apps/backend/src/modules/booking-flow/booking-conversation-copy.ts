@@ -215,8 +215,20 @@ export function copyClosestSlotsWhenPreferredUnavailable(
   return `${requestedTimeLabel} isn't available for ${humanDate}. The closest options are:\n\n${body}\n\nWhich one would you like me to reserve?`;
 }
 
-export function copySingleExactTimeAvailable(humanDate: string, slotDisplay: string): string {
-  return `${slotDisplay} is available for ${humanDate}.\n\nWould you like me to reserve it?\n\nReply 1 to confirm, or tell me another time you prefer.`;
+export function copySingleExactTimeAvailable(
+  humanDate: string,
+  slotDisplay: string,
+  opts?: { availabilityQuestionTone?: boolean },
+): string {
+  const q = opts?.availabilityQuestionTone
+    ? 'Shall I reserve it for you?'
+    : 'Would you like me to reserve it?';
+  return `${slotDisplay} is available for ${humanDate}. ${q}`;
+}
+
+/** After the user complains about being asked to pick when they already asked for this time. */
+export function copyFrustrationAcknowledgeExactSlotAvailable(humanDate: string, slotDisplay: string): string {
+  return `You're right, I've got ${slotDisplay} for ${humanDate}. Shall I reserve that for you?`;
 }
 
 export function copyNoSlotsInWindow(humanDate: string, windowLabel: string, lines: string[]): string {

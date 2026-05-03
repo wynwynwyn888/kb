@@ -16,6 +16,11 @@ describe('sanitizeOutboundCustomerText', () => {
     expect(sanitizeOutboundCustomerText('We are at exact address here in district 1.')).toBe(OUTBOUND_PLACEHOLDER_FALLBACK);
   });
 
+  it('replaces known fake-address tutorial strings', () => {
+    expect(sanitizeOutboundCustomerText("We're located at 123 Hair Avenue, Singapore.")).toBe(OUTBOUND_PLACEHOLDER_FALLBACK);
+    expect(sanitizeOutboundCustomerText('The nearest MRT station is Hair Station.')).toBe(OUTBOUND_PLACEHOLDER_FALLBACK);
+  });
+
   it('passes through normal salon copy', () => {
     expect(sanitizeOutboundCustomerText('See you Tuesday at 3pm!')).toBe('See you Tuesday at 3pm!');
   });

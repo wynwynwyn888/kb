@@ -5,6 +5,7 @@ import {
   extractPreferredTimeWindow,
   extractServiceFromBookingMessage,
   filterFreeSlotsByTimeWindow,
+  parseExactSlotReservationAffirmative,
   parseFirstVisitNaturalReply,
   parsePlainNameAnswerLine,
   parseSlotSelection,
@@ -12,7 +13,9 @@ import {
   rankSlotsForBookingOffer,
   resolveBookingCalendarDay,
   resolveRelativeDayPhrase,
+  shouldSuppressImplicitSlotPickFromFrustration,
   stripBookingFrustrationForParse,
+  userCombinedMessageAskedAvailabilityQuestion,
 } from './booking-intent-and-parse';
 
 describe('parseSlotSelection', () => {
@@ -74,6 +77,27 @@ describe('extractPreferredTimeWindow', () => {
     expect(extractPreferredTimeWindow('morning please')).toBe('morning');
     expect(extractPreferredTimeWindow('after work')).toBe('after_work');
     expect(extractPreferredTimeWindow('before lunch')).toBe('before_lunch');
+  });
+});
+
+describe('parseExactSlotReservationAffirmative', () => {
+  it('accepts yes and book phrasing', () => {
+    expect(parseExactSlotReservationAffirmative('yes')).toBe(true);
+    expect(parseExactSlotReservationAffirmative('please reserve')).toBe(true);
+    expect(parseExactSlotReservationAffirmative('can')).toBe(true);
+  });
+});
+
+describe('shouldSuppressImplicitSlotPickFromFrustration', () => {
+  it('detects why-still-ask complaints', () => {
+    expect(shouldSuppressImplicitSlotPickFromFrustration('i said 9am, why u still ask me?')).toBe(true);
+    expect(shouldSuppressImplicitSlotPickFromFrustration('why do you still ask')).toBe(true);
+  });
+});
+
+describe('userCombinedMessageAskedAvailabilityQuestion', () => {
+  it('detects timing availability questions', () => {
+    expect(userCombinedMessageAskedAvailabilityQuestion('is this timing available?')).toBe(true);
   });
 });
 

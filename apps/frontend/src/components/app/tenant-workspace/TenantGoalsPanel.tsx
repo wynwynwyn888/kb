@@ -21,8 +21,8 @@ import {
   KNOWLEDGE_ACCESS_ALL_VAULTS,
   KNOWLEDGE_ACCESS_SELECTED_VAULTS,
   KNOWLEDGE_SCOPE_ALL_WORKSPACE,
+  activeAssistantVaultsSummary,
   formatProfileUpdatedAt,
-  knowledgeVaultAccessCardLabel,
 } from '@/lib/assistant-profiles-ui';
 import {
   ErrorBanner,
@@ -48,18 +48,21 @@ const textareaStyle = {
   overflowWrap: 'break-word' as const,
 };
 
+const LIVE_DELETE_HINT = 'Set another profile active before deleting this one.';
+
 const sectionCard: CSSProperties = {
-  border: '1px solid var(--aisbp-border, #e2e8f0)',
-  borderRadius: '10px',
-  padding: '0.75rem 1rem',
-  marginBottom: '0.6rem',
+  border: '1px solid rgba(226, 232, 240, 0.9)',
+  borderRadius: 12,
+  padding: '1rem 1.1rem',
+  marginBottom: '0.85rem',
   background: 'var(--aisbp-surface, #fff)',
+  boxShadow: '0 1px 2px rgba(15, 23, 42, 0.04)',
 };
 
 const secondaryBtnStyle: CSSProperties = {
   padding: '0.45rem 0.85rem',
   borderRadius: '8px',
-  border: '1px solid var(--aisbp-border, #e2e8f0)',
+  border: '1px solid rgba(226, 232, 240, 0.95)',
   background: 'var(--aisbp-surface, #fff)',
   color: 'var(--aisbp-text-secondary, #334155)',
   fontSize: '0.85rem',
@@ -68,17 +71,28 @@ const secondaryBtnStyle: CSSProperties = {
 };
 
 const deleteBtnStyle: CSSProperties = {
-  padding: '0.45rem 0.75rem',
-  borderRadius: '8px',
-  border: '1px solid transparent',
+  padding: '0.32rem 0.5rem',
+  borderRadius: '6px',
+  border: 'none',
   background: 'transparent',
-  color: 'var(--aisbp-muted, #64748b)',
-  fontSize: '0.82rem',
+  color: 'var(--aisbp-muted, #94a3b8)',
+  fontSize: '0.78rem',
   fontWeight: 500,
   cursor: 'pointer',
-  textDecoration: 'underline',
-  textUnderlineOffset: '2px',
 };
+
+function profileListCardStyle(selected: boolean): CSSProperties {
+  return {
+    padding: '0.75rem 0.85rem',
+    borderRadius: 12,
+    border: '1px solid rgba(226, 232, 240, 0.92)',
+    borderLeftWidth: 3,
+    borderLeftStyle: 'solid',
+    borderLeftColor: selected ? 'rgba(37, 99, 235, 0.65)' : 'transparent',
+    background: selected ? 'rgba(248, 250, 252, 0.98)' : 'var(--aisbp-surface, #fff)',
+    boxShadow: selected ? '0 1px 4px rgba(15, 23, 42, 0.05)' : '0 1px 2px rgba(15, 23, 42, 0.03)',
+  };
+}
 
 function LiveBadge({ large }: { large?: boolean }) {
   return (
@@ -591,7 +605,7 @@ export function TenantGoalsPanel() {
       <style
         dangerouslySetInnerHTML={{
           __html: `
-#${layoutStyleId} { display: grid; gap: 0.75rem; grid-template-columns: 1fr; align-items: start; }
+#${layoutStyleId} { display: grid; gap: 1.1rem; grid-template-columns: 1fr; align-items: start; }
 @media (min-width: 960px) {
   #${layoutStyleId} { grid-template-columns: minmax(240px, 300px) minmax(0, 1fr); }
 }
@@ -634,9 +648,10 @@ export function TenantGoalsPanel() {
             <div
               style={{
                 ...sectionCard,
-                marginBottom: '0.75rem',
-                borderColor: 'rgba(34, 197, 94, 0.4)',
-                background: 'linear-gradient(180deg, rgba(34, 197, 94, 0.08) 0%, var(--aisbp-surface, #fff) 40%)',
+                marginBottom: '1rem',
+                borderLeft: '4px solid rgb(34, 197, 94)',
+                paddingLeft: '1.15rem',
+                boxShadow: '0 2px 14px rgba(15, 23, 42, 0.06)',
               }}
             >
               <p
@@ -646,18 +661,19 @@ export function TenantGoalsPanel() {
                   letterSpacing: '0.07em',
                   textTransform: 'uppercase',
                   color: 'var(--aisbp-muted, #64748b)',
-                  margin: '0 0 0.5rem',
+                  margin: '0 0 0.55rem',
                 }}
               >
                 Active assistant
               </p>
-              <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.6rem', marginBottom: '0.35rem' }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.55rem', marginBottom: '0.45rem' }}>
                 <span
                   style={{
-                    fontSize: '1.35rem',
+                    fontSize: '1.55rem',
                     fontWeight: 800,
-                    lineHeight: 1.2,
+                    lineHeight: 1.15,
                     color: 'var(--aisbp-text-heading, #0f172a)',
+                    letterSpacing: '-0.02em',
                   }}
                 >
                   {activeProfile.name.trim() || 'Untitled assistant'}
@@ -665,26 +681,28 @@ export function TenantGoalsPanel() {
                 <LiveBadge large />
               </div>
               {activeProfile.description?.trim() ? (
-                <p style={{ fontSize: '0.9rem', color: 'var(--aisbp-text-secondary, #334155)', margin: '0 0 0.5rem', lineHeight: 1.45 }}>
+                <p style={{ fontSize: '0.9rem', color: 'var(--aisbp-text-secondary, #334155)', margin: '0 0 0.65rem', lineHeight: 1.45 }}>
                   {activeProfile.description.trim()}
                 </p>
               ) : null}
-              <p style={{ fontSize: '0.85rem', color: 'var(--aisbp-text-secondary, #334155)', margin: '0 0 0.25rem' }}>
-                Knowledge vaults:{' '}
-                {knowledgeVaultAccessCardLabel(
-                  activeProfile.knowledgeAccessMode,
-                  activeProfile.selectedVaultIds?.length ?? 0,
-                )}
+              <p style={{ fontSize: '0.88rem', color: 'var(--aisbp-text-secondary, #334155)', margin: '0 0 0.5rem', lineHeight: 1.5 }}>
+                Used for live customer replies across connected channels.
               </p>
-              <p style={{ fontSize: '0.82rem', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 0.5rem' }}>
-                Used for live customer replies.
+              <p style={{ fontSize: '0.84rem', color: 'var(--aisbp-text-secondary, #475569)', margin: '0 0 0.35rem', fontWeight: 600 }}>
+                Vaults:{' '}
+                <span style={{ fontWeight: 500 }}>
+                  {activeAssistantVaultsSummary(
+                    activeProfile.knowledgeAccessMode,
+                    activeProfile.selectedVaultIds?.length ?? 0,
+                  )}
+                </span>
               </p>
-              <p style={{ fontSize: '0.75rem', color: 'var(--aisbp-muted, #94a3b8)', margin: '0 0 0.75rem' }}>
+              <p style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted, #94a3b8)', margin: '0 0 1rem' }}>
                 Last updated {formatProfileUpdatedAt(activeProfile.updatedAt)}
               </p>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.45rem', alignItems: 'center' }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
                 <button type="button" onClick={() => requestSelectProfile(activeProfile.id)} style={secondaryBtnStyle}>
-                  Edit
+                  Edit profile
                 </button>
                 <button type="button" onClick={() => duplicateProfileById(activeProfile.id)} style={secondaryBtnStyle}>
                   Duplicate
@@ -737,22 +755,11 @@ export function TenantGoalsPanel() {
               >
                 Assistant profiles
               </h2>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
                 {sortedProfiles.map(p => {
                   const selected = p.id === selectedProfileId;
                   return (
-                    <div
-                      key={p.id}
-                      style={{
-                        padding: '0.65rem 0.75rem',
-                        borderRadius: '10px',
-                        border: selected
-                          ? '2px solid var(--aisbp-accent, #2563eb)'
-                          : '1px solid var(--aisbp-border, #e2e8f0)',
-                        background: selected ? 'rgba(37, 99, 235, 0.06)' : 'var(--aisbp-surface, #fff)',
-                        boxShadow: p.isActive ? 'inset 0 0 0 1px rgba(34, 197, 94, 0.2)' : undefined,
-                      }}
-                    >
+                    <div key={p.id} style={profileListCardStyle(selected)}>
                       <button
                         type="button"
                         onClick={() => requestSelectProfile(p.id)}
@@ -785,8 +792,8 @@ export function TenantGoalsPanel() {
                           </p>
                         ) : null}
                         <p style={{ fontSize: '0.7rem', color: 'var(--aisbp-muted, #94a3b8)', margin: '0 0 0.2rem' }}>
-                          Knowledge vaults:{' '}
-                          {knowledgeVaultAccessCardLabel(
+                          Vaults:{' '}
+                          {activeAssistantVaultsSummary(
                             p.knowledgeAccessMode,
                             p.selectedVaultIds?.length ?? 0,
                           )}
@@ -795,37 +802,53 @@ export function TenantGoalsPanel() {
                           Updated {formatProfileUpdatedAt(p.updatedAt)}
                         </p>
                       </button>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem' }}>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', alignItems: 'center' }}>
                         <button
                           type="button"
                           onClick={() => requestSelectProfile(p.id)}
-                          style={{ ...secondaryBtnStyle, padding: '0.28rem 0.5rem', fontSize: '0.76rem' }}
+                          style={{ ...secondaryBtnStyle, padding: '0.28rem 0.55rem', fontSize: '0.76rem' }}
                         >
-                          Edit
+                          Edit profile
                         </button>
-                        <button
-                          type="button"
-                          disabled={p.isActive}
-                          onClick={() => activateProfileById(p.id)}
-                          style={{ ...secondaryBtnStyle, padding: '0.28rem 0.5rem', fontSize: '0.76rem' }}
-                        >
-                          Set active
-                        </button>
+                        {!p.isActive ? (
+                          <button
+                            type="button"
+                            onClick={() => activateProfileById(p.id)}
+                            style={{ ...secondaryBtnStyle, padding: '0.28rem 0.55rem', fontSize: '0.76rem' }}
+                          >
+                            Set live
+                          </button>
+                        ) : (
+                          <span
+                            style={{
+                              fontSize: '0.76rem',
+                              color: 'var(--aisbp-muted, #64748b)',
+                              fontWeight: 600,
+                              padding: '0.28rem 0.35rem',
+                            }}
+                          >
+                            Currently live
+                          </span>
+                        )}
                         <button
                           type="button"
                           onClick={() => duplicateProfileById(p.id)}
-                          style={{ ...secondaryBtnStyle, padding: '0.28rem 0.5rem', fontSize: '0.76rem' }}
+                          style={{ ...secondaryBtnStyle, padding: '0.28rem 0.55rem', fontSize: '0.76rem' }}
                         >
                           Duplicate
                         </button>
                         <button
                           type="button"
                           disabled={profiles.length <= 1 || p.isActive}
+                          title={p.isActive ? LIVE_DELETE_HINT : undefined}
+                          aria-label={p.isActive ? LIVE_DELETE_HINT : 'Delete profile'}
                           onClick={() => onDeleteProfile(p.id)}
                           style={{
                             ...deleteBtnStyle,
                             padding: '0.28rem 0.45rem',
                             fontSize: '0.76rem',
+                            opacity: p.isActive ? 0.45 : 1,
+                            cursor: p.isActive || profiles.length <= 1 ? 'not-allowed' : 'pointer',
                           }}
                         >
                           Delete
@@ -947,20 +970,42 @@ export function TenantGoalsPanel() {
                         </span>
                       </label>
                     </div>
-                    {knowledgeAccessMode === KNOWLEDGE_ACCESS_SELECTED_VAULTS ? (
-                      kbVaults.length === 0 ? (
+                    {knowledgeAccessMode === KNOWLEDGE_ACCESS_SELECTED_VAULTS && kbVaults.length === 0 ? (
+                      <p
+                        style={{
+                          margin: '0.75rem 0 0',
+                          fontSize: '0.82rem',
+                          color: 'var(--aisbp-muted, #64748b)',
+                          lineHeight: 1.45,
+                        }}
+                      >
+                        No knowledge vaults yet. Create one in Knowledge Base.
+                      </p>
+                    ) : null}
+                    {knowledgeAccessMode === KNOWLEDGE_ACCESS_SELECTED_VAULTS && kbVaults.length > 0 ? (
+                      <div
+                        style={{
+                          marginTop: '0.75rem',
+                          paddingTop: '0.75rem',
+                          borderTop: '1px solid rgba(226, 232, 240, 0.85)',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '0.5rem',
+                        }}
+                      >
                         <p
                           style={{
-                            margin: '0.75rem 0 0',
-                            fontSize: '0.82rem',
+                            fontSize: '0.72rem',
+                            fontWeight: 700,
+                            letterSpacing: '0.06em',
+                            textTransform: 'uppercase',
                             color: 'var(--aisbp-muted, #64748b)',
-                            lineHeight: 1.45,
+                            margin: 0,
                           }}
                         >
-                          No knowledge vaults yet. Create one in Knowledge Base.
+                          Choose vaults
                         </p>
-                      ) : (
-                        <div style={{ marginTop: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
                           {kbVaults.map(v => {
                             const checked = selectedVaultIds.includes(v.id);
                             return (
@@ -998,7 +1043,35 @@ export function TenantGoalsPanel() {
                             );
                           })}
                         </div>
-                      )
+                        {kbVaults.length === 1 ? (
+                          <p
+                            style={{
+                              margin: 0,
+                              fontSize: '0.78rem',
+                              color: 'var(--aisbp-muted, #64748b)',
+                              lineHeight: 1.45,
+                            }}
+                          >
+                            Only one vault exists. Create more vaults in Knowledge Base.
+                          </p>
+                        ) : null}
+                        {selectedVaultIds.length === 0 ? (
+                          <p
+                            style={{
+                              margin: 0,
+                              fontSize: '0.8rem',
+                              color: 'rgb(154, 52, 18)',
+                              lineHeight: 1.45,
+                              padding: '0.45rem 0.55rem',
+                              borderRadius: 8,
+                              background: 'rgba(251, 191, 36, 0.15)',
+                              border: '1px solid rgba(251, 191, 36, 0.45)',
+                            }}
+                          >
+                            Select at least one vault or use all vaults.
+                          </p>
+                        ) : null}
+                      </div>
                     ) : null}
                   </div>
 
@@ -1139,14 +1212,16 @@ export function TenantGoalsPanel() {
                     <button type="submit" style={mvpPrimaryButtonStyle} disabled={saving || !selectedProfileId}>
                       {saving ? 'Saving…' : 'Save changes'}
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => selectedProfileId && activateProfileById(selectedProfileId)}
-                      style={secondaryBtnStyle}
-                      disabled={!selectedProfileId || Boolean(selectedRow?.isActive)}
-                    >
-                      Set active
-                    </button>
+                    {!selectedRow?.isActive ? (
+                      <button
+                        type="button"
+                        onClick={() => selectedProfileId && activateProfileById(selectedProfileId)}
+                        style={secondaryBtnStyle}
+                        disabled={!selectedProfileId}
+                      >
+                        Set live
+                      </button>
+                    ) : null}
                     <button
                       type="button"
                       onClick={() => selectedProfileId && duplicateProfileById(selectedProfileId)}
@@ -1158,8 +1233,17 @@ export function TenantGoalsPanel() {
                     <button
                       type="button"
                       onClick={() => selectedProfileId && onDeleteProfile(selectedProfileId)}
-                      style={deleteBtnStyle}
+                      style={{
+                        ...deleteBtnStyle,
+                        opacity: selectedRow?.isActive ? 0.45 : 1,
+                        cursor:
+                          !selectedProfileId || profiles.length <= 1 || selectedRow?.isActive
+                            ? 'not-allowed'
+                            : 'pointer',
+                      }}
                       disabled={!selectedProfileId || profiles.length <= 1 || Boolean(selectedRow?.isActive)}
+                      title={selectedRow?.isActive ? LIVE_DELETE_HINT : undefined}
+                      aria-label={selectedRow?.isActive ? LIVE_DELETE_HINT : 'Delete profile'}
                     >
                       Delete
                     </button>

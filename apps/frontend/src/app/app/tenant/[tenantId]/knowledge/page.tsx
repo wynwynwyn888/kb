@@ -48,13 +48,13 @@ const PAGE_BG = 'var(--aisbp-page-bg, #F8FAFC)';
 
 const glassSection: CSSProperties = {
   borderRadius: 16,
-  padding: '1.15rem 1.2rem',
-  marginBottom: '1.1rem',
-  background: 'var(--aisbp-glass-bg, rgba(255, 255, 255, 0.88))',
+  padding: '1.15rem 1.25rem',
+  marginBottom: '1.15rem',
+  background: 'var(--aisbp-glass-bg, rgba(255, 255, 255, 0.94))',
   backdropFilter: 'blur(18px)',
   WebkitBackdropFilter: 'blur(18px)',
-  border: '1px solid var(--aisbp-glass-border, rgba(226, 232, 240, 0.95))',
-  boxShadow: '0 12px 40px rgba(15, 23, 42, 0.04)',
+  border: 'none',
+  boxShadow: '0 4px 28px rgba(15, 23, 42, 0.06)',
 };
 
 const bentoBtn: CSSProperties = {
@@ -282,11 +282,38 @@ function fmtKind(s: string | null | undefined) {
 const faqCardShell: CSSProperties = {
   borderRadius: 16,
   padding: '1.15rem 1.25rem',
-  marginBottom: 14,
+  marginBottom: 18,
   background: 'linear-gradient(180deg, var(--aisbp-card-gradient-top, #ffffff) 0%, var(--aisbp-card-gradient-bottom, #fafbfc) 100%)',
-  border: '1px solid var(--aisbp-border, #e2e8f0)',
-  boxShadow: '0 4px 24px rgba(15, 23, 42, 0.055)',
+  border: 'none',
+  boxShadow: '0 2px 16px rgba(15, 23, 42, 0.06)',
 };
+
+function KbVaultPill({ name }: { name: string }) {
+  const label = name.trim() || 'Unassigned';
+  return (
+    <span
+      title={label}
+      style={{
+        display: 'inline-block',
+        maxWidth: '100%',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap' as const,
+        fontSize: '0.68rem',
+        fontWeight: 700,
+        letterSpacing: '0.06em',
+        textTransform: 'uppercase' as const,
+        color: '#475569',
+        background: '#f1f5f9',
+        border: '1px solid #e2e8f0',
+        borderRadius: 999,
+        padding: '0.22rem 0.6rem',
+      }}
+    >
+      {label}
+    </span>
+  );
+}
 
 function faqListStatusLabel(s: string): string {
   const u = s.toUpperCase();
@@ -330,10 +357,21 @@ function DocumentVaultLine({
   }
 
   return (
-    <div style={{ marginTop: '0.85rem' }}>
-      <label htmlFor={`kb-vault-${doc.id}`} style={{ ...mvpLabelStyle, display: 'block', marginBottom: '0.35rem' }}>
-        Knowledge vault
+    <div
+      style={{
+        marginTop: '0.6rem',
+        padding: '0.75rem 0.85rem',
+        borderRadius: 12,
+        background: 'rgba(248, 250, 252, 0.95)',
+        border: '1px solid rgba(226, 232, 240, 0.95)',
+      }}
+    >
+      <label htmlFor={`kb-vault-${doc.id}`} style={{ ...mvpLabelStyle, display: 'block', marginBottom: '0.4rem' }}>
+        Assign to vault
       </label>
+      <p style={{ fontSize: '0.75rem', color: '#64748b', margin: '0 0 0.5rem', lineHeight: 1.4 }}>
+        Choose which vault this item belongs to. Assistant profiles can search all vaults or only selected ones.
+      </p>
       <select
         id={`kb-vault-${doc.id}`}
         value={selectValue || fallbackId}
@@ -451,7 +489,7 @@ function FaqKnowledgeCard({
 
   return (
     <article style={faqCardShell}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <p
             style={{
@@ -469,8 +507,23 @@ function FaqKnowledgeCard({
             {question}
           </h3>
         </div>
-        <StatusPill label={faqListStatusLabel(doc.status)} tone={statusPillTone(doc.status)} />
+        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+          <KbVaultPill name={doc.vaultName?.trim() || 'Unassigned'} />
+          <StatusPill label={faqListStatusLabel(doc.status)} tone={statusPillTone(doc.status)} />
+        </div>
       </div>
+
+      <DocumentVaultLine
+        doc={doc}
+        vaults={vaults}
+        token={token}
+        subId={subId}
+        vaultAssignBusy={vaultAssignBusy}
+        onVaultAssignBusy={onVaultAssignBusy}
+        onPatchDocVault={onPatchDocVault}
+        setSaveOk={setSaveOk}
+        setWriteErr={setWriteErr}
+      />
 
       {!editing ? (
         <>
@@ -600,18 +653,6 @@ function FaqKnowledgeCard({
         </div>
       )}
 
-      <DocumentVaultLine
-        doc={doc}
-        vaults={vaults}
-        token={token}
-        subId={subId}
-        vaultAssignBusy={vaultAssignBusy}
-        onVaultAssignBusy={onVaultAssignBusy}
-        onPatchDocVault={onPatchDocVault}
-        setSaveOk={setSaveOk}
-        setWriteErr={setWriteErr}
-      />
-
       <div
         style={{
           display: 'flex',
@@ -620,15 +661,11 @@ function FaqKnowledgeCard({
           gap: '12px 16px',
           marginTop: '1.1rem',
           paddingTop: '0.85rem',
-          borderTop: '1px solid var(--aisbp-modal-divider, #f1f5f9)',
+          borderTop: '1px solid rgba(241, 245, 249, 0.95)',
         }}
       >
         <span style={{ fontSize: '0.68rem', fontWeight: 600, letterSpacing: '0.04em', color: '#94a3b8' }}>
           {fmtKind(doc.documentKind ?? 'faq')} · {typeof doc.chunkCount === 'number' ? `${doc.chunkCount} chunk${doc.chunkCount === 1 ? '' : 's'}` : '—'}
-        </span>
-        <span style={{ fontSize: '0.68rem', color: '#cbd5e1' }}>·</span>
-        <span style={{ fontSize: '0.68rem', fontWeight: 600, letterSpacing: '0.04em', color: '#94a3b8' }}>
-          Vault: {doc.vaultName?.trim() || '—'}
         </span>
         <span style={{ fontSize: '0.68rem', color: '#cbd5e1' }}>·</span>
         <span style={{ fontSize: '0.68rem', fontWeight: 600, letterSpacing: '0.04em', color: '#94a3b8' }}>
@@ -803,7 +840,7 @@ function NoteKnowledgeCard({
   return (
     <>
       <article style={faqCardShell}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <p
               style={{
@@ -819,8 +856,23 @@ function NoteKnowledgeCard({
             </p>
             <h3 style={{ fontSize: '1.05rem', fontWeight: 700, margin: 0, color: '#0f172a', lineHeight: 1.4 }}>{doc.title}</h3>
           </div>
-          <StatusPill label={faqListStatusLabel(doc.status)} tone={statusPillTone(doc.status)} />
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+            <KbVaultPill name={doc.vaultName?.trim() || 'Unassigned'} />
+            <StatusPill label={faqListStatusLabel(doc.status)} tone={statusPillTone(doc.status)} />
+          </div>
         </div>
+
+        <DocumentVaultLine
+          doc={doc}
+          vaults={vaults}
+          token={token}
+          subId={subId}
+          vaultAssignBusy={vaultAssignBusy}
+          onVaultAssignBusy={onVaultAssignBusy}
+          onPatchDocVault={onPatchDocVault}
+          setSaveOk={setSaveOk}
+          setWriteErr={setWriteErr}
+        />
 
         <p
           style={{
@@ -900,18 +952,6 @@ function NoteKnowledgeCard({
           </button>
         ) : null}
 
-        <DocumentVaultLine
-          doc={doc}
-          vaults={vaults}
-          token={token}
-          subId={subId}
-          vaultAssignBusy={vaultAssignBusy}
-          onVaultAssignBusy={onVaultAssignBusy}
-          onPatchDocVault={onPatchDocVault}
-          setSaveOk={setSaveOk}
-          setWriteErr={setWriteErr}
-        />
-
         <div
           style={{
             display: 'flex',
@@ -920,7 +960,7 @@ function NoteKnowledgeCard({
             gap: '12px 16px',
             marginTop: '1.1rem',
             paddingTop: '0.85rem',
-            borderTop: '1px solid var(--aisbp-modal-divider, #f1f5f9)',
+            borderTop: '1px solid rgba(241, 245, 249, 0.95)',
           }}
         >
           <span style={{ fontSize: '0.68rem', fontWeight: 600, letterSpacing: '0.04em', color: '#94a3b8' }}>
@@ -946,10 +986,6 @@ function NoteKnowledgeCard({
               CHECK CHUNKING
             </span>
           ) : null}
-          <span style={{ fontSize: '0.68rem', color: '#cbd5e1' }}>·</span>
-          <span style={{ fontSize: '0.68rem', fontWeight: 600, letterSpacing: '0.04em', color: '#94a3b8' }}>
-            Vault: {doc.vaultName?.trim() || '—'}
-          </span>
           <span style={{ fontSize: '0.68rem', color: '#cbd5e1' }}>·</span>
           <span style={{ fontSize: '0.68rem', fontWeight: 600, letterSpacing: '0.04em', color: '#94a3b8' }}>
             Updated {relativeTimeLabel(doc.updatedAt ?? doc.createdAt)}
@@ -1174,7 +1210,7 @@ function FileKnowledgeCard({
   return (
     <>
       <article style={faqCardShell}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
           <div style={{ flex: 1, minWidth: 0 }}>
             <p
               style={{
@@ -1190,7 +1226,10 @@ function FileKnowledgeCard({
             </p>
             <h3 style={{ fontSize: '1.05rem', fontWeight: 700, margin: 0, color: '#0f172a', lineHeight: 1.4 }}>{doc.title}</h3>
           </div>
-          <StatusPill label={faqListStatusLabel(doc.status)} tone={statusPillTone(doc.status)} />
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+            <KbVaultPill name={doc.vaultName?.trim() || 'Unassigned'} />
+            <StatusPill label={faqListStatusLabel(doc.status)} tone={statusPillTone(doc.status)} />
+          </div>
         </div>
 
         <p style={{ fontSize: '0.8125rem', color: '#64748b', margin: '0.85rem 0 0', lineHeight: 1.5 }}>
@@ -1207,6 +1246,18 @@ function FileKnowledgeCard({
           {' · '}
           {typeof doc.chunkCount === 'number' ? `${doc.chunkCount} chunk${doc.chunkCount === 1 ? '' : 's'}` : '—'}
         </p>
+
+        <DocumentVaultLine
+          doc={doc}
+          vaults={vaults}
+          token={token}
+          subId={subId}
+          vaultAssignBusy={vaultAssignBusy}
+          onVaultAssignBusy={onVaultAssignBusy}
+          onPatchDocVault={onPatchDocVault}
+          setSaveOk={setSaveOk}
+          setWriteErr={setWriteErr}
+        />
 
         <p
           style={{
@@ -1294,18 +1345,6 @@ function FileKnowledgeCard({
           </p>
         ) : null}
 
-        <DocumentVaultLine
-          doc={doc}
-          vaults={vaults}
-          token={token}
-          subId={subId}
-          vaultAssignBusy={vaultAssignBusy}
-          onVaultAssignBusy={onVaultAssignBusy}
-          onPatchDocVault={onPatchDocVault}
-          setSaveOk={setSaveOk}
-          setWriteErr={setWriteErr}
-        />
-
         <div
           style={{
             display: 'flex',
@@ -1314,13 +1353,9 @@ function FileKnowledgeCard({
             gap: '0.5rem',
             marginTop: '1.05rem',
             paddingTop: '0.85rem',
-            borderTop: '1px solid var(--aisbp-modal-divider, #f1f5f9)',
+            borderTop: '1px solid rgba(241, 245, 249, 0.95)',
           }}
         >
-          <span style={{ fontSize: '0.68rem', fontWeight: 600, letterSpacing: '0.04em', color: '#94a3b8' }}>
-            Vault: {doc.vaultName?.trim() || '—'}
-          </span>
-          <span style={{ fontSize: '0.68rem', color: '#cbd5e1', marginRight: '0.35rem' }}>·</span>
           <button
             type="button"
             onClick={() => setDetailsOpen(true)}
@@ -1850,7 +1885,7 @@ export default function SubaccountKnowledgePage() {
                   accept=".txt,.pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
                 />
 
-                <section style={{ ...glassSection, marginBottom: '1.1rem' }}>
+                <section style={{ ...glassSection, marginBottom: '1.25rem' }}>
                   <h2
                     style={{
                       fontSize: '1rem',
@@ -1896,8 +1931,7 @@ export default function SubaccountKnowledgePage() {
                             flexWrap: 'wrap',
                             alignItems: 'center',
                             gap: '0.45rem',
-                            paddingBottom: '0.5rem',
-                            borderBottom: '1px solid var(--aisbp-border, #f1f5f9)',
+                            padding: '0.35rem 0',
                           }}
                         >
                           {renamingVaultId === v.id ? (
@@ -2149,6 +2183,18 @@ export default function SubaccountKnowledgePage() {
                         {saving ? 'Saving…' : 'Save FAQ'}
                       </button>
                     </form>
+                    <p
+                      style={{
+                        fontSize: '0.78rem',
+                        color: '#64748b',
+                        margin: '-0.35rem 0 1.1rem',
+                        maxWidth: 520,
+                        lineHeight: 1.45,
+                      }}
+                    >
+                      New FAQs use your workspace default vault first. After saving, use <strong style={{ fontWeight: 600 }}>Assign to vault</strong>{' '}
+                      on the card to move them.
+                    </p>
 
                     {faqRows.length === 0 ? (
                       <EmptyState
@@ -2224,6 +2270,18 @@ export default function SubaccountKnowledgePage() {
                         {saving ? 'Saving…' : 'Save note'}
                       </button>
                     </form>
+                    <p
+                      style={{
+                        fontSize: '0.78rem',
+                        color: '#64748b',
+                        margin: '-0.35rem 0 1.1rem',
+                        maxWidth: 520,
+                        lineHeight: 1.45,
+                      }}
+                    >
+                      New notes use the default vault; open the card below and use <strong style={{ fontWeight: 600 }}>Assign to vault</strong> to
+                      organize.
+                    </p>
 
                     {otherRows.length > 0 ? (
                       <p
@@ -2318,6 +2376,10 @@ export default function SubaccountKnowledgePage() {
                     >
                       Choose a file to upload (PDF, DOC, DOCX, or TXT)
                     </div>
+                    <p style={{ fontSize: '0.78rem', color: '#64748b', margin: '-0.5rem 0 1rem', lineHeight: 1.45 }}>
+                      Uploaded files land in the default vault. Use <strong style={{ fontWeight: 600 }}>Assign to vault</strong> on each file card
+                      to move them.
+                    </p>
                     {fileRows.length === 0 ? (
                       <EmptyState
                         compact

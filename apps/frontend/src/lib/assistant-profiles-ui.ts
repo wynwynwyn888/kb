@@ -1,21 +1,22 @@
-/** Align with backend `tenant_bot_profiles.knowledge_scope_mode`. */
+/** Align with backend `tenant_bot_profiles.knowledge_access_mode`. */
+export const KNOWLEDGE_ACCESS_ALL_VAULTS = 'all_vaults';
+export const KNOWLEDGE_ACCESS_SELECTED_VAULTS = 'selected_vaults';
+
+/** Legacy — `tenant_bot_profiles.knowledge_scope_mode` (synced server-side). */
 export const KNOWLEDGE_SCOPE_ALL_WORKSPACE = 'all_workspace_knowledge';
 export const KNOWLEDGE_SCOPE_SELECTED_COLLECTIONS = 'selected_collections';
 
-/** Short label for profile cards (Knowledge: …). */
-export function knowledgeScopeCardLabel(mode: string | undefined): string {
-  const m = mode?.trim();
-  if (m === KNOWLEDGE_SCOPE_SELECTED_COLLECTIONS) return 'Selected collections';
-  return 'All workspace knowledge';
-}
-
-/** Full sentence for assistant summary card. */
-export function knowledgeScopeSentence(mode: string | undefined): string {
-  const m = mode?.trim();
-  if (m === KNOWLEDGE_SCOPE_SELECTED_COLLECTIONS) {
-    return 'Knowledge: Selected collections';
+/** Short label for profile cards (Knowledge vaults: …). */
+export function knowledgeVaultAccessCardLabel(
+  accessMode: string | undefined,
+  selectedVaultCount: number,
+): string {
+  const m = accessMode?.trim();
+  if (m === KNOWLEDGE_ACCESS_SELECTED_VAULTS) {
+    if (selectedVaultCount <= 0) return 'Selected vaults (none)';
+    return `${selectedVaultCount} selected vault${selectedVaultCount === 1 ? '' : 's'}`;
   }
-  return 'Knowledge: All workspace knowledge';
+  return 'All knowledge vaults';
 }
 
 export function formatProfileUpdatedAt(iso: string): string {

@@ -11,10 +11,13 @@ import { getSupabaseService } from '../../lib/supabase';
 import { AuthService } from '../auth/auth.service';
 import {
   type BotProfilePromptFields,
+  KNOWLEDGE_ACCESS_ALL_VAULTS,
+  KNOWLEDGE_ACCESS_SELECTED_VAULTS,
   KNOWLEDGE_SCOPE_ALL_WORKSPACE,
   KNOWLEDGE_SCOPE_SELECTED_COLLECTIONS,
   buildBookingNluProfileAppendix,
   buildBookingReplyPersonaPrompt,
+  buildKnowledgeAccessSummaryLine,
   buildOrchestrationTenantPromptFromProfile,
   buildThreeSectionPromptBlob,
   parsePromptSections,
@@ -33,6 +36,9 @@ export interface TenantBotProfileDto {
   escalationBehaviorNotes: string;
   knowledgeScopeNotes: string;
   knowledgeScopeMode: string;
+  /** all_vaults | selected_vaults */
+  knowledgeAccessMode: string;
+  selectedVaultIds: string[];
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
@@ -91,9 +97,13 @@ export class BotProfilesService {
   private mapProfile(
     row: ProfileRow,
     prompt: PromptRow | null,
+    selectedVaultIds: string[],
   ): TenantBotProfileDto {
     const t = (prompt?.['temperature'] as number | undefined) ?? 0.7;
     const maxT = (prompt?.['max_tokens'] as number | null | undefined) ?? null;
+    const accessRaw = String(row['knowledge_access_mode'] ?? '').trim();
+    const knowledgeAccessMode =
+      accessRaw === KNOWLEDGE_ACCESS_SELECTED_VAULTS ? KNOWLEDGE_ACCESS_SELECTED_VAULTS : KNOWLEDGE_ACCESS_ALL_VAULTS;
     return {
       id: row['id'] as string,
       tenantId: row['tenant_id'] as string,
@@ -108,6 +118,8 @@ export class BotProfilesService {
       knowledgeScopeNotes: (row['knowledge_scope_notes'] as string) ?? '',
       knowledgeScopeMode:
         String(row['knowledge_scope_mode'] ?? '').trim() || KNOWLEDGE_SCOPE_ALL_WORKSPACE,
+      knowledgeAccessMode,
+      selectedVaultIds,
       isActive: Boolean(row['is_active']),
       createdAt: row['created_at'] as string,
       updatedAt: row['updated_at'] as string,
@@ -118,7 +130,59 @@ export class BotProfilesService {
     };
   }
 
-  private profileFieldsFromRow(row: ProfileRow): BotProfilePromptFields {
+  private async loadVaultSelectionsForProfiles(
+    tenantId: string,
+    profileIds: string[],
+  ): Promise<Map<string, string[]>> {
+    const m = new Map<string, string[]>();
+    if (!profileIds.length) return m;
+    const supabase = getSupabaseService();
+    const { data, error } = await supabase
+      .from('tenant_bot_profile_knowledge_vaults')
+      .select('profile_id, vault_id')
+      .in('profile_id', profileIds);
+    if (error) {
+      throw new BadRequestException(`Failed to load profile vault links: ${error.message}`);
+    }
+    for (const r of data ?? []) {
+      const pid = r['profile_id'] as string;
+      const vid = r['vault_id'] as string;
+      const cur = m.get(pid) ?? [];
+      cur.push(vid);
+      m.set(pid, cur);
+    }
+    return m;
+  }
+
+  private async computeKnowledgeAccessSummaryLine(tenantId: string, row: ProfileRow): Promise<string> {
+    const access =
+      String(row['knowledge_access_mode'] ?? '').trim() === KNOWLEDGE_ACCESS_SELECTED_VAULTS
+        ? KNOWLEDGE_ACCESS_SELECTED_VAULTS
+        : KNOWLEDGE_ACCESS_ALL_VAULTS;
+    if (access !== KNOWLEDGE_ACCESS_SELECTED_VAULTS) {
+      return buildKnowledgeAccessSummaryLine(KNOWLEDGE_ACCESS_ALL_VAULTS, []);
+    }
+    const supabase = getSupabaseService();
+    const pid = row['id'] as string;
+    const { data: links } = await supabase
+      .from('tenant_bot_profile_knowledge_vaults')
+      .select('vault_id')
+      .eq('profile_id', pid);
+    const vids = (links ?? []).map(l => l['vault_id'] as string).filter(Boolean);
+    if (vids.length === 0) {
+      return buildKnowledgeAccessSummaryLine(KNOWLEDGE_ACCESS_SELECTED_VAULTS, []);
+    }
+    const { data: vaults } = await supabase
+      .from('knowledge_vaults')
+      .select('id, name')
+      .in('id', vids)
+      .eq('tenant_id', tenantId);
+    const names = (vaults ?? []).map(v => String(v['name'] ?? '')).filter(Boolean);
+    return buildKnowledgeAccessSummaryLine(KNOWLEDGE_ACCESS_SELECTED_VAULTS, names);
+  }
+
+  private async buildPromptFieldsFromProfileRow(tenantId: string, row: ProfileRow): Promise<BotProfilePromptFields> {
+    const summary = await this.computeKnowledgeAccessSummaryLine(tenantId, row);
     return {
       name: String(row['name'] ?? ''),
       description: String(row['description'] ?? ''),
@@ -129,8 +193,7 @@ export class BotProfilesService {
       bookingBehaviorNotes: String(row['booking_behavior_notes'] ?? ''),
       escalationBehaviorNotes: String(row['escalation_behavior_notes'] ?? ''),
       knowledgeScopeNotes: String(row['knowledge_scope_notes'] ?? ''),
-      knowledgeScopeMode:
-        String(row['knowledge_scope_mode'] ?? '').trim() || KNOWLEDGE_SCOPE_ALL_WORKSPACE,
+      knowledgeAccessSummary: summary,
     };
   }
 
@@ -219,6 +282,7 @@ export class BotProfilesService {
         escalation_behavior_notes: '',
         knowledge_scope_notes: '',
         knowledge_scope_mode: KNOWLEDGE_SCOPE_ALL_WORKSPACE,
+        knowledge_access_mode: KNOWLEDGE_ACCESS_ALL_VAULTS,
         is_active: false,
         created_at: now,
         updated_at: now,
@@ -276,6 +340,7 @@ export class BotProfilesService {
       escalation_behavior_notes: '',
       knowledge_scope_notes: '',
       knowledge_scope_mode: KNOWLEDGE_SCOPE_ALL_WORKSPACE,
+      knowledge_access_mode: KNOWLEDGE_ACCESS_ALL_VAULTS,
       is_active: true,
       created_at: now,
       updated_at: now,
@@ -297,6 +362,15 @@ export class BotProfilesService {
       updated_at: now,
     });
     if (ce) throw new BadRequestException(`Failed to create default prompt config: ${ce.message}`);
+  }
+
+  private async replaceProfileVaultLinks(profileId: string, vaultIds: string[]): Promise<void> {
+    const supabase = getSupabaseService();
+    await supabase.from('tenant_bot_profile_knowledge_vaults').delete().eq('profile_id', profileId);
+    if (!vaultIds.length) return;
+    const rows = vaultIds.map(vid => ({ profile_id: profileId, vault_id: vid }));
+    const { error } = await supabase.from('tenant_bot_profile_knowledge_vaults').insert(rows);
+    if (error) throw new BadRequestException(`Failed to save vault selection: ${error.message}`);
   }
 
   private async setActiveProfileInternal(tenantId: string, profileId: string): Promise<void> {
@@ -342,7 +416,11 @@ export class BotProfilesService {
       throw new BadRequestException(`Failed to list profiles: ${error.message}`);
     }
     const prompts = await this.loadPromptsByProfileId(tenantId);
-    return (rows ?? []).map(r => this.mapProfile(r as ProfileRow, prompts.get(r['id'] as string) ?? null));
+    const profileIds = (rows ?? []).map(r => r['id'] as string);
+    const vaultMap = await this.loadVaultSelectionsForProfiles(tenantId, profileIds);
+    return (rows ?? []).map(r =>
+      this.mapProfile(r as ProfileRow, prompts.get(r['id'] as string) ?? null, vaultMap.get(r['id'] as string) ?? []),
+    );
   }
 
   async createBotProfile(
@@ -359,6 +437,8 @@ export class BotProfilesService {
       escalationBehaviorNotes?: string;
       knowledgeScopeNotes?: string;
       knowledgeScopeMode?: string;
+      knowledgeAccessMode?: string;
+      selectedVaultIds?: string[];
       temperature?: number;
       modelOverride?: string | null;
       maxTokens?: number | null;
@@ -382,10 +462,20 @@ export class BotProfilesService {
     const notes = body.businessNotes ?? '';
     const blob = buildThreeSectionPromptBlob(persona, goals, notes);
 
+    const accessMode =
+      body.knowledgeAccessMode?.trim() === KNOWLEDGE_ACCESS_SELECTED_VAULTS
+        ? KNOWLEDGE_ACCESS_SELECTED_VAULTS
+        : KNOWLEDGE_ACCESS_ALL_VAULTS;
     const scopeMode =
       body.knowledgeScopeMode?.trim() === KNOWLEDGE_SCOPE_SELECTED_COLLECTIONS
         ? KNOWLEDGE_SCOPE_SELECTED_COLLECTIONS
         : KNOWLEDGE_SCOPE_ALL_WORKSPACE;
+    const effectiveScope =
+      body.knowledgeScopeMode !== undefined
+        ? scopeMode
+        : accessMode === KNOWLEDGE_ACCESS_SELECTED_VAULTS
+          ? KNOWLEDGE_SCOPE_SELECTED_COLLECTIONS
+          : KNOWLEDGE_SCOPE_ALL_WORKSPACE;
 
     const insertProf = {
       id: pid,
@@ -399,7 +489,8 @@ export class BotProfilesService {
       booking_behavior_notes: body.bookingBehaviorNotes ?? '',
       escalation_behavior_notes: body.escalationBehaviorNotes ?? '',
       knowledge_scope_notes: body.knowledgeScopeNotes ?? '',
-      knowledge_scope_mode: scopeMode,
+      knowledge_scope_mode: effectiveScope,
+      knowledge_access_mode: accessMode,
       is_active: false,
       created_at: now,
       updated_at: now,
@@ -436,6 +527,11 @@ export class BotProfilesService {
       await this.setActiveProfileInternal(tenantId, pid);
     }
 
+    const selectedVaults = Array.isArray(body.selectedVaultIds) ? body.selectedVaultIds.filter(Boolean) : [];
+    if (accessMode === KNOWLEDGE_ACCESS_SELECTED_VAULTS && selectedVaults.length > 0) {
+      await this.replaceProfileVaultLinks(pid, selectedVaults);
+    }
+
     const { data: row, error: re } = await supabase
       .from('tenant_bot_profiles')
       .select('*')
@@ -449,7 +545,8 @@ export class BotProfilesService {
       .select('id, tenant_id, bot_profile_id, temperature, model_override, max_tokens')
       .eq('bot_profile_id', pid)
       .maybeSingle();
-    return this.mapProfile(row as ProfileRow, pr as PromptRow | null);
+    const vm = await this.loadVaultSelectionsForProfiles(tenantId, [row['id'] as string]);
+    return this.mapProfile(row as ProfileRow, pr as PromptRow | null, vm.get(row['id'] as string) ?? []);
   }
 
   async updateBotProfile(
@@ -467,6 +564,8 @@ export class BotProfilesService {
       escalationBehaviorNotes: string;
       knowledgeScopeNotes: string;
       knowledgeScopeMode: string;
+      knowledgeAccessMode: string;
+      selectedVaultIds: string[];
       temperature: number;
       modelOverride: string | null;
       maxTokens: number | null;
@@ -515,6 +614,18 @@ export class BotProfilesService {
           ? KNOWLEDGE_SCOPE_SELECTED_COLLECTIONS
           : KNOWLEDGE_SCOPE_ALL_WORKSPACE
         : String(existing['knowledge_scope_mode'] ?? '').trim() || KNOWLEDGE_SCOPE_ALL_WORKSPACE;
+    const nextAccessMode =
+      body.knowledgeAccessMode !== undefined
+        ? body.knowledgeAccessMode.trim() === KNOWLEDGE_ACCESS_SELECTED_VAULTS
+          ? KNOWLEDGE_ACCESS_SELECTED_VAULTS
+          : KNOWLEDGE_ACCESS_ALL_VAULTS
+        : String(existing['knowledge_access_mode'] ?? '').trim() || KNOWLEDGE_ACCESS_ALL_VAULTS;
+    const effectiveScopeForRow =
+      body.knowledgeScopeMode !== undefined
+        ? nextScopeMode
+        : nextAccessMode === KNOWLEDGE_ACCESS_SELECTED_VAULTS
+          ? KNOWLEDGE_SCOPE_SELECTED_COLLECTIONS
+          : KNOWLEDGE_SCOPE_ALL_WORKSPACE;
 
     const { error: ue } = await supabase
       .from('tenant_bot_profiles')
@@ -528,7 +639,8 @@ export class BotProfilesService {
         booking_behavior_notes: nextBook,
         escalation_behavior_notes: nextEsc,
         knowledge_scope_notes: nextKnow,
-        knowledge_scope_mode: nextScopeMode,
+        knowledge_scope_mode: effectiveScopeForRow,
+        knowledge_access_mode: nextAccessMode,
         updated_at: now,
       })
       .eq('id', botProfileId)
@@ -552,6 +664,15 @@ export class BotProfilesService {
 
     await supabase.from('tenant_prompt_configs').update(updPrompt).eq('bot_profile_id', botProfileId);
 
+    if (body.knowledgeAccessMode !== undefined && nextAccessMode === KNOWLEDGE_ACCESS_ALL_VAULTS) {
+      await this.replaceProfileVaultLinks(botProfileId, []);
+    } else if (
+      nextAccessMode === KNOWLEDGE_ACCESS_SELECTED_VAULTS &&
+      body.selectedVaultIds !== undefined
+    ) {
+      await this.replaceProfileVaultLinks(botProfileId, body.selectedVaultIds.filter(Boolean));
+    }
+
     const { data: row } = await supabase
       .from('tenant_bot_profiles')
       .select('*')
@@ -562,7 +683,8 @@ export class BotProfilesService {
       .select('id, tenant_id, bot_profile_id, temperature, model_override, max_tokens')
       .eq('bot_profile_id', botProfileId)
       .maybeSingle();
-    return this.mapProfile(row as ProfileRow, pr.data as PromptRow | null);
+    const vm = await this.loadVaultSelectionsForProfiles(tenantId, [botProfileId]);
+    return this.mapProfile(row as ProfileRow, pr.data as PromptRow | null, vm.get(botProfileId) ?? []);
   }
 
   async setActiveBotProfile(
@@ -594,7 +716,8 @@ export class BotProfilesService {
       .select('id, tenant_id, bot_profile_id, temperature, model_override, max_tokens')
       .eq('bot_profile_id', botProfileId)
       .maybeSingle();
-    return this.mapProfile(row as ProfileRow, pr.data as PromptRow | null);
+    const vm = await this.loadVaultSelectionsForProfiles(tenantId, [botProfileId]);
+    return this.mapProfile(row as ProfileRow, pr.data as PromptRow | null, vm.get(botProfileId) ?? []);
   }
 
   async duplicateBotProfile(
@@ -629,6 +752,8 @@ export class BotProfilesService {
       escalationBehaviorNotes: src.escalationBehaviorNotes,
       knowledgeScopeNotes: src.knowledgeScopeNotes,
       knowledgeScopeMode: src.knowledgeScopeMode,
+      knowledgeAccessMode: src.knowledgeAccessMode,
+      selectedVaultIds: src.selectedVaultIds,
       temperature: src.temperature,
       modelOverride: src.modelOverride,
       maxTokens: src.maxTokens,
@@ -666,6 +791,53 @@ export class BotProfilesService {
     if (error) throw new BadRequestException(`Failed to delete profile: ${error.message}`);
   }
 
+  /**
+   * Resolves which knowledge document IDs the active assistant profile may use for KB retrieval.
+   */
+  async getKbDocumentAllowlistForActiveProfile(
+    tenantId: string,
+  ): Promise<
+    | { kind: 'all' }
+    | { kind: 'none'; reason: 'profileKnowledgeVaultsEmpty' | 'selectedVaultsNoDocuments' }
+    | { kind: 'allowlist'; documentIds: string[] }
+  > {
+    await this.ensureMigratedForTenant(tenantId);
+    const supabase = getSupabaseService();
+    const { data: prof } = await supabase
+      .from('tenant_bot_profiles')
+      .select('id, knowledge_access_mode')
+      .eq('tenant_id', tenantId)
+      .eq('is_active', true)
+      .maybeSingle();
+    if (!prof?.id) return { kind: 'all' };
+
+    const access = String(prof['knowledge_access_mode'] ?? '').trim();
+    if (access !== KNOWLEDGE_ACCESS_SELECTED_VAULTS) {
+      return { kind: 'all' };
+    }
+
+    const { data: links } = await supabase
+      .from('tenant_bot_profile_knowledge_vaults')
+      .select('vault_id')
+      .eq('profile_id', prof['id'] as string);
+    const vaultIds = (links ?? []).map(l => l['vault_id'] as string).filter(Boolean);
+    if (vaultIds.length === 0) {
+      return { kind: 'none', reason: 'profileKnowledgeVaultsEmpty' };
+    }
+
+    const { data: docs } = await supabase
+      .from('knowledge_documents')
+      .select('id')
+      .eq('tenant_id', tenantId)
+      .eq('status', 'READY')
+      .in('vault_id', vaultIds);
+    const ids = (docs ?? []).map(d => d.id as string).filter(Boolean);
+    if (ids.length === 0) {
+      return { kind: 'none', reason: 'selectedVaultsNoDocuments' };
+    }
+    return { kind: 'allowlist', documentIds: ids };
+  }
+
   /** Orchestration: active profile text + linked reply settings. Falls back to legacy prompt row if needed. */
   async getActivePromptForOrchestration(tenantId: string): Promise<{
     id: string;
@@ -693,7 +865,8 @@ export class BotProfilesService {
         .eq('bot_profile_id', prof['id'] as string)
         .maybeSingle();
 
-      const systemPrompt = buildOrchestrationTenantPromptFromProfile(this.profileFieldsFromRow(prof));
+      const promptFields = await this.buildPromptFieldsFromProfileRow(tenantId, prof as ProfileRow);
+      const systemPrompt = buildOrchestrationTenantPromptFromProfile(promptFields);
       return {
         id: (pr?.['id'] as string) ?? (prof['id'] as string),
         systemPrompt,
@@ -736,7 +909,8 @@ export class BotProfilesService {
       .eq('is_active', true)
       .maybeSingle();
     if (!prof?.id) return '';
-    return buildBookingNluProfileAppendix(this.profileFieldsFromRow(prof));
+    const fields = await this.buildPromptFieldsFromProfileRow(tenantId, prof as ProfileRow);
+    return buildBookingNluProfileAppendix(fields);
   }
 
   async getBookingReplyPersonaPrompt(tenantId: string): Promise<string | undefined> {
@@ -749,7 +923,8 @@ export class BotProfilesService {
       .eq('is_active', true)
       .maybeSingle();
     if (!prof?.id) return undefined;
-    const s = buildBookingReplyPersonaPrompt(this.profileFieldsFromRow(prof)).trim();
+    const fields = await this.buildPromptFieldsFromProfileRow(tenantId, prof as ProfileRow);
+    const s = buildBookingReplyPersonaPrompt(fields).trim();
     return s || undefined;
   }
 

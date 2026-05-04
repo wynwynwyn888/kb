@@ -109,6 +109,8 @@ export class PromptsController {
       escalationBehaviorNotes?: string;
       knowledgeScopeNotes?: string;
       knowledgeScopeMode?: string;
+      knowledgeAccessMode?: string;
+      selectedVaultIds?: string[];
       temperature?: number;
       modelOverride?: string | null;
       maxTokens?: number | null;
@@ -137,6 +139,8 @@ export class PromptsController {
       escalationBehaviorNotes?: string;
       knowledgeScopeNotes?: string;
       knowledgeScopeMode?: string;
+      knowledgeAccessMode?: string;
+      selectedVaultIds?: string[];
       temperature?: number;
       modelOverride?: string | null;
       maxTokens?: number | null;

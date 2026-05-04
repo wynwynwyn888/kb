@@ -7,19 +7,22 @@ import { useAuth } from '@/contexts/AuthContext';
 import {
   getAgencyAiConfig,
   listTenantBotProfiles,
+  listKbVaults,
   createTenantBotProfile,
   updateTenantBotProfile,
   activateTenantBotProfile,
   duplicateTenantBotProfile,
   deleteTenantBotProfile,
+  type KbVaultRow,
   type SubaccountBehaviorPolicy,
   type TenantBotProfileRow,
 } from '@/lib/api';
 import {
+  KNOWLEDGE_ACCESS_ALL_VAULTS,
+  KNOWLEDGE_ACCESS_SELECTED_VAULTS,
   KNOWLEDGE_SCOPE_ALL_WORKSPACE,
-  KNOWLEDGE_SCOPE_SELECTED_COLLECTIONS,
   formatProfileUpdatedAt,
-  knowledgeScopeCardLabel,
+  knowledgeVaultAccessCardLabel,
 } from '@/lib/assistant-profiles-ui';
 import {
   ErrorBanner,
@@ -164,6 +167,10 @@ function numToPreset(n: number): TempPreset {
   return 'balanced';
 }
 
+function sortVaultIds(ids: string[]): string[] {
+  return [...ids].filter(Boolean).sort();
+}
+
 type FormBaseline = {
   profileName: string;
   description: string;
@@ -174,7 +181,8 @@ type FormBaseline = {
   bookingBehaviorNotes: string;
   escalationBehaviorNotes: string;
   knowledgeScopeNotes: string;
-  knowledgeScopeMode: string;
+  knowledgeAccessMode: string;
+  selectedVaultIds: string[];
   tempPreset: TempPreset;
   modelOverride: string;
   maxTokens: number;
@@ -182,9 +190,10 @@ type FormBaseline = {
 
 function rowToBaseline(row: TenantBotProfileRow): FormBaseline {
   const mt = row.maxTokens != null && row.maxTokens > 0 ? row.maxTokens : 800;
-  const rawScope = row.knowledgeScopeMode?.trim() || KNOWLEDGE_SCOPE_ALL_WORKSPACE;
-  const scope =
-    rawScope === KNOWLEDGE_SCOPE_SELECTED_COLLECTIONS ? KNOWLEDGE_SCOPE_ALL_WORKSPACE : rawScope;
+  const access =
+    row.knowledgeAccessMode?.trim() === KNOWLEDGE_ACCESS_SELECTED_VAULTS
+      ? KNOWLEDGE_ACCESS_SELECTED_VAULTS
+      : KNOWLEDGE_ACCESS_ALL_VAULTS;
   return {
     profileName: row.name,
     description: row.description ?? '',
@@ -195,7 +204,8 @@ function rowToBaseline(row: TenantBotProfileRow): FormBaseline {
     bookingBehaviorNotes: row.bookingBehaviorNotes ?? '',
     escalationBehaviorNotes: row.escalationBehaviorNotes ?? '',
     knowledgeScopeNotes: row.knowledgeScopeNotes ?? '',
-    knowledgeScopeMode: scope,
+    knowledgeAccessMode: access,
+    selectedVaultIds: sortVaultIds(row.selectedVaultIds ?? []),
     tempPreset: numToPreset(row.temperature != null ? Number(row.temperature) : 0.7),
     modelOverride: row.modelOverride ?? '',
     maxTokens: mt,
@@ -230,7 +240,9 @@ export function TenantGoalsPanel() {
   const [bookingBehaviorNotes, setBookingBehaviorNotes] = useState('');
   const [escalationBehaviorNotes, setEscalationBehaviorNotes] = useState('');
   const [knowledgeScopeNotes, setKnowledgeScopeNotes] = useState('');
-  const [knowledgeScopeMode, setKnowledgeScopeMode] = useState(KNOWLEDGE_SCOPE_ALL_WORKSPACE);
+  const [knowledgeAccessMode, setKnowledgeAccessMode] = useState(KNOWLEDGE_ACCESS_ALL_VAULTS);
+  const [selectedVaultIds, setSelectedVaultIds] = useState<string[]>([]);
+  const [kbVaults, setKbVaults] = useState<KbVaultRow[]>([]);
   const [tempPreset, setTempPreset] = useState<TempPreset>('balanced');
   const [modelOverride, setModelOverride] = useState('');
   const [maxTokens, setMaxTokens] = useState(800);
@@ -253,7 +265,8 @@ export function TenantGoalsPanel() {
       bookingBehaviorNotes,
       escalationBehaviorNotes,
       knowledgeScopeNotes,
-      knowledgeScopeMode,
+      knowledgeAccessMode,
+      selectedVaultIds,
       tempPreset,
       modelOverride,
       maxTokens,
@@ -268,7 +281,8 @@ export function TenantGoalsPanel() {
     bookingBehaviorNotes,
     escalationBehaviorNotes,
     knowledgeScopeNotes,
-    knowledgeScopeMode,
+    knowledgeAccessMode,
+    selectedVaultIds,
     tempPreset,
     modelOverride,
     maxTokens,
@@ -301,10 +315,12 @@ export function TenantGoalsPanel() {
     setBookingBehaviorNotes(row.bookingBehaviorNotes ?? '');
     setEscalationBehaviorNotes(row.escalationBehaviorNotes ?? '');
     setKnowledgeScopeNotes(row.knowledgeScopeNotes ?? '');
-    const rawScope = row.knowledgeScopeMode?.trim() || KNOWLEDGE_SCOPE_ALL_WORKSPACE;
-    setKnowledgeScopeMode(
-      rawScope === KNOWLEDGE_SCOPE_SELECTED_COLLECTIONS ? KNOWLEDGE_SCOPE_ALL_WORKSPACE : rawScope,
-    );
+    const access =
+      row.knowledgeAccessMode?.trim() === KNOWLEDGE_ACCESS_SELECTED_VAULTS
+        ? KNOWLEDGE_ACCESS_SELECTED_VAULTS
+        : KNOWLEDGE_ACCESS_ALL_VAULTS;
+    setKnowledgeAccessMode(access);
+    setSelectedVaultIds(sortVaultIds(row.selectedVaultIds ?? []));
     setTempPreset(numToPreset(row.temperature != null ? Number(row.temperature) : 0.7));
     setModelOverride(row.modelOverride ?? '');
     const mt = row.maxTokens != null && row.maxTokens > 0 ? row.maxTokens : 800;
@@ -320,11 +336,14 @@ export function TenantGoalsPanel() {
       setLoading(true);
       setErr('');
       try {
-        const [profileList, agencyCfg] = await Promise.all([
+        const [profileList, agencyCfg, vaultList] = await Promise.all([
           listTenantBotProfiles(token, subaccountId),
           getAgencyAiConfig(token).catch(() => null),
+          listKbVaults(token, subaccountId).catch(() => [] as KbVaultRow[]),
         ]);
         if (cancelled) return;
+
+        setKbVaults(Array.isArray(vaultList) ? vaultList : []);
 
         if (agencyCfg?.subaccountBehaviorPolicy) {
           setPolicy(agencyCfg.subaccountBehaviorPolicy);
@@ -350,7 +369,8 @@ export function TenantGoalsPanel() {
           setBookingBehaviorNotes('');
           setEscalationBehaviorNotes('');
           setKnowledgeScopeNotes('');
-          setKnowledgeScopeMode(KNOWLEDGE_SCOPE_ALL_WORKSPACE);
+          setKnowledgeAccessMode(KNOWLEDGE_ACCESS_ALL_VAULTS);
+          setSelectedVaultIds([]);
           setTempPreset('balanced');
           setModelOverride('');
           setMaxTokens(800);
@@ -403,15 +423,25 @@ export function TenantGoalsPanel() {
         bookingBehaviorNotes,
         escalationBehaviorNotes,
         knowledgeScopeNotes,
-        knowledgeScopeMode,
+        knowledgeAccessMode,
+        selectedVaultIds:
+          knowledgeAccessMode === KNOWLEDGE_ACCESS_SELECTED_VAULTS ? selectedVaultIds : undefined,
+        knowledgeScopeMode:
+          knowledgeAccessMode === KNOWLEDGE_ACCESS_SELECTED_VAULTS
+            ? 'selected_collections'
+            : KNOWLEDGE_SCOPE_ALL_WORKSPACE,
         temperature,
         maxTokens: tok,
         modelOverride: p.allowModelOverride && mo ? mo : null,
       });
       setOk('Changes saved.');
-      const refreshed = await listTenantBotProfiles(token, subaccountId);
+      const [refreshed, vaultList] = await Promise.all([
+        listTenantBotProfiles(token, subaccountId),
+        listKbVaults(token, subaccountId).catch(() => [] as KbVaultRow[]),
+      ]);
       const list = Array.isArray(refreshed) ? refreshed : [];
       setProfiles(list);
+      setKbVaults(Array.isArray(vaultList) ? vaultList : []);
       const match = list.find(x => x.id === selectedProfileId) ?? list.find(x => x.isActive) ?? list[0];
       if (match) applyRowToForm(match);
     } catch (e) {
@@ -449,7 +479,8 @@ export function TenantGoalsPanel() {
         bookingBehaviorNotes: '',
         escalationBehaviorNotes: '',
         knowledgeScopeNotes: '',
-        knowledgeScopeMode: KNOWLEDGE_SCOPE_ALL_WORKSPACE,
+        knowledgeAccessMode: KNOWLEDGE_ACCESS_ALL_VAULTS,
+        selectedVaultIds: [],
         setActive: false,
       });
       const refreshed = await listTenantBotProfiles(token, subaccountId);
@@ -639,7 +670,11 @@ export function TenantGoalsPanel() {
                 </p>
               ) : null}
               <p style={{ fontSize: '0.85rem', color: 'var(--aisbp-text-secondary, #334155)', margin: '0 0 0.25rem' }}>
-                Knowledge: {knowledgeScopeCardLabel(activeProfile.knowledgeScopeMode)}
+                Knowledge vaults:{' '}
+                {knowledgeVaultAccessCardLabel(
+                  activeProfile.knowledgeAccessMode,
+                  activeProfile.selectedVaultIds?.length ?? 0,
+                )}
               </p>
               <p style={{ fontSize: '0.82rem', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 0.5rem' }}>
                 Used for live customer replies.
@@ -750,7 +785,11 @@ export function TenantGoalsPanel() {
                           </p>
                         ) : null}
                         <p style={{ fontSize: '0.7rem', color: 'var(--aisbp-muted, #94a3b8)', margin: '0 0 0.2rem' }}>
-                          Knowledge: {knowledgeScopeCardLabel(p.knowledgeScopeMode)}
+                          Knowledge vaults:{' '}
+                          {knowledgeVaultAccessCardLabel(
+                            p.knowledgeAccessMode,
+                            p.selectedVaultIds?.length ?? 0,
+                          )}
                         </p>
                         <p style={{ fontSize: '0.7rem', color: 'var(--aisbp-muted, #94a3b8)', margin: 0 }}>
                           Updated {formatProfileUpdatedAt(p.updatedAt)}
@@ -847,13 +886,120 @@ export function TenantGoalsPanel() {
                   </div>
 
                   <div style={sectionCard}>
-                    <label style={mvpLabelStyle}>Knowledge scope</label>
-                    <p style={{ fontSize: '0.88rem', fontWeight: 600, margin: '0.25rem 0 0.15rem', color: 'var(--aisbp-text-heading, #0f172a)' }}>
-                      Knowledge: All workspace knowledge
+                    <label style={mvpLabelStyle}>Knowledge used by this assistant</label>
+                    <p
+                      style={{
+                        fontSize: '0.82rem',
+                        color: 'var(--aisbp-text-secondary, #334155)',
+                        margin: '0.35rem 0 0.75rem',
+                        lineHeight: 1.45,
+                      }}
+                    >
+                      Vaults are groups of knowledge this assistant can use when replying.
                     </p>
-                    <p style={{ fontSize: '0.72rem', color: 'var(--aisbp-muted, #94a3b8)', margin: '0 0 0.35rem' }}>
-                      Selected collections — coming soon
-                    </p>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
+                      <label
+                        style={{
+                          display: 'flex',
+                          alignItems: 'flex-start',
+                          gap: '0.45rem',
+                          fontSize: '0.88rem',
+                          cursor: 'pointer',
+                          color: 'var(--aisbp-text-heading, #0f172a)',
+                        }}
+                      >
+                        <input
+                          type="radio"
+                          name="knowledge-access-mode"
+                          checked={knowledgeAccessMode === KNOWLEDGE_ACCESS_ALL_VAULTS}
+                          onChange={() => setKnowledgeAccessMode(KNOWLEDGE_ACCESS_ALL_VAULTS)}
+                          style={{ marginTop: '0.2rem' }}
+                        />
+                        <span>
+                          <strong style={{ fontWeight: 700 }}>Use all vaults</strong>
+                          <span style={{ display: 'block', fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)', marginTop: '0.15rem' }}>
+                            Default — search every knowledge vault in this workspace.
+                          </span>
+                        </span>
+                      </label>
+                      <label
+                        style={{
+                          display: 'flex',
+                          alignItems: 'flex-start',
+                          gap: '0.45rem',
+                          fontSize: '0.88rem',
+                          cursor: 'pointer',
+                          color: 'var(--aisbp-text-heading, #0f172a)',
+                        }}
+                      >
+                        <input
+                          type="radio"
+                          name="knowledge-access-mode"
+                          checked={knowledgeAccessMode === KNOWLEDGE_ACCESS_SELECTED_VAULTS}
+                          onChange={() => setKnowledgeAccessMode(KNOWLEDGE_ACCESS_SELECTED_VAULTS)}
+                          style={{ marginTop: '0.2rem' }}
+                        />
+                        <span>
+                          <strong style={{ fontWeight: 700 }}>Selected vaults</strong>
+                          <span style={{ display: 'block', fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)', marginTop: '0.15rem' }}>
+                            Only the vaults you check below are searched for this assistant.
+                          </span>
+                        </span>
+                      </label>
+                    </div>
+                    {knowledgeAccessMode === KNOWLEDGE_ACCESS_SELECTED_VAULTS ? (
+                      kbVaults.length === 0 ? (
+                        <p
+                          style={{
+                            margin: '0.75rem 0 0',
+                            fontSize: '0.82rem',
+                            color: 'var(--aisbp-muted, #64748b)',
+                            lineHeight: 1.45,
+                          }}
+                        >
+                          No knowledge vaults yet. Create one in Knowledge Base.
+                        </p>
+                      ) : (
+                        <div style={{ marginTop: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                          {kbVaults.map(v => {
+                            const checked = selectedVaultIds.includes(v.id);
+                            return (
+                              <label
+                                key={v.id}
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '0.45rem',
+                                  fontSize: '0.85rem',
+                                  cursor: 'pointer',
+                                }}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() => {
+                                    setSelectedVaultIds(prev => {
+                                      const s = new Set(prev);
+                                      if (s.has(v.id)) s.delete(v.id);
+                                      else s.add(v.id);
+                                      return sortVaultIds([...s]);
+                                    });
+                                  }}
+                                />
+                                <span>
+                                  {v.name}
+                                  {v.isDefault ? (
+                                    <span style={{ fontSize: '0.72rem', color: 'var(--aisbp-muted, #94a3b8)', marginLeft: '0.35rem' }}>
+                                      (default)
+                                    </span>
+                                  ) : null}
+                                </span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      )
+                    ) : null}
                   </div>
 
                   <div style={sectionCard}>
@@ -970,12 +1116,12 @@ export function TenantGoalsPanel() {
                         />
                       </div>
                       <div>
-                        <label style={mvpLabelStyle}>Knowledge scope notes</label>
+                        <label style={mvpLabelStyle}>Knowledge vault notes</label>
                         <textarea
                           style={textareaStyle}
                           value={knowledgeScopeNotes}
                           onChange={e => setKnowledgeScopeNotes(e.target.value)}
-                          aria-label="Knowledge scope notes"
+                          aria-label="Knowledge vault notes"
                         />
                       </div>
                     </div>

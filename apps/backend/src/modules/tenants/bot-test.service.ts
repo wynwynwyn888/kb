@@ -101,11 +101,17 @@ export class BotTestService {
       messageType: 'text' as const,
     }));
 
+    const kbFilter = await this.botProfiles.getKbDocumentAllowlistForActiveProfile(tenantId);
+    let documentIdAllowlist: string[] | null | undefined = undefined;
+    if (kbFilter.kind === 'allowlist') documentIdAllowlist = kbFilter.documentIds;
+    else if (kbFilter.kind === 'none') documentIdAllowlist = [];
+
     const kbResult = await this.kbService.retrieve({
       tenantId,
       conversationId: 'bot-test',
       query: msg,
       topK: 8,
+      documentIdAllowlist,
     });
     const kbChunks: RetrievalChunk[] = kbResult.chunks;
 

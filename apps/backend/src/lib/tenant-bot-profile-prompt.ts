@@ -73,6 +73,11 @@ export function buildThreeSectionPromptBlob(
   ].join('\n');
 }
 
+/** Assistant KB access: all vaults vs named vault subset. */
+export const KNOWLEDGE_ACCESS_ALL_VAULTS = 'all_vaults';
+export const KNOWLEDGE_ACCESS_SELECTED_VAULTS = 'selected_vaults';
+
+/** Legacy DB column `knowledge_scope_mode` — kept in sync for older readers. */
 export const KNOWLEDGE_SCOPE_ALL_WORKSPACE = 'all_workspace_knowledge';
 export const KNOWLEDGE_SCOPE_SELECTED_COLLECTIONS = 'selected_collections';
 
@@ -86,24 +91,23 @@ export interface BotProfilePromptFields {
   bookingBehaviorNotes: string;
   escalationBehaviorNotes: string;
   knowledgeScopeNotes: string;
-  /** KB visibility mode; summaries appear in orchestration prompts. */
-  knowledgeScopeMode: string;
+  /** One line for orchestration / booking appendix, e.g. "Knowledge access: All knowledge vaults" */
+  knowledgeAccessSummary: string;
 }
 
-/** Single-line summary for prompts (orchestration / NLU). */
-export function knowledgeScopeSummaryLine(mode: string | undefined): string {
-  const m = mode?.trim();
-  if (m === KNOWLEDGE_SCOPE_SELECTED_COLLECTIONS) {
-    return 'Knowledge scope: Selected collections';
+/** Build the single-line knowledge access hint for prompts. */
+export function buildKnowledgeAccessSummaryLine(
+  accessMode: string | undefined,
+  selectedVaultNames: string[],
+): string {
+  const m = (accessMode ?? '').trim();
+  if (m === KNOWLEDGE_ACCESS_SELECTED_VAULTS && selectedVaultNames.length > 0) {
+    return `Knowledge access: Selected vaults: ${selectedVaultNames.join(', ')}`;
   }
-  return 'Knowledge scope: All workspace knowledge';
-}
-
-/** Short label for UI cards (no “Knowledge scope:” prefix). */
-export function knowledgeScopeCardLabel(mode: string | undefined): string {
-  const m = mode?.trim();
-  if (m === KNOWLEDGE_SCOPE_SELECTED_COLLECTIONS) return 'Selected collections';
-  return 'All workspace knowledge';
+  if (m === KNOWLEDGE_ACCESS_SELECTED_VAULTS) {
+    return 'Knowledge access: Selected vaults (none assigned)';
+  }
+  return 'Knowledge access: All knowledge vaults';
 }
 
 /** Full subaccount instructions for main orchestration (stacked under agency policy separately). */
@@ -116,7 +120,7 @@ export function buildOrchestrationTenantPromptFromProfile(p: BotProfilePromptFie
   }
   chunks.push(header.join('\n'));
 
-  chunks.push(knowledgeScopeSummaryLine(p.knowledgeScopeMode));
+  chunks.push(p.knowledgeAccessSummary.trim() || buildKnowledgeAccessSummaryLine(KNOWLEDGE_ACCESS_ALL_VAULTS, []));
 
   chunks.push(
     buildThreeSectionPromptBlob(p.persona, p.conversationGoals, p.businessNotes),
@@ -141,7 +145,7 @@ export function buildOrchestrationTenantPromptFromProfile(p: BotProfilePromptFie
 /** Short appendix for booking NLU (tone / scope hints only). */
 export function buildBookingNluProfileAppendix(p: BotProfilePromptFields): string {
   const parts: string[] = [];
-  parts.push(knowledgeScopeSummaryLine(p.knowledgeScopeMode));
+  parts.push(p.knowledgeAccessSummary.trim() || buildKnowledgeAccessSummaryLine(KNOWLEDGE_ACCESS_ALL_VAULTS, []));
   if (p.description.trim()) parts.push(`Business context: ${p.description.trim()}`);
   if (p.toneRules.trim()) parts.push(`Tone: ${p.toneRules.trim()}`);
   if (p.bookingBehaviorNotes.trim()) parts.push(`Booking handling: ${p.bookingBehaviorNotes.trim()}`);
@@ -151,7 +155,9 @@ export function buildBookingNluProfileAppendix(p: BotProfilePromptFields): strin
 
 /** Persona line(s) for booking reply composer user JSON `personaPrompt`. */
 export function buildBookingReplyPersonaPrompt(p: BotProfilePromptFields): string {
-  const parts: string[] = [knowledgeScopeSummaryLine(p.knowledgeScopeMode)];
+  const parts: string[] = [
+    p.knowledgeAccessSummary.trim() || buildKnowledgeAccessSummaryLine(KNOWLEDGE_ACCESS_ALL_VAULTS, []),
+  ];
   if (p.persona.trim()) parts.push(p.persona.trim());
   if (p.toneRules.trim()) parts.push(`Tone rules: ${p.toneRules.trim()}`);
   if (p.bookingBehaviorNotes.trim()) parts.push(`Booking style: ${p.bookingBehaviorNotes.trim()}`);

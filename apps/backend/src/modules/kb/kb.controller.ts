@@ -86,6 +86,82 @@ export class KbController {
     return row;
   }
 
+  @Get('vaults/:tenantId')
+  @ApiOperation({ summary: 'List knowledge vaults for a workspace' })
+  async listVaults(@Param('tenantId') tenantId: string, @CurrentUser() user: SessionUser) {
+    if (!tenantId?.trim()) throw new BadRequestException('tenantId is required');
+    await this.assertTenantScope(user, tenantId);
+    return this.kbService.listVaults(tenantId.trim());
+  }
+
+  @Post('vaults')
+  @ApiOperation({ summary: 'Create a knowledge vault' })
+  async createVault(
+    @Body() dto: { tenantId: string; name: string; description?: string | null },
+    @CurrentUser() user: SessionUser,
+  ) {
+    if (!dto.tenantId?.trim()) throw new BadRequestException('tenantId is required');
+    await this.assertTenantScope(user, dto.tenantId);
+    try {
+      return await this.kbService.createVault(dto.tenantId.trim(), dto.name, dto.description);
+    } catch (e) {
+      throw new BadRequestException(mapKbError(e));
+    }
+  }
+
+  @Patch('vaults/:vaultId')
+  @ApiOperation({ summary: 'Rename or update a knowledge vault' })
+  async updateVault(
+    @Param('vaultId') vaultId: string,
+    @Query('tenantId') tenantId: string | undefined,
+    @Body() dto: { name?: string; description?: string | null },
+    @CurrentUser() user: SessionUser,
+  ) {
+    if (!tenantId?.trim()) throw new BadRequestException('tenantId query parameter is required');
+    await this.assertTenantScope(user, tenantId);
+    try {
+      return await this.kbService.updateVault(tenantId.trim(), vaultId.trim(), dto);
+    } catch (e) {
+      throw new BadRequestException(mapKbError(e));
+    }
+  }
+
+  @Delete('vaults/:vaultId')
+  @ApiOperation({ summary: 'Delete an empty vault, or move documents to reassignToVaultId first' })
+  async deleteVault(
+    @Param('vaultId') vaultId: string,
+    @Query('tenantId') tenantId: string | undefined,
+    @Query('reassignToVaultId') reassignToVaultId: string | undefined,
+    @CurrentUser() user: SessionUser,
+  ) {
+    if (!tenantId?.trim()) throw new BadRequestException('tenantId query parameter is required');
+    await this.assertTenantScope(user, tenantId);
+    try {
+      return await this.kbService.deleteVault(tenantId.trim(), vaultId.trim(), {
+        reassignToVaultId: reassignToVaultId?.trim(),
+      });
+    } catch (e) {
+      throw new BadRequestException(mapKbError(e));
+    }
+  }
+
+  @Patch('documents/:documentId/vault')
+  @ApiOperation({ summary: 'Assign a document to a knowledge vault' })
+  async setDocumentVault(
+    @Param('documentId') documentId: string,
+    @Body() dto: { tenantId: string; vaultId: string },
+    @CurrentUser() user: SessionUser,
+  ) {
+    if (!dto.tenantId?.trim()) throw new BadRequestException('tenantId is required');
+    if (!dto.vaultId?.trim()) throw new BadRequestException('vaultId is required');
+    await this.assertTenantScope(user, dto.tenantId);
+    try {
+      return await this.kbService.setDocumentVault(dto.tenantId.trim(), documentId.trim(), dto.vaultId.trim());
+    } catch (e) {
+      throw new BadRequestException(mapKbError(e));
+    }
+  }
+
   @Get('documents/:tenantId')
   @ApiOperation({ summary: 'List knowledge documents (READY only, or all with ?all=1)' })
   async listDocuments(

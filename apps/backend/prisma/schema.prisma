@@ -116,6 +116,7 @@ model Tenant {
   tagRules           TenantTagRule[]
   followUpSettings   TenantFollowUpSettings?
   botProfiles        TenantBotProfile[]
+  knowledgeVaults  KnowledgeVault[]
 
   @@unique([ghlLocationId])
   @@index([agencyId])
@@ -374,14 +375,17 @@ model TenantBotProfile {
   bookingBehaviorNotes      String   @default("") @map("booking_behavior_notes") @db.Text
   escalationBehaviorNotes   String   @default("") @map("escalation_behavior_notes") @db.Text
   knowledgeScopeNotes       String   @default("") @map("knowledge_scope_notes") @db.Text
-  /// all_workspace_knowledge | selected_collections (future)
+  /// all_workspace_knowledge | selected_collections (legacy; use knowledgeAccessMode for vaults)
   knowledgeScopeMode        String   @default("all_workspace_knowledge") @map("knowledge_scope_mode")
+  /// all_vaults | selected_vaults — controls KB retrieval for this profile when active
+  knowledgeAccessMode       String   @default("all_vaults") @map("knowledge_access_mode")
   isActive                  Boolean  @default(false) @map("is_active")
   createdAt                 DateTime @default(now()) @map("created_at")
   updatedAt                 DateTime @updatedAt @map("updated_at")
 
-  tenant       Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  promptConfig TenantPromptConfig?
+  tenant              Tenant                           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  promptConfig        TenantPromptConfig?
+  knowledgeVaultLinks TenantBotProfileKnowledgeVault[]
 
   @@unique([tenantId, name])
   @@index([tenantId])
@@ -409,6 +413,37 @@ model TenantModelOverride {
 // KNOWLEDGE BASE
 // ============================================================================
 
+/// Groups knowledge documents for assistant profile access control.
+model KnowledgeVault {
+  id          String   @id @default(uuid())
+  tenantId    String   @map("tenant_id")
+  name        String
+  description String?  @db.Text
+  isDefault   Boolean  @default(false) @map("is_default")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  tenant       Tenant                           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  documents    KnowledgeDocument[]
+  profileLinks TenantBotProfileKnowledgeVault[]
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@map("knowledge_vaults")
+}
+
+model TenantBotProfileKnowledgeVault {
+  profileId String @map("profile_id")
+  vaultId   String @map("vault_id")
+
+  profile TenantBotProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  vault   KnowledgeVault   @relation(fields: [vaultId], references: [id], onDelete: Cascade)
+
+  @@id([profileId, vaultId])
+  @@index([vaultId])
+  @@map("tenant_bot_profile_knowledge_vaults")
+}
+
 enum DocumentStatus {
   PENDING
   PROCESSING
@@ -420,6 +455,7 @@ enum DocumentStatus {
 model KnowledgeDocument {
   id        String         @id @default(uuid())
   tenantId  String         @map("tenant_id")
+  vaultId   String         @map("vault_id")
   title     String
   source    String
   mimeType  String         @map("mime_type")
@@ -433,9 +469,11 @@ model KnowledgeDocument {
 
   // Relations
   tenant Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  vault  KnowledgeVault   @relation(fields: [vaultId], references: [id], onDelete: Restrict)
   chunks KnowledgeChunk[]
 
   @@index([tenantId])
+  @@index([vaultId])
   @@map("knowledge_documents")
 }
 

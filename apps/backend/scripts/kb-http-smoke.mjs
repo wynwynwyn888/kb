@@ -52,9 +52,22 @@ async function seedKbRow(sbAdmin, tenantId) {
   const content =
     'KB smoke: refund requests are accepted within thirty days of purchase.';
 
+  const vaultId = randomUUID();
+  const { error: ve } = await sbAdmin.from('knowledge_vaults').insert({
+    id: vaultId,
+    tenant_id: tenantId,
+    name: 'General Knowledge',
+    description: null,
+    is_default: true,
+    created_at: now,
+    updated_at: now,
+  });
+  if (ve) throw new Error(`knowledge_vaults: ${ve.message}`);
+
   const { error: de } = await sbAdmin.from('knowledge_documents').insert({
     id: docId,
     tenant_id: tenantId,
+    vault_id: vaultId,
     title: 'KB HTTP Smoke FAQ',
     source: 'smoke',
     mime_type: 'text/plain',

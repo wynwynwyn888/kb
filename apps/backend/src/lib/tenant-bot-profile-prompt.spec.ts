@@ -1,8 +1,10 @@
 import { describe, expect, it } from '@jest/globals';
 import {
-  KNOWLEDGE_SCOPE_ALL_WORKSPACE,
+  KNOWLEDGE_ACCESS_ALL_VAULTS,
+  KNOWLEDGE_ACCESS_SELECTED_VAULTS,
   buildBookingNluProfileAppendix,
   buildBookingReplyPersonaPrompt,
+  buildKnowledgeAccessSummaryLine,
   buildOrchestrationTenantPromptFromProfile,
   buildThreeSectionPromptBlob,
   parsePromptSections,
@@ -17,7 +19,18 @@ describe('tenant-bot-profile-prompt', () => {
     expect(p.additional).toBe('Note');
   });
 
-  it('buildOrchestrationTenantPromptFromProfile includes persona blocks and extras', () => {
+  it('buildKnowledgeAccessSummaryLine formats all vaults', () => {
+    expect(buildKnowledgeAccessSummaryLine(KNOWLEDGE_ACCESS_ALL_VAULTS, [])).toContain('All knowledge vaults');
+  });
+
+  it('buildKnowledgeAccessSummaryLine formats selected vault names', () => {
+    const s = buildKnowledgeAccessSummaryLine(KNOWLEDGE_ACCESS_SELECTED_VAULTS, ['A', 'B']);
+    expect(s).toContain('Selected vaults');
+    expect(s).toContain('A');
+    expect(s).toContain('B');
+  });
+
+  it('buildOrchestrationTenantPromptFromProfile includes knowledge access summary', () => {
     const out = buildOrchestrationTenantPromptFromProfile({
       name: 'Celeste',
       description: 'Salon front desk',
@@ -28,11 +41,11 @@ describe('tenant-bot-profile-prompt', () => {
       bookingBehaviorNotes: 'Confirm slot',
       escalationBehaviorNotes: 'Hand to human if angry',
       knowledgeScopeNotes: 'Only services on menu',
-      knowledgeScopeMode: KNOWLEDGE_SCOPE_ALL_WORKSPACE,
+      knowledgeAccessSummary: buildKnowledgeAccessSummaryLine(KNOWLEDGE_ACCESS_ALL_VAULTS, []),
     });
     expect(out).toContain('### Assistant profile');
     expect(out).toContain('Celeste');
-    expect(out).toContain('Knowledge scope: All workspace knowledge');
+    expect(out).toContain('Knowledge access:');
     expect(out).toContain('### Bot Persona');
     expect(out).toContain('Warm');
     expect(out).toContain('### Tone rules');
@@ -59,9 +72,9 @@ describe('tenant-bot-profile-prompt', () => {
       bookingBehaviorNotes: 'B',
       escalationBehaviorNotes: '',
       knowledgeScopeNotes: 'K',
-      knowledgeScopeMode: KNOWLEDGE_SCOPE_ALL_WORKSPACE,
+      knowledgeAccessSummary: buildKnowledgeAccessSummaryLine(KNOWLEDGE_ACCESS_ALL_VAULTS, []),
     });
-    expect(s).toContain('Knowledge scope: All workspace knowledge');
+    expect(s).toContain('Knowledge access:');
     expect(s).toContain('Business context: D');
     expect(s).toContain('Tone: T');
   });
@@ -77,9 +90,8 @@ describe('tenant-bot-profile-prompt', () => {
       bookingBehaviorNotes: 'BB',
       escalationBehaviorNotes: '',
       knowledgeScopeNotes: '',
-      knowledgeScopeMode: KNOWLEDGE_SCOPE_ALL_WORKSPACE,
+      knowledgeAccessSummary: buildKnowledgeAccessSummaryLine(KNOWLEDGE_ACCESS_ALL_VAULTS, []),
     });
-    expect(s).toContain('Knowledge scope: All workspace knowledge');
     expect(s).toContain('P');
     expect(s).toContain('Tone rules: T');
   });

@@ -688,12 +688,24 @@ export class ConversationOrchestrationService {
         (opts?.retrieveQuery ?? input.incomingMessage.messageContent ?? '').trim() ||
         (input.incomingMessage.messageContent ?? '').trim();
 
+      const kbFilter = await this.botProfiles.getKbDocumentAllowlistForActiveProfile(input.tenantId);
+      let documentIdAllowlist: string[] | null | undefined = undefined;
+      if (kbFilter.kind === 'allowlist') {
+        documentIdAllowlist = kbFilter.documentIds;
+      } else if (kbFilter.kind === 'none') {
+        documentIdAllowlist = [];
+        this.logger.warn(
+          `KB retrieval skipped: tenant=${input.tenantId} reason=${kbFilter.reason} conversation=${conversationId}`,
+        );
+      }
+
       const result = await this.kbService.retrieve({
         tenantId: input.tenantId,
         conversationId,
         query: retrieveQuery,
         topK: 5,
         intentHint: latestIntent !== 'UNKNOWN' ? latestIntent : undefined,
+        documentIdAllowlist,
       });
 
       const filterIntent = opts?.kbFilterIntent ?? latestIntent;

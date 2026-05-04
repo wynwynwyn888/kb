@@ -79,14 +79,15 @@ export class KbService {
   async retrieve(
     query: RetrievalQuery,
   ): Promise<RetrievalResult> {
-    const { tenantId, conversationId, query: queryText, topK = DEFAULT_TOP_K } = query;
+    const { tenantId, conversationId, query: queryText, topK = DEFAULT_TOP_K, documentIdAllowlist } = query;
 
     this.logger.debug(
-      `KB retrieval started: tenant=${tenantId}, conversation=${conversationId}, topK=${topK}`,
+      `KB retrieval started: tenant=${tenantId}, conversation=${conversationId}, topK=${topK} ` +
+        `allowlist=${documentIdAllowlist === undefined ? 'all' : documentIdAllowlist === null ? 'null' : documentIdAllowlist.length}`,
     );
 
-    // Load all READY chunks for tenant (joined with document title/status)
-    const chunks = await this.loadTenantChunks(tenantId);
+    // Load READY chunks (optionally restricted to assistant profile vault access)
+    const chunks = await this.loadTenantChunks(tenantId, documentIdAllowlist);
     if (chunks.length === 0) {
       this.logger.debug(`KB retrieval: no chunks found for tenant=${tenantId}`);
       return {
@@ -214,7 +215,7 @@ export class KbService {
     // lags after migrations; we infer kind from `source` + `metadata.documentKind`.
     let q = this.supabase
       .from('knowledge_documents')
-      .select('id, title, source, status, created_at, updated_at, metadata, mime_type, size')
+      .select('id, title, source, status, created_at, updated_at, metadata, mime_type, size, vault_id')
       .eq('tenant_id', tenantId);
     if (!opts?.includeAllStatuses) {
       q = q.eq('status', 'READY');
@@ -225,6 +226,24 @@ export class KbService {
 
     // Fetch chunk counts per document
     const docIds = data.map(d => d.id);
+    const vaultIds = [
+      ...new Set(
+        data
+          .map(d => (d as { vault_id?: string | null }).vault_id)
+          .filter((x): x is string => typeof x === 'string' && x.length > 0),
+      ),
+    ];
+    const vaultNameById: Record<string, string> = {};
+    if (vaultIds.length > 0) {
+      const { data: vaultRows } = await this.supabase
+        .from('knowledge_vaults')
+        .select('id, name')
+        .in('id', vaultIds);
+      for (const v of vaultRows ?? []) {
+        vaultNameById[v.id as string] = String(v.name ?? '');
+      }
+    }
+
     const { data: chunks } = await this.supabase
       .from('knowledge_chunks')
       .select('document_id')
@@ -277,7 +296,9 @@ export class KbService {
         updated_at?: string | null;
         mime_type?: string | null;
         size?: number | null;
+        vault_id?: string | null;
       };
+      const vid = row.vault_id ?? null;
 
       return {
         id: d.id,
@@ -285,6 +306,8 @@ export class KbService {
         source: d.source,
         status: d.status,
         documentKind: kind,
+        vaultId: vid,
+        vaultName: vid ? vaultNameById[vid] ?? null : null,
         chunkCount: countMap[d.id] ?? 0,
         createdAt: row.created_at,
         updatedAt: (row.updated_at && String(row.updated_at)) || row.created_at,
@@ -324,6 +347,7 @@ export class KbService {
     const q = question.trim();
     const a = answer.trim();
     if (!q || !a) throw new Error('question and answer required');
+    const vaultId = await this.ensureDefaultVaultForTenant(tenantId);
     const title = `FAQ: ${q.slice(0, 200)}`;
     const docId = randomUUID();
     const now = new Date().toISOString();
@@ -332,6 +356,7 @@ export class KbService {
       .insert({
         id: docId,
         tenant_id: tenantId,
+        vault_id: vaultId,
         title,
         source: 'faq',
         mime_type: 'text/plain',
@@ -360,6 +385,7 @@ export class KbService {
     const t = title.trim();
     const c = content.trim();
     if (!t || !c) throw new Error('title and content required');
+    const vaultId = await this.ensureDefaultVaultForTenant(tenantId);
     const docId = randomUUID();
     const now = new Date().toISOString();
     const { data: doc, error: de } = await this.supabase
@@ -367,6 +393,7 @@ export class KbService {
       .insert({
         id: docId,
         tenant_id: tenantId,
+        vault_id: vaultId,
         title: t,
         source: 'rich_text',
         mime_type: 'text/plain',
@@ -691,6 +718,7 @@ export class KbService {
       text = buffer.toString('utf8');
     }
     if (!text.trim()) throw new Error('Empty or unsupported file content');
+    const vaultId = await this.ensureDefaultVaultForTenant(tenantId);
     const docId = randomUUID();
     const now = new Date().toISOString();
     let metadata: Record<string, unknown> = { fileName, mime, documentKind: 'file' };
@@ -700,6 +728,7 @@ export class KbService {
       .insert({
         id: docId,
         tenant_id: tenantId,
+        vault_id: vaultId,
         title: fileName,
         source: m || 'file',
         mime_type: mime || 'application/octet-stream',
@@ -904,10 +933,12 @@ export class KbService {
         .eq('id', docId);
     } else {
       // Create new document
+      const vaultId = await this.ensureDefaultVaultForTenant(tenantId);
       const { data: newDoc, error: newDocError } = await this.supabase
         .from('knowledge_documents')
         .insert({
           tenant_id: tenantId,
+          vault_id: vaultId,
           title: chunk.title,
           source: chunk.source ?? 'manual',
           mime_type: 'text/plain',
@@ -1000,7 +1031,181 @@ export class KbService {
     if (error) throw new Error(error.message);
   }
 
-  private async loadTenantChunks(tenantId: string): Promise<
+  /**
+   * Ensures the tenant has at least one knowledge vault (creates "General Knowledge" if needed).
+   * New documents must reference a vault_id.
+   */
+  async ensureDefaultVaultForTenant(tenantId: string): Promise<string> {
+    const { data: def } = await this.supabase
+      .from('knowledge_vaults')
+      .select('id')
+      .eq('tenant_id', tenantId)
+      .eq('is_default', true)
+      .maybeSingle();
+    if (def?.id) return def.id as string;
+
+    const { data: anyV } = await this.supabase
+      .from('knowledge_vaults')
+      .select('id')
+      .eq('tenant_id', tenantId)
+      .limit(1)
+      .maybeSingle();
+    if (anyV?.id) return anyV.id as string;
+
+    const id = randomUUID();
+    const now = new Date().toISOString();
+    const { error } = await this.supabase.from('knowledge_vaults').insert({
+      id,
+      tenant_id: tenantId,
+      name: 'General Knowledge',
+      description: null,
+      is_default: true,
+      created_at: now,
+      updated_at: now,
+    });
+    if (error) throw new Error(`Failed to create default vault: ${error.message}`);
+    return id;
+  }
+
+  async listVaults(tenantId: string): Promise<
+    Array<{
+      id: string;
+      name: string;
+      description: string | null;
+      isDefault: boolean;
+      documentCount: number;
+      createdAt: string;
+      updatedAt: string;
+    }>
+  > {
+    const { data: vaults, error } = await this.supabase
+      .from('knowledge_vaults')
+      .select('id, name, description, is_default, created_at, updated_at')
+      .eq('tenant_id', tenantId)
+      .order('is_default', { ascending: false })
+      .order('name', { ascending: true });
+    if (error || !vaults?.length) return [];
+
+    const { data: counts } = await this.supabase
+      .from('knowledge_documents')
+      .select('vault_id')
+      .eq('tenant_id', tenantId);
+    const countByVault: Record<string, number> = {};
+    for (const r of counts ?? []) {
+      const vid = r['vault_id'] as string | undefined;
+      if (vid) countByVault[vid] = (countByVault[vid] ?? 0) + 1;
+    }
+
+    return vaults.map(v => ({
+      id: v.id as string,
+      name: v.name as string,
+      description: (v.description as string | null) ?? null,
+      isDefault: Boolean(v['is_default']),
+      documentCount: countByVault[v.id as string] ?? 0,
+      createdAt: String(v['created_at'] ?? ''),
+      updatedAt: String(v['updated_at'] ?? ''),
+    }));
+  }
+
+  async createVault(
+    tenantId: string,
+    name: string,
+    description?: string | null,
+  ): Promise<{ id: string }> {
+    const n = name.trim();
+    if (!n) throw new Error('Vault name is required');
+    const now = new Date().toISOString();
+    const id = randomUUID();
+    const { error } = await this.supabase.from('knowledge_vaults').insert({
+      id,
+      tenant_id: tenantId,
+      name: n,
+      description: description?.trim() || null,
+      is_default: false,
+      created_at: now,
+      updated_at: now,
+    });
+    if (error) throw new Error(error.message);
+    return { id };
+  }
+
+  async updateVault(
+    tenantId: string,
+    vaultId: string,
+    body: { name?: string; description?: string | null },
+  ): Promise<{ ok: true }> {
+    const updates: Record<string, unknown> = { updated_at: new Date().toISOString() };
+    if (body.name !== undefined) {
+      const n = body.name.trim();
+      if (!n) throw new Error('Vault name is required');
+      updates['name'] = n;
+    }
+    if (body.description !== undefined) {
+      updates['description'] = body.description === null || body.description === '' ? null : body.description.trim();
+    }
+    const { error } = await this.supabase
+      .from('knowledge_vaults')
+      .update(updates)
+      .eq('id', vaultId)
+      .eq('tenant_id', tenantId);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  }
+
+  async deleteVault(
+    tenantId: string,
+    vaultId: string,
+    opts?: { reassignToVaultId?: string },
+  ): Promise<{ ok: true }> {
+    const { count, error: cErr } = await this.supabase
+      .from('knowledge_documents')
+      .select('id', { count: 'exact', head: true })
+      .eq('tenant_id', tenantId)
+      .eq('vault_id', vaultId);
+    if (cErr) throw new Error(cErr.message);
+    const n = count ?? 0;
+    if (n > 0) {
+      const target = opts?.reassignToVaultId?.trim();
+      if (!target) {
+        throw new Error(
+          `Vault has ${n} document(s). Provide reassignToVaultId or move documents before deleting.`,
+        );
+      }
+      const { error: mv } = await this.supabase
+        .from('knowledge_documents')
+        .update({ vault_id: target, updated_at: new Date().toISOString() })
+        .eq('tenant_id', tenantId)
+        .eq('vault_id', vaultId);
+      if (mv) throw new Error(mv.message);
+    }
+    const { data: vrow } = await this.supabase
+      .from('knowledge_vaults')
+      .select('is_default')
+      .eq('id', vaultId)
+      .eq('tenant_id', tenantId)
+      .maybeSingle();
+    if (vrow?.['is_default']) {
+      throw new Error('Cannot delete the default vault for this workspace.');
+    }
+    const { error: de } = await this.supabase.from('knowledge_vaults').delete().eq('id', vaultId).eq('tenant_id', tenantId);
+    if (de) throw new Error(de.message);
+    return { ok: true };
+  }
+
+  async setDocumentVault(tenantId: string, documentId: string, vaultId: string): Promise<{ ok: true }> {
+    const { error } = await this.supabase
+      .from('knowledge_documents')
+      .update({ vault_id: vaultId, updated_at: new Date().toISOString() })
+      .eq('id', documentId)
+      .eq('tenant_id', tenantId);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  }
+
+  private async loadTenantChunks(
+    tenantId: string,
+    documentIdAllowlist?: string[] | null,
+  ): Promise<
     Array<{
       id: string;
       documentId: string;
@@ -1012,11 +1217,18 @@ export class KbService {
   > {
     // Two-step load: PostgREST embed filters on aliased `document.*` are unreliable in some clients;
     // we filter READY + tenant on `knowledge_documents` first, then load chunks.
-    const { data: docs, error: dErr } = await this.supabase
+    let docQuery = this.supabase
       .from('knowledge_documents')
       .select('id, title, source, updated_at')
       .eq('tenant_id', tenantId)
       .eq('status', 'READY');
+
+    if (documentIdAllowlist !== undefined && documentIdAllowlist !== null) {
+      if (documentIdAllowlist.length === 0) return [];
+      docQuery = docQuery.in('id', documentIdAllowlist);
+    }
+
+    const { data: docs, error: dErr } = await docQuery;
 
     if (dErr) {
       this.logger.warn(`loadTenantChunks: documents failed: ${dErr.message}`);

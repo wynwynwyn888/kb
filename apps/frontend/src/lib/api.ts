@@ -1150,8 +1150,11 @@ export interface TenantBotProfileRow {
   bookingBehaviorNotes: string;
   escalationBehaviorNotes: string;
   knowledgeScopeNotes: string;
-  /** all_workspace_knowledge | selected_collections */
+  /** all_workspace_knowledge | selected_collections (legacy; kept in sync with vault access) */
   knowledgeScopeMode: string;
+  /** all_vaults | selected_vaults */
+  knowledgeAccessMode: string;
+  selectedVaultIds: string[];
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
@@ -1214,6 +1217,8 @@ export async function createTenantBotProfile(
     escalationBehaviorNotes?: string;
     knowledgeScopeNotes?: string;
     knowledgeScopeMode?: string;
+    knowledgeAccessMode?: string;
+    selectedVaultIds?: string[];
     temperature?: number;
     modelOverride?: string | null;
     maxTokens?: number | null;
@@ -1242,6 +1247,8 @@ export async function updateTenantBotProfile(
     escalationBehaviorNotes: string;
     knowledgeScopeNotes: string;
     knowledgeScopeMode: string;
+    knowledgeAccessMode?: string;
+    selectedVaultIds?: string[];
     temperature: number;
     modelOverride: string | null;
     maxTokens: number | null;
@@ -1473,6 +1480,69 @@ export interface KbDocumentRow {
   /** First chunk preview (FAQ / notes / files) */
   answerPreview?: string;
   faqQuestion?: string;
+  vaultId?: string | null;
+  vaultName?: string | null;
+}
+
+export interface KbVaultRow {
+  id: string;
+  name: string;
+  description: string | null;
+  isDefault: boolean;
+  documentCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export async function listKbVaults(token: string, tenantId: string): Promise<KbVaultRow[]> {
+  return apiRequest<KbVaultRow[]>(`/kb/vaults/${encodeURIComponent(tenantId)}`, { token });
+}
+
+export async function createKbVault(
+  token: string,
+  dto: { tenantId: string; name: string; description?: string | null },
+): Promise<{ id: string }> {
+  return apiRequest<{ id: string }>('/kb/vaults', { token, method: 'POST', body: JSON.stringify(dto) });
+}
+
+export async function updateKbVault(
+  token: string,
+  vaultId: string,
+  tenantId: string,
+  body: { name?: string; description?: string | null },
+): Promise<{ ok: true }> {
+  const q = new URLSearchParams({ tenantId });
+  return apiRequest<{ ok: true }>(`/kb/vaults/${encodeURIComponent(vaultId)}?${q}`, {
+    token,
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function deleteKbVault(
+  token: string,
+  vaultId: string,
+  tenantId: string,
+  reassignToVaultId?: string,
+): Promise<{ ok: true }> {
+  const q = new URLSearchParams({ tenantId });
+  if (reassignToVaultId?.trim()) q.set('reassignToVaultId', reassignToVaultId.trim());
+  return apiRequest<{ ok: true }>(`/kb/vaults/${encodeURIComponent(vaultId)}?${q}`, {
+    token,
+    method: 'DELETE',
+  });
+}
+
+export async function setKbDocumentVault(
+  token: string,
+  documentId: string,
+  dto: { tenantId: string; vaultId: string },
+): Promise<{ ok: true }> {
+  return apiRequest(`/kb/documents/${encodeURIComponent(documentId)}/vault`, {
+    token,
+    method: 'PATCH',
+    body: JSON.stringify(dto),
+  });
 }
 
 export async function listKbDocuments(

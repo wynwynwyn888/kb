@@ -12,6 +12,12 @@ export interface RetrievalQuery {
   topK?: number; // default 5
   /** Optional intent label (e.g. `BUSINESS_HOURS`) for generic retrieval scoring */
   intentHint?: string;
+  /**
+   * When set, only chunks whose document id is in this list are considered.
+   * Empty array = no KB search (e.g. assistant profile selected vaults with no matching docs).
+   * Omit / undefined = all READY documents for the tenant (default).
+   */
+  documentIdAllowlist?: string[] | null;
 }
 
 /**

@@ -54,6 +54,7 @@ describe('BotProfilesService', () => {
                         escalation_behavior_notes: '',
                         knowledge_scope_notes: '',
                         knowledge_scope_mode: 'all_workspace_knowledge',
+                        knowledge_access_mode: 'all_vaults',
                         is_active: true,
                         created_at: 't',
                         updated_at: 't',
@@ -90,7 +91,7 @@ describe('BotProfilesService', () => {
     const out = await svc.getActivePromptForOrchestration(tenantId);
     expect(out?.systemPrompt).toContain('Friendly expert');
     expect(out?.systemPrompt).toContain('Professional');
-    expect(out?.systemPrompt).toContain('Knowledge scope: All workspace knowledge');
+    expect(out?.systemPrompt).toContain('Knowledge access: All knowledge vaults');
   });
 
   it('cannot delete the active profile', async () => {
@@ -147,5 +148,172 @@ describe('BotProfilesService', () => {
     await expect(svc.deleteBotProfile(userId, tenantId, profileId)).rejects.toBeInstanceOf(
       BadRequestException,
     );
+  });
+
+  it('getKbDocumentAllowlistForActiveProfile returns all when access mode is all_vaults', async () => {
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'tenant_bot_profiles') {
+        return {
+          select: (cols: string, opts?: { count?: string; head?: boolean }) => {
+            if (opts?.head) {
+              return { eq: () => Promise.resolve({ count: 1, error: null }) };
+            }
+            if (String(cols).includes('knowledge_access_mode')) {
+              return {
+                eq: () => ({
+                  eq: () => ({
+                    maybeSingle: () =>
+                      Promise.resolve({
+                        data: { id: profileId, knowledge_access_mode: 'all_vaults' },
+                        error: null,
+                      }),
+                  }),
+                }),
+              };
+            }
+            return {};
+          },
+        };
+      }
+      return {};
+    });
+    const out = await svc.getKbDocumentAllowlistForActiveProfile(tenantId);
+    expect(out).toEqual({ kind: 'all' });
+  });
+
+  it('getKbDocumentAllowlistForActiveProfile returns none when selected_vaults but no vault links', async () => {
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'tenant_bot_profiles') {
+        return {
+          select: (cols: string, opts?: { count?: string; head?: boolean }) => {
+            if (opts?.head) {
+              return { eq: () => Promise.resolve({ count: 1, error: null }) };
+            }
+            if (String(cols).includes('knowledge_access_mode')) {
+              return {
+                eq: () => ({
+                  eq: () => ({
+                    maybeSingle: () =>
+                      Promise.resolve({
+                        data: { id: profileId, knowledge_access_mode: 'selected_vaults' },
+                        error: null,
+                      }),
+                  }),
+                }),
+              };
+            }
+            return {};
+          },
+        };
+      }
+      if (table === 'tenant_bot_profile_knowledge_vaults') {
+        return {
+          select: () => ({
+            eq: () => Promise.resolve({ data: [], error: null }),
+          }),
+        };
+      }
+      return {};
+    });
+    const out = await svc.getKbDocumentAllowlistForActiveProfile(tenantId);
+    expect(out).toEqual({ kind: 'none', reason: 'profileKnowledgeVaultsEmpty' });
+  });
+
+  it('getKbDocumentAllowlistForActiveProfile returns allowlist for selected vault READY docs', async () => {
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'tenant_bot_profiles') {
+        return {
+          select: (cols: string, opts?: { count?: string; head?: boolean }) => {
+            if (opts?.head) {
+              return { eq: () => Promise.resolve({ count: 1, error: null }) };
+            }
+            if (String(cols).includes('knowledge_access_mode')) {
+              return {
+                eq: () => ({
+                  eq: () => ({
+                    maybeSingle: () =>
+                      Promise.resolve({
+                        data: { id: profileId, knowledge_access_mode: 'selected_vaults' },
+                        error: null,
+                      }),
+                  }),
+                }),
+              };
+            }
+            return {};
+          },
+        };
+      }
+      if (table === 'tenant_bot_profile_knowledge_vaults') {
+        return {
+          select: () => ({
+            eq: () => Promise.resolve({ data: [{ vault_id: 'vault-1' }], error: null }),
+          }),
+        };
+      }
+      if (table === 'knowledge_documents') {
+        return {
+          select: () => ({
+            eq: () => ({
+              eq: () => ({
+                in: () => Promise.resolve({ data: [{ id: 'doc-a' }, { id: 'doc-b' }], error: null }),
+              }),
+            }),
+          }),
+        };
+      }
+      return {};
+    });
+    const out = await svc.getKbDocumentAllowlistForActiveProfile(tenantId);
+    expect(out).toEqual({ kind: 'allowlist', documentIds: ['doc-a', 'doc-b'] });
+  });
+
+  it('getKbDocumentAllowlistForActiveProfile returns none when selected vaults have no READY docs', async () => {
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'tenant_bot_profiles') {
+        return {
+          select: (cols: string, opts?: { count?: string; head?: boolean }) => {
+            if (opts?.head) {
+              return { eq: () => Promise.resolve({ count: 1, error: null }) };
+            }
+            if (String(cols).includes('knowledge_access_mode')) {
+              return {
+                eq: () => ({
+                  eq: () => ({
+                    maybeSingle: () =>
+                      Promise.resolve({
+                        data: { id: profileId, knowledge_access_mode: 'selected_vaults' },
+                        error: null,
+                      }),
+                  }),
+                }),
+              };
+            }
+            return {};
+          },
+        };
+      }
+      if (table === 'tenant_bot_profile_knowledge_vaults') {
+        return {
+          select: () => ({
+            eq: () => Promise.resolve({ data: [{ vault_id: 'vault-1' }], error: null }),
+          }),
+        };
+      }
+      if (table === 'knowledge_documents') {
+        return {
+          select: () => ({
+            eq: () => ({
+              eq: () => ({
+                in: () => Promise.resolve({ data: [], error: null }),
+              }),
+            }),
+          }),
+        };
+      }
+      return {};
+    });
+    const out = await svc.getKbDocumentAllowlistForActiveProfile(tenantId);
+    expect(out).toEqual({ kind: 'none', reason: 'selectedVaultsNoDocuments' });
   });
 });

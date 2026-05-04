@@ -165,10 +165,23 @@ async function seed(supabase: SupabaseClient): Promise<{
   });
   if (eAsp) throw new Error(`agency_system_policies: ${eAsp.message}`);
 
+  const vaultId = randomUUID();
+  const { error: eVault } = await supabase.from('knowledge_vaults').insert({
+    id: vaultId,
+    tenant_id: tenantId,
+    name: 'General Knowledge',
+    description: null,
+    is_default: true,
+    created_at: now,
+    updated_at: now,
+  });
+  if (eVault) throw new Error(`knowledge_vaults: ${eVault.message}`);
+
   const docId = randomUUID();
   const { error: eDoc } = await supabase.from('knowledge_documents').insert({
     id: docId,
     tenant_id: tenantId,
+    vault_id: vaultId,
     title: 'E2E KB Doc',
     source: 'e2e-seed',
     mime_type: 'text/plain',

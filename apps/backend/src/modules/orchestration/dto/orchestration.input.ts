@@ -20,7 +20,7 @@ export interface OrchestrationInput {
     /** Optional IANA zone for business-local greetings; defaults to app timezone. */
     timeZone?: string;
   };
-  /** From `tenant_prompt_configs` (same fields as saved via prompts API). */
+  /** Built from active `tenant_bot_profiles` (+ linked reply settings in `tenant_prompt_configs`), or legacy prompt row. */
   promptConfig?: {
     id: string;
     systemPrompt: string;

@@ -13,6 +13,8 @@ import { ConversationsModule } from '../conversations/conversations.module';
 import { BookingFlowModule } from '../booking-flow/booking-flow.module';
 import { BookingSettingsModule } from '../booking-settings/booking-settings.module';
 
+import { PromptsModule } from '../prompts/prompts.module';
+
 @Module({
   imports: [
     AiRouterModule,
@@ -22,6 +24,7 @@ import { BookingSettingsModule } from '../booking-settings/booking-settings.modu
     ConversationsModule,
     BookingFlowModule,
     BookingSettingsModule,
+    PromptsModule,
   ],
   providers: [
     ConversationOrchestrationService,

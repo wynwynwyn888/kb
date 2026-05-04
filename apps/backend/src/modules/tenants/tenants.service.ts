@@ -5,6 +5,7 @@ import { BadRequestException, ForbiddenException, Injectable, NotFoundException 
 import { getSupabaseService } from '../../lib/supabase';
 import type { TenantRole } from '../../lib/enums';
 import { resolveBotMode, type BotOperatingMode, isBotModeString } from '../../lib/bot-mode';
+import { BotProfilesService } from '../prompts/bot-profiles.service';
 
 /** When the DB enforces NOT NULL on `ghl_location_id`, store a sentinel until a real GHL id is set in Integrations. */
 const PENDING_GHL_PREFIX = 'pending:';
@@ -49,6 +50,8 @@ export interface TenantDetail extends TenantSummary {
 
 @Injectable()
 export class TenantsService {
+  constructor(private readonly botProfiles: BotProfilesService) {}
+
   /**
    * Get all tenants for an agency (agency-level access required)
    */
@@ -113,13 +116,26 @@ export class TenantsService {
       return null;
     }
 
-    // Get active prompt config
-    const { data: prompt } = await supabase
-      .from('tenant_prompt_configs')
-      .select('id, name, temperature, model_override, is_active')
-      .eq('tenant_id', tenantId)
-      .eq('is_active', true)
-      .single();
+    let promptDetail = await this.botProfiles.getActiveProfileSnapshotForSettings(tenantId);
+    if (!promptDetail) {
+      const { data: p } = await supabase
+        .from('tenant_prompt_configs')
+        .select('id, name, temperature, model_override, is_active')
+        .eq('tenant_id', tenantId)
+        .eq('is_active', true)
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (p) {
+        promptDetail = {
+          id: p.id as string,
+          name: p.name as string,
+          temperature: p.temperature as number,
+          modelOverride: (p.model_override as string | undefined) || undefined,
+          isActive: Boolean(p.is_active),
+        };
+      }
+    }
 
     // Get quota wallet
     const { data: wallet } = await supabase
@@ -145,13 +161,15 @@ export class TenantsService {
       botEnabled,
       createdAt: new Date(tenant.created_at),
       updatedAt: new Date(tenant.updated_at),
-      promptConfig: prompt ? {
-        id: prompt.id,
-        name: prompt.name,
-        temperature: prompt.temperature,
-        modelOverride: prompt.model_override || undefined,
-        isActive: prompt.is_active,
-      } : null,
+      promptConfig: promptDetail
+        ? {
+            id: promptDetail.id,
+            name: promptDetail.name,
+            temperature: promptDetail.temperature,
+            modelOverride: promptDetail.modelOverride,
+            isActive: promptDetail.isActive,
+          }
+        : null,
       quota: wallet ? {
         totalQuota: wallet.total_quota,
         usedQuota: wallet.used_quota,

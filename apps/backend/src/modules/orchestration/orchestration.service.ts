@@ -55,6 +55,7 @@ import {
 } from '../../lib/outbound-safety-governor';
 import { ConversationBookingFlowService } from '../booking-flow/conversation-booking-flow.service';
 import { BookingSettingsService } from '../booking-settings/booking-settings.service';
+import { BotProfilesService } from '../prompts/bot-profiles.service';
 
 @Injectable()
 export class ConversationOrchestrationService {
@@ -71,6 +72,7 @@ export class ConversationOrchestrationService {
     private readonly conversationsService: ConversationsService,
     private readonly bookingFlow: ConversationBookingFlowService,
     private readonly bookingSettings: BookingSettingsService,
+    private readonly botProfiles: BotProfilesService,
   ) {}
 
   /**
@@ -553,30 +555,7 @@ export class ConversationOrchestrationService {
   async loadPromptConfig(
     tenantId: string,
   ): Promise<OrchestrationInput['promptConfig']> {
-    const { data: rows, error } = await this.supabase
-      .from('tenant_prompt_configs')
-      .select('id, system_prompt, temperature, model_override, max_tokens, is_active, updated_at')
-      .eq('tenant_id', tenantId)
-      .eq('is_active', true)
-      .order('updated_at', { ascending: false })
-      .limit(1);
-
-    if (error) {
-      this.logger.warn(`loadPromptConfig: ${error.message}`);
-      return null;
-    }
-    const config = rows?.[0];
-    if (!config) return null;
-
-    return {
-      id: config.id,
-      systemPrompt: config.system_prompt,
-      temperature: config.temperature,
-      modelOverride: config.model_override || undefined,
-      maxTokens: (config as { max_tokens?: number | null }).max_tokens ?? null,
-      isActive: config.is_active,
-      updatedAt: (config as { updated_at?: string | null }).updated_at ?? null,
-    };
+    return this.botProfiles.getActivePromptForOrchestration(tenantId);
   }
 
   /**

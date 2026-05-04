@@ -9,6 +9,7 @@ import {
 import { randomUUID } from 'node:crypto';
 import { getSupabaseService } from '../../lib/supabase';
 import { AuthService } from '../auth/auth.service';
+import { parsePromptSections } from '../../lib/tenant-bot-profile-prompt';
 
 export interface TenantPromptDto {
   id: string;
@@ -129,12 +130,25 @@ export class PromptsService {
 
     const { data: existing } = await supabase
       .from('tenant_prompt_configs')
-      .select('id')
+      .select('id, bot_profile_id')
       .eq('tenant_id', tenantId)
       .eq('name', name.trim())
       .maybeSingle();
 
     if (existing?.id) {
+      const parsed = parsePromptSections(systemPrompt);
+      if (existing.bot_profile_id) {
+        await supabase
+          .from('tenant_bot_profiles')
+          .update({
+            name: name.trim(),
+            persona: parsed.persona,
+            conversation_goals: parsed.goals,
+            business_notes: parsed.additional,
+            updated_at: now,
+          })
+          .eq('id', existing.bot_profile_id as string);
+      }
       const { data: updated, error: ue } = await supabase
         .from('tenant_prompt_configs')
         .update({

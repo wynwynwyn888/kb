@@ -115,6 +115,7 @@ model Tenant {
   taggingSettings    TenantTaggingSettings?
   tagRules           TenantTagRule[]
   followUpSettings   TenantFollowUpSettings?
+  botProfiles        TenantBotProfile[]
 
   @@unique([ghlLocationId])
   @@index([agencyId])
@@ -348,14 +349,41 @@ model TenantPromptConfig {
   maxTokens       Int?     @map("max_tokens")
   promptVariables Json     @default("{}") @map("prompt_variables")
   isActive        Boolean  @default(true) @map("is_active")
+  botProfileId    String?  @unique @map("bot_profile_id")
   createdAt       DateTime @default(now()) @map("created_at")
   updatedAt       DateTime @updatedAt @map("updated_at")
 
   // Relations
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant     Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  botProfile TenantBotProfile? @relation(fields: [botProfileId], references: [id], onDelete: Cascade)
 
   @@index([tenantId])
   @@map("tenant_prompt_configs")
+}
+
+/// Per-workspace assistant / bot profile (persona, goals, notes, behavior). One active per tenant.
+model TenantBotProfile {
+  id                        String   @id @default(uuid())
+  tenantId                  String   @map("tenant_id")
+  name                      String
+  description               String   @default("") @db.Text
+  persona                   String   @default("") @db.Text
+  conversationGoals         String   @default("") @map("conversation_goals") @db.Text
+  businessNotes             String   @default("") @map("business_notes") @db.Text
+  toneRules                 String   @default("") @map("tone_rules") @db.Text
+  bookingBehaviorNotes      String   @default("") @map("booking_behavior_notes") @db.Text
+  escalationBehaviorNotes   String   @default("") @map("escalation_behavior_notes") @db.Text
+  knowledgeScopeNotes       String   @default("") @map("knowledge_scope_notes") @db.Text
+  isActive                  Boolean  @default(false) @map("is_active")
+  createdAt                 DateTime @default(now()) @map("created_at")
+  updatedAt                 DateTime @updatedAt @map("updated_at")
+
+  tenant       Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  promptConfig TenantPromptConfig?
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@map("tenant_bot_profiles")
 }
 
 model TenantModelOverride {

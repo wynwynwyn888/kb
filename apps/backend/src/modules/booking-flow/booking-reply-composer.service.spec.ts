@@ -18,6 +18,7 @@ jest.mock('../../lib/supabase', () => ({
 }));
 
 import { BookingReplyComposerService } from './booking-reply-composer.service';
+import type { BotProfilesService } from '../prompts/bot-profiles.service';
 
 function chainTenantAgencyOpenAi() {
   mockFrom.mockImplementation((table: string) => {
@@ -60,7 +61,10 @@ describe('BookingReplyComposerService', () => {
     mockComposerGenerate.mockReset();
     mockFrom.mockReset();
     chainTenantAgencyOpenAi();
-    svc = new BookingReplyComposerService();
+    const mockBotProfiles = {
+      getBookingReplyPersonaPrompt: async () => undefined as string | undefined,
+    };
+    svc = new BookingReplyComposerService(mockBotProfiles as unknown as BotProfilesService);
   });
 
   const baseInput = {
@@ -72,6 +76,24 @@ describe('BookingReplyComposerService', () => {
     businessName: 'Test Salon',
     userFrustrated: false,
   };
+
+  it('includes active assistant profile text in composer user payload', async () => {
+    const mockBotProfiles2 = {
+      getBookingReplyPersonaPrompt: async () => 'Speak briefly and warmly.',
+    };
+    const svc2 = new BookingReplyComposerService(mockBotProfiles2 as unknown as BotProfilesService);
+    mockComposerGenerate.mockResolvedValue({
+      content: JSON.stringify({ reply: 'What time works for you?', confidence: 0.9 }),
+    });
+    const safe = 'What time would you like?';
+    await svc2.compose({
+      ...baseInput,
+      nextStep: { type: 'ask_time', fieldId: 'preferred_time', safeBaseMessage: safe },
+    });
+    const arg = mockComposerGenerate.mock.calls[0]?.[0] as { messages: Array<{ role: string; content: string }> };
+    const user = JSON.parse(arg.messages[1].content) as { personaPrompt: string | null };
+    expect(user.personaPrompt).toContain('briefly');
+  });
 
   it('rewrites ask_service and keeps option letters when model includes them', async () => {
     const safe =

@@ -1138,6 +1138,27 @@ export async function getQuotaAuditLog(token: string, opts?: { tenantId?: string
 }
 
 // Prompts — tenant configs & agency policies
+export interface TenantBotProfileRow {
+  id: string;
+  tenantId: string;
+  name: string;
+  description: string;
+  persona: string;
+  conversationGoals: string;
+  businessNotes: string;
+  toneRules: string;
+  bookingBehaviorNotes: string;
+  escalationBehaviorNotes: string;
+  knowledgeScopeNotes: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+  temperature: number;
+  modelOverride: string | null;
+  maxTokens: number | null;
+  promptConfigId: string | null;
+}
+
 export interface TenantPromptRow {
   id: string;
   name: string;
@@ -1169,6 +1190,96 @@ export async function upsertTenantPrompt(
     method: 'POST',
     body: JSON.stringify(dto),
   });
+}
+
+export async function listTenantBotProfiles(token: string, tenantId: string): Promise<TenantBotProfileRow[]> {
+  return apiRequest<TenantBotProfileRow[]>(`/prompts/tenant/${encodeURIComponent(tenantId)}/bot-profiles`, {
+    token,
+  });
+}
+
+export async function createTenantBotProfile(
+  token: string,
+  tenantId: string,
+  body: {
+    name: string;
+    description?: string;
+    persona?: string;
+    conversationGoals?: string;
+    businessNotes?: string;
+    toneRules?: string;
+    bookingBehaviorNotes?: string;
+    escalationBehaviorNotes?: string;
+    knowledgeScopeNotes?: string;
+    temperature?: number;
+    modelOverride?: string | null;
+    maxTokens?: number | null;
+    setActive?: boolean;
+  }
+): Promise<TenantBotProfileRow> {
+  return apiRequest<TenantBotProfileRow>(`/prompts/tenant/${encodeURIComponent(tenantId)}/bot-profiles`, {
+    token,
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function updateTenantBotProfile(
+  token: string,
+  tenantId: string,
+  profileId: string,
+  body: Partial<{
+    name: string;
+    description: string;
+    persona: string;
+    conversationGoals: string;
+    businessNotes: string;
+    toneRules: string;
+    bookingBehaviorNotes: string;
+    escalationBehaviorNotes: string;
+    knowledgeScopeNotes: string;
+    temperature: number;
+    modelOverride: string | null;
+    maxTokens: number | null;
+  }>
+): Promise<TenantBotProfileRow> {
+  return apiRequest<TenantBotProfileRow>(
+    `/prompts/tenant/${encodeURIComponent(tenantId)}/bot-profiles/${encodeURIComponent(profileId)}`,
+    { token, method: 'PATCH', body: JSON.stringify(body) }
+  );
+}
+
+export async function activateTenantBotProfile(
+  token: string,
+  tenantId: string,
+  profileId: string
+): Promise<TenantBotProfileRow> {
+  return apiRequest<TenantBotProfileRow>(
+    `/prompts/tenant/${encodeURIComponent(tenantId)}/bot-profiles/${encodeURIComponent(profileId)}/activate`,
+    { token, method: 'POST' }
+  );
+}
+
+export async function duplicateTenantBotProfile(
+  token: string,
+  tenantId: string,
+  profileId: string
+): Promise<TenantBotProfileRow> {
+  return apiRequest<TenantBotProfileRow>(
+    `/prompts/tenant/${encodeURIComponent(tenantId)}/bot-profiles/${encodeURIComponent(profileId)}/duplicate`,
+    { token, method: 'POST' }
+  );
+}
+
+export async function deleteTenantBotProfile(
+  token: string,
+  tenantId: string,
+  profileId: string
+): Promise<void> {
+  await apiRequestNoContent(
+    `/prompts/tenant/${encodeURIComponent(tenantId)}/bot-profiles/${encodeURIComponent(profileId)}`,
+    { token, method: 'DELETE' }
+  );
 }
 
 export interface AgencyPolicyRow {

@@ -6,6 +6,7 @@ import { isUsableOpenAiFallbackKey } from '../../lib/ai-live-model-resolve';
 import { bookingNluOutputSchema, type BookingNluInterpretInput, type BookingNluOutput } from './booking-nlu.schema';
 import { listNluExtractedFieldKeysForLog } from './booking-nlu-merge';
 import { softenBookingNluParsedJson } from './booking-nlu-soften';
+import { BotProfilesService } from '../prompts/bot-profiles.service';
 
 type ProviderRow = {
   provider: string;
@@ -18,6 +19,8 @@ type ProviderRow = {
 export class BookingNluInterpreterService {
   private readonly logger = new Logger(BookingNluInterpreterService.name);
   private readonly supabase = getSupabaseService();
+
+  constructor(private readonly botProfiles: BotProfilesService) {}
 
   /**
    * Returns structured NLU output or null (caller keeps deterministic path only).
@@ -113,6 +116,12 @@ export class BookingNluInterpreterService {
       '- slotSelection is advisory only; the host app may ignore it for safety.',
     ].join('\n');
 
+    const profileAppendix = await this.botProfiles.getBookingNluProfileAppendix(input.tenantId);
+    const systemPromptFull =
+      profileAppendix.trim().length > 0
+        ? `${system}\n\n---\nSubaccount active assistant profile (hints only):\n${profileAppendix}`
+        : system;
+
     const adapter = new OpenAiProviderAdapter();
     adapter.initialize({
       apiKey: openaiRow.api_key,
@@ -126,7 +135,7 @@ export class BookingNluInterpreterService {
       const result = await adapter.generate({
         model,
         messages: [
-          { role: 'system', content: system },
+          { role: 'system', content: systemPromptFull },
           { role: 'user', content: userPayload },
         ],
         temperature,

@@ -8,11 +8,13 @@ import {
   Get,
   HttpCode,
   Param,
+  Patch,
   Post,
   UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { PromptsService } from './prompts.service';
+import { BotProfilesService } from './bot-profiles.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { SessionUser } from '../../lib/supabase';
@@ -22,7 +24,10 @@ import type { SessionUser } from '../../lib/supabase';
 @UseGuards(JwtAuthGuard)
 @Controller('prompts')
 export class PromptsController {
-  constructor(private readonly promptsService: PromptsService) {}
+  constructor(
+    private readonly promptsService: PromptsService,
+    private readonly botProfilesService: BotProfilesService,
+  ) {}
 
   @Get('tenant/:tenantId')
   @ApiOperation({
@@ -79,6 +84,107 @@ export class PromptsController {
       promptVariables: dto.promptVariables,
       isActive: dto.isActive,
     });
+  }
+
+  @Get('tenant/:tenantId/bot-profiles')
+  @ApiOperation({ summary: 'List Assistant / Bot profiles for a workspace' })
+  async listBotProfiles(@Param('tenantId') tenantId: string, @CurrentUser() user: SessionUser) {
+    if (!tenantId?.trim()) throw new BadRequestException('tenantId is required');
+    return this.botProfilesService.listBotProfiles(user.id, tenantId.trim());
+  }
+
+  @Post('tenant/:tenantId/bot-profiles')
+  @ApiOperation({ summary: 'Create a new Assistant / Bot profile' })
+  async createBotProfile(
+    @Param('tenantId') tenantId: string,
+    @Body()
+    body: {
+      name: string;
+      description?: string;
+      persona?: string;
+      conversationGoals?: string;
+      businessNotes?: string;
+      toneRules?: string;
+      bookingBehaviorNotes?: string;
+      escalationBehaviorNotes?: string;
+      knowledgeScopeNotes?: string;
+      temperature?: number;
+      modelOverride?: string | null;
+      maxTokens?: number | null;
+      setActive?: boolean;
+    },
+    @CurrentUser() user: SessionUser,
+  ) {
+    if (!tenantId?.trim()) throw new BadRequestException('tenantId is required');
+    return this.botProfilesService.createBotProfile(user.id, tenantId.trim(), body);
+  }
+
+  @Patch('tenant/:tenantId/bot-profiles/:profileId')
+  @ApiOperation({ summary: 'Update an Assistant / Bot profile' })
+  async updateBotProfile(
+    @Param('tenantId') tenantId: string,
+    @Param('profileId') profileId: string,
+    @Body()
+    body: {
+      name?: string;
+      description?: string;
+      persona?: string;
+      conversationGoals?: string;
+      businessNotes?: string;
+      toneRules?: string;
+      bookingBehaviorNotes?: string;
+      escalationBehaviorNotes?: string;
+      knowledgeScopeNotes?: string;
+      temperature?: number;
+      modelOverride?: string | null;
+      maxTokens?: number | null;
+    },
+    @CurrentUser() user: SessionUser,
+  ) {
+    if (!tenantId?.trim() || !profileId?.trim()) {
+      throw new BadRequestException('tenantId and profileId are required');
+    }
+    return this.botProfilesService.updateBotProfile(user.id, tenantId.trim(), profileId.trim(), body);
+  }
+
+  @Post('tenant/:tenantId/bot-profiles/:profileId/activate')
+  @ApiOperation({ summary: 'Set an Assistant / Bot profile as the active one' })
+  async activateBotProfile(
+    @Param('tenantId') tenantId: string,
+    @Param('profileId') profileId: string,
+    @CurrentUser() user: SessionUser,
+  ) {
+    if (!tenantId?.trim() || !profileId?.trim()) {
+      throw new BadRequestException('tenantId and profileId are required');
+    }
+    return this.botProfilesService.setActiveBotProfile(user.id, tenantId.trim(), profileId.trim());
+  }
+
+  @Post('tenant/:tenantId/bot-profiles/:profileId/duplicate')
+  @ApiOperation({ summary: 'Duplicate an Assistant / Bot profile' })
+  async duplicateBotProfile(
+    @Param('tenantId') tenantId: string,
+    @Param('profileId') profileId: string,
+    @CurrentUser() user: SessionUser,
+  ) {
+    if (!tenantId?.trim() || !profileId?.trim()) {
+      throw new BadRequestException('tenantId and profileId are required');
+    }
+    return this.botProfilesService.duplicateBotProfile(user.id, tenantId.trim(), profileId.trim());
+  }
+
+  @Delete('tenant/:tenantId/bot-profiles/:profileId')
+  @HttpCode(204)
+  @ApiOperation({ summary: 'Delete a non-active Assistant / Bot profile' })
+  async deleteBotProfile(
+    @Param('tenantId') tenantId: string,
+    @Param('profileId') profileId: string,
+    @CurrentUser() user: SessionUser,
+  ): Promise<void> {
+    if (!tenantId?.trim() || !profileId?.trim()) {
+      throw new BadRequestException('tenantId and profileId are required');
+    }
+    await this.botProfilesService.deleteBotProfile(user.id, tenantId.trim(), profileId.trim());
   }
 
   @Get('policy/:agencyId')

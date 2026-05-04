@@ -6,9 +6,14 @@ import { useParams } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   getAgencyAiConfig,
-  listTenantPrompts,
-  upsertTenantPrompt,
+  listTenantBotProfiles,
+  createTenantBotProfile,
+  updateTenantBotProfile,
+  activateTenantBotProfile,
+  duplicateTenantBotProfile,
+  deleteTenantBotProfile,
   type SubaccountBehaviorPolicy,
+  type TenantBotProfileRow,
 } from '@/lib/api';
 import {
   ErrorBanner,
@@ -21,7 +26,7 @@ import {
   mvpPrimaryButtonStyle,
 } from '@/components/app/mvp-ui';
 
-const DEFAULT_PROFILE = 'default';
+const DEFAULT_NEW_PROFILE = 'New profile';
 
 const textareaStyle = {
   ...mvpInputStyle,
@@ -41,6 +46,37 @@ const sectionCard = {
   marginBottom: '0.85rem',
   background: 'var(--aisbp-surface, #fff)',
 };
+
+const secondaryBtnStyle: CSSProperties = {
+  padding: '0.45rem 0.85rem',
+  borderRadius: '8px',
+  border: '1px solid var(--aisbp-border, #e2e8f0)',
+  background: 'var(--aisbp-surface, #fff)',
+  color: 'var(--aisbp-text-secondary, #334155)',
+  fontSize: '0.85rem',
+  fontWeight: 600,
+  cursor: 'pointer',
+};
+
+function ActiveBadge() {
+  return (
+    <span
+      style={{
+        display: 'inline-block',
+        marginLeft: '0.5rem',
+        padding: '0.15rem 0.45rem',
+        borderRadius: '6px',
+        fontSize: '0.72rem',
+        fontWeight: 700,
+        letterSpacing: '0.02em',
+        background: 'rgba(34, 197, 94, 0.15)',
+        color: 'rgb(22, 101, 52)',
+      }}
+    >
+      Active
+    </span>
+  );
+}
 
 const TEMP_PRESETS = { precise: 0.35, balanced: 0.7, creative: 1.2 } as const;
 type TempPreset = keyof typeof TEMP_PRESETS;
@@ -97,76 +133,6 @@ function numToPreset(n: number): TempPreset {
   return 'balanced';
 }
 
-/**
- * Parse saved prompt into three sections; legacy single-block content maps to Goals.
- *
- * Important: we only treat **exact** AISBP section header lines as boundaries. A previous
- * regex used `(?=^###\\s|$)` which stopped at *any* markdown `### …` line inside persona/goals,
- * so pasted playbooks looked like “one line” after load/save.
- */
-function parsePromptSections(raw: string): { persona: string; goals: string; additional: string } {
-  const t = (raw || '').trimEnd();
-  if (!t) return { persona: '', goals: '', additional: '' };
-
-  const lines = t.split(/\r?\n/);
-  const headerPersona = '### Bot Persona';
-  const headerGoals = '### Goals';
-  const headerAdditional = '### Additional information';
-
-  const hasOurPersonaHeader = lines.some(l => l.trim() === headerPersona);
-  if (!hasOurPersonaHeader) {
-    return { persona: '', goals: t.trim(), additional: '' };
-  }
-
-  type Section = 'none' | 'persona' | 'goals' | 'additional';
-  let section: Section = 'none';
-  const buckets: Record<'persona' | 'goals' | 'additional', string[]> = {
-    persona: [],
-    goals: [],
-    additional: [],
-  };
-
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (trimmed === headerPersona) {
-      section = 'persona';
-      continue;
-    }
-    if (trimmed === headerGoals) {
-      section = 'goals';
-      continue;
-    }
-    if (trimmed === headerAdditional) {
-      section = 'additional';
-      continue;
-    }
-    if (section === 'none') continue;
-    buckets[section].push(line);
-  }
-
-  const persona = buckets.persona.join('\n').trim();
-  const goals = buckets.goals.join('\n').trim();
-  const additional = buckets.additional.join('\n').trim();
-
-  if (!persona && !goals && !additional) {
-    return { persona: '', goals: t.trim(), additional: '' };
-  }
-  return { persona, goals, additional };
-}
-
-function buildPromptBlob(persona: string, goals: string, additional: string): string {
-  return [
-    '### Bot Persona',
-    persona.trim(),
-    '',
-    '### Goals',
-    goals.trim(),
-    '',
-    '### Additional information',
-    additional.trim(),
-  ].join('\n');
-}
-
 type PromptSectionField = 'persona' | 'goals' | 'additional';
 
 const PROMPT_SECTION_MODAL_TITLE: Record<PromptSectionField, string> = {
@@ -216,10 +182,17 @@ export function TenantGoalsPanel() {
   const { token } = useAuth();
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [profileName, setProfileName] = useState(DEFAULT_PROFILE);
+  const [profiles, setProfiles] = useState<TenantBotProfileRow[]>([]);
+  const [selectedProfileId, setSelectedProfileId] = useState('');
+  const [profileName, setProfileName] = useState('');
+  const [description, setDescription] = useState('');
   const [persona, setPersona] = useState('');
   const [goals, setGoals] = useState('');
   const [additional, setAdditional] = useState('');
+  const [toneRules, setToneRules] = useState('');
+  const [bookingBehaviorNotes, setBookingBehaviorNotes] = useState('');
+  const [escalationBehaviorNotes, setEscalationBehaviorNotes] = useState('');
+  const [knowledgeScopeNotes, setKnowledgeScopeNotes] = useState('');
   const [tempPreset, setTempPreset] = useState<TempPreset>('balanced');
   const [modelOverride, setModelOverride] = useState('');
   const [maxTokens, setMaxTokens] = useState(800);
@@ -251,8 +224,8 @@ export function TenantGoalsPanel() {
       setLoading(true);
       setErr('');
       try {
-        const [prompts, agencyCfg] = await Promise.all([
-          listTenantPrompts(token, subaccountId),
+        const [profileList, agencyCfg] = await Promise.all([
+          listTenantBotProfiles(token, subaccountId),
           getAgencyAiConfig(token).catch(() => null),
         ]);
         if (cancelled) return;
@@ -263,26 +236,37 @@ export function TenantGoalsPanel() {
           setPolicy(defaultPolicy());
         }
 
-        const list = Array.isArray(prompts) ? prompts : [];
+        const list = Array.isArray(profileList) ? profileList : [];
+        setProfiles(list);
         const chosen =
-          list.find(p => p.isActive) ?? list.find(p => p.name === DEFAULT_PROFILE) ?? list[0] ?? null;
+          list.find(p => p.isActive) ?? list[0] ?? null;
         if (chosen) {
-          setProfileName(chosen.name || DEFAULT_PROFILE);
-          const { persona: p, goals: g, additional: a } = parsePromptSections(chosen.systemPrompt ?? '');
-          setPersona(p);
-          setGoals(g);
-          setAdditional(a);
-          const t = chosen.temperature;
-          setTempPreset(numToPreset(t != null ? Number(t) : 0.7));
+          setSelectedProfileId(chosen.id);
+          setProfileName(chosen.name);
+          setDescription(chosen.description ?? '');
+          setPersona(chosen.persona ?? '');
+          setGoals(chosen.conversationGoals ?? '');
+          setAdditional(chosen.businessNotes ?? '');
+          setToneRules(chosen.toneRules ?? '');
+          setBookingBehaviorNotes(chosen.bookingBehaviorNotes ?? '');
+          setEscalationBehaviorNotes(chosen.escalationBehaviorNotes ?? '');
+          setKnowledgeScopeNotes(chosen.knowledgeScopeNotes ?? '');
+          setTempPreset(numToPreset(chosen.temperature != null ? Number(chosen.temperature) : 0.7));
           setModelOverride(chosen.modelOverride ?? '');
           const mt = chosen.maxTokens != null && chosen.maxTokens > 0 ? chosen.maxTokens : 800;
           setMaxTokens(mt);
           setLengthKey(inferLengthKey(mt));
         } else {
-          setProfileName(DEFAULT_PROFILE);
+          setSelectedProfileId('');
+          setProfileName('');
+          setDescription('');
           setPersona('');
           setGoals('');
           setAdditional('');
+          setToneRules('');
+          setBookingBehaviorNotes('');
+          setEscalationBehaviorNotes('');
+          setKnowledgeScopeNotes('');
           setTempPreset('balanced');
           setModelOverride('');
           setMaxTokens(800);
@@ -299,9 +283,26 @@ export function TenantGoalsPanel() {
     };
   }, [token, subaccountId, loadAttempt]);
 
+  const applyProfileToForm = (row: TenantBotProfileRow) => {
+    setProfileName(row.name);
+    setDescription(row.description ?? '');
+    setPersona(row.persona ?? '');
+    setGoals(row.conversationGoals ?? '');
+    setAdditional(row.businessNotes ?? '');
+    setToneRules(row.toneRules ?? '');
+    setBookingBehaviorNotes(row.bookingBehaviorNotes ?? '');
+    setEscalationBehaviorNotes(row.escalationBehaviorNotes ?? '');
+    setKnowledgeScopeNotes(row.knowledgeScopeNotes ?? '');
+    setTempPreset(numToPreset(row.temperature != null ? Number(row.temperature) : 0.7));
+    setModelOverride(row.modelOverride ?? '');
+    const mt = row.maxTokens != null && row.maxTokens > 0 ? row.maxTokens : 800;
+    setMaxTokens(mt);
+    setLengthKey(inferLengthKey(mt));
+  };
+
   const onSavePrompt = async (ev: FormEvent) => {
     ev.preventDefault();
-    if (!token) return;
+    if (!token || !selectedProfileId) return;
     setSaving(true);
     setErr('');
     setOk('');
@@ -310,36 +311,129 @@ export function TenantGoalsPanel() {
       const rawT = TEMP_PRESETS[tempPreset];
       const temperature = p.allowResponseStyleOverride ? clamp(rawT, p.temperatureMin, p.temperatureMax) : rawT;
       const tok = p.allowMaxTokensOverride ? clamp(maxTokens, p.maxTokensMin, p.maxTokensMax) : maxTokens;
-      const systemPrompt = buildPromptBlob(persona, goals, additional);
       const mo = modelOverride.trim();
-      await upsertTenantPrompt(token, {
-        tenantId: subaccountId,
-        name: profileName.trim() || DEFAULT_PROFILE,
-        systemPrompt,
+      await updateTenantBotProfile(token, subaccountId, selectedProfileId, {
+        name: profileName.trim() || 'Assistant profile',
+        description,
+        persona,
+        conversationGoals: goals,
+        businessNotes: additional,
+        toneRules,
+        bookingBehaviorNotes,
+        escalationBehaviorNotes,
+        knowledgeScopeNotes,
         temperature,
         maxTokens: tok,
-        modelOverride: p.allowModelOverride && mo ? mo : undefined,
+        modelOverride: p.allowModelOverride && mo ? mo : null,
       });
       setOk('Bot instructions saved.');
-      const refreshed = await listTenantPrompts(token, subaccountId);
+      const refreshed = await listTenantBotProfiles(token, subaccountId);
       const list = Array.isArray(refreshed) ? refreshed : [];
-      const match = list.find(p2 => p2.name === (profileName.trim() || DEFAULT_PROFILE)) ?? list[0];
-      if (match) {
-        setProfileName(match.name || DEFAULT_PROFILE);
-        const { persona: p2, goals: g, additional: a } = parsePromptSections(match.systemPrompt ?? '');
-        setPersona(p2);
-        setGoals(g);
-        setAdditional(a);
-        setTempPreset(numToPreset(match.temperature != null ? Number(match.temperature) : 0.7));
-        setModelOverride(match.modelOverride ?? '');
-        const mt2 = match.maxTokens != null && match.maxTokens > 0 ? match.maxTokens : 800;
-        setMaxTokens(mt2);
-        setLengthKey(inferLengthKey(mt2));
-      }
+      setProfiles(list);
+      const match = list.find(x => x.id === selectedProfileId) ?? list.find(x => x.isActive) ?? list[0];
+      if (match) applyProfileToForm(match);
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Save failed');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const onProfileDropdownChange = (id: string) => {
+    setSelectedProfileId(id);
+    const row = profiles.find(x => x.id === id);
+    if (row) applyProfileToForm(row);
+  };
+
+  const onNewProfile = async () => {
+    if (!token) return;
+    setErr('');
+    setOk('');
+    try {
+      const used = new Set(profiles.map(p => p.name));
+      let name = DEFAULT_NEW_PROFILE;
+      let n = 2;
+      while (used.has(name)) {
+        name = `${DEFAULT_NEW_PROFILE} (${n})`;
+        n += 1;
+      }
+      const created = await createTenantBotProfile(token, subaccountId, {
+        name,
+        description: '',
+        persona: '',
+        conversationGoals: '',
+        businessNotes: '',
+        toneRules: '',
+        bookingBehaviorNotes: '',
+        escalationBehaviorNotes: '',
+        knowledgeScopeNotes: '',
+        setActive: false,
+      });
+      const refreshed = await listTenantBotProfiles(token, subaccountId);
+      setProfiles(Array.isArray(refreshed) ? refreshed : []);
+      setSelectedProfileId(created.id);
+      applyProfileToForm(created);
+      setOk('Assistant profile created. Edit and save when ready.');
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not create profile');
+    }
+  };
+
+  const onDuplicateProfile = async () => {
+    if (!token || !selectedProfileId) return;
+    setErr('');
+    setOk('');
+    try {
+      const created = await duplicateTenantBotProfile(token, subaccountId, selectedProfileId);
+      const refreshed = await listTenantBotProfiles(token, subaccountId);
+      setProfiles(Array.isArray(refreshed) ? refreshed : []);
+      setSelectedProfileId(created.id);
+      applyProfileToForm(created);
+      setOk('Profile duplicated.');
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Duplicate failed');
+    }
+  };
+
+  const onSetActiveProfile = async () => {
+    if (!token || !selectedProfileId) return;
+    setErr('');
+    setOk('');
+    try {
+      await activateTenantBotProfile(token, subaccountId, selectedProfileId);
+      const refreshed = await listTenantBotProfiles(token, subaccountId);
+      const list = Array.isArray(refreshed) ? refreshed : [];
+      setProfiles(list);
+      const row = list.find(x => x.id === selectedProfileId);
+      if (row) applyProfileToForm(row);
+      setOk('Active assistant profile updated.');
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not set active profile');
+    }
+  };
+
+  const onDeleteProfile = async () => {
+    if (!token || !selectedProfileId) return;
+    const row = profiles.find(x => x.id === selectedProfileId);
+    if (!row || row.isActive || profiles.length <= 1) return;
+    if (!window.confirm(`Delete assistant profile “${row.name}”? This cannot be undone.`)) return;
+    setErr('');
+    setOk('');
+    try {
+      await deleteTenantBotProfile(token, subaccountId, selectedProfileId);
+      const refreshed = await listTenantBotProfiles(token, subaccountId);
+      const list = Array.isArray(refreshed) ? refreshed : [];
+      setProfiles(list);
+      const next = list.find(x => x.isActive) ?? list[0] ?? null;
+      if (next) {
+        setSelectedProfileId(next.id);
+        applyProfileToForm(next);
+      } else {
+        setSelectedProfileId('');
+      }
+      setOk('Profile deleted.');
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Delete failed');
     }
   };
 
@@ -393,6 +487,89 @@ export function TenantGoalsPanel() {
 
       {!loading && !err ? (
         <form onSubmit={onSavePrompt}>
+          <div style={sectionCard}>
+            <div
+              style={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                alignItems: 'center',
+                gap: '0.5rem 0.75rem',
+                marginBottom: '0.5rem',
+              }}
+            >
+              <span style={{ ...mvpLabelStyle, marginBottom: 0 }}>Assistant profile</span>
+              <select
+                value={selectedProfileId}
+                onChange={e => onProfileDropdownChange(e.target.value)}
+                style={{ ...mvpInputStyle, minWidth: '220px', maxWidth: '100%' }}
+                disabled={!profiles.length}
+                aria-label="Select assistant profile to edit"
+              >
+                {profiles.map(p => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+              {profiles.find(p => p.id === selectedProfileId)?.isActive ? <ActiveBadge /> : null}
+            </div>
+            <p style={{ fontSize: '0.8rem', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 0.75rem', lineHeight: 1.45 }}>
+              The active profile is used for live replies. Select a profile to edit it; use <strong>Set active</strong> to
+              change which profile is live.
+            </p>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.85rem' }}>
+              <button type="button" onClick={onNewProfile} style={secondaryBtnStyle}>
+                New profile
+              </button>
+              <button type="button" onClick={onDuplicateProfile} style={secondaryBtnStyle} disabled={!selectedProfileId}>
+                Duplicate profile
+              </button>
+              <button
+                type="button"
+                onClick={onSetActiveProfile}
+                style={secondaryBtnStyle}
+                disabled={!selectedProfileId || Boolean(profiles.find(p => p.id === selectedProfileId)?.isActive)}
+              >
+                Set active
+              </button>
+              <button
+                type="button"
+                onClick={onDeleteProfile}
+                style={{
+                  ...secondaryBtnStyle,
+                  color: 'var(--aisbp-danger, #b91c1c)',
+                  borderColor: 'rgba(185, 28, 28, 0.35)',
+                }}
+                disabled={
+                  !selectedProfileId ||
+                  profiles.length <= 1 ||
+                  Boolean(profiles.find(p => p.id === selectedProfileId)?.isActive)
+                }
+              >
+                Delete profile
+              </button>
+            </div>
+            <div style={{ marginBottom: '0.65rem' }}>
+              <label style={mvpLabelStyle}>Profile name</label>
+              <input
+                style={{ ...mvpInputStyle, maxWidth: 'min(100%, 400px)' }}
+                value={profileName}
+                onChange={e => setProfileName(e.target.value)}
+                autoComplete="off"
+              />
+            </div>
+            <div>
+              <label style={mvpLabelStyle}>Description</label>
+              <input
+                style={{ ...mvpInputStyle, maxWidth: 'min(100%, 520px)' }}
+                value={description}
+                onChange={e => setDescription(e.target.value)}
+                placeholder="e.g. Salon Concierge"
+                autoComplete="off"
+              />
+              <p style={mvpFieldHint}>For your team only — helps tell assistant profiles apart.</p>
+            </div>
+          </div>
           <div style={sectionCard}>
             <div
               style={{
@@ -587,20 +764,57 @@ export function TenantGoalsPanel() {
           </div>
 
           <details style={{ marginBottom: '0.75rem' }}>
-            <summary style={{ cursor: 'pointer', fontSize: '0.82rem', fontWeight: 600, color: 'var(--aisbp-muted, #64748b)' }}>Advanced details</summary>
-            <div style={{ marginTop: '0.65rem' }}>
-              <label style={mvpLabelStyle}>Profile name</label>
-              <input
-                style={{ ...mvpInputStyle, maxWidth: '280px' }}
-                value={profileName}
-                onChange={e => setProfileName(e.target.value)}
-                autoComplete="off"
-              />
-              <p style={mvpFieldHint}>Default profile name is &quot;default&quot;.</p>
+            <summary
+              style={{
+                cursor: 'pointer',
+                fontSize: '0.82rem',
+                fontWeight: 600,
+                color: 'var(--aisbp-muted, #64748b)',
+              }}
+            >
+              More assistant profile fields
+            </summary>
+            <div style={{ marginTop: '0.75rem', display: 'grid', gap: '0.85rem' }}>
+              <div>
+                <label style={mvpLabelStyle}>Tone rules</label>
+                <textarea
+                  style={textareaStyle}
+                  value={toneRules}
+                  onChange={e => setToneRules(e.target.value)}
+                  aria-label="Tone rules"
+                />
+              </div>
+              <div>
+                <label style={mvpLabelStyle}>Booking behavior notes</label>
+                <textarea
+                  style={textareaStyle}
+                  value={bookingBehaviorNotes}
+                  onChange={e => setBookingBehaviorNotes(e.target.value)}
+                  aria-label="Booking behavior notes"
+                />
+              </div>
+              <div>
+                <label style={mvpLabelStyle}>Escalation behavior notes</label>
+                <textarea
+                  style={textareaStyle}
+                  value={escalationBehaviorNotes}
+                  onChange={e => setEscalationBehaviorNotes(e.target.value)}
+                  aria-label="Escalation behavior notes"
+                />
+              </div>
+              <div>
+                <label style={mvpLabelStyle}>Knowledge scope notes</label>
+                <textarea
+                  style={textareaStyle}
+                  value={knowledgeScopeNotes}
+                  onChange={e => setKnowledgeScopeNotes(e.target.value)}
+                  aria-label="Knowledge scope notes"
+                />
+              </div>
             </div>
           </details>
 
-          <button type="submit" style={mvpPrimaryButtonStyle} disabled={saving}>
+          <button type="submit" style={mvpPrimaryButtonStyle} disabled={saving || !selectedProfileId}>
             {saving ? 'Saving…' : 'Save instructions'}
           </button>
         </form>

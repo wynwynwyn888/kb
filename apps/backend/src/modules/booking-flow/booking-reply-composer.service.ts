@@ -7,6 +7,7 @@ import { parseJsonLenient } from './booking-nlu-interpreter.service';
 import { bookingReplyComposerOutputSchema } from './booking-reply-composer.schema';
 import { bookingReplyComposerOutputPassesGuardrails } from './booking-reply-composer.guards';
 import type { BookingReplyComposerComposeInput } from './booking-reply-composer.types';
+import { BotProfilesService } from '../prompts/bot-profiles.service';
 
 type ProviderRow = {
   provider: string;
@@ -27,6 +28,8 @@ function clip(s: string, max: number): string {
 export class BookingReplyComposerService {
   private readonly logger = new Logger(BookingReplyComposerService.name);
   private readonly supabase = getSupabaseService();
+
+  constructor(private readonly botProfiles: BotProfilesService) {}
 
   /**
    * Rewrites deterministic `safeBaseMessage` in a short WhatsApp tone without changing the booking action.
@@ -64,6 +67,10 @@ export class BookingReplyComposerService {
     const maxTokens = 400;
     const temperature = 0.65;
 
+    const profilePersona = await this.botProfiles.getBookingReplyPersonaPrompt(input.tenantId);
+    const personaPromptMerged =
+      [input.personaPrompt?.trim(), profilePersona].filter(Boolean).join('\n\n') || null;
+
     const userPayload = JSON.stringify(
       {
         latestInboundText: input.latestInboundText,
@@ -71,7 +78,7 @@ export class BookingReplyComposerService {
         currentBookingState: input.currentBookingState,
         nextStep: input.nextStep,
         businessName: input.businessName ?? null,
-        personaPrompt: input.personaPrompt ?? null,
+        personaPrompt: personaPromptMerged,
         userFrustrated: Boolean(input.userFrustrated),
       },
       null,

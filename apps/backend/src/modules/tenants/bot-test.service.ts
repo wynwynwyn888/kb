@@ -6,6 +6,7 @@ import { GenerationService } from '../generation/generation.service';
 import { KbService } from '../kb/kb.service';
 import { AgencyAiConfigService } from '../agency-ai-config/agency-ai-config.service';
 import { TenantsService } from './tenants.service';
+import { BotProfilesService } from '../prompts/bot-profiles.service';
 import type { MemoryEntry } from '../orchestration/dto/memory-entry';
 import type { RetrievalChunk } from '../kb/dto/retrieval.dto';
 import { formatLiveCustomerDraftForPreview } from '../../lib/live-outbound-preview';
@@ -36,6 +37,7 @@ export class BotTestService {
     private readonly generationService: GenerationService,
     private readonly kbService: KbService,
     private readonly agencyAiConfig: AgencyAiConfigService,
+    private readonly botProfiles: BotProfilesService,
   ) {}
 
   async runTest(
@@ -76,18 +78,11 @@ export class BotTestService {
       .limit(1);
     const agencyPrompt = policyRows?.[0]?.content as string | undefined;
 
-    const { data: promptRows } = await this.supabase
-      .from('tenant_prompt_configs')
-      .select('system_prompt, model_override, temperature, max_tokens, is_active, updated_at')
-      .eq('tenant_id', tenantId)
-      .eq('is_active', true)
-      .order('updated_at', { ascending: false })
-      .limit(1);
-    const tenantRow = promptRows?.[0];
-    const tenantPrompt = tenantRow?.system_prompt as string | undefined;
-    const modelOverride = (tenantRow?.model_override as string | null)?.trim() ?? '';
-    const subTemp = tenantRow != null ? Number((tenantRow as { temperature?: unknown }).temperature) : NaN;
-    const subMax = (tenantRow as { max_tokens?: number | null } | undefined)?.max_tokens;
+    const orch = await this.botProfiles.getActivePromptForOrchestration(tenantId);
+    const tenantPrompt = orch?.systemPrompt;
+    const modelOverride = orch?.modelOverride?.trim() ?? '';
+    const subTemp = orch != null ? Number(orch.temperature) : NaN;
+    const subMax = orch?.maxTokens ?? null;
 
     const systemPrompt = buildStackedSystemPrompt(agencyPrompt, tenantPrompt);
 

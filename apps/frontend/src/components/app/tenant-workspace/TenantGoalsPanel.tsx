@@ -20,7 +20,6 @@ import {
   KNOWLEDGE_SCOPE_SELECTED_COLLECTIONS,
   formatProfileUpdatedAt,
   knowledgeScopeCardLabel,
-  knowledgeScopeSentence,
 } from '@/lib/assistant-profiles-ui';
 import {
   ErrorBanner,
@@ -37,20 +36,20 @@ const DEFAULT_NEW_PROFILE = 'New profile';
 
 const textareaStyle = {
   ...mvpInputStyle,
-  minHeight: '140px',
+  minHeight: '96px',
   resize: 'vertical' as const,
   fontFamily: 'inherit',
   fontSize: '0.9rem',
-  lineHeight: 1.5,
+  lineHeight: 1.45,
   whiteSpace: 'pre-wrap' as const,
   overflowWrap: 'break-word' as const,
 };
 
-const sectionCard = {
+const sectionCard: CSSProperties = {
   border: '1px solid var(--aisbp-border, #e2e8f0)',
   borderRadius: '10px',
-  padding: '1rem 1.1rem',
-  marginBottom: '0.85rem',
+  padding: '0.75rem 1rem',
+  marginBottom: '0.6rem',
   background: 'var(--aisbp-surface, #fff)',
 };
 
@@ -65,18 +64,32 @@ const secondaryBtnStyle: CSSProperties = {
   cursor: 'pointer',
 };
 
-function LiveBadge() {
+const deleteBtnStyle: CSSProperties = {
+  padding: '0.45rem 0.75rem',
+  borderRadius: '8px',
+  border: '1px solid transparent',
+  background: 'transparent',
+  color: 'var(--aisbp-muted, #64748b)',
+  fontSize: '0.82rem',
+  fontWeight: 500,
+  cursor: 'pointer',
+  textDecoration: 'underline',
+  textUnderlineOffset: '2px',
+};
+
+function LiveBadge({ large }: { large?: boolean }) {
   return (
     <span
       style={{
         display: 'inline-block',
-        padding: '0.15rem 0.5rem',
-        borderRadius: '6px',
-        fontSize: '0.72rem',
-        fontWeight: 700,
-        letterSpacing: '0.02em',
-        background: 'rgba(34, 197, 94, 0.15)',
-        color: 'rgb(22, 101, 52)',
+        padding: large ? '0.28rem 0.65rem' : '0.15rem 0.5rem',
+        borderRadius: '8px',
+        fontSize: large ? '0.8rem' : '0.72rem',
+        fontWeight: 800,
+        letterSpacing: '0.03em',
+        background: 'rgba(34, 197, 94, 0.18)',
+        color: 'rgb(21, 128, 61)',
+        border: '1px solid rgba(34, 197, 94, 0.45)',
       }}
     >
       Live
@@ -90,7 +103,7 @@ function DraftBadge() {
       style={{
         display: 'inline-block',
         padding: '0.15rem 0.5rem',
-        borderRadius: '6px',
+        borderRadius: '8px',
         fontSize: '0.72rem',
         fontWeight: 700,
         letterSpacing: '0.02em',
@@ -144,60 +157,11 @@ function clamp(n: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, n));
 }
 
-function countWords(text: string): number {
-  const t = text.trim();
-  if (!t) return 0;
-  return t.split(/\s+/).length;
-}
-
 function numToPreset(n: number): TempPreset {
   if (!Number.isFinite(n)) return 'balanced';
   if (n <= 0.5) return 'precise';
   if (n >= 0.95) return 'creative';
   return 'balanced';
-}
-
-type PromptSectionField = 'persona' | 'goals' | 'additional';
-
-const PROMPT_SECTION_MODAL_TITLE: Record<PromptSectionField, string> = {
-  persona: 'Persona',
-  goals: 'Conversation goals',
-  additional: 'Business notes',
-};
-
-const expandIconBtnStyle: CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  width: '2.25rem',
-  height: '2.25rem',
-  flexShrink: 0,
-  borderRadius: '8px',
-  border: '1px solid var(--aisbp-border, #e2e8f0)',
-  background: 'var(--aisbp-stat-tile-bg, #f8fafc)',
-  color: 'var(--aisbp-muted, #64748b)',
-  cursor: 'pointer',
-};
-
-const wordCountRowStyle: CSSProperties = {
-  fontSize: '0.72rem',
-  color: 'var(--aisbp-muted, #94a3b8)',
-  margin: '0.35rem 0 0',
-  textAlign: 'right',
-};
-
-function ExpandEditorIcon() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path
-        d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
 }
 
 type FormBaseline = {
@@ -275,7 +239,6 @@ export function TenantGoalsPanel() {
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState('');
   const [ok, setOk] = useState('');
-  const [promptModal, setPromptModal] = useState<null | { field: PromptSectionField; draft: string }>(null);
 
   const baselineRef = useRef<FormBaseline | null>(null);
 
@@ -327,20 +290,6 @@ export function TenantGoalsPanel() {
     () => profiles.find(p => p.id === selectedProfileId) ?? null,
     [profiles, selectedProfileId],
   );
-
-  useEffect(() => {
-    if (!promptModal) return;
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setPromptModal(null);
-    };
-    window.addEventListener('keydown', onKey);
-    return () => {
-      document.body.style.overflow = prev;
-      window.removeEventListener('keydown', onKey);
-    };
-  }, [promptModal]);
 
   const applyRowToForm = (row: TenantBotProfileRow) => {
     setProfileName(row.name);
@@ -507,7 +456,7 @@ export function TenantGoalsPanel() {
       setProfiles(Array.isArray(refreshed) ? refreshed : []);
       setSelectedProfileId(created.id);
       applyRowToForm(created);
-      setOk('Draft profile created. Save when ready, then Set active to use it for live replies.');
+      setOk('Draft created. Save your changes, then set active when ready.');
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Could not create profile');
     }
@@ -529,7 +478,7 @@ export function TenantGoalsPanel() {
       setProfiles(Array.isArray(refreshed) ? refreshed : []);
       setSelectedProfileId(created.id);
       applyRowToForm(created);
-      setOk('Profile duplicated as a draft.');
+      setOk('Duplicated as a draft.');
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Duplicate failed');
     }
@@ -602,50 +551,27 @@ export function TenantGoalsPanel() {
     }
   };
 
-  const openPromptModal = (field: PromptSectionField) => {
-    const draft = field === 'persona' ? persona : field === 'goals' ? goals : additional;
-    setPromptModal({ field, draft });
-  };
-
-  const applyPromptModal = () => {
-    if (!promptModal) return;
-    const { field, draft } = promptModal;
-    if (field === 'persona') setPersona(draft);
-    else if (field === 'goals') setGoals(draft);
-    else setAdditional(draft);
-    setPromptModal(null);
-  };
-
   const layoutStyleId = 'aisbp-goals-layout-css';
+
+  const showAdvancedModel = policy.allowModelOverride;
 
   return (
     <div>
       <style
         dangerouslySetInnerHTML={{
           __html: `
-#${layoutStyleId} { display: grid; gap: 1rem; grid-template-columns: 1fr; align-items: start; }
+#${layoutStyleId} { display: grid; gap: 0.75rem; grid-template-columns: 1fr; align-items: start; }
 @media (min-width: 960px) {
-  #${layoutStyleId} { grid-template-columns: minmax(260px, 320px) minmax(0, 1fr); }
+  #${layoutStyleId} { grid-template-columns: minmax(240px, 300px) minmax(0, 1fr); }
 }
 `,
         }}
       />
 
       <PageHeader title="Bot Instructions" eyebrow="Client workspace" />
-      <p
-        style={{
-          fontSize: '0.88rem',
-          color: 'var(--aisbp-muted, #64748b)',
-          margin: '0 0 1rem',
-          lineHeight: 1.5,
-          maxWidth: '640px',
-        }}
-      >
-        Define how this workspace’s bot should sound, what it should achieve, and what it must know.
-      </p>
 
       {err && (
-        <div style={{ marginBottom: '1rem' }}>
+        <div style={{ marginBottom: '0.75rem' }}>
           <ErrorBanner message={err} />
           <button
             type="button"
@@ -677,109 +603,86 @@ export function TenantGoalsPanel() {
             <div
               style={{
                 ...sectionCard,
-                borderColor: 'rgba(34, 197, 94, 0.35)',
-                background: 'linear-gradient(180deg, rgba(34, 197, 94, 0.06) 0%, var(--aisbp-surface, #fff) 48%)',
+                marginBottom: '0.75rem',
+                borderColor: 'rgba(34, 197, 94, 0.4)',
+                background: 'linear-gradient(180deg, rgba(34, 197, 94, 0.08) 0%, var(--aisbp-surface, #fff) 40%)',
               }}
             >
-              <div
+              <p
                 style={{
-                  display: 'flex',
-                  flexWrap: 'wrap',
-                  alignItems: 'flex-start',
-                  justifyContent: 'space-between',
-                  gap: '0.75rem',
-                  marginBottom: '0.65rem',
+                  fontSize: '0.68rem',
+                  fontWeight: 700,
+                  letterSpacing: '0.07em',
+                  textTransform: 'uppercase',
+                  color: 'var(--aisbp-muted, #64748b)',
+                  margin: '0 0 0.5rem',
                 }}
               >
-                <div>
-                  <p
-                    style={{
-                      fontSize: '0.72rem',
-                      fontWeight: 700,
-                      letterSpacing: '0.06em',
-                      textTransform: 'uppercase',
-                      color: 'var(--aisbp-muted, #64748b)',
-                      margin: '0 0 0.35rem',
-                    }}
-                  >
-                    Active assistant
-                  </p>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.5rem' }}>
-                    <span
-                      style={{
-                        fontSize: '1.05rem',
-                        fontWeight: 800,
-                        color: 'var(--aisbp-text-heading, #0f172a)',
-                      }}
-                    >
-                      {activeProfile.name.trim() || 'Untitled assistant'}
-                    </span>
-                    {activeProfile.description?.trim() ? (
-                      <span style={{ fontSize: '0.9rem', color: 'var(--aisbp-muted, #64748b)' }}>
-                        — {activeProfile.description.trim()}
-                      </span>
-                    ) : null}
-                    <LiveBadge />
-                  </div>
-                </div>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-                  <button
-                    type="button"
-                    onClick={() => requestSelectProfile(activeProfile.id)}
-                    style={secondaryBtnStyle}
-                  >
-                    Edit active profile
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => duplicateProfileById(activeProfile.id)}
-                    style={secondaryBtnStyle}
-                  >
-                    Duplicate
-                  </button>
-                  <button type="button" onClick={onNewProfile} style={mvpPrimaryButtonStyle}>
-                    Create new profile
-                  </button>
-                </div>
+                Active assistant
+              </p>
+              <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.6rem', marginBottom: '0.35rem' }}>
+                <span
+                  style={{
+                    fontSize: '1.35rem',
+                    fontWeight: 800,
+                    lineHeight: 1.2,
+                    color: 'var(--aisbp-text-heading, #0f172a)',
+                  }}
+                >
+                  {activeProfile.name.trim() || 'Untitled assistant'}
+                </span>
+                <LiveBadge large />
               </div>
-              <p style={{ fontSize: '0.85rem', color: 'var(--aisbp-text-secondary, #334155)', margin: '0 0 0.35rem' }}>
-                {knowledgeScopeSentence(activeProfile.knowledgeScopeMode)}
+              {activeProfile.description?.trim() ? (
+                <p style={{ fontSize: '0.9rem', color: 'var(--aisbp-text-secondary, #334155)', margin: '0 0 0.5rem', lineHeight: 1.45 }}>
+                  {activeProfile.description.trim()}
+                </p>
+              ) : null}
+              <p style={{ fontSize: '0.85rem', color: 'var(--aisbp-text-secondary, #334155)', margin: '0 0 0.25rem' }}>
+                Knowledge: {knowledgeScopeCardLabel(activeProfile.knowledgeScopeMode)}
               </p>
-              <p style={{ fontSize: '0.8rem', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 0.5rem' }}>
-                Used for live replies across connected channels.
+              <p style={{ fontSize: '0.82rem', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 0.5rem' }}>
+                Used for live customer replies.
               </p>
-              <p style={{ fontSize: '0.75rem', color: 'var(--aisbp-muted, #94a3b8)', margin: '0 0 0.35rem' }}>
+              <p style={{ fontSize: '0.75rem', color: 'var(--aisbp-muted, #94a3b8)', margin: '0 0 0.75rem' }}>
                 Last updated {formatProfileUpdatedAt(activeProfile.updatedAt)}
               </p>
-              <p style={{ fontSize: '0.72rem', color: 'var(--aisbp-muted, #94a3b8)', margin: 0, lineHeight: 1.45 }}>
-                This profile is used for live replies in this workspace.
-              </p>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.45rem', alignItems: 'center' }}>
+                <button type="button" onClick={() => requestSelectProfile(activeProfile.id)} style={secondaryBtnStyle}>
+                  Edit
+                </button>
+                <button type="button" onClick={() => duplicateProfileById(activeProfile.id)} style={secondaryBtnStyle}>
+                  Duplicate
+                </button>
+                <button type="button" onClick={onNewProfile} style={secondaryBtnStyle}>
+                  Create new profile
+                </button>
+              </div>
               {activeProfileLooksEmpty(activeProfile) ? (
                 <p
                   style={{
                     margin: '0.75rem 0 0',
-                    padding: '0.65rem 0.75rem',
+                    padding: '0.55rem 0.7rem',
                     borderRadius: '8px',
                     background: 'rgba(234, 179, 8, 0.12)',
                     color: 'rgb(113, 63, 18)',
-                    fontSize: '0.82rem',
+                    fontSize: '0.8rem',
                     lineHeight: 1.45,
                   }}
                 >
-                  This live assistant has little or no instruction content yet. Add persona and goals before going live
-                  with customers.
+                  Add persona and goals so this live assistant is ready for customers.
                 </p>
               ) : null}
             </div>
           ) : (
-            <div style={{ ...sectionCard, marginBottom: '1rem' }}>
-              <p style={{ margin: '0 0 0.5rem', fontWeight: 700, color: 'var(--aisbp-text-heading, #0f172a)' }}>
+            <div style={{ ...sectionCard, marginBottom: '0.75rem' }}>
+              <p style={{ margin: '0 0 0.35rem', fontWeight: 700, color: 'var(--aisbp-text-heading, #0f172a)' }}>
                 No live assistant
               </p>
-              <p style={{ fontSize: '0.85rem', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 0.75rem' }}>
-                Choose a profile below and click <strong>Set active</strong>, or create a new profile.
+              <p style={{ fontSize: '0.85rem', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 0.65rem' }}>
+                Set a profile active below, or create a new one.
               </p>
-              <button type="button" onClick={onNewProfile} style={mvpPrimaryButtonStyle}>
+              <button type="button" onClick={onNewProfile} style={secondaryBtnStyle}>
                 Create new profile
               </button>
             </div>
@@ -789,30 +692,30 @@ export function TenantGoalsPanel() {
             <aside style={{ minWidth: 0 }}>
               <h2
                 style={{
-                  fontSize: '0.82rem',
+                  fontSize: '0.78rem',
                   fontWeight: 800,
                   textTransform: 'uppercase',
                   letterSpacing: '0.05em',
                   color: 'var(--aisbp-muted, #64748b)',
-                  margin: '0 0 0.65rem',
+                  margin: '0 0 0.5rem',
                 }}
               >
                 Assistant profiles
               </h2>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                 {sortedProfiles.map(p => {
                   const selected = p.id === selectedProfileId;
                   return (
                     <div
                       key={p.id}
                       style={{
-                        padding: '0.75rem 0.85rem',
+                        padding: '0.65rem 0.75rem',
                         borderRadius: '10px',
                         border: selected
                           ? '2px solid var(--aisbp-accent, #2563eb)'
                           : '1px solid var(--aisbp-border, #e2e8f0)',
                         background: selected ? 'rgba(37, 99, 235, 0.06)' : 'var(--aisbp-surface, #fff)',
-                        boxShadow: p.isActive ? '0 1px 0 rgba(34, 197, 94, 0.25)' : undefined,
+                        boxShadow: p.isActive ? 'inset 0 0 0 1px rgba(34, 197, 94, 0.2)' : undefined,
                       }}
                     >
                       <button
@@ -823,36 +726,41 @@ export function TenantGoalsPanel() {
                           width: '100%',
                           textAlign: 'left',
                           padding: 0,
-                          marginBottom: '0.5rem',
+                          marginBottom: '0.45rem',
                           border: 'none',
                           background: 'transparent',
                           cursor: 'pointer',
                           font: 'inherit',
                         }}
                       >
-                        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.4rem', marginBottom: '0.35rem' }}>
-                          <span style={{ fontWeight: 700, color: 'var(--aisbp-text-heading, #0f172a)', fontSize: '0.92rem' }}>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.35rem', marginBottom: '0.25rem' }}>
+                          <span style={{ fontWeight: 700, color: 'var(--aisbp-text-heading, #0f172a)', fontSize: '0.9rem' }}>
                             {p.name.trim() || 'Untitled'}
                           </span>
                           {p.isActive ? <LiveBadge /> : <DraftBadge />}
                         </div>
+                        {!p.isActive ? (
+                          <p style={{ fontSize: '0.72rem', color: 'var(--aisbp-muted, #94a3b8)', margin: '0 0 0.35rem' }}>
+                            Not used for live replies
+                          </p>
+                        ) : null}
                         {p.description?.trim() ? (
-                          <p style={{ fontSize: '0.8rem', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 0.35rem', lineHeight: 1.4 }}>
+                          <p style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 0.35rem', lineHeight: 1.35 }}>
                             {p.description.trim()}
                           </p>
                         ) : null}
-                        <p style={{ fontSize: '0.72rem', color: 'var(--aisbp-muted, #94a3b8)', margin: '0 0 0.35rem' }}>
+                        <p style={{ fontSize: '0.7rem', color: 'var(--aisbp-muted, #94a3b8)', margin: '0 0 0.2rem' }}>
                           Knowledge: {knowledgeScopeCardLabel(p.knowledgeScopeMode)}
                         </p>
-                        <p style={{ fontSize: '0.72rem', color: 'var(--aisbp-muted, #94a3b8)', margin: 0 }}>
+                        <p style={{ fontSize: '0.7rem', color: 'var(--aisbp-muted, #94a3b8)', margin: 0 }}>
                           Updated {formatProfileUpdatedAt(p.updatedAt)}
                         </p>
                       </button>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem' }}>
                         <button
                           type="button"
                           onClick={() => requestSelectProfile(p.id)}
-                          style={{ ...secondaryBtnStyle, padding: '0.3rem 0.55rem', fontSize: '0.78rem' }}
+                          style={{ ...secondaryBtnStyle, padding: '0.28rem 0.5rem', fontSize: '0.76rem' }}
                         >
                           Edit
                         </button>
@@ -860,14 +768,14 @@ export function TenantGoalsPanel() {
                           type="button"
                           disabled={p.isActive}
                           onClick={() => activateProfileById(p.id)}
-                          style={{ ...secondaryBtnStyle, padding: '0.3rem 0.55rem', fontSize: '0.78rem' }}
+                          style={{ ...secondaryBtnStyle, padding: '0.28rem 0.5rem', fontSize: '0.76rem' }}
                         >
                           Set active
                         </button>
                         <button
                           type="button"
                           onClick={() => duplicateProfileById(p.id)}
-                          style={{ ...secondaryBtnStyle, padding: '0.3rem 0.55rem', fontSize: '0.78rem' }}
+                          style={{ ...secondaryBtnStyle, padding: '0.28rem 0.5rem', fontSize: '0.76rem' }}
                         >
                           Duplicate
                         </button>
@@ -876,11 +784,9 @@ export function TenantGoalsPanel() {
                           disabled={profiles.length <= 1 || p.isActive}
                           onClick={() => onDeleteProfile(p.id)}
                           style={{
-                            ...secondaryBtnStyle,
-                            padding: '0.3rem 0.55rem',
-                            fontSize: '0.78rem',
-                            color: 'var(--aisbp-danger, #b91c1c)',
-                            borderColor: 'rgba(185, 28, 28, 0.35)',
+                            ...deleteBtnStyle,
+                            padding: '0.28rem 0.45rem',
+                            fontSize: '0.76rem',
                           }}
                         >
                           Delete
@@ -891,327 +797,159 @@ export function TenantGoalsPanel() {
                 })}
               </div>
               {isDirty ? (
-                <p style={{ fontSize: '0.78rem', color: 'rgb(180, 83, 9)', margin: '0.75rem 0 0', fontWeight: 600 }}>
-                  Unsaved changes on this profile
+                <p style={{ fontSize: '0.75rem', color: 'rgb(180, 83, 9)', margin: '0.6rem 0 0', fontWeight: 600 }}>
+                  Unsaved changes
                 </p>
               ) : null}
             </aside>
 
             <div style={{ minWidth: 0 }}>
               {!selectedProfileId ? (
-                <p style={{ fontSize: '0.9rem', color: 'var(--aisbp-muted, #64748b)' }}>Select a profile to edit.</p>
+                <p style={{ fontSize: '0.88rem', color: 'var(--aisbp-muted, #64748b)' }}>Select a profile to edit.</p>
               ) : (
                 <form onSubmit={onSavePrompt}>
-                  <div style={{ ...sectionCard, marginBottom: '0.75rem' }}>
-                    <p style={{ fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 0.5rem' }}>
+                  <div style={sectionCard}>
+                    <div style={{ marginBottom: '0.5rem' }}>
                       {selectedRow?.isActive ? (
-                        <span>
-                          Editing live assistant <LiveBadge />
+                        <span style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--aisbp-muted, #64748b)' }}>
+                          Live assistant <LiveBadge />
                         </span>
                       ) : (
-                        <span>
-                          Editing draft <DraftBadge />
-                        </span>
+                        <div>
+                          <span style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--aisbp-muted, #64748b)' }}>
+                            <DraftBadge />{' '}
+                            <span style={{ fontWeight: 600 }}>Not used for live replies</span>
+                          </span>
+                        </div>
                       )}
-                    </p>
-                    <div style={{ marginBottom: '0.65rem' }}>
+                    </div>
+                    <div style={{ marginBottom: '0.55rem' }}>
                       <label style={mvpLabelStyle}>Profile name</label>
                       <input
-                        style={{ ...mvpInputStyle, maxWidth: 'min(100%, 480px)' }}
+                        style={{ ...mvpInputStyle, maxWidth: '100%' }}
                         value={profileName}
                         onChange={e => setProfileName(e.target.value)}
                         autoComplete="off"
                         aria-label="Profile name"
                       />
                     </div>
-                    <div style={{ marginBottom: '0.5rem' }}>
+                    <div style={{ marginBottom: 0 }}>
                       <label style={mvpLabelStyle}>Description</label>
                       <input
-                        style={{ ...mvpInputStyle, maxWidth: 'min(100%, 520px)' }}
+                        style={{ ...mvpInputStyle, maxWidth: '100%' }}
                         value={description}
                         onChange={e => setDescription(e.target.value)}
-                        placeholder="e.g. Salon Concierge"
+                        placeholder="Short label for your team"
                         autoComplete="off"
                       />
-                      <p style={mvpFieldHint}>For your team only — helps tell assistant profiles apart.</p>
+                      <p style={{ ...mvpFieldHint, marginBottom: 0 }}>Shown in the profile list only.</p>
                     </div>
                   </div>
 
                   <div style={sectionCard}>
-                    <h2
-                      style={{
-                        fontSize: '0.95rem',
-                        fontWeight: 800,
-                        margin: '0 0 0.5rem',
-                        color: 'var(--aisbp-text-heading, #0f172a)',
-                      }}
-                    >
-                      Knowledge scope
-                    </h2>
-                    <p style={{ fontSize: '0.8rem', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 0.75rem', lineHeight: 1.45 }}>
-                      Choose what this assistant profile is allowed to use from the workspace knowledge base.
+                    <label style={mvpLabelStyle}>Knowledge scope</label>
+                    <p style={{ fontSize: '0.88rem', fontWeight: 600, margin: '0.25rem 0 0.15rem', color: 'var(--aisbp-text-heading, #0f172a)' }}>
+                      Knowledge: All workspace knowledge
                     </p>
-                    <label
-                      style={{
-                        display: 'flex',
-                        alignItems: 'flex-start',
-                        gap: '0.5rem',
-                        marginBottom: '0.5rem',
-                        cursor: 'pointer',
-                        fontSize: '0.88rem',
-                      }}
-                    >
-                      <input
-                        type="radio"
-                        name="knowledgeScope"
-                        checked={knowledgeScopeMode === KNOWLEDGE_SCOPE_ALL_WORKSPACE}
-                        onChange={() => setKnowledgeScopeMode(KNOWLEDGE_SCOPE_ALL_WORKSPACE)}
-                      />
-                      <span>
-                        <strong>All workspace knowledge</strong>
-                        <span style={{ display: 'block', fontSize: '0.78rem', color: 'var(--aisbp-muted, #94a3b8)', marginTop: '0.15rem' }}>
-                          Default — full workspace knowledge base
-                        </span>
-                      </span>
-                    </label>
-                    <label
-                      style={{
-                        display: 'flex',
-                        alignItems: 'flex-start',
-                        gap: '0.5rem',
-                        marginBottom: '0.5rem',
-                        cursor: 'not-allowed',
-                        opacity: 0.65,
-                        fontSize: '0.88rem',
-                      }}
-                    >
-                      <input type="radio" name="knowledgeScope" disabled checked={false} readOnly />
-                      <span>
-                        <strong>Selected collections — coming soon</strong>
-                        <span style={{ display: 'block', fontSize: '0.78rem', color: 'var(--aisbp-muted, #94a3b8)', marginTop: '0.15rem' }}>
-                          Restrict to specific collections (not available yet)
-                        </span>
-                      </span>
-                    </label>
+                    <p style={{ fontSize: '0.72rem', color: 'var(--aisbp-muted, #94a3b8)', margin: '0 0 0.35rem' }}>
+                      Selected collections — coming soon
+                    </p>
                   </div>
 
                   <div style={sectionCard}>
-                    <div
-                      style={{
-                        display: 'flex',
-                        alignItems: 'flex-start',
-                        justifyContent: 'space-between',
-                        gap: '0.65rem',
-                        marginBottom: '0.5rem',
-                      }}
-                    >
-                      <h2
-                        style={{
-                          fontSize: '0.95rem',
-                          fontWeight: 800,
-                          margin: 0,
-                          color: 'var(--aisbp-text-heading, #0f172a)',
-                          flex: '1 1 auto',
-                          minWidth: 0,
-                        }}
-                      >
-                        Persona
-                      </h2>
-                      <button
-                        type="button"
-                        onClick={() => openPromptModal('persona')}
-                        style={expandIconBtnStyle}
-                        aria-label="Open persona editor in a large view"
-                        title="Expand editor"
-                      >
-                        <ExpandEditorIcon />
-                      </button>
-                    </div>
-                    <p style={{ fontSize: '0.8rem', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 0.5rem' }}>
-                      Identity, tone, and how the bot should sound.
-                    </p>
-                    <textarea
-                      style={textareaStyle}
-                      value={persona}
-                      onChange={e => setPersona(e.target.value)}
-                      aria-label="Bot Persona"
-                    />
-                    <p style={wordCountRowStyle}>{countWords(persona)} words</p>
+                    <label style={mvpLabelStyle}>Persona</label>
+                    <textarea style={textareaStyle} value={persona} onChange={e => setPersona(e.target.value)} aria-label="Persona" />
                   </div>
                   <div style={sectionCard}>
-                    <div
-                      style={{
-                        display: 'flex',
-                        alignItems: 'flex-start',
-                        justifyContent: 'space-between',
-                        gap: '0.65rem',
-                        marginBottom: '0.5rem',
-                      }}
-                    >
-                      <h2
-                        style={{
-                          fontSize: '0.95rem',
-                          fontWeight: 800,
-                          margin: 0,
-                          color: 'var(--aisbp-text-heading, #0f172a)',
-                          flex: '1 1 auto',
-                          minWidth: 0,
-                        }}
-                      >
-                        Conversation goals
-                      </h2>
-                      <button
-                        type="button"
-                        onClick={() => openPromptModal('goals')}
-                        style={expandIconBtnStyle}
-                        aria-label="Open conversation goals editor in a large view"
-                        title="Expand editor"
-                      >
-                        <ExpandEditorIcon />
-                      </button>
-                    </div>
-                    <p style={{ fontSize: '0.8rem', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 0.5rem' }}>
-                      Outcomes, priorities, and what success looks like.
-                    </p>
+                    <label style={mvpLabelStyle}>Conversation goals</label>
                     <textarea style={textareaStyle} value={goals} onChange={e => setGoals(e.target.value)} aria-label="Conversation goals" />
-                    <p style={wordCountRowStyle}>{countWords(goals)} words</p>
                   </div>
                   <div style={sectionCard}>
-                    <div
-                      style={{
-                        display: 'flex',
-                        alignItems: 'flex-start',
-                        justifyContent: 'space-between',
-                        gap: '0.65rem',
-                        marginBottom: '0.5rem',
-                      }}
-                    >
-                      <h2
-                        style={{
-                          fontSize: '0.95rem',
-                          fontWeight: 800,
-                          margin: 0,
-                          color: 'var(--aisbp-text-heading, #0f172a)',
-                          flex: '1 1 auto',
-                          minWidth: 0,
-                        }}
-                      >
-                        Business notes
-                      </h2>
-                      <button
-                        type="button"
-                        onClick={() => openPromptModal('additional')}
-                        style={expandIconBtnStyle}
-                        aria-label="Open business notes editor in a large view"
-                        title="Expand editor"
-                      >
-                        <ExpandEditorIcon />
-                      </button>
-                    </div>
-                    <p style={{ fontSize: '0.8rem', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 0.5rem' }}>
-                      Guardrails, hours, products, or anything else the bot should know.
-                    </p>
-                    <textarea
-                      style={textareaStyle}
-                      value={additional}
-                      onChange={e => setAdditional(e.target.value)}
-                      aria-label="Business notes"
-                    />
-                    <p style={wordCountRowStyle}>{countWords(additional)} words</p>
+                    <label style={mvpLabelStyle}>Business notes</label>
+                    <textarea style={textareaStyle} value={additional} onChange={e => setAdditional(e.target.value)} aria-label="Business notes" />
                   </div>
 
-                  <div
-                    style={{
-                      ...sectionCard,
-                      display: 'grid',
-                      gap: '0.85rem',
-                      gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))',
-                    }}
-                  >
-                    <div>
-                      <label style={mvpLabelStyle}>Reply style</label>
-                      <select
-                        value={tempPreset}
-                        onChange={e => setTempPreset(e.target.value as TempPreset)}
-                        style={mvpInputStyle}
-                        disabled={!policy.allowResponseStyleOverride}
-                      >
-                        <option value="precise">Precise</option>
-                        <option value="balanced">Balanced</option>
-                        <option value="creative">Creative</option>
-                      </select>
-                      <p style={mvpFieldHint}>
-                        Balanced is the usual default. Your agency can limit how far each workspace can adjust style.
-                      </p>
-                    </div>
-                    <div>
-                      <span style={mvpLabelStyle}>Reply length</span>
-                      <select
-                        value={lengthKey}
-                        onChange={e => {
-                          const v = e.target.value as (typeof LENGTH_PRESETS)[number]['value'];
-                          setLengthKey(v);
-                          const opt = LENGTH_PRESETS.find(o => o.value === v);
-                          if (opt && opt.value !== 'custom') setMaxTokens(opt.tokens);
-                        }}
-                        style={mvpInputStyle}
-                        disabled={!policy.allowMaxTokensOverride}
-                      >
-                        {LENGTH_PRESETS.map(o => (
-                          <option key={o.value} value={o.value}>
-                            {o.label}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label style={mvpLabelStyle}>Maximum reply length</label>
-                      <input
-                        type="number"
-                        value={maxTokens}
-                        onChange={e => setMaxTokens(parseInt(e.target.value, 10) || 0)}
-                        style={mvpInputStyle}
-                        disabled={!policy.allowMaxTokensOverride}
-                        min={policy.maxTokensMin}
-                        max={policy.maxTokensMax}
-                      />
-                    </div>
-                    <div>
-                      <label style={mvpLabelStyle}>Model override (Advanced)</label>
-                      <input
-                        style={mvpInputStyle}
-                        value={modelOverride}
-                        onChange={e => setModelOverride(e.target.value)}
-                        placeholder="Optional model ID"
-                        autoComplete="off"
-                        disabled={!policy.allowModelOverride}
-                      />
-                      {!policy.allowModelOverride ? (
-                        <p style={mvpFieldHint}>Your agency has disabled model overrides for workspaces.</p>
-                      ) : null}
-                    </div>
-                  </div>
-
-                  <details style={{ marginBottom: '0.75rem' }}>
+                  <details style={{ marginBottom: '0.6rem' }}>
                     <summary
                       style={{
                         cursor: 'pointer',
-                        fontSize: '0.82rem',
+                        fontSize: '0.8rem',
                         fontWeight: 600,
                         color: 'var(--aisbp-muted, #64748b)',
+                        listStyle: 'none',
                       }}
                     >
-                      More behavior settings
+                      Advanced
                     </summary>
-                    <div style={{ marginTop: '0.75rem', display: 'grid', gap: '0.85rem' }}>
+                    <div style={{ marginTop: '0.65rem', display: 'grid', gap: '0.65rem' }}>
+                      <div
+                        style={{
+                          display: 'grid',
+                          gap: '0.65rem',
+                          gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
+                        }}
+                      >
+                        <div>
+                          <label style={mvpLabelStyle}>Reply style</label>
+                          <select
+                            value={tempPreset}
+                            onChange={e => setTempPreset(e.target.value as TempPreset)}
+                            style={mvpInputStyle}
+                            disabled={!policy.allowResponseStyleOverride}
+                          >
+                            <option value="precise">Precise</option>
+                            <option value="balanced">Balanced</option>
+                            <option value="creative">Creative</option>
+                          </select>
+                        </div>
+                        <div>
+                          <span style={mvpLabelStyle}>Reply length</span>
+                          <select
+                            value={lengthKey}
+                            onChange={e => {
+                              const v = e.target.value as (typeof LENGTH_PRESETS)[number]['value'];
+                              setLengthKey(v);
+                              const opt = LENGTH_PRESETS.find(o => o.value === v);
+                              if (opt && opt.value !== 'custom') setMaxTokens(opt.tokens);
+                            }}
+                            style={mvpInputStyle}
+                            disabled={!policy.allowMaxTokensOverride}
+                          >
+                            {LENGTH_PRESETS.map(o => (
+                              <option key={o.value} value={o.value}>
+                                {o.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label style={mvpLabelStyle}>Maximum reply length</label>
+                          <input
+                            type="number"
+                            value={maxTokens}
+                            onChange={e => setMaxTokens(parseInt(e.target.value, 10) || 0)}
+                            style={mvpInputStyle}
+                            disabled={!policy.allowMaxTokensOverride}
+                            min={policy.maxTokensMin}
+                            max={policy.maxTokensMax}
+                          />
+                        </div>
+                        {showAdvancedModel ? (
+                          <div>
+                            <label style={mvpLabelStyle}>Model override</label>
+                            <input
+                              style={mvpInputStyle}
+                              value={modelOverride}
+                              onChange={e => setModelOverride(e.target.value)}
+                              placeholder="Optional model ID"
+                              autoComplete="off"
+                            />
+                          </div>
+                        ) : null}
+                      </div>
                       <div>
                         <label style={mvpLabelStyle}>Tone rules</label>
-                        <textarea
-                          style={textareaStyle}
-                          value={toneRules}
-                          onChange={e => setToneRules(e.target.value)}
-                          aria-label="Tone rules"
-                        />
+                        <textarea style={textareaStyle} value={toneRules} onChange={e => setToneRules(e.target.value)} aria-label="Tone rules" />
                       </div>
                       <div>
                         <label style={mvpLabelStyle}>Booking behavior</label>
@@ -1243,7 +981,15 @@ export function TenantGoalsPanel() {
                     </div>
                   </details>
 
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center', marginBottom: '1rem' }}>
+                  <div
+                    style={{
+                      display: 'flex',
+                      flexWrap: 'wrap',
+                      gap: '0.45rem',
+                      alignItems: 'center',
+                      marginBottom: '0.5rem',
+                    }}
+                  >
                     <button type="submit" style={mvpPrimaryButtonStyle} disabled={saving || !selectedProfileId}>
                       {saving ? 'Saving…' : 'Save changes'}
                     </button>
@@ -1266,11 +1012,7 @@ export function TenantGoalsPanel() {
                     <button
                       type="button"
                       onClick={() => selectedProfileId && onDeleteProfile(selectedProfileId)}
-                      style={{
-                        ...secondaryBtnStyle,
-                        color: 'var(--aisbp-danger, #b91c1c)',
-                        borderColor: 'rgba(185, 28, 28, 0.35)',
-                      }}
+                      style={deleteBtnStyle}
                       disabled={!selectedProfileId || profiles.length <= 1 || Boolean(selectedRow?.isActive)}
                     >
                       Delete
@@ -1281,129 +1023,6 @@ export function TenantGoalsPanel() {
             </div>
           </div>
         </>
-      ) : null}
-
-      {promptModal ? (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="aisbp-prompt-modal-title"
-          style={{
-            position: 'fixed',
-            inset: 0,
-            zIndex: 1000,
-            background: 'rgba(15, 23, 42, 0.5)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '1rem',
-          }}
-          onClick={() => setPromptModal(null)}
-        >
-          <div
-            style={{
-              width: '100%',
-              maxWidth: 'min(920px, 100%)',
-              maxHeight: 'min(90vh, 880px)',
-              background: 'var(--aisbp-surface, #fff)',
-              borderRadius: '12px',
-              border: '1px solid var(--aisbp-border, #e2e8f0)',
-              boxShadow: '0 24px 64px rgba(15, 23, 42, 0.18)',
-              display: 'flex',
-              flexDirection: 'column',
-              padding: '1rem 1.15rem 1.1rem',
-            }}
-            onClick={e => e.stopPropagation()}
-          >
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: '0.75rem',
-                marginBottom: '0.65rem',
-              }}
-            >
-              <h2
-                id="aisbp-prompt-modal-title"
-                style={{
-                  margin: 0,
-                  fontSize: '1.05rem',
-                  fontWeight: 800,
-                  color: 'var(--aisbp-text-heading, #0f172a)',
-                }}
-              >
-                {PROMPT_SECTION_MODAL_TITLE[promptModal.field]}
-              </h2>
-              <button
-                type="button"
-                onClick={() => setPromptModal(null)}
-                aria-label="Close editor"
-                style={{
-                  ...expandIconBtnStyle,
-                  border: '1px solid transparent',
-                  background: 'transparent',
-                  color: 'var(--aisbp-muted, #64748b)',
-                  fontSize: '1.35rem',
-                  lineHeight: 1,
-                  fontWeight: 400,
-                }}
-              >
-                ×
-              </button>
-            </div>
-            <p style={{ fontSize: '0.8rem', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 0.5rem', lineHeight: 1.45 }}>
-              Edit below. Use <strong>Done</strong> to apply changes to the form, or close / Cancel / Esc to discard edits
-              made only in this dialog.
-            </p>
-            <textarea
-              value={promptModal.draft}
-              onChange={e => setPromptModal(m => (m ? { ...m, draft: e.target.value } : null))}
-              aria-label={PROMPT_SECTION_MODAL_TITLE[promptModal.field]}
-              style={{
-                ...mvpInputStyle,
-                flex: 1,
-                minHeight: 'min(58vh, 520px)',
-                resize: 'vertical' as const,
-                fontFamily: 'inherit',
-                fontSize: '0.9rem',
-                lineHeight: 1.5,
-                whiteSpace: 'pre-wrap' as const,
-                overflowWrap: 'break-word' as const,
-              }}
-            />
-            <p style={wordCountRowStyle}>{countWords(promptModal.draft)} words</p>
-            <div
-              style={{
-                display: 'flex',
-                flexWrap: 'wrap',
-                gap: '0.5rem',
-                justifyContent: 'flex-end',
-                marginTop: '0.85rem',
-              }}
-            >
-              <button
-                type="button"
-                onClick={() => setPromptModal(null)}
-                style={{
-                  padding: '0.45rem 0.9rem',
-                  borderRadius: '8px',
-                  border: '1px solid var(--aisbp-border, #e2e8f0)',
-                  background: 'var(--aisbp-surface, #fff)',
-                  color: 'var(--aisbp-text-secondary, #334155)',
-                  fontSize: '0.88rem',
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                }}
-              >
-                Cancel
-              </button>
-              <button type="button" onClick={applyPromptModal} style={{ ...mvpPrimaryButtonStyle, width: 'fit-content' }}>
-                Done
-              </button>
-            </div>
-          </div>
-        </div>
       ) : null}
     </div>
   );

@@ -343,11 +343,24 @@ export class KbService {
     return out;
   }
 
-  async createFaq(tenantId: string, question: string, answer: string): Promise<{ id: string }> {
+  private async resolveVaultIdForNewDocument(tenantId: string, requestedVaultId?: string | null): Promise<string> {
+    const want = requestedVaultId?.trim();
+    if (!want) return this.ensureDefaultVaultForTenant(tenantId);
+    const { data, error } = await this.supabase
+      .from('knowledge_vaults')
+      .select('id')
+      .eq('tenant_id', tenantId)
+      .eq('id', want)
+      .maybeSingle();
+    if (error || !data?.id) return this.ensureDefaultVaultForTenant(tenantId);
+    return data.id as string;
+  }
+
+  async createFaq(tenantId: string, question: string, answer: string, requestedVaultId?: string): Promise<{ id: string }> {
     const q = question.trim();
     const a = answer.trim();
     if (!q || !a) throw new Error('question and answer required');
-    const vaultId = await this.ensureDefaultVaultForTenant(tenantId);
+    const vaultId = await this.resolveVaultIdForNewDocument(tenantId, requestedVaultId);
     const title = `FAQ: ${q.slice(0, 200)}`;
     const docId = randomUUID();
     const now = new Date().toISOString();
@@ -381,11 +394,11 @@ export class KbService {
     return { id: doc.id };
   }
 
-  async createRichText(tenantId: string, title: string, content: string): Promise<{ id: string }> {
+  async createRichText(tenantId: string, title: string, content: string, requestedVaultId?: string): Promise<{ id: string }> {
     const t = title.trim();
     const c = content.trim();
     if (!t || !c) throw new Error('title and content required');
-    const vaultId = await this.ensureDefaultVaultForTenant(tenantId);
+    const vaultId = await this.resolveVaultIdForNewDocument(tenantId, requestedVaultId);
     const docId = randomUUID();
     const now = new Date().toISOString();
     const { data: doc, error: de } = await this.supabase
@@ -702,6 +715,7 @@ export class KbService {
     fileName: string,
     buffer: Buffer,
     mime: string,
+    requestedVaultId?: string,
   ): Promise<{ id: string; status: string }> {
     const m = (mime || '').toLowerCase();
     let text = '';
@@ -718,7 +732,7 @@ export class KbService {
       text = buffer.toString('utf8');
     }
     if (!text.trim()) throw new Error('Empty or unsupported file content');
-    const vaultId = await this.ensureDefaultVaultForTenant(tenantId);
+    const vaultId = await this.resolveVaultIdForNewDocument(tenantId, requestedVaultId);
     const docId = randomUUID();
     const now = new Date().toISOString();
     let metadata: Record<string, unknown> = { fileName, mime, documentKind: 'file' };

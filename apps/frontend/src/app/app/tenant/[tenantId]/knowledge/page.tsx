@@ -74,6 +74,45 @@ const bentoBtn: CSSProperties = {
   color: 'var(--aisbp-text-heading, #0f172a)',
 };
 
+function CreateKnowledgeVaultSelect(props: {
+  vaults: KbVaultRow[];
+  value: string;
+  onChange: (vaultId: string) => void;
+  disabled?: boolean;
+  helperWhenSelectable: string;
+}) {
+  const { vaults, value, onChange, disabled, helperWhenSelectable } = props;
+  const empty = vaults.length === 0;
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+      <label>
+        <span style={mvpLabelStyle}>Knowledge vault</span>
+        <select
+          value={empty ? '' : value}
+          onChange={e => onChange(e.target.value)}
+          disabled={disabled || empty}
+          style={{ ...mvpInputStyle, marginTop: '0.35rem', maxWidth: 360 }}
+          aria-label="Knowledge vault"
+        >
+          {empty ? (
+            <option value="">No vaults yet</option>
+          ) : (
+            vaults.map(v => (
+              <option key={v.id} value={v.id}>
+                {v.name}
+                {v.isDefault ? ' (default)' : ''}
+              </option>
+            ))
+          )}
+        </select>
+      </label>
+      <p style={{ fontSize: '0.78rem', color: '#64748b', margin: 0, lineHeight: 1.45, maxWidth: 520 }}>
+        {empty ? 'Create a vault before adding knowledge.' : helperWhenSelectable}
+      </p>
+    </div>
+  );
+}
+
 function kbSearchRelevanceLabelDisplay(h: KbSearchHit): string {
   const m: Record<string, string> = {
     HIGH: 'High',
@@ -1514,6 +1553,9 @@ export default function SubaccountKnowledgePage() {
   const [vaultMutating, setVaultMutating] = useState(false);
   const [vaultAssignBusy, setVaultAssignBusy] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [createFaqVaultId, setCreateFaqVaultId] = useState('');
+  const [createNoteVaultId, setCreateNoteVaultId] = useState('');
+  const [createFileVaultId, setCreateFileVaultId] = useState('');
 
   const [faqQ, setFaqQ] = useState('');
   const [faqA, setFaqA] = useState('');
@@ -1574,6 +1616,14 @@ export default function SubaccountKnowledgePage() {
     void load();
   }, [load]);
 
+  useEffect(() => {
+    const prefer = vaults.find(v => v.isDefault)?.id?.trim() || vaults[0]?.id?.trim() || '';
+    const resolve = (cur: string) => (cur && vaults.some(v => v.id === cur) ? cur : prefer);
+    setCreateFaqVaultId(prev => resolve(prev));
+    setCreateNoteVaultId(prev => resolve(prev));
+    setCreateFileVaultId(prev => resolve(prev));
+  }, [vaults]);
+
   const { faqRows, richRows, fileRows, otherRows } = useMemo(() => {
     const faq: KbDocumentRow[] = [];
     const file: KbDocumentRow[] = [];
@@ -1597,6 +1647,11 @@ export default function SubaccountKnowledgePage() {
   const onFaqSave = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!token || !subId) return;
+    if (!vaults.length) {
+      setWriteErr('Create a vault before adding knowledge.');
+      setSaveOk('');
+      return;
+    }
     const form = e.currentTarget;
     const qEl = form.elements.namedItem('kb-faq-question') as HTMLInputElement | null;
     const aEl = form.elements.namedItem('kb-faq-answer') as HTMLTextAreaElement | null;
@@ -1611,7 +1666,12 @@ export default function SubaccountKnowledgePage() {
     setSaveOk('');
     setSaving(true);
     try {
-      await createKbFaq(token, { tenantId: subId, question: q, answer: a });
+      await createKbFaq(token, {
+        tenantId: subId,
+        question: q,
+        answer: a,
+        ...(createFaqVaultId.trim() ? { vaultId: createFaqVaultId.trim() } : {}),
+      });
       setFaqQ('');
       setFaqA('');
       setSaveOk('FAQ saved.');
@@ -1627,6 +1687,11 @@ export default function SubaccountKnowledgePage() {
   const onRichSave = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!token || !subId) return;
+    if (!vaults.length) {
+      setWriteErr('Create a vault before adding knowledge.');
+      setSaveOk('');
+      return;
+    }
     const form = e.currentTarget;
     const tEl = form.elements.namedItem('kb-rich-title') as HTMLInputElement | null;
     const bEl = form.elements.namedItem('kb-rich-body') as HTMLTextAreaElement | null;
@@ -1641,7 +1706,12 @@ export default function SubaccountKnowledgePage() {
     setSaveOk('');
     setSaving(true);
     try {
-      await createKbRichText(token, { tenantId: subId, title, content: body });
+      await createKbRichText(token, {
+        tenantId: subId,
+        title,
+        content: body,
+        ...(createNoteVaultId.trim() ? { vaultId: createNoteVaultId.trim() } : {}),
+      });
       setRichTitle('');
       setRichBody('');
       setSaveOk('Note saved.');
@@ -1658,11 +1728,16 @@ export default function SubaccountKnowledgePage() {
     const file = e.currentTarget.files?.[0];
     e.currentTarget.value = '';
     if (!token || !subId || !file) return;
+    if (!vaults.length) {
+      setWriteErr('Create a vault before adding knowledge.');
+      setSaveOk('');
+      return;
+    }
     setWriteErr('');
     setSaveOk('');
     setSaving(true);
     try {
-      await uploadKbFile(token, subId, file);
+      await uploadKbFile(token, subId, file, createFileVaultId.trim() || undefined);
       setSaveOk('File uploaded.');
       await load();
     } catch (er) {
@@ -1834,57 +1909,6 @@ export default function SubaccountKnowledgePage() {
 
             {!loadErr && !loading ? (
               <>
-                <div
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
-                    gap: '0.75rem',
-                    marginBottom: '1.35rem',
-                  }}
-                  aria-label="Knowledge actions"
-                >
-                  <button
-                    type="button"
-                    style={bentoBtn}
-                    onClick={() => {
-                      setTab('rich');
-                      setSaveOk('');
-                    }}
-                  >
-                    <span style={iconCircle}>📝</span>
-                    <span style={{ fontSize: '0.875rem', fontWeight: 600 }}>Add note</span>
-                  </button>
-                  <button
-                    type="button"
-                    style={bentoBtn}
-                    onClick={() => {
-                      setTab('files');
-                      fileInputRef.current?.click();
-                    }}
-                  >
-                    <span style={iconCircle}>📤</span>
-                    <span style={{ fontSize: '0.875rem', fontWeight: 600 }}>Upload file</span>
-                  </button>
-                  <button
-                    type="button"
-                    style={bentoBtn}
-                    onClick={() => {
-                      setTab('faq');
-                      setSaveOk('');
-                    }}
-                  >
-                    <span style={iconCircle}>❓</span>
-                    <span style={{ fontSize: '0.875rem', fontWeight: 600 }}>Add FAQ</span>
-                  </button>
-                </div>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  onChange={onFileChange}
-                  style={{ display: 'none' }}
-                  accept=".txt,.pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
-                />
-
                 <section style={{ ...glassSection, marginBottom: '1.25rem' }}>
                   <h2
                     style={{
@@ -1910,7 +1934,7 @@ export default function SubaccountKnowledgePage() {
                   </p>
                   {vaults.length === 0 ? (
                     <p style={{ fontSize: '0.85rem', color: '#64748b', margin: '0 0 0.75rem', lineHeight: 1.45 }}>
-                      No vaults listed yet. Adding your first FAQ, note, or file creates a default vault automatically.
+                      Create a vault before adding knowledge.
                     </p>
                   ) : (
                     <ul
@@ -2087,6 +2111,91 @@ export default function SubaccountKnowledgePage() {
                   </form>
                 </section>
 
+                <h2
+                  style={{
+                    fontSize: '1.05rem',
+                    fontWeight: 700,
+                    margin: '0 0 0.65rem',
+                    color: 'var(--aisbp-text-heading, #0f172a)',
+                  }}
+                >
+                  Add knowledge
+                </h2>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+                    gap: '0.75rem',
+                    marginBottom: '1.35rem',
+                  }}
+                  aria-label="Add knowledge"
+                >
+                  <button
+                    type="button"
+                    style={{
+                      ...bentoBtn,
+                      ...(vaults.length === 0 ? { opacity: 0.55, cursor: 'not-allowed' as const } : {}),
+                    }}
+                    onClick={() => {
+                      if (vaults.length === 0) {
+                        setWriteErr('Create a vault before adding knowledge.');
+                        setSaveOk('');
+                        return;
+                      }
+                      setTab('rich');
+                      setSaveOk('');
+                    }}
+                  >
+                    <span style={iconCircle}>📝</span>
+                    <span style={{ fontSize: '0.875rem', fontWeight: 600 }}>Add note</span>
+                  </button>
+                  <button
+                    type="button"
+                    style={{
+                      ...bentoBtn,
+                      ...(vaults.length === 0 ? { opacity: 0.55, cursor: 'not-allowed' as const } : {}),
+                    }}
+                    onClick={() => {
+                      if (vaults.length === 0) {
+                        setWriteErr('Create a vault before adding knowledge.');
+                        setSaveOk('');
+                        return;
+                      }
+                      setTab('files');
+                      fileInputRef.current?.click();
+                    }}
+                  >
+                    <span style={iconCircle}>📤</span>
+                    <span style={{ fontSize: '0.875rem', fontWeight: 600 }}>Upload file</span>
+                  </button>
+                  <button
+                    type="button"
+                    style={{
+                      ...bentoBtn,
+                      ...(vaults.length === 0 ? { opacity: 0.55, cursor: 'not-allowed' as const } : {}),
+                    }}
+                    onClick={() => {
+                      if (vaults.length === 0) {
+                        setWriteErr('Create a vault before adding knowledge.');
+                        setSaveOk('');
+                        return;
+                      }
+                      setTab('faq');
+                      setSaveOk('');
+                    }}
+                  >
+                    <span style={iconCircle}>❓</span>
+                    <span style={{ fontSize: '0.875rem', fontWeight: 600 }}>Add FAQ</span>
+                  </button>
+                </div>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  onChange={onFileChange}
+                  style={{ display: 'none' }}
+                  accept=".txt,.pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain"
+                />
+
                 {saving ? (
                   <p style={{ fontSize: '0.75rem', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 1rem' }}>Working…</p>
                 ) : null}
@@ -2148,6 +2257,16 @@ export default function SubaccountKnowledgePage() {
                       Add approved answers your bot can use when replying.
                     </p>
                     <form onSubmit={onFaqSave} style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxWidth: 520, marginBottom: '1.25rem' }}>
+                      <CreateKnowledgeVaultSelect
+                        vaults={vaults}
+                        value={createFaqVaultId}
+                        onChange={id => {
+                          setCreateFaqVaultId(id);
+                          setSaveOk('');
+                        }}
+                        disabled={saving}
+                        helperWhenSelectable="Choose which vault this FAQ belongs to."
+                      />
                       <label>
                         <span style={mvpLabelStyle}>Question</span>
                         <input
@@ -2179,22 +2298,14 @@ export default function SubaccountKnowledgePage() {
                           autoComplete="off"
                         />
                       </label>
-                      <button type="submit" disabled={saving} style={{ ...mvpPrimaryButtonStyle, width: 'fit-content' }}>
+                      <button
+                        type="submit"
+                        disabled={saving || vaults.length === 0}
+                        style={{ ...mvpPrimaryButtonStyle, width: 'fit-content' }}
+                      >
                         {saving ? 'Saving…' : 'Save FAQ'}
                       </button>
                     </form>
-                    <p
-                      style={{
-                        fontSize: '0.78rem',
-                        color: '#64748b',
-                        margin: '-0.35rem 0 1.1rem',
-                        maxWidth: 520,
-                        lineHeight: 1.45,
-                      }}
-                    >
-                      New FAQs use your workspace default vault first. After saving, use <strong style={{ fontWeight: 600 }}>Assign to vault</strong>{' '}
-                      on the card to move them.
-                    </p>
 
                     {faqRows.length === 0 ? (
                       <EmptyState
@@ -2235,6 +2346,16 @@ export default function SubaccountKnowledgePage() {
                       Longer context such as policies, menus, or service details.
                     </p>
                     <form onSubmit={onRichSave} style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxWidth: 520, marginBottom: '1.25rem' }}>
+                      <CreateKnowledgeVaultSelect
+                        vaults={vaults}
+                        value={createNoteVaultId}
+                        onChange={id => {
+                          setCreateNoteVaultId(id);
+                          setSaveOk('');
+                        }}
+                        disabled={saving}
+                        helperWhenSelectable="Choose which vault this note belongs to."
+                      />
                       <label>
                         <span style={mvpLabelStyle}>Title</span>
                         <input
@@ -2266,22 +2387,14 @@ export default function SubaccountKnowledgePage() {
                           autoComplete="off"
                         />
                       </label>
-                      <button type="submit" disabled={saving} style={{ ...mvpPrimaryButtonStyle, width: 'fit-content' }}>
+                      <button
+                        type="submit"
+                        disabled={saving || vaults.length === 0}
+                        style={{ ...mvpPrimaryButtonStyle, width: 'fit-content' }}
+                      >
                         {saving ? 'Saving…' : 'Save note'}
                       </button>
                     </form>
-                    <p
-                      style={{
-                        fontSize: '0.78rem',
-                        color: '#64748b',
-                        margin: '-0.35rem 0 1.1rem',
-                        maxWidth: 520,
-                        lineHeight: 1.45,
-                      }}
-                    >
-                      New notes use the default vault; open the card below and use <strong style={{ fontWeight: 600 }}>Assign to vault</strong> to
-                      organize.
-                    </p>
 
                     {otherRows.length > 0 ? (
                       <p
@@ -2351,16 +2464,36 @@ export default function SubaccountKnowledgePage() {
                       Plain text (.txt) is indexed right away. Use <strong style={{ fontWeight: 600 }}>View extracted text</strong> on each
                       card to confirm what the bot can read. Original download appears only when the server keeps the uploaded file.
                     </p>
+                    <div style={{ maxWidth: 520, marginBottom: '1rem' }}>
+                      <CreateKnowledgeVaultSelect
+                        vaults={vaults}
+                        value={createFileVaultId}
+                        onChange={id => {
+                          setCreateFileVaultId(id);
+                          setSaveOk('');
+                        }}
+                        disabled={saving}
+                        helperWhenSelectable="Choose which vault this file belongs to."
+                      />
+                    </div>
                     <div
                       role="button"
-                      tabIndex={0}
+                      tabIndex={vaults.length === 0 ? -1 : 0}
                       onKeyDown={e => {
+                        if (vaults.length === 0) return;
                         if (e.key === 'Enter' || e.key === ' ') {
                           e.preventDefault();
                           fileInputRef.current?.click();
                         }
                       }}
-                      onClick={() => fileInputRef.current?.click()}
+                      onClick={() => {
+                        if (vaults.length === 0) {
+                          setWriteErr('Create a vault before adding knowledge.');
+                          setSaveOk('');
+                          return;
+                        }
+                        fileInputRef.current?.click();
+                      }}
                       style={{
                         display: 'block',
                         fontSize: '0.8125rem',
@@ -2369,17 +2502,14 @@ export default function SubaccountKnowledgePage() {
                         border: '1px dashed #94a3b8',
                         background: 'rgba(248, 250, 252, 0.8)',
                         color: '#334155',
-                        cursor: 'pointer',
+                        cursor: vaults.length === 0 ? 'not-allowed' : 'pointer',
                         textAlign: 'center',
                         marginBottom: '1rem',
+                        opacity: vaults.length === 0 ? 0.55 : 1,
                       }}
                     >
                       Choose a file to upload (PDF, DOC, DOCX, or TXT)
                     </div>
-                    <p style={{ fontSize: '0.78rem', color: '#64748b', margin: '-0.5rem 0 1rem', lineHeight: 1.45 }}>
-                      Uploaded files land in the default vault. Use <strong style={{ fontWeight: 600 }}>Assign to vault</strong> on each file card
-                      to move them.
-                    </p>
                     {fileRows.length === 0 ? (
                       <EmptyState
                         compact

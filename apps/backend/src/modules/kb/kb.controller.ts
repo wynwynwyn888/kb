@@ -184,7 +184,7 @@ export class KbController {
     if (!dto.tenantId?.trim()) throw new BadRequestException('tenantId is required');
     await this.assertTenantScope(user, dto.tenantId);
     try {
-      return await this.kbService.createFaq(dto.tenantId, dto.question, dto.answer);
+      return await this.kbService.createFaq(dto.tenantId, dto.question, dto.answer, dto.vaultId);
     } catch (e) {
       throw new BadRequestException(mapKbError(e));
     }
@@ -215,7 +215,7 @@ export class KbController {
     if (!dto.tenantId?.trim()) throw new BadRequestException('tenantId is required');
     await this.assertTenantScope(user, dto.tenantId);
     try {
-      return await this.kbService.createRichText(dto.tenantId, dto.title, dto.content);
+      return await this.kbService.createRichText(dto.tenantId, dto.title, dto.content, dto.vaultId);
     } catch (e) {
       throw new BadRequestException(mapKbError(e));
     }
@@ -283,6 +283,7 @@ export class KbController {
         file.originalname,
         file.buffer,
         file.mimetype,
+        body.vaultId,
       );
     } catch (e) {
       const me = e instanceof Error ? e.message : String(e);

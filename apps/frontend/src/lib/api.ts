@@ -1556,7 +1556,7 @@ export async function listKbDocuments(
 
 export async function createKbFaq(
   token: string,
-  dto: { tenantId: string; question: string; answer: string },
+  dto: { tenantId: string; question: string; answer: string; vaultId?: string },
 ): Promise<{ id: string }> {
   return apiRequest('/kb/documents/faq', { token, method: 'POST', body: JSON.stringify(dto) });
 }
@@ -1606,7 +1606,7 @@ export async function getKbRichNoteSource(
 
 export async function createKbRichText(
   token: string,
-  dto: { tenantId: string; title: string; content: string },
+  dto: { tenantId: string; title: string; content: string; vaultId?: string },
 ): Promise<{ id: string }> {
   return apiRequest('/kb/documents/rich', { token, method: 'POST', body: JSON.stringify(dto) });
 }
@@ -1680,9 +1680,15 @@ export async function downloadKbDocumentOriginal(
   return { blob, filename };
 }
 
-export async function uploadKbFile(token: string, tenantId: string, file: File): Promise<{ id: string; status: string }> {
+export async function uploadKbFile(
+  token: string,
+  tenantId: string,
+  file: File,
+  vaultId?: string,
+): Promise<{ id: string; status: string }> {
   const fd = new FormData();
   fd.set('tenantId', tenantId);
+  if (vaultId?.trim()) fd.set('vaultId', vaultId.trim());
   fd.set('file', file);
   const headers: Record<string, string> = {};
   if (token) headers['Authorization'] = `Bearer ${token}`;

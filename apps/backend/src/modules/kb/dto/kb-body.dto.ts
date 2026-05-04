@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsInt, IsNotEmpty, IsOptional, IsString, Max, Min } from 'class-validator';
+import { IsInt, IsNotEmpty, IsOptional, IsString, IsUUID, Max, Min } from 'class-validator';
 
 export class CreateKbFaqBodyDto {
   @IsString()
@@ -13,6 +13,10 @@ export class CreateKbFaqBodyDto {
   @IsString()
   @IsNotEmpty()
   answer!: string;
+
+  @IsOptional()
+  @IsUUID()
+  vaultId?: string;
 }
 
 export class UpdateKbFaqBodyDto {
@@ -41,6 +45,10 @@ export class CreateKbRichTextBodyDto {
   @IsString()
   @IsNotEmpty()
   content!: string;
+
+  @IsOptional()
+  @IsUUID()
+  vaultId?: string;
 }
 
 export class UpdateKbRichTextBodyDto {
@@ -61,6 +69,10 @@ export class KbFileUploadBodyDto {
   @IsString()
   @IsNotEmpty()
   tenantId!: string;
+
+  @IsOptional()
+  @IsUUID()
+  vaultId?: string;
 }
 
 export class KbSearchBodyDto {

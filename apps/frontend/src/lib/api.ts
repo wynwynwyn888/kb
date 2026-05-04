@@ -1150,6 +1150,8 @@ export interface TenantBotProfileRow {
   bookingBehaviorNotes: string;
   escalationBehaviorNotes: string;
   knowledgeScopeNotes: string;
+  /** all_workspace_knowledge | selected_collections */
+  knowledgeScopeMode: string;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
@@ -1211,6 +1213,7 @@ export async function createTenantBotProfile(
     bookingBehaviorNotes?: string;
     escalationBehaviorNotes?: string;
     knowledgeScopeNotes?: string;
+    knowledgeScopeMode?: string;
     temperature?: number;
     modelOverride?: string | null;
     maxTokens?: number | null;
@@ -1238,6 +1241,7 @@ export async function updateTenantBotProfile(
     bookingBehaviorNotes: string;
     escalationBehaviorNotes: string;
     knowledgeScopeNotes: string;
+    knowledgeScopeMode: string;
     temperature: number;
     modelOverride: string | null;
     maxTokens: number | null;

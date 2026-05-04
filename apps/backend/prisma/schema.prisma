@@ -374,6 +374,8 @@ model TenantBotProfile {
   bookingBehaviorNotes      String   @default("") @map("booking_behavior_notes") @db.Text
   escalationBehaviorNotes   String   @default("") @map("escalation_behavior_notes") @db.Text
   knowledgeScopeNotes       String   @default("") @map("knowledge_scope_notes") @db.Text
+  /// all_workspace_knowledge | selected_collections (future)
+  knowledgeScopeMode        String   @default("all_workspace_knowledge") @map("knowledge_scope_mode")
   isActive                  Boolean  @default(false) @map("is_active")
   createdAt                 DateTime @default(now()) @map("created_at")
   updatedAt                 DateTime @updatedAt @map("updated_at")

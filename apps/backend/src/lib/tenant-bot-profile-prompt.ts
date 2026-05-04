@@ -73,6 +73,9 @@ export function buildThreeSectionPromptBlob(
   ].join('\n');
 }
 
+export const KNOWLEDGE_SCOPE_ALL_WORKSPACE = 'all_workspace_knowledge';
+export const KNOWLEDGE_SCOPE_SELECTED_COLLECTIONS = 'selected_collections';
+
 export interface BotProfilePromptFields {
   name: string;
   description: string;
@@ -83,6 +86,24 @@ export interface BotProfilePromptFields {
   bookingBehaviorNotes: string;
   escalationBehaviorNotes: string;
   knowledgeScopeNotes: string;
+  /** KB visibility mode; summaries appear in orchestration prompts. */
+  knowledgeScopeMode: string;
+}
+
+/** Single-line summary for prompts (orchestration / NLU). */
+export function knowledgeScopeSummaryLine(mode: string | undefined): string {
+  const m = mode?.trim();
+  if (m === KNOWLEDGE_SCOPE_SELECTED_COLLECTIONS) {
+    return 'Knowledge scope: Selected collections';
+  }
+  return 'Knowledge scope: All workspace knowledge';
+}
+
+/** Short label for UI cards (no “Knowledge scope:” prefix). */
+export function knowledgeScopeCardLabel(mode: string | undefined): string {
+  const m = mode?.trim();
+  if (m === KNOWLEDGE_SCOPE_SELECTED_COLLECTIONS) return 'Selected collections';
+  return 'All workspace knowledge';
 }
 
 /** Full subaccount instructions for main orchestration (stacked under agency policy separately). */
@@ -94,6 +115,8 @@ export function buildOrchestrationTenantPromptFromProfile(p: BotProfilePromptFie
     header.push('', p.description.trim());
   }
   chunks.push(header.join('\n'));
+
+  chunks.push(knowledgeScopeSummaryLine(p.knowledgeScopeMode));
 
   chunks.push(
     buildThreeSectionPromptBlob(p.persona, p.conversationGoals, p.businessNotes),
@@ -109,7 +132,7 @@ export function buildOrchestrationTenantPromptFromProfile(p: BotProfilePromptFie
     chunks.push(`### Escalation behavior\n${p.escalationBehaviorNotes.trim()}`);
   }
   if (p.knowledgeScopeNotes.trim()) {
-    chunks.push(`### Knowledge scope\n${p.knowledgeScopeNotes.trim()}`);
+    chunks.push(`### Knowledge scope notes\n${p.knowledgeScopeNotes.trim()}`);
   }
 
   return chunks.filter(Boolean).join('\n\n');
@@ -118,18 +141,19 @@ export function buildOrchestrationTenantPromptFromProfile(p: BotProfilePromptFie
 /** Short appendix for booking NLU (tone / scope hints only). */
 export function buildBookingNluProfileAppendix(p: BotProfilePromptFields): string {
   const parts: string[] = [];
+  parts.push(knowledgeScopeSummaryLine(p.knowledgeScopeMode));
   if (p.description.trim()) parts.push(`Business context: ${p.description.trim()}`);
   if (p.toneRules.trim()) parts.push(`Tone: ${p.toneRules.trim()}`);
   if (p.bookingBehaviorNotes.trim()) parts.push(`Booking handling: ${p.bookingBehaviorNotes.trim()}`);
-  if (p.knowledgeScopeNotes.trim()) parts.push(`Scope: ${p.knowledgeScopeNotes.trim()}`);
-  return parts.join('\n');
+  if (p.knowledgeScopeNotes.trim()) parts.push(`Scope notes: ${p.knowledgeScopeNotes.trim()}`);
+  return parts.filter(Boolean).join('\n');
 }
 
 /** Persona line(s) for booking reply composer user JSON `personaPrompt`. */
 export function buildBookingReplyPersonaPrompt(p: BotProfilePromptFields): string {
-  const parts: string[] = [];
+  const parts: string[] = [knowledgeScopeSummaryLine(p.knowledgeScopeMode)];
   if (p.persona.trim()) parts.push(p.persona.trim());
   if (p.toneRules.trim()) parts.push(`Tone rules: ${p.toneRules.trim()}`);
   if (p.bookingBehaviorNotes.trim()) parts.push(`Booking style: ${p.bookingBehaviorNotes.trim()}`);
-  return parts.join('\n\n');
+  return parts.filter(Boolean).join('\n\n');
 }

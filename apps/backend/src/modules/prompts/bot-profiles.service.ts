@@ -11,6 +11,8 @@ import { getSupabaseService } from '../../lib/supabase';
 import { AuthService } from '../auth/auth.service';
 import {
   type BotProfilePromptFields,
+  KNOWLEDGE_SCOPE_ALL_WORKSPACE,
+  KNOWLEDGE_SCOPE_SELECTED_COLLECTIONS,
   buildBookingNluProfileAppendix,
   buildBookingReplyPersonaPrompt,
   buildOrchestrationTenantPromptFromProfile,
@@ -30,6 +32,7 @@ export interface TenantBotProfileDto {
   bookingBehaviorNotes: string;
   escalationBehaviorNotes: string;
   knowledgeScopeNotes: string;
+  knowledgeScopeMode: string;
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
@@ -103,6 +106,8 @@ export class BotProfilesService {
       bookingBehaviorNotes: (row['booking_behavior_notes'] as string) ?? '',
       escalationBehaviorNotes: (row['escalation_behavior_notes'] as string) ?? '',
       knowledgeScopeNotes: (row['knowledge_scope_notes'] as string) ?? '',
+      knowledgeScopeMode:
+        String(row['knowledge_scope_mode'] ?? '').trim() || KNOWLEDGE_SCOPE_ALL_WORKSPACE,
       isActive: Boolean(row['is_active']),
       createdAt: row['created_at'] as string,
       updatedAt: row['updated_at'] as string,
@@ -124,6 +129,8 @@ export class BotProfilesService {
       bookingBehaviorNotes: String(row['booking_behavior_notes'] ?? ''),
       escalationBehaviorNotes: String(row['escalation_behavior_notes'] ?? ''),
       knowledgeScopeNotes: String(row['knowledge_scope_notes'] ?? ''),
+      knowledgeScopeMode:
+        String(row['knowledge_scope_mode'] ?? '').trim() || KNOWLEDGE_SCOPE_ALL_WORKSPACE,
     };
   }
 
@@ -211,6 +218,7 @@ export class BotProfilesService {
         booking_behavior_notes: '',
         escalation_behavior_notes: '',
         knowledge_scope_notes: '',
+        knowledge_scope_mode: KNOWLEDGE_SCOPE_ALL_WORKSPACE,
         is_active: false,
         created_at: now,
         updated_at: now,
@@ -267,6 +275,7 @@ export class BotProfilesService {
       booking_behavior_notes: '',
       escalation_behavior_notes: '',
       knowledge_scope_notes: '',
+      knowledge_scope_mode: KNOWLEDGE_SCOPE_ALL_WORKSPACE,
       is_active: true,
       created_at: now,
       updated_at: now,
@@ -349,6 +358,7 @@ export class BotProfilesService {
       bookingBehaviorNotes?: string;
       escalationBehaviorNotes?: string;
       knowledgeScopeNotes?: string;
+      knowledgeScopeMode?: string;
       temperature?: number;
       modelOverride?: string | null;
       maxTokens?: number | null;
@@ -372,6 +382,11 @@ export class BotProfilesService {
     const notes = body.businessNotes ?? '';
     const blob = buildThreeSectionPromptBlob(persona, goals, notes);
 
+    const scopeMode =
+      body.knowledgeScopeMode?.trim() === KNOWLEDGE_SCOPE_SELECTED_COLLECTIONS
+        ? KNOWLEDGE_SCOPE_SELECTED_COLLECTIONS
+        : KNOWLEDGE_SCOPE_ALL_WORKSPACE;
+
     const insertProf = {
       id: pid,
       tenant_id: tenantId,
@@ -384,6 +399,7 @@ export class BotProfilesService {
       booking_behavior_notes: body.bookingBehaviorNotes ?? '',
       escalation_behavior_notes: body.escalationBehaviorNotes ?? '',
       knowledge_scope_notes: body.knowledgeScopeNotes ?? '',
+      knowledge_scope_mode: scopeMode,
       is_active: false,
       created_at: now,
       updated_at: now,
@@ -450,6 +466,7 @@ export class BotProfilesService {
       bookingBehaviorNotes: string;
       escalationBehaviorNotes: string;
       knowledgeScopeNotes: string;
+      knowledgeScopeMode: string;
       temperature: number;
       modelOverride: string | null;
       maxTokens: number | null;
@@ -492,6 +509,12 @@ export class BotProfilesService {
       body.knowledgeScopeNotes !== undefined
         ? body.knowledgeScopeNotes
         : String(existing['knowledge_scope_notes'] ?? '');
+    const nextScopeMode =
+      body.knowledgeScopeMode !== undefined
+        ? body.knowledgeScopeMode.trim() === KNOWLEDGE_SCOPE_SELECTED_COLLECTIONS
+          ? KNOWLEDGE_SCOPE_SELECTED_COLLECTIONS
+          : KNOWLEDGE_SCOPE_ALL_WORKSPACE
+        : String(existing['knowledge_scope_mode'] ?? '').trim() || KNOWLEDGE_SCOPE_ALL_WORKSPACE;
 
     const { error: ue } = await supabase
       .from('tenant_bot_profiles')
@@ -505,6 +528,7 @@ export class BotProfilesService {
         booking_behavior_notes: nextBook,
         escalation_behavior_notes: nextEsc,
         knowledge_scope_notes: nextKnow,
+        knowledge_scope_mode: nextScopeMode,
         updated_at: now,
       })
       .eq('id', botProfileId)
@@ -604,6 +628,7 @@ export class BotProfilesService {
       bookingBehaviorNotes: src.bookingBehaviorNotes,
       escalationBehaviorNotes: src.escalationBehaviorNotes,
       knowledgeScopeNotes: src.knowledgeScopeNotes,
+      knowledgeScopeMode: src.knowledgeScopeMode,
       temperature: src.temperature,
       modelOverride: src.modelOverride,
       maxTokens: src.maxTokens,

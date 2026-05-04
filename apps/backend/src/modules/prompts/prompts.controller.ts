@@ -108,6 +108,7 @@ export class PromptsController {
       bookingBehaviorNotes?: string;
       escalationBehaviorNotes?: string;
       knowledgeScopeNotes?: string;
+      knowledgeScopeMode?: string;
       temperature?: number;
       modelOverride?: string | null;
       maxTokens?: number | null;
@@ -135,6 +136,7 @@ export class PromptsController {
       bookingBehaviorNotes?: string;
       escalationBehaviorNotes?: string;
       knowledgeScopeNotes?: string;
+      knowledgeScopeMode?: string;
       temperature?: number;
       modelOverride?: string | null;
       maxTokens?: number | null;

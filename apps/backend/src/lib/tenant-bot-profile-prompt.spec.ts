@@ -1,5 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 import {
+  KNOWLEDGE_SCOPE_ALL_WORKSPACE,
   buildBookingNluProfileAppendix,
   buildBookingReplyPersonaPrompt,
   buildOrchestrationTenantPromptFromProfile,
@@ -27,9 +28,11 @@ describe('tenant-bot-profile-prompt', () => {
       bookingBehaviorNotes: 'Confirm slot',
       escalationBehaviorNotes: 'Hand to human if angry',
       knowledgeScopeNotes: 'Only services on menu',
+      knowledgeScopeMode: KNOWLEDGE_SCOPE_ALL_WORKSPACE,
     });
     expect(out).toContain('### Assistant profile');
     expect(out).toContain('Celeste');
+    expect(out).toContain('Knowledge scope: All workspace knowledge');
     expect(out).toContain('### Bot Persona');
     expect(out).toContain('Warm');
     expect(out).toContain('### Tone rules');
@@ -56,7 +59,9 @@ describe('tenant-bot-profile-prompt', () => {
       bookingBehaviorNotes: 'B',
       escalationBehaviorNotes: '',
       knowledgeScopeNotes: 'K',
+      knowledgeScopeMode: KNOWLEDGE_SCOPE_ALL_WORKSPACE,
     });
+    expect(s).toContain('Knowledge scope: All workspace knowledge');
     expect(s).toContain('Business context: D');
     expect(s).toContain('Tone: T');
   });
@@ -72,7 +77,9 @@ describe('tenant-bot-profile-prompt', () => {
       bookingBehaviorNotes: 'BB',
       escalationBehaviorNotes: '',
       knowledgeScopeNotes: '',
+      knowledgeScopeMode: KNOWLEDGE_SCOPE_ALL_WORKSPACE,
     });
+    expect(s).toContain('Knowledge scope: All workspace knowledge');
     expect(s).toContain('P');
     expect(s).toContain('Tone rules: T');
   });

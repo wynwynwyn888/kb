@@ -53,6 +53,7 @@ describe('BotProfilesService', () => {
                         booking_behavior_notes: '',
                         escalation_behavior_notes: '',
                         knowledge_scope_notes: '',
+                        knowledge_scope_mode: 'all_workspace_knowledge',
                         is_active: true,
                         created_at: 't',
                         updated_at: 't',
@@ -89,6 +90,7 @@ describe('BotProfilesService', () => {
     const out = await svc.getActivePromptForOrchestration(tenantId);
     expect(out?.systemPrompt).toContain('Friendly expert');
     expect(out?.systemPrompt).toContain('Professional');
+    expect(out?.systemPrompt).toContain('Knowledge scope: All workspace knowledge');
   });
 
   it('cannot delete the active profile', async () => {

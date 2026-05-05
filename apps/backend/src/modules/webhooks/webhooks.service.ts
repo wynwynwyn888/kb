@@ -43,7 +43,7 @@ export class WebhooksService {
    */
   async handleGhlWebhook(
     payload: GhlWebhookPayload,
-    opts?: { smokeImmediate?: boolean },
+    opts?: { smokeImmediate?: boolean; workflowFlatRaw?: Record<string, unknown> },
   ): Promise<{
     success: boolean;
     eventId?: string;
@@ -96,6 +96,7 @@ export class WebhooksService {
       payload,
       externalEventId,
       dedupeKey,
+      opts?.workflowFlatRaw,
     );
 
     // Persist webhook event
@@ -187,6 +188,7 @@ export class WebhooksService {
     payload: GhlWebhookPayload,
     externalEventId: string,
     dedupeKey: string,
+    workflowFlatRaw?: Record<string, unknown>,
   ): NormalizedWebhookPayload {
     const data = (payload.data || {}) as unknown as Record<string, unknown>;
     const extracted = extractInboundContactFields(data);
@@ -197,7 +199,10 @@ export class WebhooksService {
       typeof data['messageType'] === 'string' ? data['messageType'] : undefined;
     const messageTypeMapped = this.mapMessageType(rawMessageType);
 
-    const audioMediaUrl = extractGhlInboundAudioMediaUrl(data, { envelope });
+    const audioMediaUrl = extractGhlInboundAudioMediaUrl(data, {
+      envelope,
+      workflowFlatRaw,
+    });
 
     const voiceInboundAudioPlaceholderWithoutMediaUrl =
       ghlBodyIndicatesAudioPlaceholder(rawMessageBody) && !audioMediaUrl;
@@ -217,10 +222,15 @@ export class WebhooksService {
           audioMediaUrl,
           rawData: data,
           envelope,
+          workflowFlatRaw,
         });
 
-    if (payload.event === 'conversation_message_created') {
-      this.logGhlInboundNormalizeDiagnostics(payload, data, envelope, {
+    const evNorm = (payload.event || '').trim().toLowerCase();
+    const runInboundShapeDiagnostics =
+      evNorm === 'conversation_message_created' || evNorm === 'inboundmessage';
+
+    if (runInboundShapeDiagnostics) {
+      this.logGhlInboundNormalizeDiagnostics(payload, data, envelope, workflowFlatRaw, {
         rawMessageType: rawMessageType ?? null,
         mappedMessageType: messageType,
         messageBodyPreview: this.redactInboundUrlsForLog(rawMessageBody, 240),
@@ -281,6 +291,7 @@ export class WebhooksService {
     payload: GhlWebhookPayload,
     data: Record<string, unknown>,
     envelope: Record<string, unknown>,
+    workflowFlatRaw: Record<string, unknown> | undefined,
     ctx: {
       rawMessageType: string | null;
       mappedMessageType: string;
@@ -296,12 +307,33 @@ export class WebhooksService {
         ? Object.keys(msgRaw as Record<string, unknown>).slice(0, 40)
         : [];
 
+    const flat = workflowFlatRaw;
+    const customDataKeys =
+      flat &&
+      flat['customData'] &&
+      typeof flat['customData'] === 'object' &&
+      !Array.isArray(flat['customData'])
+        ? Object.keys(flat['customData'] as Record<string, unknown>).slice(0, 40)
+        : [];
+    const workflowFlatDataKeys =
+      flat &&
+      flat['data'] &&
+      typeof flat['data'] === 'object' &&
+      !Array.isArray(flat['data'])
+        ? Object.keys(flat['data'] as Record<string, unknown>).slice(0, 40)
+        : [];
+    const flatMsg = flat?.['message'];
+    const workflowFlatMessageKeys =
+      flatMsg && typeof flatMsg === 'object' && !Array.isArray(flatMsg)
+        ? Object.keys(flatMsg as Record<string, unknown>).slice(0, 40)
+        : [];
+
     let attachmentCount = 0;
     let mediaKeyedNodeCount = 0;
     let attachmentItemKeysSample: string[] = [];
     let mediaItemKeysSample: string[] = [];
 
-    const roots = collectGhlInboundMediaRootNodes(data, envelope);
+    const roots = collectGhlInboundMediaRootNodes(data, envelope, workflowFlatRaw);
     for (const node of roots) {
       const att = node['attachments'];
       if (Array.isArray(att)) {
@@ -329,7 +361,7 @@ export class WebhooksService {
       }
     }
 
-    const topLevelKeys = Object.keys(envelope).slice(0, 40);
+    const topLevelKeys = flat ? Object.keys(flat).slice(0, 40) : Object.keys(envelope).slice(0, 40);
     const dataKeys = Object.keys(data).slice(0, 40);
 
     this.logger.log(
@@ -343,7 +375,10 @@ export class WebhooksService {
         mediaKeyedNodeCount,
         topLevelKeys,
         dataKeys,
+        customDataKeys,
+        workflowFlatDataKeys,
         messageKeys,
+        workflowFlatMessageKeys,
         attachmentItemKeysSample,
         mediaItemKeysSample,
         audioMediaUrlShape: this.inboundUrlShapeMeta(ctx.audioMediaUrlForShape),

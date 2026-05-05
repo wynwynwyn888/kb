@@ -42,9 +42,11 @@ export class WebhooksController {
     this.logger.log(summarizeGhlWebhookBodyKeys(body));
 
     let payload: GhlWebhookPayload;
+    let workflowFlatRaw: Record<string, unknown> | undefined;
     try {
       const coerced = coerceGhlWebhookPayload(body);
       payload = coerced.payload;
+      workflowFlatRaw = coerced.workflowFlatRaw;
       this.logger.log(`Webhook payload shape detected: ${coerced.shape}`);
     } catch (e) {
       throw new BadRequestException(
@@ -78,7 +80,10 @@ export class WebhooksController {
       const smokeImmediate =
         String(aisbpSmokeImmediate ?? '').toLowerCase() === 'true' ||
         String(process.env['AISBP_WEBHOOK_SMOKE_IMMEDIATE'] ?? '').toLowerCase() === 'true';
-      const result = await this.webhooksService.handleGhlWebhook(payload, { smokeImmediate });
+      const result = await this.webhooksService.handleGhlWebhook(payload, {
+        smokeImmediate,
+        workflowFlatRaw,
+      });
 
       if (result.duplicate) {
         this.logger.log(

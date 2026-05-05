@@ -142,6 +142,41 @@ function extractConversationId(
   return undefined;
 }
 
+/** Copy attachments / media / HTTP URL fields from workflow-flat sources into canonical `data` for downstream extractors. */
+function mergeWorkflowFlatMediaIntoInbound(
+  inbound: Record<string, unknown>,
+  raw: Record<string, unknown>,
+  sources: Record<string, unknown>[],
+): void {
+  const candidates: Record<string, unknown>[] = [];
+  for (const s of sources) candidates.push(s);
+  candidates.push(raw);
+
+  for (const src of candidates) {
+    const att = src['attachments'];
+    if (Array.isArray(att) && att.length > 0 && !inbound['attachments']) {
+      inbound['attachments'] = att;
+    }
+  }
+  for (const src of candidates) {
+    const med = src['media'];
+    if (med != null && typeof med === 'object' && !inbound['media']) {
+      inbound['media'] = med;
+    }
+  }
+  const urlKeys = ['mediaUrl', 'fileUrl', 'downloadUrl', 'attachmentUrl', 'url'] as const;
+  for (const k of urlKeys) {
+    if (inbound[k]) continue;
+    for (const src of candidates) {
+      const v = src[k];
+      if (typeof v === 'string' && /^https?:\/\//i.test(v.trim())) {
+        inbound[k] = v.trim();
+        break;
+      }
+    }
+  }
+}
+
 /**
  * Accepts native nested `GhlWebhookPayload`, GHL Workflow envelope (`customData` + `contact` + `message`),
  * or flat top-level rows (plus optional dotted keys like `data.id`). Produces a canonical nested payload
@@ -150,6 +185,8 @@ function extractConversationId(
 export function coerceGhlWebhookPayload(raw: unknown): {
   payload: GhlWebhookPayload;
   shape: GhlWebhookPayloadShape;
+  /** Original flat webhook body (same reference as input) — pass to `WebhooksService` for diagnostics + URL discovery. */
+  workflowFlatRaw?: Record<string, unknown>;
 } {
   if (!isPlainObject(raw)) {
     throw new Error('Invalid webhook payload: body must be a JSON object');
@@ -195,6 +232,10 @@ export function coerceGhlWebhookPayload(raw: unknown): {
   if (messageType !== undefined) inbound['messageType'] = messageType;
   if (channel !== undefined) inbound['channel'] = channel;
 
+  if (!hadNestedNonEmptyData) {
+    mergeWorkflowFlatMediaIntoInbound(inbound, r, sources);
+  }
+
   const locationId = pickFromSources(sources, ['locationId']);
   const event = pickFromSources(sources, ['event']);
   if (!locationId || !event) {
@@ -217,5 +258,9 @@ export function coerceGhlWebhookPayload(raw: unknown): {
       : {}),
   };
 
-  return { payload, shape };
+  return {
+    payload,
+    shape,
+    ...(hadNestedNonEmptyData ? {} : { workflowFlatRaw: r }),
+  };
 }

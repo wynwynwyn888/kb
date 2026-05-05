@@ -84,6 +84,7 @@ function firstMessagesArrayItem(root: Record<string, unknown> | undefined): Reco
 export function collectGhlInboundMediaRootNodes(
   data: Record<string, unknown>,
   envelope?: Record<string, unknown>,
+  workflowFlatRaw?: Record<string, unknown>,
 ): Record<string, unknown>[] {
   const out: Record<string, unknown>[] = [];
   const seen = new WeakSet<object>();
@@ -93,6 +94,20 @@ export function collectGhlInboundMediaRootNodes(
     seen.add(o);
     out.push(o);
   };
+
+  if (workflowFlatRaw) {
+    const w = workflowFlatRaw;
+    push(digRecord(w, ['customData', 'message']));
+    const cd = w['customData'];
+    if (cd && typeof cd === 'object' && !Array.isArray(cd)) {
+      push(cd as Record<string, unknown>);
+    }
+    const topMsg = w['message'];
+    if (topMsg && typeof topMsg === 'object' && !Array.isArray(topMsg)) {
+      push(topMsg as Record<string, unknown>);
+    }
+    push(w);
+  }
 
   push(digRecord(data, ['data', 'message']));
   push(digRecord(data, ['message']));
@@ -116,7 +131,15 @@ function extractUrlFromAttachmentLikeObject(item: Record<string, unknown>): stri
 }
 
 function extractUrlsFromNode(node: Record<string, unknown>): string | null {
-  for (const key of ['mediaUrl', 'fileUrl', 'attachmentUrl', 'audioUrl', 'mediaURL']) {
+  for (const key of [
+    'mediaUrl',
+    'fileUrl',
+    'downloadUrl',
+    'attachmentUrl',
+    'url',
+    'audioUrl',
+    'mediaURL',
+  ]) {
     const u = asNonEmptyString(node[key]);
     if (u && isHttpUrl(u)) return u;
   }
@@ -163,9 +186,13 @@ function extractUrlsFromNode(node: Record<string, unknown>): string | null {
  */
 export function extractGhlInboundAudioMediaUrl(
   data: Record<string, unknown>,
-  opts?: { envelope?: Record<string, unknown> },
+  opts?: { envelope?: Record<string, unknown>; workflowFlatRaw?: Record<string, unknown> },
 ): string | null {
-  const roots = collectGhlInboundMediaRootNodes(data, opts?.envelope);
+  const roots = collectGhlInboundMediaRootNodes(
+    data,
+    opts?.envelope,
+    opts?.workflowFlatRaw,
+  );
   for (const node of roots) {
     const u = extractUrlsFromNode(node);
     if (u) return u;
@@ -210,8 +237,9 @@ function mediaObjectHintsAudio(media: unknown): boolean {
 export function ghlAttachmentsHintAudio(
   data: Record<string, unknown>,
   envelope?: Record<string, unknown>,
+  workflowFlatRaw?: Record<string, unknown>,
 ): boolean {
-  for (const node of collectGhlInboundMediaRootNodes(data, envelope)) {
+  for (const node of collectGhlInboundMediaRootNodes(data, envelope, workflowFlatRaw)) {
     if (attachmentArrayHintsAudio(node['attachments'])) return true;
     if (mediaObjectHintsAudio(node['media'])) return true;
   }
@@ -237,6 +265,8 @@ export function ghlInboundShouldTranscribeVoice(params: {
   rawData: Record<string, unknown>;
   /** Full webhook envelope (top-level `messages`, etc.). */
   envelope?: Record<string, unknown>;
+  /** Original GHL workflow-flat body — used for attachment/media hints. */
+  workflowFlatRaw?: Record<string, unknown>;
 }): boolean {
   const url = params.audioMediaUrl?.trim() || '';
   const body = String(params.messageContent ?? '').trim();
@@ -257,7 +287,7 @@ export function ghlInboundShouldTranscribeVoice(params: {
     return false;
   }
 
-  if (ghlAttachmentsHintAudio(params.rawData, params.envelope)) {
+  if (ghlAttachmentsHintAudio(params.rawData, params.envelope, params.workflowFlatRaw)) {
     return true;
   }
 
@@ -266,9 +296,7 @@ export function ghlInboundShouldTranscribeVoice(params: {
   }
 
   if (bodyEmpty) {
-    return (
-      ghlAttachmentsHintAudio(params.rawData, params.envelope) || urlFilenameHintsAudio(url)
-    );
+    return urlFilenameHintsAudio(url);
   }
 
   return false;

@@ -19,8 +19,12 @@ import { formatPostgrestError } from '../../lib/format-postgrest-error';
 import { extractGhlInboundDedupeKeys } from './ghl-webhook-dedupe';
 import { extractInboundContactFields } from './ghl-inbound-contact-extract';
 import {
+  collectGhlInboundMediaRootNodes,
   extractGhlInboundAudioMediaUrl,
+  extractGhlInboundMessageBodyString,
+  ghlBodyIndicatesAudioPlaceholder,
   ghlInboundShouldTranscribeVoice,
+  VOICE_INBOUND_PLACEHOLDER_NO_MEDIA_USER_MESSAGE,
 } from './ghl-inbound-audio-media';
 
 @Injectable()
@@ -88,7 +92,7 @@ export class WebhooksService {
     }
 
     // Normalize payload to internal shape
-    const normalizedPayload = this.normalizePayload(
+    const normalizedPayload = this.normalizeInboundConversationMessage(
       payload,
       externalEventId,
       dedupeKey,
@@ -177,25 +181,63 @@ export class WebhooksService {
   }
 
   /**
-   * Normalize GHL payload to internal format
+   * Normalize GHL payload to internal format (inbound conversation messages).
    */
-  private normalizePayload(
+  private normalizeInboundConversationMessage(
     payload: GhlWebhookPayload,
     externalEventId: string,
     dedupeKey: string,
   ): NormalizedWebhookPayload {
     const data = (payload.data || {}) as unknown as Record<string, unknown>;
     const extracted = extractInboundContactFields(data);
+    const envelope = payload as unknown as Record<string, unknown>;
 
-    const messageContent = (typeof data['message'] === 'string' && data['message']) || '';
-    const messageType = this.mapMessageType(typeof data['messageType'] === 'string' ? data['messageType'] : undefined);
-    const audioMediaUrl = extractGhlInboundAudioMediaUrl(data);
-    const voiceInboundNeedsTranscribe = ghlInboundShouldTranscribeVoice({
-      messageType,
-      messageContent,
-      audioMediaUrl,
-      rawData: data,
-    });
+    const rawMessageBody = extractGhlInboundMessageBodyString(data);
+    const rawMessageType =
+      typeof data['messageType'] === 'string' ? data['messageType'] : undefined;
+    const messageTypeMapped = this.mapMessageType(rawMessageType);
+
+    const audioMediaUrl = extractGhlInboundAudioMediaUrl(data, { envelope });
+
+    const voiceInboundAudioPlaceholderWithoutMediaUrl =
+      ghlBodyIndicatesAudioPlaceholder(rawMessageBody) && !audioMediaUrl;
+
+    let messageContent = rawMessageBody;
+    let messageType = messageTypeMapped;
+    if (voiceInboundAudioPlaceholderWithoutMediaUrl) {
+      messageContent = VOICE_INBOUND_PLACEHOLDER_NO_MEDIA_USER_MESSAGE;
+      messageType = 'text';
+    }
+
+    const voiceInboundNeedsTranscribe = voiceInboundAudioPlaceholderWithoutMediaUrl
+      ? false
+      : ghlInboundShouldTranscribeVoice({
+          messageType: messageTypeMapped,
+          messageContent: rawMessageBody,
+          audioMediaUrl,
+          rawData: data,
+          envelope,
+        });
+
+    if (payload.event === 'conversation_message_created') {
+      this.logGhlInboundNormalizeDiagnostics(payload, data, envelope, {
+        rawMessageType: rawMessageType ?? null,
+        mappedMessageType: messageType,
+        messageBodyPreview: this.redactInboundUrlsForLog(rawMessageBody, 240),
+        audioMediaUrlForShape: audioMediaUrl,
+        voiceInboundNeedsTranscribe,
+        voiceInboundAudioPlaceholderWithoutMediaUrl,
+      });
+      if (voiceInboundAudioPlaceholderWithoutMediaUrl) {
+        this.logger.log(
+          JSON.stringify({
+            voiceInboundAudioPlaceholderWithoutMediaUrl: true,
+            rawMessageType: rawMessageType ?? null,
+            mappedMessageType: messageType,
+          }),
+        );
+      }
+    }
 
     return {
       ghlLocationId: payload.locationId,
@@ -205,6 +247,7 @@ export class WebhooksService {
       messageType,
       audioMediaUrl: audioMediaUrl ?? null,
       voiceInboundNeedsTranscribe,
+      voiceInboundAudioPlaceholderWithoutMediaUrl,
       timestamp: payload.timestamp || new Date().toISOString(),
       externalEventId,
       eventType: payload.event,
@@ -215,6 +258,99 @@ export class WebhooksService {
       contactPhone: extracted.phone,
       contactEmail: extracted.email,
     };
+  }
+
+  private redactInboundUrlsForLog(text: string, maxLen: number): string {
+    return text
+      .replace(/https?:\/\/[^\s"'<>]+/gi, '[redacted_url]')
+      .replace(/\bsk-[a-zA-Z0-9_-]{10,}\b/gi, '[redacted_token]')
+      .slice(0, maxLen);
+  }
+
+  private inboundUrlShapeMeta(raw: string | null): { host: string; pathLen: number } | null {
+    if (!raw?.trim()) return null;
+    try {
+      const u = new URL(raw.trim());
+      return { host: u.hostname, pathLen: u.pathname.length };
+    } catch {
+      return { host: 'unparsed', pathLen: Math.min(raw.trim().length, 80) };
+    }
+  }
+
+  private logGhlInboundNormalizeDiagnostics(
+    payload: GhlWebhookPayload,
+    data: Record<string, unknown>,
+    envelope: Record<string, unknown>,
+    ctx: {
+      rawMessageType: string | null;
+      mappedMessageType: string;
+      messageBodyPreview: string;
+      audioMediaUrlForShape: string | null;
+      voiceInboundNeedsTranscribe: boolean;
+      voiceInboundAudioPlaceholderWithoutMediaUrl: boolean;
+    },
+  ): void {
+    const msgRaw = data['message'];
+    const messageKeys =
+      msgRaw && typeof msgRaw === 'object' && !Array.isArray(msgRaw)
+        ? Object.keys(msgRaw as Record<string, unknown>).slice(0, 40)
+        : [];
+
+    let attachmentCount = 0;
+    let mediaKeyedNodeCount = 0;
+    let attachmentItemKeysSample: string[] = [];
+    let mediaItemKeysSample: string[] = [];
+
+    const roots = collectGhlInboundMediaRootNodes(data, envelope);
+    for (const node of roots) {
+      const att = node['attachments'];
+      if (Array.isArray(att)) {
+        attachmentCount += att.length;
+        if (!attachmentItemKeysSample.length) {
+          const first = att[0];
+          if (first && typeof first === 'object' && !Array.isArray(first)) {
+            attachmentItemKeysSample = Object.keys(first as Record<string, unknown>).slice(0, 30);
+          }
+        }
+      }
+      const med = node['media'];
+      if (med != null && typeof med === 'object') {
+        mediaKeyedNodeCount++;
+        if (!mediaItemKeysSample.length) {
+          if (Array.isArray(med)) {
+            const m0 = med[0];
+            if (m0 && typeof m0 === 'object' && !Array.isArray(m0)) {
+              mediaItemKeysSample = Object.keys(m0 as Record<string, unknown>).slice(0, 30);
+            }
+          } else {
+            mediaItemKeysSample = Object.keys(med as Record<string, unknown>).slice(0, 30);
+          }
+        }
+      }
+    }
+
+    const topLevelKeys = Object.keys(envelope).slice(0, 40);
+    const dataKeys = Object.keys(data).slice(0, 40);
+
+    this.logger.log(
+      JSON.stringify({
+        ghlInboundShapeDiagnostics: true,
+        eventType: payload.event,
+        messageType: ctx.rawMessageType,
+        mappedMessageType: ctx.mappedMessageType,
+        messageBodyPreview: ctx.messageBodyPreview,
+        attachmentCount,
+        mediaKeyedNodeCount,
+        topLevelKeys,
+        dataKeys,
+        messageKeys,
+        attachmentItemKeysSample,
+        mediaItemKeysSample,
+        audioMediaUrlShape: this.inboundUrlShapeMeta(ctx.audioMediaUrlForShape),
+        voiceInboundNeedsTranscribe: ctx.voiceInboundNeedsTranscribe,
+        voiceInboundAudioPlaceholderWithoutMediaUrl: ctx.voiceInboundAudioPlaceholderWithoutMediaUrl,
+      }),
+    );
   }
 
   /**
@@ -235,6 +371,8 @@ export class WebhooksService {
       VideoMessage: 'video',
       audio: 'audio',
       AudioMessage: 'audio',
+      voice: 'audio',
+      VoiceMessage: 'audio',
     };
 
     return typeMap[ghlType || ''] || 'unknown';
@@ -303,6 +441,9 @@ export class WebhooksService {
       contactFieldsFromExtendedWebhook: Boolean(payload.contactFieldsFromExtendedWebhook),
       audioMediaUrl: payload.audioMediaUrl ?? undefined,
       voiceInboundNeedsTranscribe: Boolean(payload.voiceInboundNeedsTranscribe),
+      voiceInboundAudioPlaceholderWithoutMediaUrl: Boolean(
+        payload.voiceInboundAudioPlaceholderWithoutMediaUrl,
+      ),
     };
 
     await this.inboundQueue.add('persist', jobData, {

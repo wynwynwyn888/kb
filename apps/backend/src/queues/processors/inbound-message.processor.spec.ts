@@ -20,7 +20,10 @@ jestGlobal.mock('../../modules/conversation-policy/conversation-intent', () => (
 import type { Job } from 'bullmq';
 
 import { InboundMessageProcessor } from './inbound-message.processor';
-import { VOICE_NOTE_TRANSCRIPTION_FAILED_USER_MESSAGE } from '../../modules/transcription/audio-transcription.service';
+import {
+  VOICE_INBOUND_PLACEHOLDER_NO_MEDIA_USER_MESSAGE,
+  VOICE_NOTE_TRANSCRIPTION_FAILED_USER_MESSAGE,
+} from '../../modules/transcription/audio-transcription.service';
 
 const CONV_ID = 'c1111111-1111-1111-1111-111111111111';
 
@@ -767,5 +770,52 @@ describe('InboundMessageProcessor', () => {
     );
 
     expect(mockAudioTranscription.transcribeRemoteMedia).not.toHaveBeenCalled();
+  });
+
+  it('persist: GHL placeholder-without-media skips transcription and sets metadata', async () => {
+    let inserted: Record<string, unknown> | null = null;
+    mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'tenants') {
+        return {
+          select: () => ({
+            eq: () => ({
+              single: async () => ({ data: { id: 'tenant-1' }, error: null }),
+            }),
+          }),
+        };
+      }
+      if (table === 'conversations') {
+        return makeConversationsTableMock({ id: CONV_ID });
+      }
+      if (table === 'messages') {
+        return {
+          insert: (row: Record<string, unknown>) => {
+            inserted = row;
+            return { error: null };
+          },
+        };
+      }
+      return {} as never;
+    });
+
+    await processor.process(
+      makeJob('persist', {
+        locationId: 'loc_1',
+        ghlConversationId: 'ghl_conv_1',
+        ghlContactId: 'ct_1',
+        messageContent: VOICE_INBOUND_PLACEHOLDER_NO_MEDIA_USER_MESSAGE,
+        messageType: 'text',
+        timestamp: '2026-01-01T00:00:00Z',
+        smokeImmediate: false,
+        voiceInboundNeedsTranscribe: false,
+        voiceInboundAudioPlaceholderWithoutMediaUrl: true,
+      }),
+    );
+
+    expect(mockAudioTranscription.transcribeRemoteMedia).not.toHaveBeenCalled();
+    expect(inserted?.['content']).toBe(VOICE_INBOUND_PLACEHOLDER_NO_MEDIA_USER_MESSAGE);
+    const meta = inserted?.['metadata'] as Record<string, unknown> | undefined;
+    expect(meta?.['voiceInboundAudioPlaceholderWithoutMediaUrl']).toBe(true);
+    expect(meta?.['inboundVoiceNote']).toBe(true);
   });
 });

@@ -45,6 +45,8 @@ export interface InboundMessageJobData {
   audioMediaUrl?: string | null;
   /** When true, run speech-to-text before persisting message content. */
   voiceInboundNeedsTranscribe?: boolean;
+  /** GHL placeholder voice inbound with no media URL — persist metadata only, no transcription. */
+  voiceInboundAudioPlaceholderWithoutMediaUrl?: boolean;
 }
 
 export interface OrchestrateDebouncedJobData {
@@ -104,6 +106,7 @@ export class InboundMessageProcessor extends WorkerHost {
       contactFieldsFromExtendedWebhook,
       audioMediaUrl,
       voiceInboundNeedsTranscribe,
+      voiceInboundAudioPlaceholderWithoutMediaUrl,
     } = job.data;
 
     this.logger.log(
@@ -134,6 +137,9 @@ export class InboundMessageProcessor extends WorkerHost {
           messageType,
           audioMediaUrl: audioMediaUrl ?? null,
           voiceInboundNeedsTranscribe: Boolean(voiceInboundNeedsTranscribe),
+          voiceInboundAudioPlaceholderWithoutMediaUrl: Boolean(
+            voiceInboundAudioPlaceholderWithoutMediaUrl,
+          ),
         },
         tenant.id,
         conversation.id,
@@ -235,7 +241,14 @@ export class InboundMessageProcessor extends WorkerHost {
    * Raw audio is never forwarded to the text reply model — only the transcript (or a safe fallback string).
    */
   private async resolveVoiceInboundContent(
-    job: Pick<InboundMessageJobData, 'messageContent' | 'messageType' | 'audioMediaUrl' | 'voiceInboundNeedsTranscribe'>,
+    job: Pick<
+      InboundMessageJobData,
+      | 'messageContent'
+      | 'messageType'
+      | 'audioMediaUrl'
+      | 'voiceInboundNeedsTranscribe'
+      | 'voiceInboundAudioPlaceholderWithoutMediaUrl'
+    >,
     tenantId: string,
     conversationId: string,
     webhookEventId?: string,
@@ -244,6 +257,17 @@ export class InboundMessageProcessor extends WorkerHost {
     persistContentType: InboundMessageJobData['messageType'];
     voiceMetadata: Record<string, unknown>;
   }> {
+    if (job.voiceInboundAudioPlaceholderWithoutMediaUrl) {
+      return {
+        content: job.messageContent,
+        persistContentType: 'text',
+        voiceMetadata: {
+          inboundVoiceNote: true,
+          voiceInboundAudioPlaceholderWithoutMediaUrl: true,
+        },
+      };
+    }
+
     if (!job.voiceInboundNeedsTranscribe) {
       return {
         content: job.messageContent,

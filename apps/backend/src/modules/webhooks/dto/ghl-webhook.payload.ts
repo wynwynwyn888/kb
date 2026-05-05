@@ -35,6 +35,11 @@ export interface NormalizedWebhookPayload {
   audioMediaUrl?: string | null;
   /** When true, the inbound worker should transcribe before persisting text for orchestration. */
   voiceInboundNeedsTranscribe?: boolean;
+  /**
+   * GHL sent an audio/voice placeholder body but no downloadable media URL — inbound text was
+   * replaced with a safe customer message and transcription was skipped.
+   */
+  voiceInboundAudioPlaceholderWithoutMediaUrl?: boolean;
   /** When true, contact display/phone used snake_case or alternate GHL webhook keys (not only contactName/phoneNumber). */
   contactFieldsFromExtendedWebhook?: boolean | null;
   contactDisplayName?: string | null;

@@ -1,5 +1,6 @@
 import { jest as jestGlobal } from '@jest/globals';
 
+import { VOICE_INBOUND_PLACEHOLDER_NO_MEDIA_USER_MESSAGE } from '../transcription/audio-transcription.service';
 import { WebhooksService } from './webhooks.service';
 import { createMockSupabase, mockFrom } from '../../test/mock-supabase';
 
@@ -234,6 +235,121 @@ describe('WebhooksService', () => {
           messageType: 'audio',
           audioMediaUrl: 'https://cdn.example.com/inbound.m4a',
           voiceInboundNeedsTranscribe: true,
+        }),
+        expect.any(Object),
+      );
+    });
+
+    it('enqueues placeholder-no-media path when unsupported body and no URL', async () => {
+      (mockSupabase.from as jest.Mock).mockImplementation((table: string) => {
+        if (table === 'tenants') {
+          return {
+            select: () => ({
+              eq: () => ({ single: async () => ({ data: { id: 'tnt_1' }, error: null }) }),
+            }),
+          };
+        }
+        if (table === 'tenant_ghl_connections') {
+          return {
+            select: () => ({
+              eq: () => ({
+                eq: () => ({ single: async () => ({ data: { tenant_id: 'tnt_1', status: 'CONNECTED' }, error: null }) }),
+              }),
+            }),
+          };
+        }
+        if (table === 'webhook_events') {
+          return {
+            select: () => ({
+              eq: () => ({
+                eq: () => ({ single: async () => ({ data: null, error: { code: 'PGRST116' } }) }),
+              }),
+            }),
+            insert: () => ({ select: () => ({ single: async () => ({ data: { id: 'evt_ph' }, error: null }) }) }),
+          };
+        }
+        return {};
+      });
+
+      await service.handleGhlWebhook(
+        makePayload({
+          data: {
+            id: 'msg_ph',
+            conversationId: 'conv_1',
+            contactId: 'c1',
+            message: 'This Message type is not supported',
+            messageType: 'text',
+          } as never,
+        }),
+      );
+
+      expect(mockQueue.add).toHaveBeenCalledWith(
+        'persist',
+        expect.objectContaining({
+          messageType: 'text',
+          messageContent: VOICE_INBOUND_PLACEHOLDER_NO_MEDIA_USER_MESSAGE,
+          voiceInboundNeedsTranscribe: false,
+          voiceInboundAudioPlaceholderWithoutMediaUrl: true,
+          audioMediaUrl: undefined,
+        }),
+        expect.any(Object),
+      );
+    });
+
+    it('enqueues voice transcription when unsupported placeholder but nested data.attachments has URL', async () => {
+      (mockSupabase.from as jest.Mock).mockImplementation((table: string) => {
+        if (table === 'tenants') {
+          return {
+            select: () => ({
+              eq: () => ({ single: async () => ({ data: { id: 'tnt_1' }, error: null }) }),
+            }),
+          };
+        }
+        if (table === 'tenant_ghl_connections') {
+          return {
+            select: () => ({
+              eq: () => ({
+                eq: () => ({ single: async () => ({ data: { tenant_id: 'tnt_1', status: 'CONNECTED' }, error: null }) }),
+              }),
+            }),
+          };
+        }
+        if (table === 'webhook_events') {
+          return {
+            select: () => ({
+              eq: () => ({
+                eq: () => ({ single: async () => ({ data: null, error: { code: 'PGRST116' } }) }),
+              }),
+            }),
+            insert: () => ({ select: () => ({ single: async () => ({ data: { id: 'evt_v2' }, error: null }) }) }),
+          };
+        }
+        return {};
+      });
+
+      await service.handleGhlWebhook(
+        makePayload({
+          data: {
+            id: 'msg_v2',
+            conversationId: 'conv_1',
+            contactId: 'c1',
+            message: 'This Message type is not supported',
+            messageType: 'text',
+            data: {
+              attachments: [{ url: 'https://cdn.example.com/hidden.m4a', contentType: 'audio/mp4' }],
+            },
+          } as never,
+        }),
+      );
+
+      expect(mockQueue.add).toHaveBeenCalledWith(
+        'persist',
+        expect.objectContaining({
+          messageType: 'text',
+          messageContent: 'This Message type is not supported',
+          audioMediaUrl: 'https://cdn.example.com/hidden.m4a',
+          voiceInboundNeedsTranscribe: true,
+          voiceInboundAudioPlaceholderWithoutMediaUrl: false,
         }),
         expect.any(Object),
       );

@@ -6,6 +6,10 @@ import { isUsableOpenAiFallbackKey } from '../../lib/ai-live-model-resolve';
 export const VOICE_NOTE_TRANSCRIPTION_FAILED_USER_MESSAGE =
   "I'm sorry — I couldn't read that voice note. Please type your message or try sending it again.";
 
+/** Persisted inbound text when GHL sends an audio/voice placeholder but no downloadable media URL. */
+export const VOICE_INBOUND_PLACEHOLDER_NO_MEDIA_USER_MESSAGE =
+  "We couldn't access this voice note from the chat provider. Please type your message or try sending the voice note again.";
+
 const MAX_DOWNLOAD_BYTES = 25 * 1024 * 1024;
 const DOWNLOAD_TIMEOUT_MS = 60_000;
 

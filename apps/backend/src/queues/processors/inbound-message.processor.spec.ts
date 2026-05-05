@@ -1275,6 +1275,82 @@ describe('InboundMessageProcessor', () => {
     expect(meta?.['voiceTranscriptionStatus']).toBe('succeeded');
   });
 
+  it('persist: no conversationId -> discovery returns direct audio URL -> transcribeRemoteMedia path', async () => {
+    process.env['GHL_VOICE_DISCOVER_CONVERSATION_ID'] = 'true';
+    process.env['GHL_VOICE_DISCOVER_MESSAGE_ID'] = 'true';
+    process.env['GHL_VOICE_DISCOVER_DELAY_MS'] = '0';
+
+    let inserted: Record<string, unknown> | null = null;
+    mockGhlVoiceConversationDiscovery.discoverConversationIdByContact.mockResolvedValue({
+      ok: true,
+      conversationId: 'disc_conv_2',
+      candidateCount: 1,
+    });
+    mockGhlVoiceMessageDiscovery.discoverVoicePlaceholderMessageId.mockResolvedValue({
+      ok: true,
+      messageId: 'disc_msg_2',
+      audioMediaUrl: 'https://storage.googleapis.com/stark-media/p/file.mp3',
+      candidateReason: 'inbound_with_direct_audio_url',
+      candidateCount: 1,
+    });
+    mockAudioTranscription.transcribeRemoteMedia.mockResolvedValue({
+      ok: true as const,
+      transcript: 'direct media transcript',
+      mediaBytes: 14,
+      contentType: 'audio/mpeg',
+    });
+
+    mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'tenants') {
+        return {
+          select: () => ({
+            eq: () => ({
+              single: async () => ({ data: { id: 'tenant-1' }, error: null }),
+            }),
+          }),
+        };
+      }
+      if (table === 'conversations') return makeConversationsTableMock({ id: CONV_ID });
+      if (table === 'messages') {
+        return {
+          insert: (row: Record<string, unknown>) => {
+            inserted = row;
+            return { error: null };
+          },
+        };
+      }
+      return {} as never;
+    });
+
+    await processor.process(
+      makeJob('persist', {
+        locationId: 'loc_1',
+        ghlConversationId: '',
+        ghlContactId: 'ct_1',
+        messageContent: VOICE_INBOUND_PLACEHOLDER_NO_MEDIA_USER_MESSAGE,
+        messageType: 'text',
+        timestamp: '2026-01-01T00:00:00Z',
+        smokeImmediate: false,
+        voiceInboundNeedsTranscribe: false,
+        voiceInboundAudioPlaceholderWithoutMediaUrl: true,
+        voiceInboundPlaceholderKind: 'AUDIO',
+      }),
+    );
+
+    expect(mockAudioTranscription.transcribeRemoteMedia).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tenantId: 'tenant-1',
+        mediaUrl: 'https://storage.googleapis.com/stark-media/p/file.mp3',
+      }),
+    );
+    expect(mockGhlVoiceRecordingFetch.tryFetchRecording).not.toHaveBeenCalled();
+    const meta = inserted?.['metadata'] as Record<string, unknown> | undefined;
+    expect(inserted?.['content']).toBe('direct media transcript');
+    expect(meta?.['voiceRetrievalMethod']).toBe('ghl_message_history_direct_media_url');
+    expect(meta?.['voiceDiscoveredConversationId']).toBe(true);
+    expect(meta?.['voiceDiscoveredMessageId']).toBe(true);
+  });
+
   it('persist: conversation discovery none -> fallback with conversation_id_not_found', async () => {
     process.env['GHL_VOICE_DISCOVER_CONVERSATION_ID'] = 'true';
     process.env['GHL_VOICE_DISCOVER_MESSAGE_ID'] = 'true';
@@ -1385,6 +1461,59 @@ describe('InboundMessageProcessor', () => {
     expect(meta?.['voiceTranscriptionStatus']).toBe('media_url_missing');
   });
 
+  it('persist: message discovery returns no id and no URL -> safe fallback reason', async () => {
+    process.env['GHL_VOICE_DISCOVER_MESSAGE_ID'] = 'true';
+    process.env['GHL_VOICE_DISCOVER_DELAY_MS'] = '0';
+
+    let inserted: Record<string, unknown> | null = null;
+    mockGhlVoiceMessageDiscovery.discoverVoicePlaceholderMessageId.mockResolvedValue({
+      ok: false,
+      reason: 'audio_media_url_not_found',
+      candidateCount: 1,
+    });
+
+    mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'tenants') {
+        return {
+          select: () => ({
+            eq: () => ({
+              single: async () => ({ data: { id: 'tenant-1' }, error: null }),
+            }),
+          }),
+        };
+      }
+      if (table === 'conversations') return makeConversationsTableMock({ id: CONV_ID });
+      if (table === 'messages') {
+        return {
+          insert: (row: Record<string, unknown>) => {
+            inserted = row;
+            return { error: null };
+          },
+        };
+      }
+      return {} as never;
+    });
+
+    await processor.process(
+      makeJob('persist', {
+        locationId: 'loc_1',
+        ghlConversationId: 'ghl_conv_x',
+        ghlContactId: 'ct_1',
+        messageContent: VOICE_INBOUND_PLACEHOLDER_NO_MEDIA_USER_MESSAGE,
+        messageType: 'text',
+        timestamp: '2026-01-01T00:00:00Z',
+        smokeImmediate: false,
+        voiceInboundNeedsTranscribe: false,
+        voiceInboundAudioPlaceholderWithoutMediaUrl: true,
+        voiceInboundPlaceholderKind: 'AUDIO',
+      }),
+    );
+
+    const meta = inserted?.['metadata'] as Record<string, unknown> | undefined;
+    expect(meta?.['voiceRetrievalFailureReason']).toBe('audio_media_url_not_found');
+    expect(meta?.['voiceTranscriptionStatus']).toBe('media_url_missing');
+  });
+
   it('persist: conversationId already present -> conversation discovery not called', async () => {
     process.env['GHL_VOICE_DISCOVER_CONVERSATION_ID'] = 'true';
     process.env['GHL_VOICE_DISCOVER_MESSAGE_ID'] = 'true';
@@ -1460,6 +1589,60 @@ describe('InboundMessageProcessor', () => {
     );
 
     expect(mockGhlVoiceConversationDiscovery.discoverConversationIdByContact).not.toHaveBeenCalled();
+  });
+
+  it('persist: placeholder with direct webhook media URL uses existing transcribeRemoteMedia path', async () => {
+    let inserted: Record<string, unknown> | null = null;
+    mockAudioTranscription.transcribeRemoteMedia.mockResolvedValue({
+      ok: true as const,
+      transcript: 'from webhook media url',
+      mediaBytes: 7,
+      contentType: 'audio/mpeg',
+    });
+    mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'tenants') {
+        return {
+          select: () => ({
+            eq: () => ({
+              single: async () => ({ data: { id: 'tenant-1' }, error: null }),
+            }),
+          }),
+        };
+      }
+      if (table === 'conversations') return makeConversationsTableMock({ id: CONV_ID });
+      if (table === 'messages') {
+        return {
+          insert: (row: Record<string, unknown>) => {
+            inserted = row;
+            return { error: null };
+          },
+        };
+      }
+      return {} as never;
+    });
+
+    await processor.process(
+      makeJob('persist', {
+        locationId: 'loc_1',
+        ghlConversationId: 'ghl_conv_1',
+        ghlContactId: 'ct_1',
+        messageContent: '',
+        messageType: 'audio',
+        audioMediaUrl: 'https://cdn.example.com/inbound.webm',
+        timestamp: '2026-01-01T00:00:00Z',
+        smokeImmediate: false,
+        voiceInboundNeedsTranscribe: true,
+      }),
+    );
+
+    expect(mockAudioTranscription.transcribeRemoteMedia).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mediaUrl: 'https://cdn.example.com/inbound.webm',
+      }),
+    );
+    expect(mockGhlVoiceMessageDiscovery.discoverVoicePlaceholderMessageId).not.toHaveBeenCalled();
+    expect(mockGhlVoiceConversationDiscovery.discoverConversationIdByContact).not.toHaveBeenCalled();
+    expect(inserted?.['content']).toBe('from webhook media url');
   });
 
   it('persist: placeholder with webhook messageId uses direct recording fetch, not discovery', async () => {

@@ -395,6 +395,64 @@ export class InboundMessageProcessor extends WorkerHost {
       });
 
       if (discovered.ok) {
+        if (discovered.audioMediaUrl) {
+          const tx = await this.audioTranscription.transcribeRemoteMedia({
+            tenantId,
+            mediaUrl: discovered.audioMediaUrl,
+            conversationId,
+            webhookEventId,
+          });
+          if (tx.ok) {
+            let mediaHost: string | null = null;
+            try {
+              mediaHost = new URL(discovered.audioMediaUrl).hostname;
+            } catch {
+              mediaHost = null;
+            }
+            return {
+              content: tx.transcript,
+              persistContentType: 'text',
+              voiceMetadata: {
+                inboundVoiceNote: true,
+                voiceTranscriptionStatus: 'succeeded',
+                voiceRetrievalMethod: 'ghl_message_history_direct_media_url',
+                voiceDiscoveredMessageId: Boolean(discovered.messageId),
+                voiceDiscoveredConversationId: true,
+                voiceOriginalMediaHost: mediaHost,
+                voiceMediaBytes: tx.mediaBytes,
+                voiceMediaContentType: tx.contentType,
+              },
+            };
+          }
+          return {
+            content: job.messageContent,
+            persistContentType: 'text',
+            voiceMetadata: {
+              inboundVoiceNote: true,
+              voiceInboundAudioPlaceholderWithoutMediaUrl: true,
+              voiceTranscriptionStatus: 'media_url_missing',
+              voiceRetrievalMethod: 'ghl_message_history_direct_media_url',
+              voiceDiscoveredMessageId: Boolean(discovered.messageId),
+              voiceDiscoveredConversationId: true,
+              voiceRetrievalFailureReason: 'transcription_failed',
+            },
+          };
+        }
+        if (!discovered.messageId) {
+          return {
+            content: job.messageContent,
+            persistContentType: 'text',
+            voiceMetadata: {
+              inboundVoiceNote: true,
+              voiceInboundAudioPlaceholderWithoutMediaUrl: true,
+              voiceTranscriptionStatus: 'media_url_missing',
+              voiceRetrievalMethod: 'ghl_message_discovery_recording_fetch',
+              voiceDiscoveredMessageId: false,
+              voiceDiscoveredConversationId: true,
+              voiceRetrievalFailureReason: 'audio_media_url_not_found',
+            },
+          };
+        }
         const tr = await this.tryTranscribeFromGhlRecording({
           tenantId,
           locationId,
@@ -502,6 +560,66 @@ export class InboundMessageProcessor extends WorkerHost {
             voiceDiscoveredConversationId: true,
             voiceDiscoveredMessageId: false,
             voiceRetrievalFailureReason: discoveredMsg.reason,
+          },
+        };
+      }
+
+      if (discoveredMsg.audioMediaUrl) {
+        const tx = await this.audioTranscription.transcribeRemoteMedia({
+          tenantId,
+          mediaUrl: discoveredMsg.audioMediaUrl,
+          conversationId,
+          webhookEventId,
+        });
+        if (tx.ok) {
+          let mediaHost: string | null = null;
+          try {
+            mediaHost = new URL(discoveredMsg.audioMediaUrl).hostname;
+          } catch {
+            mediaHost = null;
+          }
+          return {
+            content: tx.transcript,
+            persistContentType: 'text',
+            voiceMetadata: {
+              inboundVoiceNote: true,
+              voiceTranscriptionStatus: 'succeeded',
+              voiceRetrievalMethod: 'ghl_message_history_direct_media_url',
+              voiceDiscoveredConversationId: true,
+              voiceDiscoveredMessageId: Boolean(discoveredMsg.messageId),
+              voiceOriginalMediaHost: mediaHost,
+              voiceMediaBytes: tx.mediaBytes,
+              voiceMediaContentType: tx.contentType,
+            },
+          };
+        }
+        return {
+          content: job.messageContent,
+          persistContentType: 'text',
+          voiceMetadata: {
+            inboundVoiceNote: true,
+            voiceInboundAudioPlaceholderWithoutMediaUrl: true,
+            voiceTranscriptionStatus: 'media_url_missing',
+            voiceRetrievalMethod: 'ghl_message_history_direct_media_url',
+            voiceDiscoveredConversationId: true,
+            voiceDiscoveredMessageId: Boolean(discoveredMsg.messageId),
+            voiceRetrievalFailureReason: 'transcription_failed',
+          },
+        };
+      }
+      if (!discoveredMsg.messageId) {
+        return {
+          content: job.messageContent,
+          persistContentType: 'text',
+          voiceMetadata: {
+            inboundVoiceNote: true,
+            voiceInboundAudioPlaceholderWithoutMediaUrl: true,
+            voiceTranscriptionStatus: 'media_url_missing',
+            voiceRetrievalMethod:
+              'ghl_conversation_discovery_message_discovery_recording_fetch',
+            voiceDiscoveredConversationId: true,
+            voiceDiscoveredMessageId: false,
+            voiceRetrievalFailureReason: 'audio_media_url_not_found',
           },
         };
       }

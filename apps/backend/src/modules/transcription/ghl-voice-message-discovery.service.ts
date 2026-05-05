@@ -1,7 +1,5 @@
 /**
- * Phase 1C: when workflow-flat webhooks omit messageId but include an AUDIO/VOICE placeholder body,
- * list conversation messages via GHL and pick the best matching inbound placeholder to obtain a message id
- * for the recording endpoint.
+ * Phase 1C+: discover message id and direct media URL from GHL message history.
  */
 
 import { Injectable, Logger } from '@nestjs/common';
@@ -11,6 +9,19 @@ import { classifyGhlAudioPlaceholderBody } from '../webhooks/ghl-inbound-audio-m
 
 const LIST_TIMEOUT_MS = 35_000;
 const MESSAGE_LIMIT = 40;
+const URL_KEYS = [
+  'url',
+  'fileUrl',
+  'mediaUrl',
+  'downloadUrl',
+  'attachmentUrl',
+  'secureUrl',
+  'link',
+  'sourceUrl',
+  'src',
+  'href',
+] as const;
+const SHAPE_WALK_KEYS = ['messages', 'data', 'items', 'results', 'conversation'] as const;
 
 function ghlApiBase(): string {
   return (
@@ -40,39 +51,35 @@ function asRecordArray(v: unknown): Record<string, unknown>[] {
   return v.filter((x): x is Record<string, unknown> => Boolean(asRecord(x)));
 }
 
-function extractMessagesArray(payload: unknown): {
-  rows: Record<string, unknown>[];
-  detectedCollectionPath: string;
-} {
-  const root = asRecord(payload);
-  if (!root) return { rows: [], detectedCollectionPath: 'none' };
-
-  const pathCandidates: Array<{ path: string; value: unknown }> = [
-    { path: 'messages', value: root['messages'] },
-    { path: 'data.messages', value: asRecord(root['data'])?.['messages'] },
-    {
-      path: 'data.conversation.messages',
-      value: asRecord(asRecord(root['data'])?.['conversation'])?.['messages'],
-    },
-    { path: 'conversation.messages', value: asRecord(root['conversation'])?.['messages'] },
-    { path: 'data.items', value: asRecord(root['data'])?.['items'] },
-    { path: 'items', value: root['items'] },
-    { path: 'data.results', value: asRecord(root['data'])?.['results'] },
-    { path: 'results', value: root['results'] },
-  ];
-
-  for (const p of pathCandidates) {
-    const rows = asRecordArray(p.value);
-    if (rows.length > 0) return { rows, detectedCollectionPath: p.path };
-  }
-  return { rows: [], detectedCollectionPath: 'none' };
-}
-
 function firstNonEmptyString(values: unknown[]): string {
   for (const v of values) {
     if (typeof v === 'string' && v.trim()) return v.trim();
   }
   return '';
+}
+
+function messageLikeRow(row: Record<string, unknown>): boolean {
+  return [
+    'id',
+    'messageId',
+    'message_id',
+    'conversationMessageId',
+    '_id',
+    'body',
+    'message',
+    'text',
+    'content',
+    'type',
+    'messageType',
+    'contentType',
+    'direction',
+    'source',
+    'attachments',
+    'media',
+    'dateAdded',
+    'createdAt',
+    'timestamp',
+  ].some((k) => k in row);
 }
 
 function extractBody(row: Record<string, unknown>): string {
@@ -96,77 +103,20 @@ function hasAudioHintInString(v: string): boolean {
   return (
     s.includes('audio') ||
     s.includes('voice') ||
-    /\.(m4a|mp3|wav|ogg|oga|aac|amr|webm|opus|aiff?)(\?|#|$)/i.test(s)
+    s.includes('stark-media') ||
+    s.includes('storage.googleapis.com') ||
+    /\.(mp3|ogg|oga|m4a|wav|webm|aac|amr)(\?|#|$)/i.test(s)
   );
 }
 
-function attachmentMediaAudioHint(row: Record<string, unknown>): {
-  isCandidate: boolean;
-  hasAttachments: boolean;
-  attachmentCount: number;
-  hasMedia: boolean;
-  mediaKeyNodeCount: number;
-} {
-  const attachments = row['attachments'];
-  const media = row['media'];
-  let attachmentCount = 0;
-  let hasAttachments = false;
-  let hasMedia = false;
-  let mediaKeyNodeCount = 0;
-  let audioHint = false;
-
-  if (Array.isArray(attachments)) {
-    hasAttachments = true;
-    attachmentCount = attachments.length;
-    for (const item of attachments) {
-      const r = asRecord(item);
-      if (!r) continue;
-      const mime = String(r['contentType'] ?? r['mimeType'] ?? '').toLowerCase();
-      const name = String(r['name'] ?? r['filename'] ?? r['fileName'] ?? '');
-      const url = String(r['url'] ?? r['mediaUrl'] ?? r['fileUrl'] ?? '');
-      if (mime.startsWith('audio/') || hasAudioHintInString(name) || hasAudioHintInString(url)) {
-        audioHint = true;
-      }
-    }
+function safeUrlShape(raw: string): { host: string; pathLen: number } | null {
+  if (!/^https?:\/\//i.test(raw)) return null;
+  try {
+    const u = new URL(raw);
+    return { host: u.hostname, pathLen: u.pathname.length };
+  } catch {
+    return null;
   }
-
-  if (media !== undefined && media !== null) {
-    hasMedia = true;
-    if (Array.isArray(media)) {
-      mediaKeyNodeCount = media.length;
-      for (const item of media) {
-        const r = asRecord(item);
-        if (!r) continue;
-        const mime = String(r['contentType'] ?? r['mimeType'] ?? '').toLowerCase();
-        const name = String(r['name'] ?? r['filename'] ?? r['fileName'] ?? '');
-        const url = String(r['url'] ?? r['mediaUrl'] ?? r['fileUrl'] ?? '');
-        if (mime.startsWith('audio/') || hasAudioHintInString(name) || hasAudioHintInString(url)) {
-          audioHint = true;
-        }
-      }
-    } else {
-      const r = asRecord(media);
-      if (r) {
-        mediaKeyNodeCount = Object.keys(r).length > 0 ? 1 : 0;
-        const mime = String(r['contentType'] ?? r['mimeType'] ?? '').toLowerCase();
-        const name = String(r['name'] ?? r['filename'] ?? r['fileName'] ?? '');
-        const url = String(r['url'] ?? r['mediaUrl'] ?? r['fileUrl'] ?? '');
-        if (mime.startsWith('audio/') || hasAudioHintInString(name) || hasAudioHintInString(url)) {
-          audioHint = true;
-        }
-      }
-    }
-  }
-
-  return { isCandidate: audioHint, hasAttachments, attachmentCount, hasMedia, mediaKeyNodeCount };
-}
-
-function extractDirectionSource(row: Record<string, unknown>): string {
-  return firstNonEmptyString([row['direction'], row['source'], row['from']]).toLowerCase();
-}
-
-function isInboundFromDirectionSource(directionSourceLower: string): boolean {
-  return /(inbound|customer|contact|user|client)/i.test(directionSourceLower);
 }
 
 function redactedBodyPreview(v: string): string {
@@ -174,31 +124,6 @@ function redactedBodyPreview(v: string): string {
     .replace(/https?:\/\/[^\s"'<>]+/gi, '[url]')
     .replace(/\bsk-[a-zA-Z0-9_-]{10,}\b/gi, '[token]')
     .slice(0, 120);
-}
-
-/** Inbound-only: placeholder body classification or obvious audio-ish GHL rows. */
-function isInboundVoicePlaceholderCandidate(row: Record<string, unknown>): boolean {
-  const directionSource = extractDirectionSource(row);
-  if (!isInboundFromDirectionSource(directionSource)) return false;
-
-  const body = extractBody(row);
-  const cls = classifyGhlAudioPlaceholderBody(body);
-  if (cls === 'AUDIO' || cls === 'VOICE') {
-    return true;
-  }
-
-  const typeBundle = [
-    String(row['type'] ?? ''),
-    String(row['messageType'] ?? ''),
-    String(row['contentType'] ?? ''),
-    String(row['source'] ?? ''),
-  ].join(' ');
-  if (/voice|audio|VoiceMessage|AudioMessage/i.test(typeBundle)) return true;
-
-  const hints = attachmentMediaAudioHint(row);
-  if (hints.isCandidate) return true;
-
-  return false;
 }
 
 function resolveMessageRowId(row: Record<string, unknown>): string | null {
@@ -212,16 +137,205 @@ function resolveMessageRowId(row: Record<string, unknown>): string | null {
   return null;
 }
 
-function compareByRecencyNearWebhook(
-  a: Record<string, unknown>,
-  b: Record<string, unknown>,
-  webhookMs: number,
-): number {
-  const ta = Date.parse(String(a['dateAdded'] ?? '')) || 0;
-  const tb = Date.parse(String(b['dateAdded'] ?? '')) || 0;
-  /** Prefer newer; tie-break by absolute distance to webhook receipt time */
-  const byTime = tb - ta;
-  if (byTime !== 0) return byTime;
+function directionSourceOf(row: Record<string, unknown>): string {
+  return firstNonEmptyString([row['direction'], row['source'], row['from']]).toLowerCase();
+}
+
+function inboundLikeDirectionSource(s: string): boolean {
+  return /(inbound|customer|contact|user|client)/i.test(s);
+}
+
+function attachmentMediaStats(row: Record<string, unknown>): {
+  hasAttachments: boolean;
+  attachmentCount: number;
+  hasMedia: boolean;
+  mediaKeyNodeCount: number;
+  hasAudioHint: boolean;
+} {
+  const attachments = row['attachments'];
+  const media = row['media'];
+  let hasAttachments = false;
+  let attachmentCount = 0;
+  let hasMedia = false;
+  let mediaKeyNodeCount = 0;
+  let hasAudioHint = false;
+
+  const inspectNode = (node: Record<string, unknown>) => {
+    const mime = String(node['contentType'] ?? node['mimeType'] ?? '').toLowerCase();
+    const name = String(node['name'] ?? node['filename'] ?? node['fileName'] ?? '');
+    const direct = firstNonEmptyString(URL_KEYS.map((k) => node[k]));
+    if (mime.startsWith('audio/') || hasAudioHintInString(name) || hasAudioHintInString(direct)) {
+      hasAudioHint = true;
+    }
+  };
+
+  if (Array.isArray(attachments)) {
+    hasAttachments = true;
+    attachmentCount = attachments.length;
+    for (const item of attachments) {
+      const r = asRecord(item);
+      if (r) inspectNode(r);
+    }
+  }
+
+  if (media != null) {
+    hasMedia = true;
+    if (Array.isArray(media)) {
+      mediaKeyNodeCount = media.length;
+      for (const item of media) {
+        const r = asRecord(item);
+        if (r) inspectNode(r);
+      }
+    } else {
+      const r = asRecord(media);
+      if (r) {
+        mediaKeyNodeCount = Object.keys(r).length > 0 ? 1 : 0;
+        inspectNode(r);
+      }
+    }
+  }
+
+  return { hasAttachments, attachmentCount, hasMedia, mediaKeyNodeCount, hasAudioHint };
+}
+
+function extractUrlFromNode(node: Record<string, unknown>): string | null {
+  for (const key of URL_KEYS) {
+    const v = firstNonEmptyString([node[key]]);
+    if (v && /^https?:\/\//i.test(v)) return v;
+  }
+  return null;
+}
+
+function audioUrlLooksDownloadable(url: string): boolean {
+  if (!/^https?:\/\//i.test(url)) return false;
+  const lower = url.toLowerCase();
+  return (
+    lower.includes('storage.googleapis.com') ||
+    lower.includes('stark-media') ||
+    /\.(mp3|ogg|oga|m4a|wav|webm|aac|amr)(\?|#|$)/i.test(lower) ||
+    lower.includes('/audio/')
+  );
+}
+
+function walkNodesForMedia(
+  root: unknown,
+  depth: number,
+  seen: WeakSet<object>,
+): { url: string | null; mediaKeyNodeCount: number } {
+  if (depth < 0 || !root || typeof root !== 'object') return { url: null, mediaKeyNodeCount: 0 };
+  if (seen.has(root as object)) return { url: null, mediaKeyNodeCount: 0 };
+  seen.add(root as object);
+
+  if (Array.isArray(root)) {
+    let nodes = 0;
+    for (const item of root) {
+      const r = walkNodesForMedia(item, depth - 1, seen);
+      nodes += r.mediaKeyNodeCount;
+      if (r.url) return { url: r.url, mediaKeyNodeCount: nodes };
+    }
+    return { url: null, mediaKeyNodeCount: nodes };
+  }
+
+  const rec = root as Record<string, unknown>;
+  let nodes = 0;
+  const direct = extractUrlFromNode(rec);
+  if (direct && audioUrlLooksDownloadable(direct)) {
+    return { url: direct, mediaKeyNodeCount: 1 };
+  }
+  nodes += 1;
+
+  const likelyChildKeys = [
+    'attachments',
+    'media',
+    'files',
+    'message',
+    'payload',
+    'customData',
+    'data',
+  ];
+  for (const k of likelyChildKeys) {
+    if (!(k in rec)) continue;
+    const r = walkNodesForMedia(rec[k], depth - 1, seen);
+    nodes += r.mediaKeyNodeCount;
+    if (r.url) return { url: r.url, mediaKeyNodeCount: nodes };
+  }
+
+  return { url: null, mediaKeyNodeCount: nodes };
+}
+
+export function extractGhlMessageAudioMediaUrl(
+  message: Record<string, unknown>,
+): { audioMediaUrl: string | null; audioMediaUrlShape: { host: string; pathLen: number } | null; mediaKeyNodeCount: number } {
+  const walked = walkNodesForMedia(message, 5, new WeakSet<object>());
+  return {
+    audioMediaUrl: walked.url,
+    audioMediaUrlShape: walked.url ? safeUrlShape(walked.url) : null,
+    mediaKeyNodeCount: walked.mediaKeyNodeCount,
+  };
+}
+
+type CandidateReason =
+  | 'inbound_with_direct_audio_url'
+  | 'inbound_placeholder_audio_or_voice'
+  | 'inbound_audio_type'
+  | 'latest_direct_audio_url_no_direction';
+
+type RankedCandidate = {
+  row: Record<string, unknown>;
+  reason: CandidateReason;
+  score: number;
+  audioMediaUrl: string | null;
+};
+
+function scoreCandidateReason(reason: CandidateReason): number {
+  if (reason === 'inbound_with_direct_audio_url') return 400;
+  if (reason === 'inbound_placeholder_audio_or_voice') return 300;
+  if (reason === 'inbound_audio_type') return 200;
+  return 100;
+}
+
+function candidateFromRow(row: Record<string, unknown>): RankedCandidate | null {
+  const body = extractBody(row);
+  const bodyKind = classifyGhlAudioPlaceholderBody(body);
+  const directionSource = directionSourceOf(row);
+  const inboundLike = inboundLikeDirectionSource(directionSource);
+  const typeBundle = [
+    String(row['type'] ?? ''),
+    String(row['messageType'] ?? ''),
+    String(row['contentType'] ?? ''),
+    String(row['source'] ?? ''),
+  ].join(' ');
+  const typeAudio = /voice|audio|VoiceMessage|AudioMessage/i.test(typeBundle);
+  const stats = attachmentMediaStats(row);
+  const extracted = extractGhlMessageAudioMediaUrl(row);
+  const directUrl = extracted.audioMediaUrl;
+
+  if (inboundLike && directUrl) {
+    return { row, reason: 'inbound_with_direct_audio_url', score: scoreCandidateReason('inbound_with_direct_audio_url'), audioMediaUrl: directUrl };
+  }
+  if (inboundLike && (bodyKind === 'AUDIO' || bodyKind === 'VOICE')) {
+    return { row, reason: 'inbound_placeholder_audio_or_voice', score: scoreCandidateReason('inbound_placeholder_audio_or_voice'), audioMediaUrl: directUrl };
+  }
+  if (inboundLike && (typeAudio || stats.hasAudioHint || directUrl)) {
+    return { row, reason: 'inbound_audio_type', score: scoreCandidateReason('inbound_audio_type'), audioMediaUrl: directUrl };
+  }
+  if (!inboundLike && directUrl) {
+    return { row, reason: 'latest_direct_audio_url_no_direction', score: scoreCandidateReason('latest_direct_audio_url_no_direction'), audioMediaUrl: directUrl };
+  }
+  return null;
+}
+
+function timestampMsForRow(row: Record<string, unknown>): number {
+  const raw = firstNonEmptyString([row['dateAdded'], row['createdAt'], row['timestamp']]);
+  const parsed = Date.parse(raw);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function compareCandidates(a: RankedCandidate, b: RankedCandidate, webhookMs: number): number {
+  if (b.score !== a.score) return b.score - a.score;
+  const ta = timestampMsForRow(a.row);
+  const tb = timestampMsForRow(b.row);
+  if (tb !== ta) return tb - ta;
   const da = Math.abs(ta - webhookMs);
   const db = Math.abs(tb - webhookMs);
   return da - db;
@@ -231,17 +345,19 @@ function safeMessageSample(row: Record<string, unknown>, index: number): Record<
   const id = resolveMessageRowId(row);
   const body = extractBody(row);
   const bodyKind = classifyGhlAudioPlaceholderBody(body);
-  const hints = attachmentMediaAudioHint(row);
+  const stats = attachmentMediaStats(row);
+  const extracted = extractGhlMessageAudioMediaUrl(row);
   const dateAdded = firstNonEmptyString([row['dateAdded'], row['createdAt'], row['timestamp']]);
   return {
     index,
     idPresent: Boolean(id),
     idLen: id ? id.length : undefined,
     direction: firstNonEmptyString([row['direction']]),
+    source: firstNonEmptyString([row['source']]),
     type: firstNonEmptyString([row['type']]),
     messageType: firstNonEmptyString([row['messageType']]),
     contentType: firstNonEmptyString([row['contentType']]),
-    source: firstNonEmptyString([row['source']]),
+    keySample: Object.keys(row).slice(0, 20),
     bodyShape: {
       length: body.length,
       startsWithCharCode: body.length ? body.charCodeAt(0) : 0,
@@ -249,12 +365,79 @@ function safeMessageSample(row: Record<string, unknown>, index: number): Record<
       normalizedPreview: redactedBodyPreview(body),
       bodyPlaceholderKind: bodyKind,
     },
-    keySample: Object.keys(row).slice(0, 20),
-    hasAttachments: hints.hasAttachments,
-    attachmentCount: hints.attachmentCount,
-    hasMedia: hints.hasMedia,
-    mediaKeyNodeCount: hints.mediaKeyNodeCount,
+    hasAttachments: stats.hasAttachments,
+    attachmentCount: stats.attachmentCount,
+    hasMedia: stats.hasMedia,
+    mediaKeyNodeCount: extracted.mediaKeyNodeCount,
+    audioMediaUrlShape: extracted.audioMediaUrlShape,
     dateAdded: dateAdded ? dateAdded.slice(0, 25) : undefined,
+  };
+}
+
+type ExtractResult = {
+  rows: Record<string, unknown>[];
+  detectedCollectionPath: string;
+  nestedArrayCandidatePaths: string[];
+};
+
+function extractMessagesArray(payload: unknown): ExtractResult {
+  const root = asRecord(payload);
+  if (!root) return { rows: [], detectedCollectionPath: 'none', nestedArrayCandidatePaths: [] };
+
+  const pathCandidates: Array<{ path: string; value: unknown }> = [
+    { path: 'messages', value: root['messages'] },
+    { path: 'messages.messages', value: asRecord(root['messages'])?.['messages'] },
+    { path: 'messages.data', value: asRecord(root['messages'])?.['data'] },
+    { path: 'messages.items', value: asRecord(root['messages'])?.['items'] },
+    { path: 'messages.results', value: asRecord(root['messages'])?.['results'] },
+    { path: 'data.messages', value: asRecord(root['data'])?.['messages'] },
+    { path: 'data.messages.messages', value: asRecord(asRecord(root['data'])?.['messages'])?.['messages'] },
+    { path: 'data.messages.items', value: asRecord(asRecord(root['data'])?.['messages'])?.['items'] },
+    { path: 'data.messages.data', value: asRecord(asRecord(root['data'])?.['messages'])?.['data'] },
+    { path: 'data.messages.results', value: asRecord(asRecord(root['data'])?.['messages'])?.['results'] },
+    { path: 'data.conversation.messages', value: asRecord(asRecord(root['data'])?.['conversation'])?.['messages'] },
+    { path: 'conversation.messages', value: asRecord(root['conversation'])?.['messages'] },
+    { path: 'items', value: root['items'] },
+    { path: 'results', value: root['results'] },
+  ];
+
+  for (const p of pathCandidates) {
+    const rows = asRecordArray(p.value).filter(messageLikeRow);
+    if (rows.length > 0) {
+      return { rows, detectedCollectionPath: p.path, nestedArrayCandidatePaths: [p.path] };
+    }
+  }
+
+  const nestedPaths: string[] = [];
+  const visited = new WeakSet<object>();
+  const walk = (node: unknown, path: string, depth: number): Record<string, unknown>[] => {
+    if (depth > 4 || !node || typeof node !== 'object') return [];
+    if (visited.has(node as object)) return [];
+    visited.add(node as object);
+    if (Array.isArray(node)) {
+      const rows = asRecordArray(node).filter(messageLikeRow);
+      if (rows.length > 0) {
+        nestedPaths.push(path);
+        return rows;
+      }
+      return [];
+    }
+    const rec = node as Record<string, unknown>;
+    for (const key of SHAPE_WALK_KEYS) {
+      if (!(key in rec)) continue;
+      const child = rec[key];
+      const childPath = path ? `${path}.${key}` : key;
+      const rows = walk(child, childPath, depth + 1);
+      if (rows.length > 0) return rows;
+    }
+    return [];
+  };
+
+  const rows = walk(root, '', 0);
+  return {
+    rows,
+    detectedCollectionPath: nestedPaths[0] ?? 'none',
+    nestedArrayCandidatePaths: nestedPaths.slice(0, 10),
   };
 }
 
@@ -263,9 +446,6 @@ export class GhlVoiceMessageDiscoveryService {
   private readonly logger = new Logger(GhlVoiceMessageDiscoveryService.name);
   private readonly supabase = getSupabaseService();
 
-  /**
-   * List GET /conversations/:conversationId/messages and pick newest qualifying inbound placeholder.
-   */
   async discoverVoicePlaceholderMessageId(params: {
     tenantId: string;
     locationId: string;
@@ -273,19 +453,24 @@ export class GhlVoiceMessageDiscoveryService {
     webhookTimestampIso: string;
     placeholderKind: 'AUDIO' | 'VOICE';
   }): Promise<
-    | { ok: true; messageId: string; candidateCount: number }
+    | {
+        ok: true;
+        messageId: string;
+        audioMediaUrl?: string;
+        candidateReason: string;
+        candidateCount: number;
+      }
     | { ok: false; reason: string; candidateCount?: number }
   > {
     const delayMs = readBoundedInt('GHL_VOICE_DISCOVER_DELAY_MS', 3000, 0, 120_000);
     const maxAttempts = readBoundedInt('GHL_VOICE_DISCOVER_MAX_ATTEMPTS', 2, 1, 6);
-    const convLen = params.conversationId.trim().length;
     const webhookMs = Date.parse(params.webhookTimestampIso) || Date.now();
 
     this.logger.log(
       JSON.stringify({
         voiceMessageDiscoveryStarted: true,
         tenantId: params.tenantId,
-        conversationIdLen: convLen,
+        conversationIdLen: params.conversationId.trim().length,
         placeholderKind: params.placeholderKind,
         delayMs,
         maxAttempts,
@@ -296,28 +481,22 @@ export class GhlVoiceMessageDiscoveryService {
 
     const tokenResult = await this.resolveAccessToken(params.tenantId, params.locationId);
     if (!tokenResult.ok) {
-      const candidateCount = 0;
       this.logger.warn(
         JSON.stringify({
           voiceMessageDiscoveryFailed: true,
           reason: tokenResult.reason,
           discoveredMessageIdPresent: false,
-          candidateCount,
+          candidateCount: 0,
         }),
       );
-      return { ok: false, reason: tokenResult.reason, candidateCount };
+      return { ok: false, reason: tokenResult.reason, candidateCount: 0 };
     }
 
-    const base = ghlApiBase();
     let lastCandidateCount = 0;
-
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      if (attempt > 1) {
-        await sleep(delayMs);
-      }
-
+      if (attempt > 1) await sleep(delayMs);
       const listResult = await this.tryListMessages({
-        baseUrl: base,
+        baseUrl: ghlApiBase(),
         token: tokenResult.token,
         conversationId: params.conversationId,
       });
@@ -346,19 +525,24 @@ export class GhlVoiceMessageDiscoveryService {
       }
 
       const top = asRecord(listResult.json) ?? {};
+      const messagesNode = top['messages'];
       const extracted = extractMessagesArray(listResult.json);
       const rows = extracted.rows;
-      const candidates = rows.filter((r) => isInboundVoicePlaceholderCandidate(r));
+      const inboundCount = rows.filter((r) => inboundLikeDirectionSource(directionSourceOf(r))).length;
+      const candidates = rows
+        .map((r) => candidateFromRow(r))
+        .filter((c): c is RankedCandidate => Boolean(c));
       lastCandidateCount = candidates.length;
-      const inboundCount = rows.filter((r) =>
-        isInboundFromDirectionSource(extractDirectionSource(r)),
-      ).length;
 
       this.logger.log(
         JSON.stringify({
           voiceMessageDiscoveryAttempt: true,
           attempt,
           responseTopLevelKeys: Object.keys(top).slice(0, 30),
+          messagesNodeType: messagesNode == null ? 'null' : Array.isArray(messagesNode) ? 'array' : typeof messagesNode,
+          messagesNodeKeys: asRecord(messagesNode) ? Object.keys(asRecord(messagesNode)!).slice(0, 20) : [],
+          messagesNodeArrayLength: Array.isArray(messagesNode) ? messagesNode.length : undefined,
+          nestedArrayCandidatePaths: extracted.nestedArrayCandidatePaths.slice(0, 10),
           detectedCollectionPath: extracted.detectedCollectionPath,
           rawItemCount: rows.length,
           candidateCount: lastCandidateCount,
@@ -375,23 +559,43 @@ export class GhlVoiceMessageDiscoveryService {
         );
       }
 
-      candidates.sort((a, b) => compareByRecencyNearWebhook(a, b, webhookMs));
-
-      const bestId = candidates.length ? resolveMessageRowId(candidates[0]!) : null;
-
-      if (bestId) {
+      candidates.sort((a, b) => compareCandidates(a, b, webhookMs));
+      const best = candidates[0] ?? null;
+      if (best) {
+        const id = resolveMessageRowId(best.row);
+        const direct = best.audioMediaUrl;
+        if (direct) {
+          this.logger.log(
+            JSON.stringify({
+              voiceMessageDiscoveryDirectMediaUrlFound: true,
+              audioMediaUrlShape: safeUrlShape(direct),
+              messageIdPresent: Boolean(id),
+              candidateReason: best.reason,
+            }),
+          );
+        }
         this.logger.log(
           JSON.stringify({
             voiceMessageDiscoverySucceeded: true,
-            discoveredMessageIdPresent: true,
+            discoveredMessageIdPresent: Boolean(id),
+            directAudioMediaUrlPresent: Boolean(direct),
+            candidateReason: best.reason,
             candidateCount: lastCandidateCount,
           }),
         );
-        return { ok: true, messageId: bestId, candidateCount: lastCandidateCount };
+        if (id || direct) {
+          return {
+            ok: true,
+            messageId: id ?? '',
+            audioMediaUrl: direct ?? undefined,
+            candidateReason: best.reason,
+            candidateCount: lastCandidateCount,
+          };
+        }
       }
 
       if (attempt === maxAttempts) {
-        const reason = 'message_id_not_found';
+        const reason = rows.length > 0 ? 'audio_media_url_not_found' : 'message_id_not_found';
         this.logger.warn(
           JSON.stringify({
             voiceMessageDiscoveryFailed: true,
@@ -404,16 +608,7 @@ export class GhlVoiceMessageDiscoveryService {
       }
     }
 
-    const reason = 'message_id_not_found';
-    this.logger.warn(
-      JSON.stringify({
-        voiceMessageDiscoveryFailed: true,
-        reason,
-        discoveredMessageIdPresent: false,
-        candidateCount: lastCandidateCount,
-      }),
-    );
-    return { ok: false, reason, candidateCount: lastCandidateCount };
+    return { ok: false, reason: 'message_id_not_found', candidateCount: lastCandidateCount };
   }
 
   private async resolveAccessToken(
@@ -427,13 +622,9 @@ export class GhlVoiceMessageDiscoveryService {
       .eq('ghl_location_id', locationId)
       .eq('status', 'CONNECTED')
       .single();
-
-    if (!data) {
-      return { ok: false, reason: 'no_ghl_credentials' };
-    }
+    if (!data) return { ok: false, reason: 'no_ghl_credentials' };
     try {
-      const token = decrypt(String(data['private_token_encrypted']));
-      return { ok: true, token };
+      return { ok: true, token: decrypt(String(data['private_token_encrypted'])) };
     } catch {
       return { ok: false, reason: 'token_decrypt_failed' };
     }
@@ -447,7 +638,9 @@ export class GhlVoiceMessageDiscoveryService {
     | { ok: true; json: unknown }
     | { ok: false; reason: string; httpStatus?: number }
   > {
-    const url = `${params.baseUrl}/conversations/${encodeURIComponent(params.conversationId.trim())}/messages?limit=${MESSAGE_LIMIT}`;
+    const url = `${params.baseUrl}/conversations/${encodeURIComponent(
+      params.conversationId.trim(),
+    )}/messages?limit=${MESSAGE_LIMIT}`;
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), LIST_TIMEOUT_MS);
     try {
@@ -460,14 +653,7 @@ export class GhlVoiceMessageDiscoveryService {
         },
         signal: ac.signal,
       });
-
-      if (!res.ok) {
-        if ([400, 401, 404].includes(res.status)) {
-          return { ok: false, reason: `http_${res.status}`, httpStatus: res.status };
-        }
-        return { ok: false, reason: `http_${res.status}`, httpStatus: res.status };
-      }
-
+      if (!res.ok) return { ok: false, reason: `http_${res.status}`, httpStatus: res.status };
       let json: unknown;
       try {
         json = (await res.json()) as unknown;
@@ -477,7 +663,7 @@ export class GhlVoiceMessageDiscoveryService {
       return { ok: true, json };
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'fetch_error';
-      return { ok: false, reason: msg === 'The operation was aborted' ? 'timeout' : 'fetch_failed' };
+      return { ok: false, reason: msg.includes('aborted') ? 'timeout' : 'fetch_failed' };
     } finally {
       clearTimeout(timer);
     }

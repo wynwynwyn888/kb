@@ -60,6 +60,94 @@ describe('GhlVoiceMessageDiscoveryService', () => {
     expect(res).toEqual(expect.objectContaining({ ok: true, messageId: 'm1' }));
   });
 
+  it('parses response.messages.messages wrapper shape', async () => {
+    global.fetch = jestGlobal.fn(async () =>
+      ({
+        ok: true,
+        json: async () => ({
+          messages: {
+            messages: [{ id: 'mwrap1', direction: 'inbound', body: 'AUDIO' }],
+          },
+          traceId: 't',
+        }),
+      }) as never,
+    );
+    const res = await svc.discoverVoicePlaceholderMessageId({
+      tenantId: 't1',
+      locationId: 'loc1',
+      conversationId: 'conv1',
+      webhookTimestampIso: '2026-01-01T00:00:03Z',
+      placeholderKind: 'AUDIO',
+    });
+    expect(res).toEqual(expect.objectContaining({ ok: true, messageId: 'mwrap1' }));
+  });
+
+  it('parses response.messages.items wrapper shape', async () => {
+    global.fetch = jestGlobal.fn(async () =>
+      ({
+        ok: true,
+        json: async () => ({
+          messages: {
+            items: [{ id: 'mwrap2', direction: 'inbound', body: 'AUDIO' }],
+          },
+          traceId: 't',
+        }),
+      }) as never,
+    );
+    const res = await svc.discoverVoicePlaceholderMessageId({
+      tenantId: 't1',
+      locationId: 'loc1',
+      conversationId: 'conv1',
+      webhookTimestampIso: '2026-01-01T00:00:03Z',
+      placeholderKind: 'AUDIO',
+    });
+    expect(res).toEqual(expect.objectContaining({ ok: true, messageId: 'mwrap2' }));
+  });
+
+  it('parses response.messages.data wrapper shape', async () => {
+    global.fetch = jestGlobal.fn(async () =>
+      ({
+        ok: true,
+        json: async () => ({
+          messages: {
+            data: [{ id: 'mwrap3', direction: 'inbound', body: 'AUDIO' }],
+          },
+        }),
+      }) as never,
+    );
+    const res = await svc.discoverVoicePlaceholderMessageId({
+      tenantId: 't1',
+      locationId: 'loc1',
+      conversationId: 'conv1',
+      webhookTimestampIso: '2026-01-01T00:00:03Z',
+      placeholderKind: 'AUDIO',
+    });
+    expect(res).toEqual(expect.objectContaining({ ok: true, messageId: 'mwrap3' }));
+  });
+
+  it('parses response.data.messages.messages wrapper shape', async () => {
+    global.fetch = jestGlobal.fn(async () =>
+      ({
+        ok: true,
+        json: async () => ({
+          data: {
+            messages: {
+              messages: [{ id: 'mwrap4', direction: 'inbound', body: 'AUDIO' }],
+            },
+          },
+        }),
+      }) as never,
+    );
+    const res = await svc.discoverVoicePlaceholderMessageId({
+      tenantId: 't1',
+      locationId: 'loc1',
+      conversationId: 'conv1',
+      webhookTimestampIso: '2026-01-01T00:00:03Z',
+      placeholderKind: 'AUDIO',
+    });
+    expect(res).toEqual(expect.objectContaining({ ok: true, messageId: 'mwrap4' }));
+  });
+
   it('finds candidate from data.conversation.messages shape', async () => {
     global.fetch = jestGlobal.fn(async () =>
       ({
@@ -167,6 +255,96 @@ describe('GhlVoiceMessageDiscoveryService', () => {
     expect(res).toEqual(expect.objectContaining({ ok: true, messageId: 'm5' }));
   });
 
+  it('returns direct media URL candidate for storage.googleapis.com/stark-media path', async () => {
+    global.fetch = jestGlobal.fn(async () =>
+      ({
+        ok: true,
+        json: async () => ({
+          messages: [
+            {
+              id: 'm6',
+              direction: 'inbound',
+              attachments: [{ url: 'https://storage.googleapis.com/stark-media/abc/file.mp3' }],
+            },
+          ],
+        }),
+      }) as never,
+    );
+    const res = await svc.discoverVoicePlaceholderMessageId({
+      tenantId: 't1',
+      locationId: 'loc1',
+      conversationId: 'conv1',
+      webhookTimestampIso: '2026-01-01T00:00:03Z',
+      placeholderKind: 'AUDIO',
+    });
+    expect(res).toEqual(
+      expect.objectContaining({
+        ok: true,
+        messageId: 'm6',
+        audioMediaUrl: expect.stringContaining('storage.googleapis.com/stark-media'),
+      }),
+    );
+  });
+
+  it('returns direct media URL candidate for .ogg mediaUrl', async () => {
+    global.fetch = jestGlobal.fn(async () =>
+      ({
+        ok: true,
+        json: async () => ({
+          messages: [{ id: 'm7', direction: 'inbound', mediaUrl: 'https://cdn.example.com/a.ogg' }],
+        }),
+      }) as never,
+    );
+    const res = await svc.discoverVoicePlaceholderMessageId({
+      tenantId: 't1',
+      locationId: 'loc1',
+      conversationId: 'conv1',
+      webhookTimestampIso: '2026-01-01T00:00:03Z',
+      placeholderKind: 'AUDIO',
+    });
+    expect(res).toEqual(
+      expect.objectContaining({ ok: true, messageId: 'm7', audioMediaUrl: 'https://cdn.example.com/a.ogg' }),
+    );
+  });
+
+  it('returns messageId-only candidate for >AUDIO< body without URL', async () => {
+    global.fetch = jestGlobal.fn(async () =>
+      ({
+        ok: true,
+        json: async () => ({
+          messages: [{ id: 'm8', direction: 'inbound', body: '>AUDIO<' }],
+        }),
+      }) as never,
+    );
+    const res = await svc.discoverVoicePlaceholderMessageId({
+      tenantId: 't1',
+      locationId: 'loc1',
+      conversationId: 'conv1',
+      webhookTimestampIso: '2026-01-01T00:00:03Z',
+      placeholderKind: 'AUDIO',
+    });
+    expect(res).toEqual(expect.objectContaining({ ok: true, messageId: 'm8', audioMediaUrl: undefined }));
+  });
+
+  it('returns direct audio URL even when id missing', async () => {
+    global.fetch = jestGlobal.fn(async () =>
+      ({
+        ok: true,
+        json: async () => ({
+          messages: [{ direction: 'inbound', media: { url: 'https://cdn.example.com/u.webm' } }],
+        }),
+      }) as never,
+    );
+    const res = await svc.discoverVoicePlaceholderMessageId({
+      tenantId: 't1',
+      locationId: 'loc1',
+      conversationId: 'conv1',
+      webhookTimestampIso: '2026-01-01T00:00:03Z',
+      placeholderKind: 'AUDIO',
+    });
+    expect(res).toEqual(expect.objectContaining({ ok: true, messageId: '', audioMediaUrl: 'https://cdn.example.com/u.webm' }));
+  });
+
   it('logs safe samples when no candidate found', async () => {
     const logSpy = jestGlobal.spyOn(Logger.prototype, 'log').mockImplementation(() => {});
     const warnSpy = jestGlobal.spyOn(Logger.prototype, 'warn').mockImplementation(() => {});
@@ -188,11 +366,13 @@ describe('GhlVoiceMessageDiscoveryService', () => {
       webhookTimestampIso: '2026-01-01T00:00:03Z',
       placeholderKind: 'AUDIO',
     });
-    expect(res).toEqual(expect.objectContaining({ ok: false, reason: 'message_id_not_found' }));
+    expect(res).toEqual(expect.objectContaining({ ok: false, reason: 'audio_media_url_not_found' }));
     expect(logSpy).toHaveBeenCalledWith(
       expect.stringContaining('"detectedCollectionPath":"messages"'),
     );
     expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('"latestMessageSamples"'));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('"messagesNodeType":"array"'));
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('"nestedArrayCandidatePaths"'));
     expect(warnSpy).toHaveBeenCalledWith(
       expect.stringContaining('"voiceMessageDiscoveryNoAudioCandidateButRecentInbound":true'),
     );

@@ -506,6 +506,7 @@ export class WebhooksService {
         payload.voiceInboundAudioPlaceholderWithoutMediaUrl,
       ),
       voiceInboundPlaceholderRawBody: payload.voiceInboundPlaceholderRawBody,
+      voiceInboundPlaceholderKind: payload.voiceInboundPlaceholderKind,
       ghlInboundMessageId: payload.ghlInboundMessageId,
     };
 

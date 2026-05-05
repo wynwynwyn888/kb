@@ -150,12 +150,19 @@ describe('InboundMessageProcessor (happy path)', () => {
     const mockGhlRecordingFetch = {
       tryFetchRecording: jestGlobal.fn(async () => ({ ok: false as const, reason: 'disabled' })),
     };
+    const mockGhlVoiceDiscovery = {
+      discoverVoicePlaceholderMessageId: jestGlobal.fn(async () => ({
+        ok: false as const,
+        reason: 'disabled',
+      })),
+    };
     processor = new InboundMessageProcessor(
       new OrchestrationService(),
       mockReset as never,
       { evaluateAndApplyAutoTags: jestGlobal.fn(async () => {}) } as never,
       mockAudioTranscription as never,
       mockGhlRecordingFetch as never,
+      mockGhlVoiceDiscovery as never,
       { add: mockQueueAdd } as never,
       { add: mockQueueAdd } as never,
     );

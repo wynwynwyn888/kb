@@ -27,6 +27,7 @@ import {
   VOICE_NOTE_TRANSCRIPTION_FAILED_USER_MESSAGE,
 } from '../../modules/transcription/audio-transcription.service';
 import { GhlVoiceRecordingFetchService } from '../../modules/transcription/ghl-voice-recording-fetch.service';
+import { GhlVoiceMessageDiscoveryService } from '../../modules/transcription/ghl-voice-message-discovery.service';
 import { classifyGhlAudioPlaceholderBody } from '../../modules/webhooks/ghl-inbound-audio-media';
 
 export interface InboundMessageJobData {
@@ -51,6 +52,8 @@ export interface InboundMessageJobData {
   voiceInboundAudioPlaceholderWithoutMediaUrl?: boolean;
   /** Raw placeholder body before webhook replaced message text (Phase 1B). */
   voiceInboundPlaceholderRawBody?: string;
+  /** Placeholder classifier result from webhook normalization (AUDIO, VOICE, UNSUPPORTED). */
+  voiceInboundPlaceholderKind?: string;
   /** Outbound GHL message id from webhook data.id (recording fetch). */
   ghlInboundMessageId?: string;
 }
@@ -83,6 +86,7 @@ export class InboundMessageProcessor extends WorkerHost {
     private readonly inboundAutoTagging: InboundAutoTaggingService,
     private readonly audioTranscription: AudioTranscriptionService,
     private readonly ghlVoiceRecordingFetch: GhlVoiceRecordingFetchService,
+    private readonly ghlVoiceMessageDiscovery: GhlVoiceMessageDiscoveryService,
     @InjectQueue(QUEUES.SEND_BUBBLE) private readonly sendBubbleQueue: Queue,
     @InjectQueue(QUEUES.INBOUND_MESSAGE_PROCESSOR) private readonly inboundQueue: Queue,
   ) {
@@ -115,6 +119,7 @@ export class InboundMessageProcessor extends WorkerHost {
       voiceInboundNeedsTranscribe,
       voiceInboundAudioPlaceholderWithoutMediaUrl,
       voiceInboundPlaceholderRawBody,
+      voiceInboundPlaceholderKind,
       ghlInboundMessageId,
     } = job.data;
 
@@ -150,7 +155,10 @@ export class InboundMessageProcessor extends WorkerHost {
             voiceInboundAudioPlaceholderWithoutMediaUrl,
           ),
           voiceInboundPlaceholderRawBody,
+          voiceInboundPlaceholderKind,
           ghlInboundMessageId,
+          ghlConversationId,
+          webhookTimestampIso: timestamp,
         },
         tenant.id,
         conversation.id,
@@ -252,6 +260,49 @@ export class InboundMessageProcessor extends WorkerHost {
    * Voice / audio inbound: transcribe server-side and persist plain text for the existing orchestration path.
    * Raw audio is never forwarded to the text reply model — only the transcript (or a safe fallback string).
    */
+  private async tryTranscribeFromGhlRecording(params: {
+    tenantId: string;
+    locationId: string;
+    messageId: string;
+    conversationId: string;
+    webhookEventId: string | undefined;
+    transcriptionSourceLabel: string;
+  }): Promise<
+    | {
+        ok: true;
+        transcript: string;
+        mediaBytes: number;
+        contentType: string | null;
+      }
+    | { ok: false; failureReason: string }
+  > {
+    const fetched = await this.ghlVoiceRecordingFetch.tryFetchRecording({
+      tenantId: params.tenantId,
+      locationId: params.locationId,
+      messageId: params.messageId,
+    });
+    if (!fetched.ok) {
+      return { ok: false, failureReason: fetched.reason };
+    }
+    const tx = await this.audioTranscription.transcribeAudioBuffer({
+      tenantId: params.tenantId,
+      buffer: fetched.buffer,
+      contentType: fetched.contentType,
+      conversationId: params.conversationId,
+      webhookEventId: params.webhookEventId,
+      sourceLabel: params.transcriptionSourceLabel,
+    });
+    if (!tx.ok) {
+      return { ok: false, failureReason: 'transcription_failed' };
+    }
+    return {
+      ok: true,
+      transcript: tx.transcript,
+      mediaBytes: tx.mediaBytes,
+      contentType: tx.contentType,
+    };
+  }
+
   private async resolveVoiceInboundContent(
     job: Pick<
       InboundMessageJobData,
@@ -261,8 +312,10 @@ export class InboundMessageProcessor extends WorkerHost {
       | 'voiceInboundNeedsTranscribe'
       | 'voiceInboundAudioPlaceholderWithoutMediaUrl'
       | 'voiceInboundPlaceholderRawBody'
+      | 'voiceInboundPlaceholderKind'
       | 'ghlInboundMessageId'
-    >,
+      | 'ghlConversationId'
+    > & { webhookTimestampIso: string },
     tenantId: string,
     conversationId: string,
     webhookEventId: string | undefined,
@@ -274,6 +327,8 @@ export class InboundMessageProcessor extends WorkerHost {
   }> {
     const fetchRecordingEnabled =
       process.env['GHL_VOICE_FETCH_RECORDING_BY_MESSAGE_ID'] === 'true';
+    const discoverMessageIdEnabled =
+      process.env['GHL_VOICE_DISCOVER_MESSAGE_ID'] === 'true';
     const rawPh = job.voiceInboundPlaceholderRawBody?.trim();
     const msgId = job.ghlInboundMessageId?.trim();
     const noMediaUrl = !(job.audioMediaUrl ?? '').trim();
@@ -285,34 +340,97 @@ export class InboundMessageProcessor extends WorkerHost {
       rawPh &&
       classifyGhlAudioPlaceholderBody(rawPh) !== 'UNKNOWN'
     ) {
-      const fetched = await this.ghlVoiceRecordingFetch.tryFetchRecording({
+      const tr = await this.tryTranscribeFromGhlRecording({
         tenantId,
         locationId,
         messageId: msgId,
+        conversationId,
+        webhookEventId,
+        transcriptionSourceLabel: 'ghl_recording_api',
       });
-      if (fetched.ok) {
-        const tx = await this.audioTranscription.transcribeAudioBuffer({
+      if (tr.ok) {
+        return {
+          content: tr.transcript,
+          persistContentType: 'text',
+          voiceMetadata: {
+            inboundVoiceNote: true,
+            voiceTranscriptionStatus: 'succeeded',
+            voiceRecordingFetchedFromGhl: true,
+            voiceMediaBytes: tr.mediaBytes,
+            voiceMediaContentType: tr.contentType,
+          },
+        };
+      }
+    }
+
+    const phKind = job.voiceInboundPlaceholderKind;
+    const convGhl = job.ghlConversationId?.trim() ?? '';
+    if (
+      discoverMessageIdEnabled &&
+      job.voiceInboundAudioPlaceholderWithoutMediaUrl &&
+      noMediaUrl &&
+      !msgId &&
+      convGhl &&
+      locationId.trim() &&
+      (phKind === 'AUDIO' || phKind === 'VOICE')
+    ) {
+      const discovered = await this.ghlVoiceMessageDiscovery.discoverVoicePlaceholderMessageId({
+        tenantId,
+        locationId,
+        conversationId: convGhl,
+        webhookTimestampIso: job.webhookTimestampIso,
+        placeholderKind: phKind,
+      });
+
+      if (discovered.ok) {
+        const tr = await this.tryTranscribeFromGhlRecording({
           tenantId,
-          buffer: fetched.buffer,
-          contentType: fetched.contentType,
+          locationId,
+          messageId: discovered.messageId,
           conversationId,
           webhookEventId,
-          sourceLabel: 'ghl_recording_api',
+          transcriptionSourceLabel: 'ghl_recording_discovery',
         });
-        if (tx.ok) {
+        if (tr.ok) {
           return {
-            content: tx.transcript,
+            content: tr.transcript,
             persistContentType: 'text',
             voiceMetadata: {
               inboundVoiceNote: true,
               voiceTranscriptionStatus: 'succeeded',
-              voiceRecordingFetchedFromGhl: true,
-              voiceMediaBytes: tx.mediaBytes,
-              voiceMediaContentType: tx.contentType,
+              voiceRetrievalMethod: 'ghl_message_discovery_recording_fetch',
+              voiceDiscoveredMessageId: true,
+              voiceMediaBytes: tr.mediaBytes,
+              voiceMediaContentType: tr.contentType,
             },
           };
         }
+        return {
+          content: job.messageContent,
+          persistContentType: 'text',
+          voiceMetadata: {
+            inboundVoiceNote: true,
+            voiceInboundAudioPlaceholderWithoutMediaUrl: true,
+            voiceTranscriptionStatus: 'media_url_missing',
+            voiceRetrievalMethod: 'ghl_message_discovery_recording_fetch',
+            voiceDiscoveredMessageId: true,
+            voiceRetrievalFailureReason: tr.failureReason,
+          },
+        };
       }
+
+      return {
+        content: job.messageContent,
+        persistContentType: 'text',
+        voiceMetadata: {
+          inboundVoiceNote: true,
+          voiceInboundAudioPlaceholderWithoutMediaUrl: true,
+          voiceTranscriptionStatus: 'media_url_missing',
+          voiceRetrievalMethod: 'ghl_message_discovery_recording_fetch',
+          voiceDiscoveredMessageId: false,
+          voiceRetrievalFailureReason: discovered.reason,
+        },
+      };
     }
 
     if (job.voiceInboundAudioPlaceholderWithoutMediaUrl) {

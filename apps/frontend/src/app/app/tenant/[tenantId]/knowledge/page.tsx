@@ -37,7 +37,6 @@ import {
 } from '@/lib/knowledge-vault-scope';
 import {
   ErrorBanner,
-  EmptyState,
   LoadingBlock,
   SuccessBanner,
   StatusPill,
@@ -56,19 +55,21 @@ const NO_VAULT_EMPTY_MSG = 'Create a knowledge vault before adding knowledge.';
 
 function vaultListCardStyle(selected: boolean): CSSProperties {
   return {
-    padding: '0.75rem 0.85rem',
-    borderRadius: 12,
-    border: '1px solid rgba(226, 232, 240, 0.92)',
+    padding: '0.65rem 0.75rem',
+    borderRadius: 10,
+    border: '1px solid',
+    borderColor: selected ? 'rgba(191, 219, 254, 0.65)' : 'transparent',
     borderLeftWidth: 3,
     borderLeftStyle: 'solid',
-    borderLeftColor: selected ? 'rgba(15, 98, 254, 0.72)' : 'transparent',
-    background: selected ? 'rgba(248, 250, 252, 0.98)' : 'var(--aisbp-surface, #fff)',
-    boxShadow: selected ? '0 1px 4px rgba(15, 23, 42, 0.05)' : '0 1px 2px rgba(15, 23, 42, 0.03)',
+    borderLeftColor: selected ? PRIMARY : 'transparent',
+    background: selected ? 'rgba(239, 246, 255, 0.72)' : 'transparent',
+    boxShadow: 'none',
     cursor: 'pointer',
     textAlign: 'left' as const,
     font: 'inherit',
     width: '100%',
     display: 'block',
+    transition: 'background 0.12s ease, border-color 0.12s ease',
   };
 }
 
@@ -379,6 +380,7 @@ function DocumentVaultLine({
   setWriteErr: (s: string) => void;
   inVaultView?: boolean;
 }) {
+  const [moveOpen, setMoveOpen] = useState(!inVaultView);
   const fallbackId = vaults[0]?.id ?? '';
   const selectValue = doc.vaultId ?? fallbackId;
 
@@ -387,6 +389,25 @@ function DocumentVaultLine({
       <p style={{ margin: '0.85rem 0 0', fontSize: '0.78rem', color: '#78716c', lineHeight: 1.45 }}>
         No knowledge vaults yet. Create one in the Knowledge Vaults section above.
       </p>
+    );
+  }
+
+  if (inVaultView && !moveOpen) {
+    return (
+      <div style={{ marginTop: '0.75rem' }}>
+        <button
+          type="button"
+          onClick={() => setMoveOpen(true)}
+          style={{
+            ...mvpSecondaryButtonStyle,
+            padding: '0.35rem 0.7rem',
+            fontSize: '0.78rem',
+            fontWeight: 600,
+          }}
+        >
+          Move to vault
+        </button>
+      </div>
     );
   }
 
@@ -400,9 +421,29 @@ function DocumentVaultLine({
         border: '1px solid rgba(226, 232, 240, 0.95)',
       }}
     >
-      <label htmlFor={`kb-vault-${doc.id}`} style={{ ...mvpLabelStyle, display: 'block', marginBottom: '0.4rem' }}>
-        {inVaultView ? 'Move to another vault' : 'Assign to vault'}
-      </label>
+      <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: '0.45rem' }}>
+        <label htmlFor={`kb-vault-${doc.id}`} style={{ ...mvpLabelStyle, display: 'block', margin: 0 }}>
+          {inVaultView ? 'Move to vault' : 'Assign to vault'}
+        </label>
+        {inVaultView ? (
+          <button
+            type="button"
+            onClick={() => setMoveOpen(false)}
+            style={{
+              fontSize: '0.75rem',
+              fontWeight: 600,
+              color: '#64748b',
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              textDecoration: 'underline',
+              textUnderlineOffset: 2,
+            }}
+          >
+            Cancel
+          </button>
+        ) : null}
+      </div>
       <p style={{ fontSize: '0.75rem', color: '#64748b', margin: '0 0 0.5rem', lineHeight: 1.4 }}>
         {inVaultView
           ? 'Pick another vault to move this item into. Live replies still use the vaults chosen on Bot Instructions → Assistant Profile.'
@@ -423,6 +464,7 @@ function DocumentVaultLine({
               const name = vaults.find(v => v.id === vid)?.name ?? null;
               onPatchDocVault(doc.id, vid, name);
               setSaveOk('Vault updated.');
+              if (inVaultView) setMoveOpen(false);
             } catch (er) {
               const raw = isApiHttpError(er) ? er.message : er instanceof Error ? er.message : 'Could not move document';
               setWriteErr(friendlifyKbMessage(raw));
@@ -546,11 +588,7 @@ function FaqKnowledgeCard({
           </h3>
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-          {inVaultView ? (
-            <span style={{ fontSize: '0.72rem', fontWeight: 500, color: '#94a3b8' }}>In this vault</span>
-          ) : (
-            <KbVaultPill name={doc.vaultName?.trim() || 'Unassigned'} />
-          )}
+          {!inVaultView ? <KbVaultPill name={doc.vaultName?.trim() || 'Unassigned'} /> : null}
           <StatusPill label={faqListStatusLabel(doc.status)} tone={statusPillTone(doc.status)} />
         </div>
       </div>
@@ -902,11 +940,7 @@ function NoteKnowledgeCard({
             <h3 style={{ fontSize: '1.05rem', fontWeight: 700, margin: 0, color: '#0f172a', lineHeight: 1.4 }}>{doc.title}</h3>
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-            {inVaultView ? (
-              <span style={{ fontSize: '0.72rem', fontWeight: 500, color: '#94a3b8' }}>In this vault</span>
-            ) : (
-              <KbVaultPill name={doc.vaultName?.trim() || 'Unassigned'} />
-            )}
+            {!inVaultView ? <KbVaultPill name={doc.vaultName?.trim() || 'Unassigned'} /> : null}
             <StatusPill label={faqListStatusLabel(doc.status)} tone={statusPillTone(doc.status)} />
           </div>
         </div>
@@ -1279,11 +1313,7 @@ function FileKnowledgeCard({
             <h3 style={{ fontSize: '1.05rem', fontWeight: 700, margin: 0, color: '#0f172a', lineHeight: 1.4 }}>{doc.title}</h3>
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-            {inVaultView ? (
-              <span style={{ fontSize: '0.72rem', fontWeight: 500, color: '#94a3b8' }}>In this vault</span>
-            ) : (
-              <KbVaultPill name={doc.vaultName?.trim() || 'Unassigned'} />
-            )}
+            {!inVaultView ? <KbVaultPill name={doc.vaultName?.trim() || 'Unassigned'} /> : null}
             <StatusPill label={faqListStatusLabel(doc.status)} tone={statusPillTone(doc.status)} />
           </div>
         </div>
@@ -1572,6 +1602,7 @@ export default function SubaccountKnowledgePage() {
   const [selectedVaultId, setSelectedVaultId] = useState('');
   const [detailName, setDetailName] = useState('');
   const [detailDesc, setDetailDesc] = useState('');
+  const [vaultEditOpen, setVaultEditOpen] = useState(false);
 
   const [faqQ, setFaqQ] = useState('');
   const [faqA, setFaqA] = useState('');
@@ -1646,6 +1677,10 @@ export default function SubaccountKnowledgePage() {
     setDetailName(v.name);
     setDetailDesc(v.description ?? '');
   }, [selectedVaultId, vaults]);
+
+  useEffect(() => {
+    setVaultEditOpen(false);
+  }, [selectedVaultId]);
 
   const vaultScopeDocs = useMemo(
     () => vaultScopedDocuments(docs, selectedVaultId),
@@ -1918,15 +1953,8 @@ export default function SubaccountKnowledgePage() {
           </p>
         </header>
 
-        <div
-          style={{
-            display: 'flex',
-            flexWrap: 'wrap',
-            gap: '1.5rem',
-            alignItems: 'flex-start',
-          }}
-        >
-          <div style={{ flex: '1 1 520px', minWidth: 0 }}>
+        <div style={{ maxWidth: 920, margin: '0 auto' }}>
+          <div style={{ minWidth: 0 }}>
             {loadErr ? <ErrorBanner message={loadErr} /> : null}
             {loading ? <LoadingBlock message="Loading…" /> : null}
             {writeErr ? <ErrorBanner message={writeErr} /> : null}
@@ -2040,89 +2068,6 @@ export default function SubaccountKnowledgePage() {
                               {' · '}
                               Updated {relativeTimeLabel(v.updatedAt)}
                             </div>
-                            <div
-                              style={{ marginTop: 10, display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}
-                              onClick={e => e.stopPropagation()}
-                              onKeyDown={e => e.stopPropagation()}
-                            >
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setSelectedVaultId(v.id);
-                                  setSaveOk('');
-                                }}
-                                style={{ ...mvpSecondaryButtonStyle, padding: '0.28rem 0.55rem', fontSize: '0.78rem' }}
-                              >
-                                Edit
-                              </button>
-                              <button
-                                type="button"
-                                disabled={vaultMutating}
-                                onClick={() => {
-                                  if (!token) return;
-                                  void (async () => {
-                                    setVaultMutating(true);
-                                    setWriteErr('');
-                                    try {
-                                      const { id } = await duplicateKbVault(token, subId, v.id);
-                                      setSelectedVaultId(id);
-                                      setSaveOk('Vault duplicated. Knowledge items are not copied yet.');
-                                      await load();
-                                    } catch (er) {
-                                      const raw =
-                                        isApiHttpError(er) ? er.message : er instanceof Error ? er.message : 'Duplicate failed';
-                                      setWriteErr(friendlifyKbMessage(raw));
-                                    } finally {
-                                      setVaultMutating(false);
-                                    }
-                                  })();
-                                }}
-                                style={{ ...mvpSecondaryButtonStyle, padding: '0.28rem 0.55rem', fontSize: '0.78rem' }}
-                              >
-                                Duplicate
-                              </button>
-                              <button
-                                type="button"
-                                disabled={vaultMutating || v.isDefault || v.documentCount > 0}
-                                title={
-                                  v.isDefault
-                                    ? 'Cannot delete the default vault.'
-                                    : v.documentCount > 0
-                                      ? "Move or delete this vault's knowledge items before deleting the vault."
-                                      : undefined
-                                }
-                                onClick={() => {
-                                  if (!token || v.isDefault || v.documentCount > 0) return;
-                                  if (!window.confirm(`Delete vault “${v.name}”?`)) return;
-                                  void (async () => {
-                                    setVaultMutating(true);
-                                    setWriteErr('');
-                                    try {
-                                      await deleteKbVault(token, v.id, subId);
-                                      setSaveOk('Vault deleted.');
-                                      await load();
-                                    } catch (er) {
-                                      const raw =
-                                        isApiHttpError(er) ? er.message : er instanceof Error ? er.message : 'Delete failed';
-                                      setWriteErr(friendlifyKbMessage(raw));
-                                    } finally {
-                                      setVaultMutating(false);
-                                    }
-                                  })();
-                                }}
-                                style={{
-                                  ...mvpSecondaryButtonStyle,
-                                  padding: '0.28rem 0.55rem',
-                                  fontSize: '0.78rem',
-                                  color: v.isDefault || v.documentCount > 0 ? '#cbd5e1' : '#b91c1c',
-                                  borderColor:
-                                    v.isDefault || v.documentCount > 0 ? 'rgba(148, 163, 184, 0.35)' : 'rgba(185, 28, 28, 0.35)',
-                                  cursor: v.isDefault || v.documentCount > 0 ? 'not-allowed' : 'pointer',
-                                }}
-                              >
-                                Delete
-                              </button>
-                            </div>
                           </div>
                         ))}
                       </div>
@@ -2132,104 +2077,65 @@ export default function SubaccountKnowledgePage() {
                             style={{
                               borderRadius: 12,
                               padding: '1rem 1.1rem',
-                              background: 'rgba(248, 250, 252, 0.95)',
-                              border: '1px solid rgba(226, 232, 240, 0.9)',
+                              background: 'rgba(239, 246, 255, 0.5)',
+                              border: '1px solid rgba(191, 219, 254, 0.55)',
                             }}
                           >
-                            <p
-                              style={{
-                                fontSize: '0.7rem',
-                                fontWeight: 700,
-                                letterSpacing: '0.07em',
-                                textTransform: 'uppercase' as const,
-                                color: '#94a3b8',
-                                margin: '0 0 0.5rem',
-                              }}
-                            >
-                              Selected vault
-                            </p>
-                            <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.4rem', marginBottom: '0.65rem' }}>
-                              <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 800, color: '#0f172a' }}>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: '0.45rem', marginBottom: '0.5rem' }}>
+                              <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 800, color: '#0f172a', letterSpacing: '-0.02em' }}>
                                 {selectedVault.name}
                               </h3>
                               {selectedVault.isDefault ? (
                                 <span
                                   style={{
-                                    fontSize: '0.65rem',
+                                    fontSize: '0.62rem',
                                     fontWeight: 700,
-                                    letterSpacing: '0.06em',
-                                    color: '#64748b',
+                                    letterSpacing: '0.08em',
+                                    color: '#0369a1',
                                     textTransform: 'uppercase' as const,
+                                    background: 'rgba(224, 242, 254, 0.9)',
+                                    border: '1px solid rgba(125, 211, 252, 0.6)',
+                                    borderRadius: 999,
+                                    padding: '0.2rem 0.5rem',
                                   }}
                                 >
                                   Default
                                 </span>
                               ) : null}
                             </div>
-                            <p style={{ fontSize: '0.8rem', color: '#64748b', margin: '0 0 0.85rem', lineHeight: 1.45 }}>
+                            <p style={{ fontSize: '0.84rem', color: '#475569', margin: '0 0 0.5rem', fontWeight: 600 }}>
                               {selectedVault.documentCount} document{selectedVault.documentCount === 1 ? '' : 's'}
-                              {' · '}Updated {relativeTimeLabel(selectedVault.updatedAt)}
                             </p>
-                            <label>
-                              <span style={mvpLabelStyle}>Vault name</span>
-                              <input
-                                value={detailName}
-                                onChange={e => {
-                                  setDetailName(e.target.value);
-                                  setSaveOk('');
-                                }}
-                                style={{ ...mvpInputStyle, marginTop: '0.35rem', width: '100%', maxWidth: 400 }}
-                                autoComplete="off"
-                              />
-                            </label>
-                            <label style={{ display: 'block', marginTop: '0.75rem' }}>
-                              <span style={mvpLabelStyle}>Description</span>
-                              <textarea
-                                value={detailDesc}
-                                onChange={e => {
-                                  setDetailDesc(e.target.value);
-                                  setSaveOk('');
-                                }}
-                                rows={3}
-                                placeholder="Optional — shown here for your team"
-                                style={{
-                                  ...mvpInputStyle,
-                                  marginTop: '0.35rem',
-                                  width: '100%',
-                                  maxWidth: 480,
-                                  minHeight: 72,
-                                  resize: 'vertical' as const,
-                                }}
-                              />
-                            </label>
-                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '0.85rem' }}>
+                            {selectedVault.description?.trim() ? (
+                              <p style={{ fontSize: '0.8125rem', color: '#64748b', margin: '0 0 0.5rem', lineHeight: 1.55 }}>
+                                {selectedVault.description.trim()}
+                              </p>
+                            ) : null}
+                            <p style={{ fontSize: '0.78rem', color: '#94a3b8', margin: '0 0 0.85rem' }}>
+                              Updated {relativeTimeLabel(selectedVault.updatedAt)}
+                            </p>
+                            <div
+                              style={{
+                                display: 'flex',
+                                flexWrap: 'wrap',
+                                gap: '0.45rem',
+                                alignItems: 'center',
+                                paddingTop: '0.65rem',
+                                borderTop: '1px solid rgba(191, 219, 254, 0.45)',
+                              }}
+                            >
                               <button
                                 type="button"
-                                disabled={vaultMutating || !detailName.trim()}
+                                disabled={vaultMutating}
                                 onClick={() => {
-                                  if (!token || !selectedVaultId) return;
-                                  void (async () => {
-                                    setVaultMutating(true);
-                                    setWriteErr('');
-                                    try {
-                                      await updateKbVault(token, selectedVaultId, subId, {
-                                        name: detailName.trim(),
-                                        description: detailDesc.trim() || null,
-                                      });
-                                      setSaveOk('Vault saved.');
-                                      await load();
-                                    } catch (er) {
-                                      const raw =
-                                        isApiHttpError(er) ? er.message : er instanceof Error ? er.message : 'Save failed';
-                                      setWriteErr(friendlifyKbMessage(raw));
-                                    } finally {
-                                      setVaultMutating(false);
-                                    }
-                                  })();
+                                  setDetailName(selectedVault.name);
+                                  setDetailDesc(selectedVault.description ?? '');
+                                  setVaultEditOpen(true);
+                                  setSaveOk('');
                                 }}
-                                style={mvpPrimaryButtonStyle}
+                                style={{ ...mvpSecondaryButtonStyle, padding: '0.38rem 0.75rem', fontSize: '0.8125rem', fontWeight: 600 }}
                               >
-                                {vaultMutating ? 'Saving…' : 'Save changes'}
+                                Edit vault
                               </button>
                               <button
                                 type="button"
@@ -2253,9 +2159,9 @@ export default function SubaccountKnowledgePage() {
                                     }
                                   })();
                                 }}
-                                style={mvpSecondaryButtonStyle}
+                                style={{ ...mvpSecondaryButtonStyle, padding: '0.38rem 0.75rem', fontSize: '0.8125rem' }}
                               >
-                                Duplicate vault
+                                Duplicate
                               </button>
                               <button
                                 type="button"
@@ -2290,6 +2196,8 @@ export default function SubaccountKnowledgePage() {
                                 }}
                                 style={{
                                   ...mvpSecondaryButtonStyle,
+                                  padding: '0.38rem 0.75rem',
+                                  fontSize: '0.8125rem',
                                   color:
                                     selectedVault.isDefault || selectedVault.documentCount > 0 ? '#cbd5e1' : '#b91c1c',
                                   borderColor:
@@ -2302,7 +2210,7 @@ export default function SubaccountKnowledgePage() {
                                       : 'pointer',
                                 }}
                               >
-                                Delete vault
+                                Delete
                               </button>
                             </div>
                           </div>
@@ -2359,18 +2267,19 @@ export default function SubaccountKnowledgePage() {
                   style={{
                     fontSize: '1.05rem',
                     fontWeight: 700,
-                    margin: '0 0 0.15rem',
+                    margin: '0 0 0.35rem',
                     color: 'var(--aisbp-text-heading, #0f172a)',
                   }}
                 >
-                  Add knowledge to this vault
+                  Add to this vault
                 </h2>
                 {selectedVault ? (
-                  <p style={{ fontSize: '0.8125rem', color: '#64748b', margin: '0 0 0.65rem', lineHeight: 1.45 }}>
-                    <strong style={{ fontWeight: 600, color: '#475569' }}>{selectedVault.name}</strong>
+                  <p style={{ fontSize: '0.8125rem', color: '#64748b', margin: '0 0 0.85rem', lineHeight: 1.5 }}>
+                    Items you add here will be saved to{' '}
+                    <strong style={{ fontWeight: 600, color: '#334155' }}>{selectedVault.name}</strong>.
                   </p>
                 ) : (
-                  <p style={{ fontSize: '0.8125rem', color: '#64748b', margin: '0 0 0.65rem', lineHeight: 1.45 }}>
+                  <p style={{ fontSize: '0.8125rem', color: '#64748b', margin: '0 0 0.85rem', lineHeight: 1.45 }}>
                     {NO_VAULT_EMPTY_MSG}
                   </p>
                 )}
@@ -2395,12 +2304,31 @@ export default function SubaccountKnowledgePage() {
                         setSaveOk('');
                         return;
                       }
+                      setTab('faq');
+                      setSaveOk('');
+                    }}
+                  >
+                    <span style={iconCircle}>❓</span>
+                    <span style={{ fontSize: '0.875rem', fontWeight: 600 }}>Add FAQ</span>
+                  </button>
+                  <button
+                    type="button"
+                    style={{
+                      ...bentoBtn,
+                      ...(!selectedVaultId ? { opacity: 0.55, cursor: 'not-allowed' as const } : {}),
+                    }}
+                    onClick={() => {
+                      if (!selectedVaultId) {
+                        setWriteErr(NO_VAULT_EMPTY_MSG);
+                        setSaveOk('');
+                        return;
+                      }
                       setTab('rich');
                       setSaveOk('');
                     }}
                   >
                     <span style={iconCircle}>📝</span>
-                    <span style={{ fontSize: '0.875rem', fontWeight: 600 }}>Add note</span>
+                    <span style={{ fontSize: '0.875rem', fontWeight: 600 }}>Add Note</span>
                   </button>
                   <button
                     type="button"
@@ -2419,26 +2347,7 @@ export default function SubaccountKnowledgePage() {
                     }}
                   >
                     <span style={iconCircle}>📤</span>
-                    <span style={{ fontSize: '0.875rem', fontWeight: 600 }}>Upload file</span>
-                  </button>
-                  <button
-                    type="button"
-                    style={{
-                      ...bentoBtn,
-                      ...(!selectedVaultId ? { opacity: 0.55, cursor: 'not-allowed' as const } : {}),
-                    }}
-                    onClick={() => {
-                      if (!selectedVaultId) {
-                        setWriteErr(NO_VAULT_EMPTY_MSG);
-                        setSaveOk('');
-                        return;
-                      }
-                      setTab('faq');
-                      setSaveOk('');
-                    }}
-                  >
-                    <span style={iconCircle}>❓</span>
-                    <span style={{ fontSize: '0.875rem', fontWeight: 600 }}>Add FAQ</span>
+                    <span style={{ fontSize: '0.875rem', fontWeight: 600 }}>Upload File</span>
                   </button>
                 </div>
                 <input
@@ -2515,11 +2424,11 @@ export default function SubaccountKnowledgePage() {
 
                 {tab === 'faq' ? (
                   <section style={glassSection}>
-                    <h2 style={{ fontSize: '1rem', fontWeight: 700, margin: '0 0 0.2rem', color: 'var(--aisbp-text-heading, #0f172a)' }}>
-                      Approved FAQ
-                    </h2>
+                    <h3 style={{ fontSize: '0.95rem', fontWeight: 700, margin: '0 0 0.5rem', color: 'var(--aisbp-text-heading, #0f172a)' }}>
+                      New FAQ
+                    </h3>
                     <p style={{ fontSize: '0.8125rem', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 1rem', lineHeight: 1.45 }}>
-                      Add approved answers your bot can use when replying.
+                      Short question and answer pairs for common customer questions.
                     </p>
                     <form onSubmit={onFaqSave} style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxWidth: 520, marginBottom: '1.25rem' }}>
                       {selectedVault ? (
@@ -2570,11 +2479,9 @@ export default function SubaccountKnowledgePage() {
                     </form>
 
                     {faqRows.length === 0 ? (
-                      <EmptyState
-                        compact
-                        title="No FAQs in this vault yet."
-                        detail="Add an FAQ below. It will be stored only in this vault until you move it."
-                      />
+                      <p style={{ fontSize: '0.875rem', color: '#64748b', margin: '0.25rem 0 0', lineHeight: 1.5 }}>
+                        No FAQs in this vault yet.
+                      </p>
                     ) : (
                       <div>
                         {faqRows.map(d => (
@@ -2604,7 +2511,7 @@ export default function SubaccountKnowledgePage() {
 
                 {tab === 'rich' ? (
                   <section style={glassSection}>
-                    <h2 style={{ fontSize: '1rem', fontWeight: 700, margin: '0 0 0.2rem', color: '#0f172a' }}>Notes</h2>
+                    <h3 style={{ fontSize: '0.95rem', fontWeight: 700, margin: '0 0 0.5rem', color: '#0f172a' }}>New note</h3>
                     <p style={{ fontSize: '0.8125rem', color: '#64748b', margin: '0 0 1rem', lineHeight: 1.45 }}>
                       Longer context such as policies, menus, or service details.
                     </p>
@@ -2673,11 +2580,9 @@ export default function SubaccountKnowledgePage() {
                     ) : null}
 
                     {richRows.length === 0 ? (
-                      <EmptyState
-                        compact
-                        title="No notes in this vault yet."
-                        detail="Add a note below. It stays in this vault until you move it elsewhere."
-                      />
+                      <p style={{ fontSize: '0.875rem', color: '#64748b', margin: '0.25rem 0 0', lineHeight: 1.5 }}>
+                        No notes in this vault yet.
+                      </p>
                     ) : (
                       <div>
                         {richRows.map(d => (
@@ -2720,7 +2625,7 @@ export default function SubaccountKnowledgePage() {
 
                 {tab === 'files' ? (
                   <section style={glassSection}>
-                    <h2 style={{ fontSize: '1rem', fontWeight: 700, margin: '0 0 0.2rem', color: '#0f172a' }}>Files</h2>
+                    <h3 style={{ fontSize: '0.95rem', fontWeight: 700, margin: '0 0 0.5rem', color: '#0f172a' }}>Upload</h3>
                     <p style={{ fontSize: '0.8125rem', color: '#64748b', margin: '0 0 1rem', lineHeight: 1.45 }}>
                       Plain text (.txt) is indexed right away. Use <strong style={{ fontWeight: 600 }}>View extracted text</strong> on each
                       card to confirm what the bot can read. Original download appears only when the server keeps the uploaded file.
@@ -2767,11 +2672,9 @@ export default function SubaccountKnowledgePage() {
                       Choose a file to upload (PDF, DOC, DOCX, or TXT)
                     </div>
                     {fileRows.length === 0 ? (
-                      <EmptyState
-                        compact
-                        title="No files in this vault yet."
-                        detail="Upload a file below. It is stored only in this vault until you move it."
-                      />
+                      <p style={{ fontSize: '0.875rem', color: '#64748b', margin: '0.25rem 0 0', lineHeight: 1.5 }}>
+                        No files in this vault yet.
+                      </p>
                     ) : (
                       <div>
                         {fileRows.map(d => (
@@ -2932,25 +2835,127 @@ export default function SubaccountKnowledgePage() {
                 </section>
               </>
             ) : null}
-          </div>
 
-          {token && !loadErr && !loading ? (
-            <div
-              style={{
-                flex: '1 1 340px',
-                width: '100%',
-                minWidth: 'min(100%, 300px)',
-                maxWidth: 460,
-                position: 'sticky' as const,
-                top: 12,
-                alignSelf: 'flex-start' as const,
-              }}
-            >
-              <BotTestPanel token={token} subaccountId={subId} />
-            </div>
-          ) : null}
+            {token && !loadErr && !loading ? (
+              <details
+                style={{
+                  marginTop: '1.75rem',
+                  padding: '0.85rem 1rem',
+                  borderRadius: 14,
+                  background: 'var(--aisbp-glass-bg, rgba(255, 255, 255, 0.88))',
+                  border: '1px solid rgba(226, 232, 240, 0.85)',
+                  boxShadow: '0 2px 12px rgba(15, 23, 42, 0.04)',
+                }}
+              >
+                <summary
+                  style={{
+                    cursor: 'pointer',
+                    fontWeight: 700,
+                    fontSize: '0.9rem',
+                    color: '#0f172a',
+                    listStyle: 'none',
+                  }}
+                >
+                  Preview bot reply
+                </summary>
+                <p style={{ fontSize: '0.78rem', color: '#64748b', margin: '0.5rem 0 0.85rem', lineHeight: 1.45 }}>
+                  Live knowledge access follows Bot Instructions → Assistant Profile, not this page’s vault picker.
+                </p>
+                <div style={{ marginTop: '0.5rem' }}>
+                  <BotTestPanel token={token} subaccountId={subId} variant="embedded" />
+                </div>
+              </details>
+            ) : null}
+          </div>
         </div>
       </div>
+
+      {vaultEditOpen && selectedVault ? (
+        <KbModal
+          title="Edit vault"
+          onClose={() => {
+            setVaultEditOpen(false);
+            setDetailName(selectedVault.name);
+            setDetailDesc(selectedVault.description ?? '');
+          }}
+          footer={
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setVaultEditOpen(false);
+                  setDetailName(selectedVault.name);
+                  setDetailDesc(selectedVault.description ?? '');
+                }}
+                style={mvpSecondaryButtonStyle}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={vaultMutating || !detailName.trim()}
+                onClick={() => {
+                  if (!token || !selectedVaultId) return;
+                  void (async () => {
+                    setVaultMutating(true);
+                    setWriteErr('');
+                    try {
+                      await updateKbVault(token, selectedVaultId, subId, {
+                        name: detailName.trim(),
+                        description: detailDesc.trim() || null,
+                      });
+                      setSaveOk('Vault saved.');
+                      setVaultEditOpen(false);
+                      await load();
+                    } catch (er) {
+                      const raw =
+                        isApiHttpError(er) ? er.message : er instanceof Error ? er.message : 'Save failed';
+                      setWriteErr(friendlifyKbMessage(raw));
+                    } finally {
+                      setVaultMutating(false);
+                    }
+                  })();
+                }}
+                style={mvpPrimaryButtonStyle}
+              >
+                {vaultMutating ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+          }
+        >
+          <label>
+            <span style={mvpLabelStyle}>Vault name</span>
+            <input
+              value={detailName}
+              onChange={e => {
+                setDetailName(e.target.value);
+                setSaveOk('');
+              }}
+              style={{ ...mvpInputStyle, marginTop: '0.35rem', width: '100%' }}
+              autoComplete="off"
+            />
+          </label>
+          <label style={{ display: 'block', marginTop: '0.85rem' }}>
+            <span style={mvpLabelStyle}>Description</span>
+            <textarea
+              value={detailDesc}
+              onChange={e => {
+                setDetailDesc(e.target.value);
+                setSaveOk('');
+              }}
+              rows={4}
+              placeholder="Optional — for your team"
+              style={{
+                ...mvpInputStyle,
+                marginTop: '0.35rem',
+                width: '100%',
+                minHeight: 88,
+                resize: 'vertical' as const,
+              }}
+            />
+          </label>
+        </KbModal>
+      ) : null}
 
       {searchTraceHit ? (
         <KbModal

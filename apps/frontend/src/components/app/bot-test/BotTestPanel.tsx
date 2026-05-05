@@ -10,7 +10,7 @@ const BORDER_SOFT = 'rgba(226, 232, 240, 0.9)';
 
 const BOT_TEST_MAX_HISTORY_MESSAGES = 12;
 
-const shell: React.CSSProperties = {
+const shellDefault: React.CSSProperties = {
   display: 'flex',
   flexDirection: 'column' as const,
   height: 'min(700px, calc(100vh - 8rem))',
@@ -26,6 +26,13 @@ const shell: React.CSSProperties = {
   overflow: 'hidden',
 };
 
+const shellEmbedded: React.CSSProperties = {
+  ...shellDefault,
+  height: 'min(420px, calc(100vh - 14rem))',
+  maxHeight: 480,
+  borderRadius: 14,
+};
+
 const messagesBox: React.CSSProperties = {
   flex: 1,
   minHeight: 280,
@@ -37,6 +44,11 @@ const messagesBox: React.CSSProperties = {
   display: 'flex',
   flexDirection: 'column' as const,
   alignItems: 'stretch',
+};
+
+const messagesBoxEmbedded: React.CSSProperties = {
+  ...messagesBox,
+  minHeight: 160,
 };
 
 function formatBotTestFailure(message: string, status?: number): { headline: string; detail?: string } {
@@ -94,8 +106,14 @@ function formatMetaLine(r: {
   return parts.join(' · ');
 }
 
-export function BotTestPanel(props: { token: string; subaccountId: string }) {
-  const { token, subaccountId } = props;
+export function BotTestPanel(props: {
+  token: string;
+  subaccountId: string;
+  /** Shorter panel for embedding under main page content (e.g. Knowledge). */
+  variant?: 'default' | 'embedded';
+}) {
+  const { token, subaccountId, variant = 'default' } = props;
+  const embedded = variant === 'embedded';
   const [input, setInput] = useState('');
   const [msgs, setMsgs] = useState<
     { role: 'user' | 'assistant'; content: string; meta?: string; error?: boolean; rawDetail?: string }[]
@@ -216,7 +234,7 @@ export function BotTestPanel(props: { token: string; subaccountId: string }) {
   );
 
   return (
-    <div style={shell}>
+    <div style={embedded ? shellEmbedded : shellDefault}>
       <style
         dangerouslySetInnerHTML={{
           __html: `@keyframes botTestTyping{0%,100%{opacity:0.35}50%{opacity:1}}`,
@@ -229,9 +247,13 @@ export function BotTestPanel(props: { token: string; subaccountId: string }) {
           background: 'rgba(255,255,255,0.55)',
         }}
       >
-        <h2 style={{ fontSize: '1.2rem', fontWeight: 700, margin: 0, color: '#0f172a', letterSpacing: '-0.02em' }}>Test your bot</h2>
+        <h2 style={{ fontSize: embedded ? '1.05rem' : '1.2rem', fontWeight: 700, margin: 0, color: '#0f172a', letterSpacing: '-0.02em' }}>
+          {embedded ? 'Preview bot reply' : 'Test your bot'}
+        </h2>
         <p style={{ fontSize: '0.8125rem', color: '#64748b', margin: '0.35rem 0 0', lineHeight: 1.5 }}>
-          Preview the reply your bot would send to a customer.
+          {embedded
+            ? 'Uses this workspace’s prompt and assistant profile knowledge access.'
+            : 'Preview the reply your bot would send to a customer.'}
         </p>
       </div>
       {panelBanner ? (
@@ -250,7 +272,7 @@ export function BotTestPanel(props: { token: string; subaccountId: string }) {
           {panelBanner}
         </div>
       ) : null}
-      <div ref={scrollRef} style={messagesBox} aria-label="Test messages">
+      <div ref={scrollRef} style={embedded ? messagesBoxEmbedded : messagesBox} aria-label="Test messages">
         {msgs.length === 0 && !sending ? (
           <div
             style={{

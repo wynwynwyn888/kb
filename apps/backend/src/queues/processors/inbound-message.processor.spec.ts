@@ -19,6 +19,7 @@ jestGlobal.mock('../../modules/conversation-policy/conversation-intent', () => (
 
 import type { Job } from 'bullmq';
 
+import { INBOUND_DEBOUNCE_ENV_KEY } from '../../lib/inbound-burst-batch';
 import { InboundMessageProcessor } from './inbound-message.processor';
 import {
   VOICE_INBOUND_PLACEHOLDER_NO_MEDIA_USER_MESSAGE,
@@ -168,6 +169,7 @@ describe('InboundMessageProcessor', () => {
 
   beforeEach(() => {
     jestGlobal.clearAllMocks();
+    delete process.env[INBOUND_DEBOUNCE_ENV_KEY];
     delete process.env['GHL_VOICE_FETCH_RECORDING_BY_MESSAGE_ID'];
     delete process.env['GHL_VOICE_DISCOVER_MESSAGE_ID'];
     delete process.env['GHL_VOICE_DISCOVER_DELAY_MS'];
@@ -206,7 +208,7 @@ describe('InboundMessageProcessor', () => {
     );
   });
 
-  it('persist stores inbound and schedules orchestrate with 5s delay and versioned jobId', async () => {
+  it('persist stores inbound and schedules orchestrate with default debounce delay and versioned jobId', async () => {
     mockSupabase.from.mockImplementation((table: string) => {
       if (table === 'tenants') {
         return {
@@ -246,11 +248,51 @@ describe('InboundMessageProcessor', () => {
         tenantId: 'tenant-1',
       }),
       expect.objectContaining({
-        delay: 5000,
+        delay: 2000,
         jobId: `deb:${CONV_ID}:1`,
       }),
     );
     expect(orchestrate).not.toHaveBeenCalled();
+  });
+
+  it('persist schedules orchestrate delay from AISBP_INBOUND_DEBOUNCE_MS when set', async () => {
+    process.env[INBOUND_DEBOUNCE_ENV_KEY] = '4300';
+    mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'tenants') {
+        return {
+          select: () => ({
+            eq: () => ({
+              single: async () => ({ data: { id: 'tenant-1' }, error: null }),
+            }),
+          }),
+        };
+      }
+      if (table === 'conversations') {
+        return makeConversationsTableMock({ id: CONV_ID });
+      }
+      if (table === 'messages') {
+        return { insert: () => ({ error: null }) };
+      }
+      return {} as never;
+    });
+
+    await processor.process(
+      makeJob('persist', {
+        locationId: 'loc_1',
+        ghlConversationId: 'ghl_conv_1',
+        ghlContactId: 'ct_1',
+        messageContent: 'Hello',
+        messageType: 'text',
+        timestamp: '2026-01-01T00:00:00Z',
+        smokeImmediate: false,
+      }),
+    );
+
+    expect(mockInboundQueueAdd).toHaveBeenCalledWith(
+      'orchestrate',
+      expect.any(Object),
+      expect.objectContaining({ delay: 4300 }),
+    );
   });
 
   it('persist without provider conversationId reuses the same row by tenant+channel+contact', async () => {

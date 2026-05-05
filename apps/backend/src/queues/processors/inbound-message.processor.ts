@@ -16,8 +16,8 @@ import { bumpInboundDebounceMeta, shouldSkipStaleDebounceJob } from '../../lib/i
 import { classifyConversationIntent } from '../../modules/conversation-policy/conversation-intent';
 import { deriveConversationIdentity } from '../../lib/conversation-identity';
 import {
-  INBOUND_DEBOUNCE_MS,
   filterInboundRowsToBurstWindow,
+  resolveInboundDebounceMs,
 } from '../../lib/inbound-burst-batch';
 import { matchChatResetCommand } from '../../lib/chat-reset-command';
 import { ConversationResetService } from '../../modules/conversations/conversation-reset.service';
@@ -39,7 +39,7 @@ export interface InboundMessageJobData {
   messageType: 'text' | 'image' | 'audio' | 'video' | 'unknown';
   timestamp: string;
   webhookEventId?: string;
-  /** When true, persist then run orchestration immediately (no 5s debounce). */
+  /** When true, persist then run orchestration immediately (no scheduled debounce). */
   smokeImmediate?: boolean;
   contactDisplayName?: string;
   contactPhone?: string;
@@ -74,8 +74,6 @@ export interface OrchestrateDebouncedJobData {
   contactEmail?: string;
   contactFieldsFromExtendedWebhook?: boolean;
 }
-
-const DEBOUNCE_MS = INBOUND_DEBOUNCE_MS;
 
 @Processor(QUEUES.INBOUND_MESSAGE_PROCESSOR)
 @Injectable()
@@ -220,6 +218,8 @@ export class InboundMessageProcessor extends WorkerHost {
         this.logger.warn(`Failed to bump inbound debounce metadata: ${formatPostgrestError(metaErr)}`);
       }
 
+      const { debounceMs, debounceSource } = resolveInboundDebounceMs();
+
       await this.inboundQueue.add(
         'orchestrate',
         {
@@ -236,7 +236,7 @@ export class InboundMessageProcessor extends WorkerHost {
           contactFieldsFromExtendedWebhook,
         } satisfies OrchestrateDebouncedJobData,
         {
-          delay: DEBOUNCE_MS,
+          delay: debounceMs,
           jobId: `deb:${conversation.id}:${newVersion}`,
           attempts: 2,
           backoff: { type: 'exponential', delay: 1500 },
@@ -245,7 +245,7 @@ export class InboundMessageProcessor extends WorkerHost {
       );
 
       this.logger.log(
-        `Debounce scheduled: conversationId=${conversation.id}, processAfterMs=${DEBOUNCE_MS}, version=${newVersion}`,
+        `Debounce scheduled: conversationId=${conversation.id}, processAfterMs=${debounceMs}, debounceMs=${debounceMs}, debounceSource=${debounceSource}, version=${newVersion}`,
       );
 
       if (webhookEventId) {

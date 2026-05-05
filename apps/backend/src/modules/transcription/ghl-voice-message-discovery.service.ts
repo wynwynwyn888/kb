@@ -705,7 +705,7 @@ export class GhlVoiceMessageDiscoveryService {
       }
     | { ok: false; reason: string; candidateCount?: number }
   > {
-    const delayMs = readBoundedInt('GHL_VOICE_DISCOVER_DELAY_MS', 3000, 0, 120_000);
+    const delayMs = readBoundedInt('GHL_VOICE_DISCOVER_DELAY_MS', 1500, 0, 120_000);
     const maxAttempts = readBoundedInt('GHL_VOICE_DISCOVER_MAX_ATTEMPTS', 2, 1, 6);
     const webhookMs = Date.parse(params.webhookTimestampIso) || Date.now();
 

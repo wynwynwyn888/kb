@@ -35,6 +35,11 @@ import {
   resolveSelectedVaultId,
   vaultScopedDocuments,
 } from '@/lib/knowledge-vault-scope';
+import { getVaultActivityAt, sortVaultsForDisplay } from '@/lib/knowledge-vault-activity';
+import {
+  KNOWLEDGE_BOT_PREVIEW_DESCRIPTION,
+  KNOWLEDGE_BOT_PREVIEW_SUMMARY,
+} from '@/lib/knowledge-bot-preview-copy';
 import {
   ErrorBanner,
   LoadingBlock,
@@ -1595,7 +1600,9 @@ export default function SubaccountKnowledgePage() {
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [vaults, setVaults] = useState<KbVaultRow[]>([]);
-  const [newVaultName, setNewVaultName] = useState('');
+  const [createVaultOpen, setCreateVaultOpen] = useState(false);
+  const [createVaultName, setCreateVaultName] = useState('');
+  const [createVaultDesc, setCreateVaultDesc] = useState('');
   const [vaultMutating, setVaultMutating] = useState(false);
   const [vaultAssignBusy, setVaultAssignBusy] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1681,6 +1688,8 @@ export default function SubaccountKnowledgePage() {
   useEffect(() => {
     setVaultEditOpen(false);
   }, [selectedVaultId]);
+
+  const sortedVaultsForUi = useMemo(() => sortVaultsForDisplay(vaults, docs), [vaults, docs]);
 
   const vaultScopeDocs = useMemo(
     () => vaultScopedDocuments(docs, selectedVaultId),
@@ -2033,7 +2042,7 @@ export default function SubaccountKnowledgePage() {
                         >
                           Vaults
                         </p>
-                        {vaults.map(v => (
+                        {sortedVaultsForUi.map(v => (
                           <div
                             key={v.id}
                             role="button"
@@ -2066,7 +2075,7 @@ export default function SubaccountKnowledgePage() {
                             <div style={{ marginTop: 6, fontSize: '0.78rem', color: '#64748b', lineHeight: 1.45 }}>
                               {v.documentCount} document{v.documentCount === 1 ? '' : 's'}
                               {' · '}
-                              Updated {relativeTimeLabel(v.updatedAt)}
+                              Last activity {relativeTimeLabel(getVaultActivityAt(v, docs))}
                             </div>
                           </div>
                         ))}
@@ -2112,7 +2121,7 @@ export default function SubaccountKnowledgePage() {
                               </p>
                             ) : null}
                             <p style={{ fontSize: '0.78rem', color: '#94a3b8', margin: '0 0 0.85rem' }}>
-                              Updated {relativeTimeLabel(selectedVault.updatedAt)}
+                              Last activity {relativeTimeLabel(getVaultActivityAt(selectedVault, docs))}
                             </p>
                             <div
                               style={{
@@ -2222,45 +2231,27 @@ export default function SubaccountKnowledgePage() {
                       </div>
                     </div>
                   )}
-                  <form
-                    style={{ marginTop: '1rem', display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}
-                    onSubmit={e => {
-                      e.preventDefault();
-                      if (!token) return;
-                      const n = newVaultName.trim();
-                      if (!n) return;
-                      void (async () => {
-                        setVaultMutating(true);
+                  <div style={{ marginTop: '1rem' }}>
+                    <button
+                      type="button"
+                      disabled={vaultMutating}
+                      onClick={() => {
+                        setCreateVaultOpen(true);
+                        setCreateVaultName('');
+                        setCreateVaultDesc('');
                         setWriteErr('');
-                        try {
-                          await createKbVault(token, { tenantId: subId, name: n });
-                          setNewVaultName('');
-                          setSaveOk('Vault created.');
-                          await load();
-                        } catch (er) {
-                          const raw =
-                            isApiHttpError(er) ? er.message : er instanceof Error ? er.message : 'Could not create vault';
-                          setWriteErr(friendlifyKbMessage(raw));
-                        } finally {
-                          setVaultMutating(false);
-                        }
-                      })();
-                    }}
-                  >
-                    <input
-                      value={newVaultName}
-                      onChange={e => {
-                        setNewVaultName(e.target.value);
                         setSaveOk('');
                       }}
-                      placeholder="New vault name"
-                      style={{ ...mvpInputStyle, flex: '1 1 200px', maxWidth: 280 }}
-                      autoComplete="off"
-                    />
-                    <button type="submit" disabled={vaultMutating} style={mvpPrimaryButtonStyle}>
-                      {vaultMutating ? 'Creating…' : 'Create vault'}
+                      style={{
+                        ...mvpSecondaryButtonStyle,
+                        padding: '0.45rem 0.85rem',
+                        fontWeight: 700,
+                        fontSize: '0.875rem',
+                      }}
+                    >
+                      + Create vault
                     </button>
-                  </form>
+                  </div>
                 </section>
 
                 <h2
@@ -2856,10 +2847,10 @@ export default function SubaccountKnowledgePage() {
                     listStyle: 'none',
                   }}
                 >
-                  Preview bot reply
+                  {KNOWLEDGE_BOT_PREVIEW_SUMMARY}
                 </summary>
                 <p style={{ fontSize: '0.78rem', color: '#64748b', margin: '0.5rem 0 0.85rem', lineHeight: 1.45 }}>
-                  Live knowledge access follows Bot Instructions → Assistant Profile, not this page’s vault picker.
+                  {KNOWLEDGE_BOT_PREVIEW_DESCRIPTION}
                 </p>
                 <div style={{ marginTop: '0.5rem' }}>
                   <BotTestPanel token={token} subaccountId={subId} variant="embedded" />
@@ -2869,6 +2860,100 @@ export default function SubaccountKnowledgePage() {
           </div>
         </div>
       </div>
+
+      {createVaultOpen ? (
+        <KbModal
+          title="Create knowledge vault"
+          onClose={() => {
+            setCreateVaultOpen(false);
+            setCreateVaultName('');
+            setCreateVaultDesc('');
+          }}
+          footer={
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setCreateVaultOpen(false);
+                  setCreateVaultName('');
+                  setCreateVaultDesc('');
+                }}
+                style={mvpSecondaryButtonStyle}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={vaultMutating || !createVaultName.trim()}
+                onClick={() => {
+                  if (!token) return;
+                  const n = createVaultName.trim();
+                  if (!n) return;
+                  void (async () => {
+                    setVaultMutating(true);
+                    setWriteErr('');
+                    try {
+                      const { id } = await createKbVault(token, {
+                        tenantId: subId,
+                        name: n,
+                        description: createVaultDesc.trim() || null,
+                      });
+                      setSelectedVaultId(id);
+                      setSaveOk('Vault created.');
+                      setCreateVaultOpen(false);
+                      setCreateVaultName('');
+                      setCreateVaultDesc('');
+                      await load();
+                    } catch (er) {
+                      const raw =
+                        isApiHttpError(er) ? er.message : er instanceof Error ? er.message : 'Could not create vault';
+                      setWriteErr(friendlifyKbMessage(raw));
+                    } finally {
+                      setVaultMutating(false);
+                    }
+                  })();
+                }}
+                style={mvpPrimaryButtonStyle}
+              >
+                {vaultMutating ? 'Creating…' : 'Create vault'}
+              </button>
+            </div>
+          }
+        >
+          <label>
+            <span style={mvpLabelStyle}>Vault name</span>
+            <input
+              value={createVaultName}
+              onChange={e => {
+                setCreateVaultName(e.target.value);
+                setSaveOk('');
+              }}
+              style={{ ...mvpInputStyle, marginTop: '0.35rem', width: '100%' }}
+              autoComplete="off"
+              placeholder="e.g. Sales FAQs"
+            />
+          </label>
+          <label style={{ display: 'block', marginTop: '0.85rem' }}>
+            <span style={mvpLabelStyle}>Description (optional)</span>
+            <textarea
+              value={createVaultDesc}
+              onChange={e => {
+                setCreateVaultDesc(e.target.value);
+                setSaveOk('');
+              }}
+              rows={3}
+              placeholder="Optional — for your team"
+              style={{
+                ...mvpInputStyle,
+                marginTop: '0.35rem',
+                width: '100%',
+                minHeight: 72,
+                resize: 'vertical' as const,
+              }}
+            />
+          </label>
+        </KbModal>
+      ) : null}
 
       {vaultEditOpen && selectedVault ? (
         <KbModal

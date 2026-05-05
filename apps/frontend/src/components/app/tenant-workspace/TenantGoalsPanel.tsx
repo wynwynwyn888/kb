@@ -34,6 +34,7 @@ import {
   mvpLabelStyle,
   mvpPrimaryButtonStyle,
 } from '@/components/app/mvp-ui';
+import { countWords } from '@/lib/prompt-text-stats';
 
 const DEFAULT_NEW_PROFILE = 'New profile';
 
@@ -53,10 +54,53 @@ const LIVE_DELETE_HINT = 'Set another profile active before deleting this one.';
 const sectionCard: CSSProperties = {
   border: '1px solid rgba(226, 232, 240, 0.9)',
   borderRadius: 12,
-  padding: '1rem 1.1rem',
-  marginBottom: '0.85rem',
+  padding: '1.05rem 1.15rem',
+  marginBottom: '1.15rem',
   background: 'var(--aisbp-surface, #fff)',
   boxShadow: '0 1px 2px rgba(15, 23, 42, 0.04)',
+};
+
+const expandModalOverlay: CSSProperties = {
+  position: 'fixed',
+  inset: 0,
+  background: 'rgba(15, 23, 42, 0.48)',
+  zIndex: 60,
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  padding: 16,
+};
+
+const expandModalPanel: CSSProperties = {
+  background: 'var(--aisbp-modal-bg, #fff)',
+  borderRadius: 16,
+  width: 'min(720px, 100%)',
+  maxHeight: 'min(82vh, 640px)',
+  overflow: 'hidden',
+  display: 'flex',
+  flexDirection: 'column',
+  maxWidth: '100%',
+  boxShadow: '0 24px 48px rgba(15, 23, 42, 0.2)',
+  border: '1px solid var(--aisbp-modal-border, #e2e8f0)',
+};
+
+const sectionTitleStyle: CSSProperties = {
+  fontSize: '0.95rem',
+  fontWeight: 700,
+  margin: '0 0 0.75rem',
+  color: 'var(--aisbp-text-heading, #0f172a)',
+};
+
+const expandTextBtn: CSSProperties = {
+  border: 'none',
+  background: 'transparent',
+  color: 'var(--aisbp-text-secondary, #334155)',
+  fontSize: '0.8rem',
+  fontWeight: 600,
+  cursor: 'pointer',
+  textDecoration: 'underline',
+  textUnderlineOffset: 2,
+  padding: '0.15rem 0.25rem',
 };
 
 const secondaryBtnStyle: CSSProperties = {
@@ -265,6 +309,8 @@ export function TenantGoalsPanel() {
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState('');
   const [ok, setOk] = useState('');
+  const [expandField, setExpandField] = useState<null | 'persona' | 'goals' | 'additional'>(null);
+  const [expandDraft, setExpandDraft] = useState('');
 
   const baselineRef = useRef<FormBaseline | null>(null);
 
@@ -871,6 +917,7 @@ export function TenantGoalsPanel() {
               ) : (
                 <form onSubmit={onSavePrompt}>
                   <div style={sectionCard}>
+                    <h3 style={sectionTitleStyle}>Profile details</h3>
                     <div style={{ marginBottom: '0.5rem' }}>
                       {selectedRow?.isActive ? (
                         <span style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--aisbp-muted, #64748b)' }}>
@@ -909,7 +956,95 @@ export function TenantGoalsPanel() {
                   </div>
 
                   <div style={sectionCard}>
-                    <label style={mvpLabelStyle}>Knowledge used by this assistant</label>
+                    <h3 style={sectionTitleStyle}>Persona</h3>
+                    <p style={{ ...mvpFieldHint, margin: '-0.25rem 0 0.5rem' }}>How the assistant should sound and behave.</p>
+                    <textarea style={textareaStyle} value={persona} onChange={e => setPersona(e.target.value)} aria-label="Persona" />
+                    <div
+                      style={{
+                        display: 'flex',
+                        flexWrap: 'wrap',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        gap: 8,
+                        marginTop: 8,
+                      }}
+                    >
+                      <span style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)' }}>
+                        {countWords(persona)} words
+                      </span>
+                      <button
+                        type="button"
+                        style={expandTextBtn}
+                        onClick={() => {
+                          setExpandDraft(persona);
+                          setExpandField('persona');
+                        }}
+                      >
+                        Expand
+                      </button>
+                    </div>
+                  </div>
+                  <div style={sectionCard}>
+                    <h3 style={sectionTitleStyle}>Conversation goals</h3>
+                    <p style={{ ...mvpFieldHint, margin: '-0.25rem 0 0.5rem' }}>What this assistant should try to achieve.</p>
+                    <textarea style={textareaStyle} value={goals} onChange={e => setGoals(e.target.value)} aria-label="Conversation goals" />
+                    <div
+                      style={{
+                        display: 'flex',
+                        flexWrap: 'wrap',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        gap: 8,
+                        marginTop: 8,
+                      }}
+                    >
+                      <span style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)' }}>
+                        {countWords(goals)} words
+                      </span>
+                      <button
+                        type="button"
+                        style={expandTextBtn}
+                        onClick={() => {
+                          setExpandDraft(goals);
+                          setExpandField('goals');
+                        }}
+                      >
+                        Expand
+                      </button>
+                    </div>
+                  </div>
+                  <div style={sectionCard}>
+                    <h3 style={sectionTitleStyle}>Business notes</h3>
+                    <p style={{ ...mvpFieldHint, margin: '-0.25rem 0 0.5rem' }}>Facts, policies, and context for this workspace.</p>
+                    <textarea style={textareaStyle} value={additional} onChange={e => setAdditional(e.target.value)} aria-label="Business notes" />
+                    <div
+                      style={{
+                        display: 'flex',
+                        flexWrap: 'wrap',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        gap: 8,
+                        marginTop: 8,
+                      }}
+                    >
+                      <span style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)' }}>
+                        {countWords(additional)} words
+                      </span>
+                      <button
+                        type="button"
+                        style={expandTextBtn}
+                        onClick={() => {
+                          setExpandDraft(additional);
+                          setExpandField('additional');
+                        }}
+                      >
+                        Expand
+                      </button>
+                    </div>
+                  </div>
+
+                  <div style={sectionCard}>
+                    <h3 style={sectionTitleStyle}>Knowledge used by this assistant</h3>
                     <p
                       style={{
                         fontSize: '0.82rem',
@@ -918,7 +1053,7 @@ export function TenantGoalsPanel() {
                         lineHeight: 1.45,
                       }}
                     >
-                      Vaults are groups of knowledge this assistant can use when replying.
+                      Vaults are groups of FAQs, notes, and files. Configure vault content under Knowledge.
                     </p>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
                       <label
@@ -1075,26 +1210,13 @@ export function TenantGoalsPanel() {
                     ) : null}
                   </div>
 
-                  <div style={sectionCard}>
-                    <label style={mvpLabelStyle}>Persona</label>
-                    <textarea style={textareaStyle} value={persona} onChange={e => setPersona(e.target.value)} aria-label="Persona" />
-                  </div>
-                  <div style={sectionCard}>
-                    <label style={mvpLabelStyle}>Conversation goals</label>
-                    <textarea style={textareaStyle} value={goals} onChange={e => setGoals(e.target.value)} aria-label="Conversation goals" />
-                  </div>
-                  <div style={sectionCard}>
-                    <label style={mvpLabelStyle}>Business notes</label>
-                    <textarea style={textareaStyle} value={additional} onChange={e => setAdditional(e.target.value)} aria-label="Business notes" />
-                  </div>
-
-                  <details style={{ marginBottom: '0.6rem' }}>
+                  <details style={{ ...sectionCard, marginBottom: '1.15rem' }}>
                     <summary
                       style={{
                         cursor: 'pointer',
-                        fontSize: '0.8rem',
-                        fontWeight: 600,
-                        color: 'var(--aisbp-muted, #64748b)',
+                        fontSize: '0.95rem',
+                        fontWeight: 700,
+                        color: 'var(--aisbp-text-heading, #0f172a)',
                         listStyle: 'none',
                       }}
                     >
@@ -1253,6 +1375,101 @@ export function TenantGoalsPanel() {
             </div>
           </div>
         </>
+      ) : null}
+
+      {expandField ? (
+        <div
+          style={expandModalOverlay}
+          role="presentation"
+          onClick={e => {
+            if (e.target === e.currentTarget) setExpandField(null);
+          }}
+        >
+          <div style={expandModalPanel} role="dialog" aria-modal="true" onClick={e => e.stopPropagation()}>
+            <div
+              style={{
+                padding: '1rem 1.15rem',
+                borderBottom: '1px solid var(--aisbp-modal-divider, #f1f5f9)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 12,
+              }}
+            >
+              <h2 style={{ fontSize: '1.05rem', fontWeight: 700, margin: 0, flex: 1, color: 'var(--aisbp-text-heading, #0f172a)' }}>
+                {expandField === 'persona'
+                  ? 'Persona'
+                  : expandField === 'goals'
+                    ? 'Conversation goals'
+                    : 'Business notes'}
+              </h2>
+              <button
+                type="button"
+                onClick={() => setExpandField(null)}
+                style={{
+                  border: 'none',
+                  background: 'var(--aisbp-modal-close-bg, #f1f5f9)',
+                  borderRadius: 8,
+                  width: 36,
+                  height: 36,
+                  cursor: 'pointer',
+                  fontSize: '1.1rem',
+                  lineHeight: 1,
+                  color: 'var(--aisbp-muted, #475569)',
+                }}
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </div>
+            <div style={{ padding: '1rem 1.15rem', overflowY: 'auto', flex: 1, minHeight: 0 }}>
+              <textarea
+                value={expandDraft}
+                onChange={e => setExpandDraft(e.target.value)}
+                rows={18}
+                style={{
+                  ...mvpInputStyle,
+                  width: '100%',
+                  minHeight: 320,
+                  resize: 'vertical' as const,
+                  fontFamily: 'inherit',
+                  fontSize: '0.9rem',
+                  lineHeight: 1.5,
+                }}
+                spellCheck
+              />
+              <p style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)', margin: '0.65rem 0 0' }}>
+                {countWords(expandDraft)} words
+              </p>
+            </div>
+            <div
+              style={{
+                padding: '0.75rem 1.15rem',
+                borderTop: '1px solid var(--aisbp-modal-divider, #f1f5f9)',
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: '0.5rem',
+                justifyContent: 'flex-end',
+              }}
+            >
+              <button type="button" onClick={() => setExpandField(null)} style={secondaryBtnStyle}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (expandField === 'persona') setPersona(expandDraft);
+                  else if (expandField === 'goals') setGoals(expandDraft);
+                  else setAdditional(expandDraft);
+                  setExpandField(null);
+                }}
+                style={mvpPrimaryButtonStyle}
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
     </div>
   );

@@ -108,6 +108,33 @@ describe('ConversationPolicyEngineService (universal — no hardcoded categories
     expect(out.policyReplyKind).toBe('menu_no_kb_clarification');
   });
 
+  const spaSixOptionState = {
+    v: 1 as const,
+    activeTopic: 'menu',
+    awaiting: 'option_selection' as const,
+    options: {
+      A: 'Essential Care',
+      B: 'Dapper Care',
+      C: 'Bath Reset',
+      D: 'Dapper Signature Spa Ritual',
+      E: 'Ayurvedic Herbal Ritual',
+      F: 'Daycare',
+    },
+    lastAssistantOptions: {
+      A: 'Essential Care',
+      B: 'Dapper Care',
+      C: 'Bath Reset',
+      D: 'Dapper Signature Spa Ritual',
+      E: 'Ayurvedic Herbal Ritual',
+      F: 'Daycare',
+    },
+    optionsUpdatedAt: new Date().toISOString(),
+    optionsSource: 'assistant_reply' as const,
+    optionsDerivedFromChunkIds: null,
+    expiresAt: null,
+    updatedAt: new Date().toISOString(),
+  };
+
   it('SHORT_SELECTION "A" with option memory → resolves to selectedText, KB if present', () => {
     const haircutKb = chunk({
       title: 'Haircut services',
@@ -127,6 +154,44 @@ describe('ConversationPolicyEngineService (universal — no hardcoded categories
     expect(out.kbChunks).toHaveLength(1);
     expect(out.menuSelectionActive).toBe(true);
     expect(out.nextPolicyState.awaiting).toBeNull();
+  });
+
+  it('SHORT_SELECTION F with six-option spa menu → Daycare (label F, not E)', () => {
+    const out = engine.evaluate({
+      intent: 'SHORT_SELECTION',
+      incomingRaw: 'F',
+      memory: [],
+      policyState: spaSixOptionState,
+      kbChunksRanked: [],
+    });
+    expect(out.resolvedSelection?.selectedLabel).toBe('F');
+    expect(out.resolvedSelection?.selectedText).toBe('Daycare');
+  });
+
+  it('optionPickResolvedWithoutKb: resolved pick with no KB still allows generation (no forced category reply)', () => {
+    const out = engine.evaluate({
+      intent: 'SHORT_SELECTION',
+      incomingRaw: 'F',
+      memory: [],
+      policyState: spaSixOptionState,
+      kbChunksRanked: [],
+      optionPickResolvedWithoutKb: true,
+    });
+    expect(out.resolvedSelection?.selectedText).toBe('Daycare');
+    expect(out.policyForcedReply).toBeNull();
+    expect(out.kbChunks).toHaveLength(0);
+  });
+
+  it('SHORT_SELECTION unknown letter with A–F menu → clarification', () => {
+    const out = engine.evaluate({
+      intent: 'SHORT_SELECTION',
+      incomingRaw: 'G',
+      memory: [],
+      policyState: spaSixOptionState,
+      kbChunksRanked: [],
+    });
+    expect(out.resolvedSelection).toBeNull();
+    expect(out.policyForcedReply).toBe(SELECTION_UNCLEAR_REPLY);
   });
 
   it('SHORT_SELECTION "first" resolves to label A from option memory', () => {

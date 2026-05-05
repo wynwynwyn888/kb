@@ -670,6 +670,62 @@ describe('InboundMessageProcessor', () => {
     expect(orchestrate).not.toHaveBeenCalled();
   });
 
+  it('orchestrate: when reset is denied, AI batch excludes /new but still runs on prior lines', async () => {
+    mockResetService.evaluateChatResetEligibility.mockResolvedValue({
+      allowed: false,
+      deniedReason: 'env_disabled',
+      allowEnvValue: 'false',
+      tenantSettingValue: undefined,
+      whitelistConfigured: false,
+      contactMatchedWhitelist: true,
+    });
+    mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'conversations') {
+        return {
+          select: () => ({
+            eq: () => ({
+              single: async () => ({
+                data: { metadata: { inboundDebounce: { pendingVersion: 4 } } },
+                error: null,
+              }),
+            }),
+          }),
+        };
+      }
+      if (table === 'messages') {
+        return {
+          select: () =>
+            resolvedQuery({
+              data: [
+                { content: '/new', created_at: '2026-01-01T00:00:02.000Z' },
+                { content: 'hello', created_at: '2026-01-01T00:00:01.000Z' },
+              ],
+              error: null,
+            }),
+        };
+      }
+      return {} as never;
+    });
+
+    await processor.process(
+      makeJob('orchestrate', {
+        tenantId: 'tenant-1',
+        conversationId: CONV_ID,
+        locationId: 'loc_1',
+        ghlContactId: 'ct_1',
+        ghlConversationId: 'ghl_conv_1',
+        debounceVersion: 4,
+      }),
+    );
+
+    expect(mockResetService.performBotStateReset).not.toHaveBeenCalled();
+    expect(orchestrate).toHaveBeenCalled();
+    const arg = orchestrate.mock.calls[0]![0] as { recentInboundBatch?: string[]; incomingMessage?: { messageContent?: string } };
+    expect(arg.recentInboundBatch).toEqual(['hello']);
+    expect(arg.incomingMessage?.messageContent).toBe('hello');
+    expect(arg.recentInboundBatch?.includes('/new')).toBe(false);
+  });
+
   it('persist: audio with media URL transcribes and stores transcript as message text', async () => {
     let inserted: Record<string, unknown> | null = null;
     mockSupabase.from.mockImplementation((table: string) => {

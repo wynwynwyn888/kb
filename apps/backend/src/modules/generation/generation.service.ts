@@ -17,6 +17,8 @@ import type { SelectionResolution } from '../conversation-policy/option-resolver
 export interface GenerateDraftPolicyContext {
   latestIntent: ConversationIntent;
   resolvedSelection: SelectionResolution | null;
+  /** Truncated prior assistant bubble that listed options (deterministic A–H picks without KB). */
+  optionMenuSourceExcerpt?: string;
   conversationStateSummary: string;
   menuSelectionActive?: boolean;
   /** Live debounce: >1 when multiple customer lines were combined into one user turn. */
@@ -442,6 +444,11 @@ export class GenerationService {
       if (pc.resolvedSelection) {
         parts.push(
           `The user chose option ${pc.resolvedSelection.selectedLabel} (${pc.resolvedSelection.selectedText}).`,
+        );
+      }
+      if (pc.optionMenuSourceExcerpt?.trim()) {
+        parts.push(
+          `The customer just picked from this menu the assistant previously sent (excerpt): ${pc.optionMenuSourceExcerpt.trim()}`,
         );
       }
       if (pc.latestIntent === 'MENU' || pc.latestIntent === 'SHORT_SELECTION') {

@@ -1,6 +1,11 @@
 import type { MemoryEntry } from '../orchestration/dto';
 import type { AisbpPolicyStateV1 } from './conversation-policy-state';
-import { parseAssistantOptionLines, resolveShortSelection } from './option-resolver';
+import {
+  isOptionSelectionSingleToken,
+  parseAssistantOptionLines,
+  resolveShortSelection,
+  shouldSkipKbForPureOptionLetterSelection,
+} from './option-resolver';
 
 const baseState = (): AisbpPolicyStateV1 => ({
   v: 1,
@@ -120,5 +125,62 @@ describe('option-resolver — resolution from memory and state', () => {
     };
     expect(resolveShortSelection('zzz', state, [])).toBeNull();
     expect(resolveShortSelection('what', state, [])).toBeNull();
+  });
+
+  it('spa-style A–F menu: F maps to Daycare (not E)', () => {
+    const menu =
+      'A) Essential Care\nB) Dapper Care\nC) Bath Reset\nD) Dapper Signature Spa Ritual\nE) Ayurvedic Herbal Ritual\nF) Daycare';
+    const state: AisbpPolicyStateV1 = {
+      ...baseState(),
+      awaiting: 'option_selection',
+      options: parseAssistantOptionLines(menu),
+      lastAssistantOptions: parseAssistantOptionLines(menu),
+    };
+    const r = resolveShortSelection('F', state, []);
+    expect(r?.selectedLabel).toBe('F');
+    expect(r?.selectedText).toBe('Daycare');
+  });
+
+  it('lowercase f resolves same as F', () => {
+    const menu =
+      'A) Essential Care\nB) Dapper Care\nC) Bath Reset\nD) Dapper Signature Spa Ritual\nE) Ayurvedic Herbal Ritual\nF) Daycare';
+    const state: AisbpPolicyStateV1 = {
+      ...baseState(),
+      awaiting: 'option_selection',
+      options: parseAssistantOptionLines(menu),
+    };
+    const r = resolveShortSelection('  f  ', state, []);
+    expect(r?.selectedLabel).toBe('F');
+    expect(r?.selectedText).toBe('Daycare');
+  });
+
+  it('unknown letter G when menu is A–F → null (clarification path)', () => {
+    const menu =
+      'A) Essential Care\nB) Dapper Care\nC) Bath Reset\nD) Dapper Signature Spa Ritual\nE) Ayurvedic Herbal Ritual\nF) Daycare';
+    const state: AisbpPolicyStateV1 = {
+      ...baseState(),
+      awaiting: 'option_selection',
+      options: parseAssistantOptionLines(menu),
+    };
+    expect(resolveShortSelection('G', state, [])).toBeNull();
+  });
+
+  it('shouldSkipKbForPureOptionLetterSelection is true for single letter with option memory', () => {
+    const state: AisbpPolicyStateV1 = {
+      ...baseState(),
+      awaiting: 'option_selection',
+      options: { A: 'One', B: 'Two' },
+    };
+    expect(shouldSkipKbForPureOptionLetterSelection(state, 'A')).toBe(true);
+    expect(shouldSkipKbForPureOptionLetterSelection(state, 'hello')).toBe(false);
+    expect(shouldSkipKbForPureOptionLetterSelection({ ...state, awaiting: null }, 'A')).toBe(false);
+  });
+
+  it('isOptionSelectionSingleToken: single letter/digit only', () => {
+    expect(isOptionSelectionSingleToken('F')).toBe(true);
+    expect(isOptionSelectionSingleToken('f')).toBe(true);
+    expect(isOptionSelectionSingleToken('6')).toBe(true);
+    expect(isOptionSelectionSingleToken('FF')).toBe(false);
+    expect(isOptionSelectionSingleToken('E F')).toBe(false);
   });
 });

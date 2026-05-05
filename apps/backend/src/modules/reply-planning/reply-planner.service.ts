@@ -59,6 +59,8 @@ export interface ReplyPlanPolicyContext {
   suppressColourRecommendations?: boolean;
   bookingCapability?: 'collect_details_only' | 'live_slot_booking' | string;
   handoverCapability?: string;
+  /** Prior assistant menu excerpt for deterministic letter picks (no KB). */
+  optionMenuSourceExcerpt?: string;
 }
 
 @Injectable()
@@ -333,6 +335,9 @@ export class ReplyPlannerService {
                 : {}),
               ...(policyContext.handoverCapability
                 ? { handoverCapability: policyContext.handoverCapability }
+                : {}),
+              ...(policyContext.optionMenuSourceExcerpt?.trim()
+                ? { optionMenuSourceExcerpt: policyContext.optionMenuSourceExcerpt.trim() }
                 : {}),
             },
           }

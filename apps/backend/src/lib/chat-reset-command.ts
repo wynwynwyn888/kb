@@ -15,3 +15,13 @@ export function matchChatResetCommand(text: string): ChatResetCommand | null {
   }
   return null;
 }
+
+/** Omit reset-command lines when building debounced inbound batches for AI orchestration. */
+export function isChatResetInboundLine(text: string): boolean {
+  return matchChatResetCommand(text) !== null;
+}
+
+/** Drop reset-command inbound rows before burst-window batching (avoid `/new` leaking into next turn). */
+export function excludeChatResetInboundRows<T extends { content?: string | null }>(rows: T[]): T[] {
+  return rows.filter(r => !isChatResetInboundLine(String(r.content ?? '').trim()));
+}

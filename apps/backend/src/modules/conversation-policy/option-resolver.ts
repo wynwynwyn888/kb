@@ -8,7 +8,7 @@ export type SelectionResolution = {
   source: 'conversation_state' | 'previous_assistant_options';
 };
 
-const LETTER_LABELS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'] as const;
+export const LETTER_LABELS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'] as const;
 
 /** Match `A) Label`, `A. Label`, `A: Label` (also `1) ...`, `1. ...`). */
 const RE_OPTION_LINE = /^\s*(?:([A-Ha-h])|(\d{1,2}))\s*[\)\.\:]\s*(.+?)\s*$/;
@@ -74,6 +74,12 @@ function optionsFromState(state: AisbpPolicyStateV1): Record<string, string> | n
   return null;
 }
 
+/** Count labels in persisted option memory (options or lastAssistantOptions). */
+export function countBundledPolicyOptions(state: AisbpPolicyStateV1): number {
+  const m = optionsFromState(state);
+  return m ? Object.keys(m).length : 0;
+}
+
 function recentAssistantTexts(memory: MemoryEntry[], max = 4): string[] {
   const out: string[] = [];
   for (let i = memory.length - 1; i >= 0 && out.length < max; i--) {
@@ -92,6 +98,28 @@ function normalizeSelectionRaw(raw: string): string {
     .replace(/^choice\s*/i, '')
     .replace(/[!?.]+$/g, '')
     .trim();
+}
+
+/**
+ * Single-letter A–Z or digit 1–8 selection token after normalizing whitespace/punctuation.
+ * Used while `awaiting=option_selection`: never send these through unconstrained KB+LLM.
+ */
+export function isOptionSelectionSingleToken(raw: string): boolean {
+  const t = normalizeSelectionRaw(raw).replace(/[!?.]+$/g, '').trim();
+  if (/^[1-8]$/.test(t)) return true;
+  return /^[a-zA-Z]$/.test(t);
+}
+
+/** Pure A–H / 1–8 option reply while awaiting option_selection — skip KB + unconstrained retrieval. */
+export function shouldSkipKbForPureOptionLetterSelection(
+  state: AisbpPolicyStateV1,
+  latestUserMessageTrimmed: string,
+): boolean {
+  return (
+    state.awaiting === 'option_selection' &&
+    countBundledPolicyOptions(state) > 0 &&
+    isOptionSelectionSingleToken(latestUserMessageTrimmed)
+  );
 }
 
 /**

@@ -9,6 +9,10 @@ describe('classifyConversationIntent', () => {
 
   it('classifies short selections including first one', () => {
     expect(classifyConversationIntent('A')).toBe('SHORT_SELECTION');
+    expect(classifyConversationIntent('F')).toBe('SHORT_SELECTION');
+    expect(classifyConversationIntent('f')).toBe('SHORT_SELECTION');
+    expect(classifyConversationIntent('H')).toBe('SHORT_SELECTION');
+    expect(classifyConversationIntent('6')).toBe('SHORT_SELECTION');
     expect(classifyConversationIntent('first one')).toBe('SHORT_SELECTION');
     expect(classifyConversationIntent('option B')).toBe('SHORT_SELECTION');
   });

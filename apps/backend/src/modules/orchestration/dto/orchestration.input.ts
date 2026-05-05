@@ -49,7 +49,11 @@ export interface OrchestrationInput {
 
   /** Optional timings from inbound worker ingress (milliseconds, numeric only — no payloads). */
   orchestrationIngressTimings?: {
-    batchToOrchestrationStartMs?: number | null;
+    /**
+     * Wall ms from enqueue of the debounced `orchestrate` Bull job (after persist) until this
+     * orchestration run starts — approximates debounce + queue wait. Omitted when implausible.
+     */
+    orchestrateQueueWaitMs?: number | null;
     debounceConfiguredMs?: number | null;
   };
 }

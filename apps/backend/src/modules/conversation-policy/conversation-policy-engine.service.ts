@@ -35,6 +35,11 @@ export interface ConversationPolicyEvaluateInput {
   memory: MemoryEntry[];
   policyState: AisbpPolicyStateV1;
   kbChunksRanked: RetrievalChunk[];
+  /**
+   * When true, a menu option was resolved with **no** KB context on purpose (pure A–H / 1–8 pick).
+   * Do not force the canned no-KB category reply — allow live generation with policy hints only.
+   */
+  optionPickResolvedWithoutKb?: boolean;
   /** Tenant / subaccount display name for booking copy */
   tenantDisplayName?: string;
   /** Active prompt config updated_at — used to invalidate stale option memory. */
@@ -229,6 +234,18 @@ export class ConversationPolicyEngineService {
             policyReplyKind: 'none',
             nextPolicyState: next,
             conversationStateSummary: `pick=${sel.selectedLabel}`,
+            menuSelectionActive: true,
+          };
+        }
+        if (params.optionPickResolvedWithoutKb) {
+          return {
+            latestIntent: intent,
+            resolvedSelection: sel,
+            kbChunks: [],
+            policyForcedReply: null,
+            policyReplyKind: 'none',
+            nextPolicyState: next,
+            conversationStateSummary: `pick=${sel.selectedLabel}_option_pick_no_kb_gen`,
             menuSelectionActive: true,
           };
         }

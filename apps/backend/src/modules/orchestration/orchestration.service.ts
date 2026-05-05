@@ -38,7 +38,7 @@ import {
   clearAwaitingState,
   type AisbpPolicyStateV1,
 } from '../conversation-policy/conversation-policy-state';
-import { resolveShortSelection } from '../conversation-policy/option-resolver';
+import { resolveShortSelection, shouldSkipKbForPureOptionLetterSelection } from '../conversation-policy/option-resolver';
 import { stripInternalGuidanceFromChunks } from '../../lib/kb-internal-guidance';
 import { interpretRetrievalChunks } from '../../lib/kb-chunk-interpretation';
 import { resolveOperatingHoursConflictsAmongChunks } from '../../lib/kb-operating-hours-conflict';
@@ -151,6 +151,25 @@ export class ConversationOrchestrationService {
           updatedAt: new Date().toISOString(),
         };
       }
+
+      const optionLetterToken = shouldSkipKbForPureOptionLetterSelection(policyStatePre, latestMsg);
+
+      const deterministicOptionPick = optionLetterToken
+        ? resolveShortSelection(latestMsg, policyStatePre, memory.entries)
+        : null;
+
+      let routingIntent: ConversationIntent = latestIntent;
+      if (optionLetterToken) {
+        routingIntent = 'SHORT_SELECTION';
+      }
+
+      if (deterministicOptionPick) {
+        this.logger.log(
+          `optionSelectionResolved: optionSelectionResolved=true selectedOptionLabel=${deterministicOptionPick.selectedLabel} ` +
+            `selectedOptionPreview=${JSON.stringify(deterministicOptionPick.selectedText.slice(0, 120))} optionSelectionSource=lastAssistantOptions`,
+        );
+      }
+
       let retrieveQuery = latestMsg;
       let menuKbAnchor: string | undefined;
       // Universal: if user replied with a short selection AND we have option memory, expand the
@@ -158,8 +177,9 @@ export class ConversationOrchestrationService {
       const optionsAwaiting =
         policyStatePre.awaiting === 'menu_category_selection' ||
         policyStatePre.awaiting === 'option_selection';
-      if (latestIntent === 'SHORT_SELECTION' && optionsAwaiting) {
-        const sel = resolveShortSelection(latestMsg, policyStatePre, memory.entries);
+      if (routingIntent === 'SHORT_SELECTION' && optionsAwaiting) {
+        const sel =
+          deterministicOptionPick ?? resolveShortSelection(latestMsg, policyStatePre, memory.entries);
         if (sel) {
           menuKbAnchor = sel.selectedText;
           retrieveQuery = sel.selectedText;
@@ -172,7 +192,7 @@ export class ConversationOrchestrationService {
       }
 
       const usePermissiveKbFilter =
-        batch.length > 1 && !(latestIntent === 'SHORT_SELECTION' && Boolean(menuKbAnchor));
+        batch.length > 1 && !(routingIntent === 'SHORT_SELECTION' && Boolean(menuKbAnchor));
 
       this.logger.log(
         `Inbound batch summary: inboundBatchCount=${batch.length} uniqueProviderMessageCount=${new Set(batch).size} ` +
@@ -182,7 +202,10 @@ export class ConversationOrchestrationService {
           `intentsPerMessage=${JSON.stringify(batchSummary.intentsPerMessage)} ` +
           `conflictingIntents=${batchSummary.conflictingIntents} ` +
           `repeatedHumanTextDetected=${repeatMeta.repeatedHumanTextDetected} ` +
-          `repeatedHumanTextAction=${repeatMeta.repeatedHumanTextAction}`,
+          `repeatedHumanTextAction=${repeatMeta.repeatedHumanTextAction}` +
+          (routingIntent !== latestIntent
+            ? ` routingIntent=${routingIntent} classifiedIntent=${latestIntent}`
+            : ''),
       );
 
       const complaintDet = detectComplaintServiceIssue(latestMsg);
@@ -322,18 +345,22 @@ export class ConversationOrchestrationService {
       // Step 3: Retrieve KB + intent-aware filter (query may expand for menu category selection)
       const kbSkipShortFollowUp = shouldSkipKbShortFollowUpActiveTopic({
         latestMessageTrimmed: latestMsg,
-        latestIntent,
+        latestIntent: routingIntent,
         activeTopic: policyStatePre.activeTopic,
         menuSelectionAnchorActive: Boolean(menuKbAnchor),
       });
+      const kbSkipOptionLetter = optionLetterToken;
       let kb_retrieval_ms = 0;
       let kbAfterRetrieve: RetrievalChunk[] = [];
       let retrievalMeta: RetrievalMeta | null = null;
 
       const kbPerf0 = performance.now();
-      if (kbSkipShortFollowUp) {
+      if (kbSkipOptionLetter || kbSkipShortFollowUp) {
+        const kbSkippedReason = kbSkipOptionLetter
+          ? 'option_letter_deterministic'
+          : 'short_followup_active_topic';
         this.logger.log(
-          `kbSkip: conversationId=${conversationId} kbSkippedReason=short_followup_active_topic latestIntent=${latestIntent}`,
+          `kbSkip: conversationId=${conversationId} kbSkippedReason=${kbSkippedReason} routingIntent=${routingIntent}`,
         );
         retrievalMeta = {
           chunksReturned: 0,
@@ -341,17 +368,17 @@ export class ConversationOrchestrationService {
           retrievalMode: 'hybrid',
           topScore: null,
           kbQuery: retrieveQuery.slice(0, 240),
-          kbSkippedReason: 'short_followup_active_topic',
+          kbSkippedReason,
         };
       } else {
         const retrieved = await this.retrieveKbContext(
           input,
           conversationId,
-          latestIntent,
+          routingIntent,
           {
             retrieveQuery,
             menuKbAnchor,
-            kbFilterIntent: usePermissiveKbFilter ? 'UNKNOWN' : latestIntent,
+            kbFilterIntent: usePermissiveKbFilter ? 'UNKNOWN' : routingIntent,
             kbFilterUserMessage: usePermissiveKbFilter
               ? batchSummary.combinedText
               : (input.incomingMessage.messageContent ?? '').trim(),
@@ -368,10 +395,10 @@ export class ConversationOrchestrationService {
         this.logger.warn(msg),
       );
       let kbRanked = stripInternalGuidanceFromChunks(kbInterpreted);
-      if (shouldCurateMenuKbContext({ latestIntent, menuKbAnchor })) {
+      if (shouldCurateMenuKbContext({ latestIntent: routingIntent, menuKbAnchor })) {
         kbRanked = prepareCustomerFacingMenuKb(kbRanked, {
           latestUserMessage: latestMsg,
-          latestIntent,
+          latestIntent: routingIntent,
           menuAnchorLabel: menuKbAnchor,
         });
       }
@@ -394,8 +421,13 @@ export class ConversationOrchestrationService {
         if (!acc) return raw;
         return Date.parse(raw) > Date.parse(acc) ? raw : acc;
       }, null);
+      const optionMenuSourceExcerpt =
+        deterministicOptionPick && optionLetterToken
+          ? this.sliceLastAssistantContent(memory.entries)
+          : undefined;
+
       const policyOutcome = this.conversationPolicy.evaluate({
-        intent: latestIntent,
+        intent: routingIntent,
         incomingRaw: latestMsg,
         memory: memory.entries,
         policyState,
@@ -404,6 +436,7 @@ export class ConversationOrchestrationService {
         promptConfigUpdatedAtIso: input.promptConfig?.updatedAt ?? null,
         kbDocumentUpdatedAtIso: latestKbDocumentUpdatedAt,
         currentTenantId: input.tenantId ?? null,
+        optionPickResolvedWithoutKb: Boolean(deterministicOptionPick && optionLetterToken),
       });
       const kbChunks = policyOutcome.kbChunks;
 
@@ -470,6 +503,7 @@ export class ConversationOrchestrationService {
           handoverCapability: input.tenant?.ghlLocationId?.trim()
             ? 'tag_and_notify'
             : 'collect_details_only',
+          ...(optionMenuSourceExcerpt ? { optionMenuSourceExcerpt } : {}),
         },
       });
       const plan_reply_ms = Math.round(performance.now() - planPerf0);
@@ -520,7 +554,7 @@ export class ConversationOrchestrationService {
       const orchestration_reply_ms = Date.now() - orchWallStartReplyPath;
       this.logger.log(
         `replyPipelineTiming: conversationId=${conversationId} ` +
-          `batch_to_orchestration_start_ms=${ingress?.batchToOrchestrationStartMs ?? 'na'} ` +
+          `orchestrate_queue_wait_ms=${ingress?.orchestrateQueueWaitMs ?? 'na'} ` +
           `debounce_ms=${ingress?.debounceConfiguredMs ?? 'na'} ` +
           `memory_load_ms=${memory_load_ms} kb_retrieval_ms=${kb_retrieval_ms} prompt_build_ms=${prompt_build_ms} ` +
           `routing_ms=${routing_ms} plan_reply_ms=${plan_reply_ms} orchestration_reply_ms=${orchestration_reply_ms}`,
@@ -676,6 +710,16 @@ export class ConversationOrchestrationService {
    * Retrieve KB context for the incoming user message.
    * Returns { chunks, meta } — chunks may be empty even when meta is non-null.
    */
+  private sliceLastAssistantContent(entries: MemoryEntry[], maxChars = 900): string {
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const e = entries[i]!;
+      if (e.role === 'assistant' && String(e.content ?? '').trim()) {
+        return String(e.content).trim().slice(0, maxChars);
+      }
+    }
+    return '';
+  }
+
   private async persistConversationMetadata(
     conversationId: string,
     metadata: Record<string, unknown>,

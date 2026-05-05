@@ -32,10 +32,10 @@ const RE_LOCATION = /\b(where\s*(are|is|do)|address|location|directions|map|find
 const RE_CONFIRM = /^(yes|yeah|yep|yup|sure|ok|okay|please\s*do|go\s*ahead)\b[!?.\s]*$/i;
 const RE_REJECT = /^(no|nope|nah|don'?t|cancel|stop)\b/i;
 
-/** Single letter A–D or 1–4 only (selection), optional punctuation */
-const RE_SHORT_LETTER = /^[a-dA-D][\s!.?]*$/;
-const RE_SHORT_DIGIT = /^[1-4][\s!.?]*$/;
-const RE_OPTION_WORD = /\b(option\s*[abcd1-4]|choice\s*[abcd1-4])\b/i;
+/** Single letter A–H or 1–8 (aligned with option memory / resolveShortSelection), optional punctuation */
+const RE_SHORT_LETTER = /^[a-hA-H][\s!.?]*$/;
+const RE_SHORT_DIGIT = /^[1-8][\s!.?]*$/;
+const RE_OPTION_WORD = /\b(option\s*[a-hA-H1-8]|choice\s*[a-hA-H1-8])\b/i;
 const RE_FIRST_LAST = /\b(first|last)\s*(one|option|choice)?\b/i;
 
 export function classifyConversationIntent(message: string): ConversationIntent {

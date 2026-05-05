@@ -19,7 +19,8 @@ import {
   filterInboundRowsToBurstWindow,
   resolveInboundDebounceMs,
 } from '../../lib/inbound-burst-batch';
-import { matchChatResetCommand } from '../../lib/chat-reset-command';
+import { excludeChatResetInboundRows, matchChatResetCommand } from '../../lib/chat-reset-command';
+import { computeOrchestrateQueueWaitMs } from '../../lib/orchestrate-queue-timing';
 import { ConversationResetService } from '../../modules/conversations/conversation-reset.service';
 import { InboundAutoTaggingService } from '../../modules/intent-tags/inbound-auto-tagging.service';
 import {
@@ -77,6 +78,8 @@ export interface OrchestrateDebouncedJobData {
   inboundWebhookReceivedAtIso?: string;
   /** Scheduled debounce delay for this orchestrate job (ms). */
   debounceConfiguredMs?: number;
+  /** `Date.now()` when the inbound worker enqueued this debounced orchestrate job. */
+  orchestrateEnqueuedAtMs?: number;
 }
 
 @Processor(QUEUES.INBOUND_MESSAGE_PROCESSOR)
@@ -209,7 +212,7 @@ export class InboundMessageProcessor extends WorkerHost {
           contactEmail,
           contactFieldsFromExtendedWebhook,
           pipelineWallStartMs: Date.now(),
-          batchToOrchestrationStartMs: null,
+          orchestrateQueueWaitMs: null,
           debounceConfiguredMs: 0,
         });
         if (webhookEventId) await this.updateWebhookEventStatus(webhookEventId, 'COMPLETED');
@@ -231,6 +234,7 @@ export class InboundMessageProcessor extends WorkerHost {
       }
 
       const { debounceMs, debounceSource } = resolveInboundDebounceMs();
+      const orchestrateEnqueuedAtMs = Date.now();
 
       await this.inboundQueue.add(
         'orchestrate',
@@ -248,6 +252,7 @@ export class InboundMessageProcessor extends WorkerHost {
           contactFieldsFromExtendedWebhook,
           inboundWebhookReceivedAtIso: timestamp,
           debounceConfiguredMs: debounceMs,
+          orchestrateEnqueuedAtMs,
         } satisfies OrchestrateDebouncedJobData,
         {
           delay: debounceMs,
@@ -827,6 +832,7 @@ export class InboundMessageProcessor extends WorkerHost {
       contactEmail,
       contactFieldsFromExtendedWebhook,
       debounceConfiguredMs,
+      orchestrateEnqueuedAtMs,
     } = job.data;
 
     const { data: convRow, error: cErr } = await this.supabase
@@ -847,24 +853,23 @@ export class InboundMessageProcessor extends WorkerHost {
     }
 
     const pipelineWallStartMs = Date.now();
-    const recentBatchWrap = await this.fetchRecentInboundBatch(conversationId);
-    const recentBatch = recentBatchWrap.texts;
-    const latestText = recentBatch.length ? recentBatch[recentBatch.length - 1]! : '';
-    const newestCreated = recentBatchWrap.newestInboundCreatedAt;
-    const newestParse = newestCreated ? Date.parse(newestCreated) : NaN;
-    const batchToOrchestrationStartMs = Number.isFinite(newestParse)
-      ? pipelineWallStartMs - newestParse
-      : null;
+    const orchestrateQueueWaitMs = computeOrchestrateQueueWaitMs(
+      pipelineWallStartMs,
+      orchestrateEnqueuedAtMs,
+    );
+    const { orchestrationBatch, resetDetectionBatch } = await this.fetchRecentInboundBatches(conversationId);
+    const latestText = orchestrationBatch.length ? orchestrationBatch[orchestrationBatch.length - 1]! : '';
+
     this.logger.log(
-      `inboundOrchIngress: conversationId=${conversationId} batch_to_orchestration_start_ms=${batchToOrchestrationStartMs ?? 'na'} debounce_ms=${debounceConfiguredMs ?? 'na'}`,
+      `inboundOrchIngress: conversationId=${conversationId} orchestrate_queue_wait_ms=${orchestrateQueueWaitMs ?? 'na'} debounce_ms=${debounceConfiguredMs ?? 'na'}`,
     );
 
     const latestIntent = latestText ? classifyConversationIntent(latestText) : 'UNKNOWN';
-    const combinedText = recentBatch.join('\n\n').trim();
+    const combinedText = orchestrationBatch.join('\n\n').trim();
     this.logger.log(
-      `Debounce processing batch: conversationId=${conversationId}, inboundBatchCount=${recentBatch.length}, ` +
-        `uniqueProviderMessageCount=${new Set(recentBatch).size}, latestIntent=${latestIntent}, ` +
-        `orderedMessagesPreview=${JSON.stringify(recentBatch.map(t => t.slice(0, 100)))} ` +
+      `Debounce processing batch: conversationId=${conversationId}, inboundBatchCount=${orchestrationBatch.length}, ` +
+        `uniqueProviderMessageCount=${new Set(orchestrationBatch).size}, latestIntent=${latestIntent}, ` +
+        `orderedMessagesPreview=${JSON.stringify(orchestrationBatch.map(t => t.slice(0, 100)))} ` +
         `combinedTextPreviewLen=${combinedText.length}`,
     );
 
@@ -876,13 +881,14 @@ export class InboundMessageProcessor extends WorkerHost {
       ghlConversationId,
       webhookEventId,
       latestInboundText: latestText,
-      recentInboundBatch: recentBatch,
+      recentInboundBatch: orchestrationBatch,
+      resetDetectionBatch,
       contactDisplayName,
       contactPhone,
       contactEmail,
       contactFieldsFromExtendedWebhook,
       pipelineWallStartMs,
-      batchToOrchestrationStartMs,
+      orchestrateQueueWaitMs,
       debounceConfiguredMs: debounceConfiguredMs ?? null,
     });
   }
@@ -896,12 +902,14 @@ export class InboundMessageProcessor extends WorkerHost {
     webhookEventId?: string;
     latestInboundText: string;
     recentInboundBatch?: string[];
+    /** Raw burst-window lines (oldest→newest), including `/new`, so trailing reset commands still run */
+    resetDetectionBatch?: string[];
     contactDisplayName?: string;
     contactPhone?: string;
     contactEmail?: string;
     contactFieldsFromExtendedWebhook?: boolean;
     pipelineWallStartMs?: number;
-    batchToOrchestrationStartMs?: number | null;
+    orchestrateQueueWaitMs?: number | null;
     debounceConfiguredMs?: number | null;
   }): Promise<void> {
     const {
@@ -913,12 +921,13 @@ export class InboundMessageProcessor extends WorkerHost {
       webhookEventId,
       latestInboundText,
       recentInboundBatch,
+      resetDetectionBatch,
       contactDisplayName,
       contactPhone,
       contactEmail,
       contactFieldsFromExtendedWebhook,
       pipelineWallStartMs,
-      batchToOrchestrationStartMs,
+      orchestrateQueueWaitMs,
       debounceConfiguredMs,
     } = ctx;
 
@@ -930,6 +939,7 @@ export class InboundMessageProcessor extends WorkerHost {
         ghlContactId,
         latestInboundText,
         recentInboundBatch,
+        resetDetectionBatch,
       })
     ) {
       this.logger.log(`Orchestration skipped (chat reset command): conversationId=${conversationId}`);
@@ -994,7 +1004,7 @@ export class InboundMessageProcessor extends WorkerHost {
       conversation: conversationRecord ?? undefined,
       ...(recentInboundBatch?.length ? { recentInboundBatch } : {}),
       orchestrationIngressTimings: {
-        batchToOrchestrationStartMs: batchToOrchestrationStartMs ?? null,
+        orchestrateQueueWaitMs: orchestrateQueueWaitMs ?? null,
         debounceConfiguredMs: debounceConfiguredMs ?? null,
       },
     };
@@ -1041,11 +1051,14 @@ export class InboundMessageProcessor extends WorkerHost {
     ghlContactId: string;
     latestInboundText: string;
     recentInboundBatch?: string[];
+    resetDetectionBatch?: string[];
   }): Promise<boolean> {
     const latestTrimmed =
-      params.recentInboundBatch && params.recentInboundBatch.length > 0
-        ? String(params.recentInboundBatch[params.recentInboundBatch.length - 1] ?? '').trim()
-        : String(params.latestInboundText ?? '').trim();
+      params.resetDetectionBatch && params.resetDetectionBatch.length > 0
+        ? String(params.resetDetectionBatch[params.resetDetectionBatch.length - 1] ?? '').trim()
+        : params.recentInboundBatch && params.recentInboundBatch.length > 0
+          ? String(params.recentInboundBatch[params.recentInboundBatch.length - 1] ?? '').trim()
+          : String(params.latestInboundText ?? '').trim();
 
     const cmd = matchChatResetCommand(latestTrimmed);
     if (!cmd) return false;
@@ -1110,9 +1123,9 @@ export class InboundMessageProcessor extends WorkerHost {
     return true;
   }
 
-  private async fetchRecentInboundBatch(conversationId: string): Promise<{
-    texts: string[];
-    newestInboundCreatedAt: string | null;
+  private async fetchRecentInboundBatches(conversationId: string): Promise<{
+    orchestrationBatch: string[];
+    resetDetectionBatch: string[];
   }> {
     const { data, error } = await this.supabase
       .from('messages')
@@ -1122,14 +1135,14 @@ export class InboundMessageProcessor extends WorkerHost {
       .eq('sender', 'CONTACT')
       .order('created_at', { ascending: false })
       .limit(50);
-    if (error || !data?.length) return { texts: [], newestInboundCreatedAt: null };
+    if (error || !data?.length) {
+      return { orchestrationBatch: [], resetDetectionBatch: [] };
+    }
     const rows = data as { created_at: string; content?: string | null }[];
-    const newestInboundCreatedAt =
-      rows[0]?.created_at != null ? String(rows[0].created_at) : null;
-    return {
-      texts: filterInboundRowsToBurstWindow(rows),
-      newestInboundCreatedAt,
-    };
+    const resetDetectionBatch = filterInboundRowsToBurstWindow(rows);
+    const withoutResetCmd = excludeChatResetInboundRows(rows);
+    const orchestrationBatch = filterInboundRowsToBurstWindow(withoutResetCmd);
+    return { orchestrationBatch, resetDetectionBatch };
   }
 
   private async findTenantByLocationId(locationId: string): Promise<{ id: string } | null> {

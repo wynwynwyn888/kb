@@ -31,38 +31,183 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-function extractMessagesArray(payload: unknown): Record<string, unknown>[] {
-  if (!payload || typeof payload !== 'object') return [];
-  const root = payload as Record<string, unknown>;
-  const m = root['messages'];
-  if (!Array.isArray(m)) return [];
-  return m.filter((x): x is Record<string, unknown> => Boolean(x) && typeof x === 'object');
+function asRecord(v: unknown): Record<string, unknown> | null {
+  return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+}
+
+function asRecordArray(v: unknown): Record<string, unknown>[] {
+  if (!Array.isArray(v)) return [];
+  return v.filter((x): x is Record<string, unknown> => Boolean(asRecord(x)));
+}
+
+function extractMessagesArray(payload: unknown): {
+  rows: Record<string, unknown>[];
+  detectedCollectionPath: string;
+} {
+  const root = asRecord(payload);
+  if (!root) return { rows: [], detectedCollectionPath: 'none' };
+
+  const pathCandidates: Array<{ path: string; value: unknown }> = [
+    { path: 'messages', value: root['messages'] },
+    { path: 'data.messages', value: asRecord(root['data'])?.['messages'] },
+    {
+      path: 'data.conversation.messages',
+      value: asRecord(asRecord(root['data'])?.['conversation'])?.['messages'],
+    },
+    { path: 'conversation.messages', value: asRecord(root['conversation'])?.['messages'] },
+    { path: 'data.items', value: asRecord(root['data'])?.['items'] },
+    { path: 'items', value: root['items'] },
+    { path: 'data.results', value: asRecord(root['data'])?.['results'] },
+    { path: 'results', value: root['results'] },
+  ];
+
+  for (const p of pathCandidates) {
+    const rows = asRecordArray(p.value);
+    if (rows.length > 0) return { rows, detectedCollectionPath: p.path };
+  }
+  return { rows: [], detectedCollectionPath: 'none' };
+}
+
+function firstNonEmptyString(values: unknown[]): string {
+  for (const v of values) {
+    if (typeof v === 'string' && v.trim()) return v.trim();
+  }
+  return '';
+}
+
+function extractBody(row: Record<string, unknown>): string {
+  const messageObj = asRecord(row['message']);
+  const payloadObj = asRecord(row['payload']);
+  return firstNonEmptyString([
+    row['body'],
+    row['message'],
+    row['text'],
+    row['content'],
+    messageObj?.['body'],
+    messageObj?.['text'],
+    messageObj?.['content'],
+    payloadObj?.['body'],
+    payloadObj?.['message'],
+  ]);
+}
+
+function hasAudioHintInString(v: string): boolean {
+  const s = v.toLowerCase();
+  return (
+    s.includes('audio') ||
+    s.includes('voice') ||
+    /\.(m4a|mp3|wav|ogg|oga|aac|amr|webm|opus|aiff?)(\?|#|$)/i.test(s)
+  );
+}
+
+function attachmentMediaAudioHint(row: Record<string, unknown>): {
+  isCandidate: boolean;
+  hasAttachments: boolean;
+  attachmentCount: number;
+  hasMedia: boolean;
+  mediaKeyNodeCount: number;
+} {
+  const attachments = row['attachments'];
+  const media = row['media'];
+  let attachmentCount = 0;
+  let hasAttachments = false;
+  let hasMedia = false;
+  let mediaKeyNodeCount = 0;
+  let audioHint = false;
+
+  if (Array.isArray(attachments)) {
+    hasAttachments = true;
+    attachmentCount = attachments.length;
+    for (const item of attachments) {
+      const r = asRecord(item);
+      if (!r) continue;
+      const mime = String(r['contentType'] ?? r['mimeType'] ?? '').toLowerCase();
+      const name = String(r['name'] ?? r['filename'] ?? r['fileName'] ?? '');
+      const url = String(r['url'] ?? r['mediaUrl'] ?? r['fileUrl'] ?? '');
+      if (mime.startsWith('audio/') || hasAudioHintInString(name) || hasAudioHintInString(url)) {
+        audioHint = true;
+      }
+    }
+  }
+
+  if (media !== undefined && media !== null) {
+    hasMedia = true;
+    if (Array.isArray(media)) {
+      mediaKeyNodeCount = media.length;
+      for (const item of media) {
+        const r = asRecord(item);
+        if (!r) continue;
+        const mime = String(r['contentType'] ?? r['mimeType'] ?? '').toLowerCase();
+        const name = String(r['name'] ?? r['filename'] ?? r['fileName'] ?? '');
+        const url = String(r['url'] ?? r['mediaUrl'] ?? r['fileUrl'] ?? '');
+        if (mime.startsWith('audio/') || hasAudioHintInString(name) || hasAudioHintInString(url)) {
+          audioHint = true;
+        }
+      }
+    } else {
+      const r = asRecord(media);
+      if (r) {
+        mediaKeyNodeCount = Object.keys(r).length > 0 ? 1 : 0;
+        const mime = String(r['contentType'] ?? r['mimeType'] ?? '').toLowerCase();
+        const name = String(r['name'] ?? r['filename'] ?? r['fileName'] ?? '');
+        const url = String(r['url'] ?? r['mediaUrl'] ?? r['fileUrl'] ?? '');
+        if (mime.startsWith('audio/') || hasAudioHintInString(name) || hasAudioHintInString(url)) {
+          audioHint = true;
+        }
+      }
+    }
+  }
+
+  return { isCandidate: audioHint, hasAttachments, attachmentCount, hasMedia, mediaKeyNodeCount };
+}
+
+function extractDirectionSource(row: Record<string, unknown>): string {
+  return firstNonEmptyString([row['direction'], row['source'], row['from']]).toLowerCase();
+}
+
+function isInboundFromDirectionSource(directionSourceLower: string): boolean {
+  return /(inbound|customer|contact|user|client)/i.test(directionSourceLower);
+}
+
+function redactedBodyPreview(v: string): string {
+  return v
+    .replace(/https?:\/\/[^\s"'<>]+/gi, '[url]')
+    .replace(/\bsk-[a-zA-Z0-9_-]{10,}\b/gi, '[token]')
+    .slice(0, 120);
 }
 
 /** Inbound-only: placeholder body classification or obvious audio-ish GHL rows. */
 function isInboundVoicePlaceholderCandidate(row: Record<string, unknown>): boolean {
-  const dir = String(row['direction'] ?? '').trim().toLowerCase();
-  if (dir !== 'inbound') return false;
+  const directionSource = extractDirectionSource(row);
+  if (!isInboundFromDirectionSource(directionSource)) return false;
 
-  const body = String(row['body'] ?? row['text'] ?? row['message'] ?? '');
+  const body = extractBody(row);
   const cls = classifyGhlAudioPlaceholderBody(body);
   if (cls === 'AUDIO' || cls === 'VOICE') {
     return true;
   }
 
-  /** Native voice/audio rows while body is empty or non-text */
-  const mtRaw = row['messageType'] ?? row['type'];
-  const mt = typeof mtRaw === 'string' ? mtRaw : typeof mtRaw === 'number' ? String(mtRaw) : '';
-  if (/voice|audio|VOICE|AUDIO|VoiceMessage|AudioMessage/i.test(mt)) return true;
+  const typeBundle = [
+    String(row['type'] ?? ''),
+    String(row['messageType'] ?? ''),
+    String(row['contentType'] ?? ''),
+    String(row['source'] ?? ''),
+  ].join(' ');
+  if (/voice|audio|VoiceMessage|AudioMessage/i.test(typeBundle)) return true;
 
-  const ct = String(row['contentType'] ?? '').toLowerCase();
-  if (ct.startsWith('audio/')) return true;
+  const hints = attachmentMediaAudioHint(row);
+  if (hints.isCandidate) return true;
 
   return false;
 }
 
 function resolveMessageRowId(row: Record<string, unknown>): string | null {
-  const id = row['id'] ?? row['messageId'];
+  const id =
+    row['id'] ??
+    row['messageId'] ??
+    row['message_id'] ??
+    row['conversationMessageId'] ??
+    row['_id'];
   if (typeof id === 'string' && id.trim()) return id.trim();
   return null;
 }
@@ -80,6 +225,37 @@ function compareByRecencyNearWebhook(
   const da = Math.abs(ta - webhookMs);
   const db = Math.abs(tb - webhookMs);
   return da - db;
+}
+
+function safeMessageSample(row: Record<string, unknown>, index: number): Record<string, unknown> {
+  const id = resolveMessageRowId(row);
+  const body = extractBody(row);
+  const bodyKind = classifyGhlAudioPlaceholderBody(body);
+  const hints = attachmentMediaAudioHint(row);
+  const dateAdded = firstNonEmptyString([row['dateAdded'], row['createdAt'], row['timestamp']]);
+  return {
+    index,
+    idPresent: Boolean(id),
+    idLen: id ? id.length : undefined,
+    direction: firstNonEmptyString([row['direction']]),
+    type: firstNonEmptyString([row['type']]),
+    messageType: firstNonEmptyString([row['messageType']]),
+    contentType: firstNonEmptyString([row['contentType']]),
+    source: firstNonEmptyString([row['source']]),
+    bodyShape: {
+      length: body.length,
+      startsWithCharCode: body.length ? body.charCodeAt(0) : 0,
+      endsWithCharCode: body.length ? body.charCodeAt(body.length - 1) : 0,
+      normalizedPreview: redactedBodyPreview(body),
+      bodyPlaceholderKind: bodyKind,
+    },
+    keySample: Object.keys(row).slice(0, 20),
+    hasAttachments: hints.hasAttachments,
+    attachmentCount: hints.attachmentCount,
+    hasMedia: hints.hasMedia,
+    mediaKeyNodeCount: hints.mediaKeyNodeCount,
+    dateAdded: dateAdded ? dateAdded.slice(0, 25) : undefined,
+  };
 }
 
 @Injectable()
@@ -169,17 +345,35 @@ export class GhlVoiceMessageDiscoveryService {
         continue;
       }
 
-      const rows = extractMessagesArray(listResult.json);
+      const top = asRecord(listResult.json) ?? {};
+      const extracted = extractMessagesArray(listResult.json);
+      const rows = extracted.rows;
       const candidates = rows.filter((r) => isInboundVoicePlaceholderCandidate(r));
       lastCandidateCount = candidates.length;
+      const inboundCount = rows.filter((r) =>
+        isInboundFromDirectionSource(extractDirectionSource(r)),
+      ).length;
 
       this.logger.log(
         JSON.stringify({
           voiceMessageDiscoveryAttempt: true,
           attempt,
+          responseTopLevelKeys: Object.keys(top).slice(0, 30),
+          detectedCollectionPath: extracted.detectedCollectionPath,
+          rawItemCount: rows.length,
           candidateCount: lastCandidateCount,
+          latestMessageSamples: rows.slice(0, 5).map((r, i) => safeMessageSample(r, i)),
         }),
       );
+
+      if (lastCandidateCount === 0 && inboundCount > 0) {
+        this.logger.warn(
+          JSON.stringify({
+            voiceMessageDiscoveryNoAudioCandidateButRecentInbound: true,
+            recentInboundCount: inboundCount,
+          }),
+        );
+      }
 
       candidates.sort((a, b) => compareByRecencyNearWebhook(a, b, webhookMs));
 

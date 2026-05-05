@@ -156,6 +156,12 @@ describe('InboundMessageProcessor (happy path)', () => {
         reason: 'disabled',
       })),
     };
+    const mockGhlConversationDiscovery = {
+      discoverConversationIdByContact: jestGlobal.fn(async () => ({
+        ok: false as const,
+        reason: 'disabled',
+      })),
+    };
     processor = new InboundMessageProcessor(
       new OrchestrationService(),
       mockReset as never,
@@ -163,6 +169,7 @@ describe('InboundMessageProcessor (happy path)', () => {
       mockAudioTranscription as never,
       mockGhlRecordingFetch as never,
       mockGhlVoiceDiscovery as never,
+      mockGhlConversationDiscovery as never,
       { add: mockQueueAdd } as never,
       { add: mockQueueAdd } as never,
     );

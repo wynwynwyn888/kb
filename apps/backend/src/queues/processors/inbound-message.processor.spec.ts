@@ -82,6 +82,13 @@ const mockGhlVoiceMessageDiscovery = {
   })),
 };
 
+const mockGhlVoiceConversationDiscovery = {
+  discoverConversationIdByContact: jestGlobal.fn(async () => ({
+    ok: false as const,
+    reason: 'test_skipped',
+  })),
+};
+
 const mockAudioTranscription = {
   transcribeRemoteMedia: jestGlobal.fn(async () => ({
     ok: true as const,
@@ -165,6 +172,8 @@ describe('InboundMessageProcessor', () => {
     delete process.env['GHL_VOICE_DISCOVER_MESSAGE_ID'];
     delete process.env['GHL_VOICE_DISCOVER_DELAY_MS'];
     delete process.env['GHL_VOICE_DISCOVER_MAX_ATTEMPTS'];
+    delete process.env['GHL_VOICE_DISCOVER_CONVERSATION_ID'];
+    delete process.env['GHL_VOICE_DISCOVER_CONVERSATION_LIMIT'];
     orchestrate.mockResolvedValue({ outcome: 'SKIP' });
     mockAudioTranscription.transcribeRemoteMedia.mockImplementation(async () => ({
       ok: true as const,
@@ -180,6 +189,10 @@ describe('InboundMessageProcessor', () => {
       ok: false as const,
       reason: 'test_skipped',
     }));
+    mockGhlVoiceConversationDiscovery.discoverConversationIdByContact.mockImplementation(async () => ({
+      ok: false as const,
+      reason: 'test_skipped',
+    }));
     processor = new InboundMessageProcessor(
       mockOrchestration as never,
       mockResetService as never,
@@ -187,6 +200,7 @@ describe('InboundMessageProcessor', () => {
       mockAudioTranscription as never,
       mockGhlVoiceRecordingFetch as never,
       mockGhlVoiceMessageDiscovery as never,
+      mockGhlVoiceConversationDiscovery as never,
       { add: mockSendBubbleQueueAdd } as never,
       { add: mockInboundQueueAdd } as never,
     );
@@ -1166,6 +1180,286 @@ describe('InboundMessageProcessor', () => {
     );
 
     expect(mockGhlVoiceMessageDiscovery.discoverVoicePlaceholderMessageId).not.toHaveBeenCalled();
+    expect(mockGhlVoiceConversationDiscovery.discoverConversationIdByContact).not.toHaveBeenCalled();
+  });
+
+  it('persist: Phase 1D no conversationId -> conversation+message discovery -> recording -> transcript', async () => {
+    process.env['GHL_VOICE_DISCOVER_CONVERSATION_ID'] = 'true';
+    process.env['GHL_VOICE_DISCOVER_CONVERSATION_LIMIT'] = '10';
+    process.env['GHL_VOICE_DISCOVER_MESSAGE_ID'] = 'true';
+    process.env['GHL_VOICE_DISCOVER_DELAY_MS'] = '0';
+
+    let inserted: Record<string, unknown> | null = null;
+    mockGhlVoiceConversationDiscovery.discoverConversationIdByContact.mockResolvedValue({
+      ok: true,
+      conversationId: 'disc_conv_1',
+      candidateCount: 3,
+    });
+    mockGhlVoiceMessageDiscovery.discoverVoicePlaceholderMessageId.mockResolvedValue({
+      ok: true,
+      messageId: 'disc_msg_1',
+      candidateCount: 2,
+    });
+    mockGhlVoiceRecordingFetch.tryFetchRecording.mockResolvedValue({
+      ok: true,
+      buffer: Buffer.from([5, 6]),
+      contentType: 'audio/mpeg',
+    });
+    mockAudioTranscription.transcribeAudioBuffer.mockResolvedValue({
+      ok: true as const,
+      transcript: 'phase1d transcript',
+      mediaBytes: 2,
+      contentType: 'audio/mpeg',
+    });
+
+    mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'tenants') {
+        return {
+          select: () => ({
+            eq: () => ({
+              single: async () => ({ data: { id: 'tenant-1' }, error: null }),
+            }),
+          }),
+        };
+      }
+      if (table === 'conversations') return makeConversationsTableMock({ id: CONV_ID });
+      if (table === 'messages') {
+        return {
+          insert: (row: Record<string, unknown>) => {
+            inserted = row;
+            return { error: null };
+          },
+        };
+      }
+      return {} as never;
+    });
+
+    await processor.process(
+      makeJob('persist', {
+        locationId: 'loc_1',
+        ghlConversationId: '',
+        ghlContactId: 'ct_1',
+        messageContent: VOICE_INBOUND_PLACEHOLDER_NO_MEDIA_USER_MESSAGE,
+        messageType: 'text',
+        timestamp: '2026-01-01T00:00:00Z',
+        smokeImmediate: false,
+        voiceInboundNeedsTranscribe: false,
+        voiceInboundAudioPlaceholderWithoutMediaUrl: true,
+        voiceInboundPlaceholderKind: 'AUDIO',
+        voiceInboundPlaceholderRawBody: '>AUDIO<',
+      }),
+    );
+
+    expect(mockGhlVoiceConversationDiscovery.discoverConversationIdByContact).toHaveBeenCalledWith({
+      tenantId: 'tenant-1',
+      locationId: 'loc_1',
+      contactId: 'ct_1',
+    });
+    expect(mockGhlVoiceMessageDiscovery.discoverVoicePlaceholderMessageId).toHaveBeenCalledWith(
+      expect.objectContaining({
+        conversationId: 'disc_conv_1',
+      }),
+    );
+    expect(mockGhlVoiceRecordingFetch.tryFetchRecording).toHaveBeenCalledWith({
+      tenantId: 'tenant-1',
+      locationId: 'loc_1',
+      messageId: 'disc_msg_1',
+    });
+    const meta = inserted?.['metadata'] as Record<string, unknown> | undefined;
+    expect(inserted?.['content']).toBe('phase1d transcript');
+    expect(meta?.['voiceRetrievalMethod']).toBe(
+      'ghl_conversation_discovery_message_discovery_recording_fetch',
+    );
+    expect(meta?.['voiceDiscoveredConversationId']).toBe(true);
+    expect(meta?.['voiceDiscoveredMessageId']).toBe(true);
+    expect(meta?.['voiceTranscriptionStatus']).toBe('succeeded');
+  });
+
+  it('persist: conversation discovery none -> fallback with conversation_id_not_found', async () => {
+    process.env['GHL_VOICE_DISCOVER_CONVERSATION_ID'] = 'true';
+    process.env['GHL_VOICE_DISCOVER_MESSAGE_ID'] = 'true';
+    process.env['GHL_VOICE_DISCOVER_DELAY_MS'] = '0';
+
+    let inserted: Record<string, unknown> | null = null;
+    mockGhlVoiceConversationDiscovery.discoverConversationIdByContact.mockResolvedValue({
+      ok: false,
+      reason: 'conversation_id_not_found',
+      candidateCount: 0,
+    });
+
+    mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'tenants') {
+        return {
+          select: () => ({
+            eq: () => ({
+              single: async () => ({ data: { id: 'tenant-1' }, error: null }),
+            }),
+          }),
+        };
+      }
+      if (table === 'conversations') return makeConversationsTableMock({ id: CONV_ID });
+      if (table === 'messages') {
+        return {
+          insert: (row: Record<string, unknown>) => {
+            inserted = row;
+            return { error: null };
+          },
+        };
+      }
+      return {} as never;
+    });
+
+    await processor.process(
+      makeJob('persist', {
+        locationId: 'loc_1',
+        ghlConversationId: '',
+        ghlContactId: 'ct_1',
+        messageContent: VOICE_INBOUND_PLACEHOLDER_NO_MEDIA_USER_MESSAGE,
+        messageType: 'text',
+        timestamp: '2026-01-01T00:00:00Z',
+        smokeImmediate: false,
+        voiceInboundNeedsTranscribe: false,
+        voiceInboundAudioPlaceholderWithoutMediaUrl: true,
+        voiceInboundPlaceholderKind: 'AUDIO',
+      }),
+    );
+
+    const meta = inserted?.['metadata'] as Record<string, unknown> | undefined;
+    expect(meta?.['voiceDiscoveredConversationId']).toBe(false);
+    expect(meta?.['voiceDiscoveredMessageId']).toBe(false);
+    expect(meta?.['voiceRetrievalFailureReason']).toBe('conversation_id_not_found');
+    expect(meta?.['voiceTranscriptionStatus']).toBe('media_url_missing');
+  });
+
+  it('persist: conversation discovery 401/403 fallback safely', async () => {
+    process.env['GHL_VOICE_DISCOVER_CONVERSATION_ID'] = 'true';
+    process.env['GHL_VOICE_DISCOVER_MESSAGE_ID'] = 'true';
+    process.env['GHL_VOICE_DISCOVER_DELAY_MS'] = '0';
+
+    let inserted: Record<string, unknown> | null = null;
+    mockGhlVoiceConversationDiscovery.discoverConversationIdByContact.mockResolvedValue({
+      ok: false,
+      reason: 'http_401',
+      candidateCount: 0,
+    });
+
+    mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'tenants') {
+        return {
+          select: () => ({
+            eq: () => ({
+              single: async () => ({ data: { id: 'tenant-1' }, error: null }),
+            }),
+          }),
+        };
+      }
+      if (table === 'conversations') return makeConversationsTableMock({ id: CONV_ID });
+      if (table === 'messages') {
+        return {
+          insert: (row: Record<string, unknown>) => {
+            inserted = row;
+            return { error: null };
+          },
+        };
+      }
+      return {} as never;
+    });
+
+    await processor.process(
+      makeJob('persist', {
+        locationId: 'loc_1',
+        ghlConversationId: '',
+        ghlContactId: 'ct_1',
+        messageContent: VOICE_INBOUND_PLACEHOLDER_NO_MEDIA_USER_MESSAGE,
+        messageType: 'text',
+        timestamp: '2026-01-01T00:00:00Z',
+        smokeImmediate: false,
+        voiceInboundNeedsTranscribe: false,
+        voiceInboundAudioPlaceholderWithoutMediaUrl: true,
+        voiceInboundPlaceholderKind: 'VOICE',
+      }),
+    );
+
+    const meta = inserted?.['metadata'] as Record<string, unknown> | undefined;
+    expect(meta?.['voiceRetrievalFailureReason']).toBe('http_401');
+    expect(meta?.['voiceTranscriptionStatus']).toBe('media_url_missing');
+  });
+
+  it('persist: conversationId already present -> conversation discovery not called', async () => {
+    process.env['GHL_VOICE_DISCOVER_CONVERSATION_ID'] = 'true';
+    process.env['GHL_VOICE_DISCOVER_MESSAGE_ID'] = 'true';
+    process.env['GHL_VOICE_DISCOVER_DELAY_MS'] = '0';
+
+    mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'tenants') {
+        return {
+          select: () => ({
+            eq: () => ({
+              single: async () => ({ data: { id: 'tenant-1' }, error: null }),
+            }),
+          }),
+        };
+      }
+      if (table === 'conversations') return makeConversationsTableMock({ id: CONV_ID });
+      if (table === 'messages') return { insert: () => ({ error: null }) };
+      return {} as never;
+    });
+
+    await processor.process(
+      makeJob('persist', {
+        locationId: 'loc_1',
+        ghlConversationId: 'existing_conv',
+        ghlContactId: 'ct_1',
+        messageContent: VOICE_INBOUND_PLACEHOLDER_NO_MEDIA_USER_MESSAGE,
+        messageType: 'text',
+        timestamp: '2026-01-01T00:00:00Z',
+        smokeImmediate: false,
+        voiceInboundNeedsTranscribe: false,
+        voiceInboundAudioPlaceholderWithoutMediaUrl: true,
+        voiceInboundPlaceholderKind: 'AUDIO',
+      }),
+    );
+
+    expect(mockGhlVoiceConversationDiscovery.discoverConversationIdByContact).not.toHaveBeenCalled();
+  });
+
+  it('persist: placeholder with media URL does not run conversation discovery', async () => {
+    process.env['GHL_VOICE_DISCOVER_CONVERSATION_ID'] = 'true';
+    process.env['GHL_VOICE_DISCOVER_MESSAGE_ID'] = 'true';
+    process.env['GHL_VOICE_DISCOVER_DELAY_MS'] = '0';
+
+    mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'tenants') {
+        return {
+          select: () => ({
+            eq: () => ({
+              single: async () => ({ data: { id: 'tenant-1' }, error: null }),
+            }),
+          }),
+        };
+      }
+      if (table === 'conversations') return makeConversationsTableMock({ id: CONV_ID });
+      if (table === 'messages') return { insert: () => ({ error: null }) };
+      return {} as never;
+    });
+
+    await processor.process(
+      makeJob('persist', {
+        locationId: 'loc_1',
+        ghlConversationId: '',
+        ghlContactId: 'ct_1',
+        messageContent: VOICE_INBOUND_PLACEHOLDER_NO_MEDIA_USER_MESSAGE,
+        messageType: 'text',
+        timestamp: '2026-01-01T00:00:00Z',
+        smokeImmediate: false,
+        voiceInboundNeedsTranscribe: false,
+        voiceInboundAudioPlaceholderWithoutMediaUrl: true,
+        voiceInboundPlaceholderKind: 'AUDIO',
+        audioMediaUrl: 'https://cdn.example.com/voice.m4a',
+      }),
+    );
+
+    expect(mockGhlVoiceConversationDiscovery.discoverConversationIdByContact).not.toHaveBeenCalled();
   });
 
   it('persist: placeholder with webhook messageId uses direct recording fetch, not discovery', async () => {

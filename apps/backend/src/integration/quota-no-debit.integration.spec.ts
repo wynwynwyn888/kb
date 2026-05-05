@@ -1,5 +1,7 @@
 import { jest as jestGlobal } from '@jest/globals';
 
+import { encrypt } from '../lib/encryption';
+import * as outboundCoalesce from '../lib/outbound-coalesce';
 import { OutboundSendService, SendSummary } from '../modules/outbound/outbound-send.service';
 import { createMockSupabase } from '../test/mock-supabase';
 
@@ -43,6 +45,10 @@ describe('Quota Debit Integration (OutboundSendService)', () => {
 
   beforeEach(() => {
     jestGlobal.clearAllMocks();
+    // Quota tests count per logical bubble / send call; disable coalescing here only.
+    jestGlobal
+      .spyOn(outboundCoalesce, 'maybeCoalesceOutboundBubbles')
+      .mockImplementation((bubbles) => bubbles);
     service = new OutboundSendService();
 
     // Mock credentials found
@@ -53,7 +59,12 @@ describe('Quota Debit Integration (OutboundSendService)', () => {
           select: () => ({
             eq: () => ({
               eq: () => ({
-                eq: () => ({ single: async () => ({ data: { private_token_encrypted: 'tok' }, error: null }) }),
+                eq: () => ({
+                  single: async () => ({
+                    data: { private_token_encrypted: encrypt('ghl-test-token') },
+                    error: null,
+                  }),
+                }),
               }),
             }),
           }),

@@ -7,6 +7,9 @@ import type {
   RoutingResponse,
   ResponseMode,
 } from '../orchestration/dto';
+import { extractSlotFromKb } from './kb-slot-extract';
+
+export { extractSlotFromKb } from './kb-slot-extract';
 
 const SIMPLE_ROUTE = 'gpt-4o-mini';
 const COMPLEX_ROUTE = 'gpt-4o';
@@ -75,6 +78,18 @@ export class AiRouterService {
 
     const tagsSuggested: string[] = [];
 
+    const extractedSlot =
+      bookingIntentDetected &&
+      Array.isArray(request.kbContext) &&
+      request.kbContext.length > 0
+        ? extractSlotFromKb(
+            request.kbContext.map((c) => ({
+              content: c.content,
+              metadata: c.metadata,
+            })),
+          )
+        : undefined;
+
     this.logger.log(
       `Routing: routingRecommendedModel=${recommendedModel}, mode=${responseMode}, ` +
         `confidence=${confidence}, reasoning=${reasoning}`,
@@ -89,6 +104,7 @@ export class AiRouterService {
       tagsSuggested,
       confidence,
       reasoning,
+      ...(extractedSlot ? { extractedSlot } : {}),
     };
   }
 }

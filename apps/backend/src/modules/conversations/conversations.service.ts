@@ -130,7 +130,7 @@ export class ConversationsService {
    */
   async updateConversationStatus(
     conversationId: string,
-    status: 'ACTIVE' | 'HANDOVER' | 'CLOSED' | 'PENDING',
+    status: 'ACTIVE' | 'HANDOVER' | 'CLOSED' | 'PENDING' | 'PAUSED',
   ): Promise<void> {
     const { error } = await this.supabase
       .from('conversations')
@@ -206,5 +206,92 @@ export class ConversationsService {
       handoverPausedBefore,
       handoverPausedAfter,
     };
+  }
+
+  /**
+   * Pause or resume AI automation for a conversation (distinct from handover).
+   * Appends a row to `conversation_automation_events` and updates `conversations.status`.
+   * @returns previous automation status, or null if the conversation row was not found
+   */
+  async setAutomationState(
+    conversationId: string,
+    newState: 'ACTIVE' | 'PAUSED',
+    actorId?: string | null,
+    actorEmail?: string | null,
+    reason?: string | null,
+  ): Promise<string | null> {
+    const { data: row, error: readError } = await this.supabase
+      .from('conversations')
+      .select('status')
+      .eq('id', conversationId)
+      .single();
+
+    if (readError && readError.code !== 'PGRST116') {
+      throw new Error(`Failed to read conversation: ${readError.message}`);
+    }
+
+    const missing = !row;
+    const previousState = missing ? null : String(row['status'] ?? null);
+
+    const { error: insertError } = await this.supabase
+      .from('conversation_automation_events')
+      .insert({
+        id: randomUUID(),
+        conversation_id: conversationId,
+        previous_state: previousState,
+        new_state: newState,
+        actor_id: actorId ?? null,
+        actor_email: actorEmail ?? null,
+        reason: reason ?? null,
+      });
+
+    if (insertError) {
+      throw new Error(`Failed to record automation event: ${insertError.message}`);
+    }
+
+    if (!missing) {
+      await this.updateConversationStatus(conversationId, newState);
+    }
+
+    return previousState;
+  }
+
+  /**
+   * Recent automation state transitions for a conversation (newest first).
+   */
+  async getAutomationEvents(conversationId: string): Promise<
+    Array<{
+      id: string;
+      previousState: string | null;
+      newState: string;
+      actorId: string | null;
+      actorEmail: string | null;
+      reason: string | null;
+      createdAt: string;
+    }>
+  > {
+    const { data, error } = await this.supabase
+      .from('conversation_automation_events')
+      .select('id, previous_state, new_state, actor_id, actor_email, reason, created_at')
+      .eq('conversation_id', conversationId)
+      .order('created_at', { ascending: false })
+      .limit(100);
+
+    if (error || !data) {
+      return [];
+    }
+
+    return (data as Record<string, unknown>[]).map((r) => ({
+      id: String(r['id']),
+      previousState: (r['previous_state'] as string | null) ?? null,
+      newState: String(r['new_state']),
+      actorId: (r['actor_id'] as string | null) ?? null,
+      actorEmail: (r['actor_email'] as string | null) ?? null,
+      reason: (r['reason'] as string | null) ?? null,
+      createdAt:
+        r['created_at'] instanceof Date
+          ? (r['created_at'] as Date).toISOString()
+          : String(r['created_at'] ?? ''),
+    }));
   }
 }

@@ -17,6 +17,8 @@ export interface SendBubbleJobData {
   contactId: string;
   ghlLocationId: string;
   replyPlanJson: string; // JSON-serialized ReplyDecision
+  /** Worker wall-clock start for downstream latency logs (omit for manual/controller enqueues). */
+  replyLatencyTrace?: { pipelineWallStartMs: number };
 }
 
 @Processor(QUEUES.SEND_BUBBLE)
@@ -35,7 +37,8 @@ export class SendBubbleProcessor extends WorkerHost {
   }
 
   async process(job: Job<SendBubbleJobData>): Promise<SendSummary> {
-    const { conversationId, tenantId, contactId, ghlLocationId, replyPlanJson } = job.data;
+    const { conversationId, tenantId, contactId, ghlLocationId, replyPlanJson, replyLatencyTrace } =
+      job.data;
 
     this.logger.log(
       `Send-bubble job started: conversationId=${conversationId}, tenantId=${tenantId}`,
@@ -53,12 +56,15 @@ export class SendBubbleProcessor extends WorkerHost {
       throw new Error(`Failed to parse reply plan JSON: ${message}`);
     }
 
+    const govStarted = Date.now();
     replyPlan = await this.outboundSafetyGovernor.applyOutboundGovernor(replyPlan, {
       conversationId,
       tenantId,
       contactId,
     });
+    const safety_governor_ms = Date.now() - govStarted;
 
+    const sendStarted = Date.now();
     const summary = await this.outboundSend.sendReply({
       tenantId,
       conversationId,
@@ -66,6 +72,15 @@ export class SendBubbleProcessor extends WorkerHost {
       replyPlan,
       ghlLocationId,
     });
+    const outbound_send_ms = Date.now() - sendStarted;
+
+    const total_backend_reply_ms = replyLatencyTrace?.pipelineWallStartMs
+      ? Date.now() - replyLatencyTrace.pipelineWallStartMs
+      : null;
+    this.logger.log(
+      `sendBubbleLatency: conversationId=${conversationId} safety_governor_ms=${safety_governor_ms} ` +
+        `outbound_send_ms=${outbound_send_ms} total_backend_reply_ms=${total_backend_reply_ms ?? 'na'}`,
+    );
 
     // Step 2: Persist handover state if reply plan is HANDOVER
     // Guard already blocks future inbound while an active HandoverEvent exists.

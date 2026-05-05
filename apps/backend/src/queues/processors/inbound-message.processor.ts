@@ -73,6 +73,10 @@ export interface OrchestrateDebouncedJobData {
   contactPhone?: string;
   contactEmail?: string;
   contactFieldsFromExtendedWebhook?: boolean;
+  /** Echo of inbound webhook `timestamp` field for ingress latency logs. */
+  inboundWebhookReceivedAtIso?: string;
+  /** Scheduled debounce delay for this orchestrate job (ms). */
+  debounceConfiguredMs?: number;
 }
 
 @Processor(QUEUES.INBOUND_MESSAGE_PROCESSOR)
@@ -184,6 +188,11 @@ export class InboundMessageProcessor extends WorkerHost {
       this.logger.log(
         `Inbound message stored: conversationId=${conversation.id}, messageType=${resolved.persistContentType}`,
       );
+      const webhookParsedAt = Date.parse(timestamp);
+      const webhook_to_persist_ms = Number.isFinite(webhookParsedAt) ? Date.now() - webhookParsedAt : null;
+      this.logger.log(
+        `inboundPersistTiming: conversationId=${conversation.id} webhook_to_persist_ms=${webhook_to_persist_ms ?? 'na'}`,
+      );
 
       if (smokeImmediate) {
         this.logger.log(`Debounce bypassed (smokeImmediate): conversationId=${conversation.id}`);
@@ -199,6 +208,9 @@ export class InboundMessageProcessor extends WorkerHost {
           contactPhone,
           contactEmail,
           contactFieldsFromExtendedWebhook,
+          pipelineWallStartMs: Date.now(),
+          batchToOrchestrationStartMs: null,
+          debounceConfiguredMs: 0,
         });
         if (webhookEventId) await this.updateWebhookEventStatus(webhookEventId, 'COMPLETED');
         return;
@@ -234,6 +246,8 @@ export class InboundMessageProcessor extends WorkerHost {
           contactPhone,
           contactEmail,
           contactFieldsFromExtendedWebhook,
+          inboundWebhookReceivedAtIso: timestamp,
+          debounceConfiguredMs: debounceMs,
         } satisfies OrchestrateDebouncedJobData,
         {
           delay: debounceMs,
@@ -812,6 +826,7 @@ export class InboundMessageProcessor extends WorkerHost {
       contactPhone,
       contactEmail,
       contactFieldsFromExtendedWebhook,
+      debounceConfiguredMs,
     } = job.data;
 
     const { data: convRow, error: cErr } = await this.supabase
@@ -831,8 +846,18 @@ export class InboundMessageProcessor extends WorkerHost {
       return;
     }
 
-    const recentBatch = await this.fetchRecentInboundBatch(conversationId);
+    const pipelineWallStartMs = Date.now();
+    const recentBatchWrap = await this.fetchRecentInboundBatch(conversationId);
+    const recentBatch = recentBatchWrap.texts;
     const latestText = recentBatch.length ? recentBatch[recentBatch.length - 1]! : '';
+    const newestCreated = recentBatchWrap.newestInboundCreatedAt;
+    const newestParse = newestCreated ? Date.parse(newestCreated) : NaN;
+    const batchToOrchestrationStartMs = Number.isFinite(newestParse)
+      ? pipelineWallStartMs - newestParse
+      : null;
+    this.logger.log(
+      `inboundOrchIngress: conversationId=${conversationId} batch_to_orchestration_start_ms=${batchToOrchestrationStartMs ?? 'na'} debounce_ms=${debounceConfiguredMs ?? 'na'}`,
+    );
 
     const latestIntent = latestText ? classifyConversationIntent(latestText) : 'UNKNOWN';
     const combinedText = recentBatch.join('\n\n').trim();
@@ -856,6 +881,9 @@ export class InboundMessageProcessor extends WorkerHost {
       contactPhone,
       contactEmail,
       contactFieldsFromExtendedWebhook,
+      pipelineWallStartMs,
+      batchToOrchestrationStartMs,
+      debounceConfiguredMs: debounceConfiguredMs ?? null,
     });
   }
 
@@ -872,6 +900,9 @@ export class InboundMessageProcessor extends WorkerHost {
     contactPhone?: string;
     contactEmail?: string;
     contactFieldsFromExtendedWebhook?: boolean;
+    pipelineWallStartMs?: number;
+    batchToOrchestrationStartMs?: number | null;
+    debounceConfiguredMs?: number | null;
   }): Promise<void> {
     const {
       tenantId,
@@ -886,6 +917,9 @@ export class InboundMessageProcessor extends WorkerHost {
       contactPhone,
       contactEmail,
       contactFieldsFromExtendedWebhook,
+      pipelineWallStartMs,
+      batchToOrchestrationStartMs,
+      debounceConfiguredMs,
     } = ctx;
 
     if (
@@ -907,19 +941,25 @@ export class InboundMessageProcessor extends WorkerHost {
         ? recentInboundBatch.join('\n\n').trim()
         : String(latestInboundText ?? '').trim();
 
-    try {
-      await this.inboundAutoTagging.evaluateAndApplyAutoTags({
+    const taggingStarted = Date.now();
+    void this.inboundAutoTagging
+      .evaluateAndApplyAutoTags({
         tenantId,
         conversationId,
         contactId: ghlContactId,
         ghlLocationId: locationId,
         messageText: messageTextForTags,
+      })
+      .then(() => {
+        this.logger.log(
+          `inboundAutoTaggingTiming: conversationId=${conversationId} auto_tagging_ms=${Date.now() - taggingStarted}`,
+        );
+      })
+      .catch((e: unknown) => {
+        this.logger.error(
+          `Inbound auto-tagging failed: conversationId=${conversationId} msg=${e instanceof Error ? e.message : String(e)}`,
+        );
       });
-    } catch (e) {
-      this.logger.error(
-        `Inbound auto-tagging threw (should not): ${e instanceof Error ? e.message : String(e)} — continuing to orchestration`,
-      );
-    }
 
     const normalizedPayload: NormalizedWebhookPayload = {
       ghlLocationId: locationId,
@@ -953,6 +993,10 @@ export class InboundMessageProcessor extends WorkerHost {
       agencyPolicy: agencyPolicy ?? undefined,
       conversation: conversationRecord ?? undefined,
       ...(recentInboundBatch?.length ? { recentInboundBatch } : {}),
+      orchestrationIngressTimings: {
+        batchToOrchestrationStartMs: batchToOrchestrationStartMs ?? null,
+        debounceConfiguredMs: debounceConfiguredMs ?? null,
+      },
     };
 
     const result = await this.orchestrationService.orchestrate(orchestrationInput);
@@ -970,6 +1014,7 @@ export class InboundMessageProcessor extends WorkerHost {
           contactId: ghlContactId,
           ghlLocationId: locationId,
           replyPlanJson: JSON.stringify(result.replyPlan),
+          replyLatencyTrace: { pipelineWallStartMs: pipelineWallStartMs ?? Date.now() },
         });
 
         this.logger.log(
@@ -1065,7 +1110,10 @@ export class InboundMessageProcessor extends WorkerHost {
     return true;
   }
 
-  private async fetchRecentInboundBatch(conversationId: string): Promise<string[]> {
+  private async fetchRecentInboundBatch(conversationId: string): Promise<{
+    texts: string[];
+    newestInboundCreatedAt: string | null;
+  }> {
     const { data, error } = await this.supabase
       .from('messages')
       .select('content, created_at')
@@ -1074,8 +1122,14 @@ export class InboundMessageProcessor extends WorkerHost {
       .eq('sender', 'CONTACT')
       .order('created_at', { ascending: false })
       .limit(50);
-    if (error || !data?.length) return [];
-    return filterInboundRowsToBurstWindow(data as { created_at: string; content?: string | null }[]);
+    if (error || !data?.length) return { texts: [], newestInboundCreatedAt: null };
+    const rows = data as { created_at: string; content?: string | null }[];
+    const newestInboundCreatedAt =
+      rows[0]?.created_at != null ? String(rows[0].created_at) : null;
+    return {
+      texts: filterInboundRowsToBurstWindow(rows),
+      newestInboundCreatedAt,
+    };
   }
 
   private async findTenantByLocationId(locationId: string): Promise<{ id: string } | null> {

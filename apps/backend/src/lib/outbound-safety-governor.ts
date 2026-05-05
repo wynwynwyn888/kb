@@ -8,24 +8,55 @@ import type { ConversationIntent } from '../modules/conversation-policy/conversa
 export const SAFE_PENDING_BOOKING_REPLY =
   "I've noted those details. Our team will confirm the appointment availability with you before anything is locked in.";
 
-const BOOKING_CLAIM_PATTERNS: RegExp[] = [
-  /\bconfirmed\b/i,
-  /\bappointment\s+is\s+confirmed\b/i,
+/**
+ * Claims that imply the calendar slot is already committed for the customer.
+ * Intentionally narrow: tentative / team-will-confirm wording must NOT match here.
+ */
+
+const BOOKING_CLAIM_HINT = /\b(appointment|appointments|booking|bookings|slot|slots|reservation|calendar)\b/i;
+
+function excludesNonCommittedBookingTone(t: string): boolean {
+  if (/\bour\s+team\s+(?:can|will|may)\s+confirm\b/i.test(t)) return true;
+  if (/\b(?:we|our\s+team)\s+(?:can|will|may)\s+confirm\b/i.test(t)) return true;
+  if (/\bconfirm\s+(?:the\s+)?(?:transport\s+)?fee\b/i.test(t)) return true;
+  if (/\btransport\s+fee\b/i.test(t) && /\bconfirm\b/i.test(t)) return true;
+  if (/don['’]t\s+have\s+(?:the\s+)?exact\s+fee\b/i.test(t)) return true;
+  if (/i\s+don['’]t\s+have\s+the\s+exact\s+fee\b/i.test(t)) return true;
+  if (/not\s+sure\s+about\s+(?:the\s+)?(?:fee|fees|price|pricing)/i.test(t)) return true;
+  return false;
+}
+
+const BOOKING_COMMITTED_PATTERNS: RegExp[] = [
+  /\b(?:your\s+(?:appointment|slot|booking)|the\s+(?:appointment|booking))\s+(?:is\s+|has\s+been\s+)?confirmed\b/i,
   /\bbooking\s+is\s+confirmed\b/i,
-  /\b(i['’]ve|i\s+have)\s+booked\b/i,
-  /\bi\s+booked\b/i,
-  /\breserved\b/i,
+  /\byour\s+slot\s+has\s+been\s+booked\b/i,
+  /\byour\s+slot\s+is\s+booked\b/i,
+  /\b(?:i['’]ve|i\s+have)\s+booked\s+(?:you|your)\b/i,
+  /\b(?:i['’]ve|i\s+have)\s+booked\s+you\s+for\b/i,
+  /\bappointment\s+has\s+been\s+booked\b/i,
+  /\bappointment\s+is\s+booked\b/i,
+  /\breserved\s+your\s+(?:slot|appointment|booking)\b/i,
   /(?:booking|appointment|reservation)\s+finalized\b/i,
   /\bfinalize[ds]?\s+(?:your\s+)?(?:booking|appointment|reservation)\b/i,
   /\bi['’]ll\s+proceed\s+with\s+booking\b/i,
   /\bplease\s+arrive\s+for\s+your\s+appointment\b/i,
-  /\byour\s+.*\b(appointment|booking)\b.*\b(is\s+)?(set|booked|confirmed|reserved)\b/i,
 ];
 
 export function textClaimsBookingConfirmed(text: string): boolean {
   const t = text.trim();
   if (!t) return false;
-  return BOOKING_CLAIM_PATTERNS.some(p => p.test(t));
+  if (excludesNonCommittedBookingTone(t)) return false;
+
+  if (BOOKING_COMMITTED_PATTERNS.some(p => p.test(t))) return true;
+
+  if (/\bi\s+booked\b/i.test(t)) {
+    if (/\b(i\s+booked)\s+(?:this|that|it|here)\b/i.test(t)) return false;
+    return BOOKING_CLAIM_HINT.test(t);
+  }
+
+  if (/\bconfirmed\s+for\b/i.test(t) && BOOKING_CLAIM_HINT.test(t)) return true;
+
+  return false;
 }
 
 /**

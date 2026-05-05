@@ -56,6 +56,11 @@ import {
 import { ConversationBookingFlowService } from '../booking-flow/conversation-booking-flow.service';
 import { BookingSettingsService } from '../booking-settings/booking-settings.service';
 import { BotProfilesService } from '../prompts/bot-profiles.service';
+import {
+  compactPersonaPolicyForGeneration,
+  estimateApproxTokens,
+} from '../../lib/compact-runtime-system-prompt';
+import { shouldSkipKbShortFollowUpActiveTopic } from '../../lib/short-followup-kb';
 
 @Injectable()
 export class ConversationOrchestrationService {
@@ -115,9 +120,11 @@ export class ConversationOrchestrationService {
       const policyForMemory = parseAisbpPolicyState(
         input.conversation?.metadata as Record<string, unknown> | undefined,
       );
+      const memPerf0 = performance.now();
       const memory = await this.memoryLoader.loadMemory(conversationId, {
         memoryResetAfterIso: policyForMemory.memoryResetAt ?? null,
       });
+      const memory_load_ms = Math.round(performance.now() - memPerf0);
 
       const latestMsg = (input.incomingMessage.messageContent ?? '').trim();
       const batch =
@@ -310,20 +317,50 @@ export class ConversationOrchestrationService {
         };
       }
 
+      const orchWallStartReplyPath = Date.now();
+
       // Step 3: Retrieve KB + intent-aware filter (query may expand for menu category selection)
-      const { chunks: kbAfterRetrieve, meta: retrievalMeta } = await this.retrieveKbContext(
-        input,
-        conversationId,
+      const kbSkipShortFollowUp = shouldSkipKbShortFollowUpActiveTopic({
+        latestMessageTrimmed: latestMsg,
         latestIntent,
-        {
-          retrieveQuery,
-          menuKbAnchor,
-          kbFilterIntent: usePermissiveKbFilter ? 'UNKNOWN' : latestIntent,
-          kbFilterUserMessage: usePermissiveKbFilter
-            ? batchSummary.combinedText
-            : (input.incomingMessage.messageContent ?? '').trim(),
-        },
-      );
+        activeTopic: policyStatePre.activeTopic,
+        menuSelectionAnchorActive: Boolean(menuKbAnchor),
+      });
+      let kb_retrieval_ms = 0;
+      let kbAfterRetrieve: RetrievalChunk[] = [];
+      let retrievalMeta: RetrievalMeta | null = null;
+
+      const kbPerf0 = performance.now();
+      if (kbSkipShortFollowUp) {
+        this.logger.log(
+          `kbSkip: conversationId=${conversationId} kbSkippedReason=short_followup_active_topic latestIntent=${latestIntent}`,
+        );
+        retrievalMeta = {
+          chunksReturned: 0,
+          chunksConsidered: 0,
+          retrievalMode: 'hybrid',
+          topScore: null,
+          kbQuery: retrieveQuery.slice(0, 240),
+          kbSkippedReason: 'short_followup_active_topic',
+        };
+      } else {
+        const retrieved = await this.retrieveKbContext(
+          input,
+          conversationId,
+          latestIntent,
+          {
+            retrieveQuery,
+            menuKbAnchor,
+            kbFilterIntent: usePermissiveKbFilter ? 'UNKNOWN' : latestIntent,
+            kbFilterUserMessage: usePermissiveKbFilter
+              ? batchSummary.combinedText
+              : (input.incomingMessage.messageContent ?? '').trim(),
+          },
+        );
+        kbAfterRetrieve = retrieved.chunks;
+        retrievalMeta = retrieved.meta;
+      }
+      kb_retrieval_ms = Math.round(performance.now() - kbPerf0);
 
       const policyState = policyStatePre;
       let kbInterpreted = interpretRetrievalChunks(kbAfterRetrieve);
@@ -339,14 +376,14 @@ export class ConversationOrchestrationService {
         });
       }
 
-      // Safe prompt metadata log — no body, only counts + presence of legacy demo terms.
+      // Safe prompt metadata log — scan full stored prompts for legacy demo bleed; runtime uses compaction below.
       const promptForScan = `${input.promptConfig?.systemPrompt ?? ''}\n${input.agencyPolicy?.systemPrompt ?? ''}`;
       const oldDemoFinding = detectOldDemoTermsInText(promptForScan);
       this.logger.log(
         `Prompt metadata: promptConfigId=${input.promptConfig?.id ?? 'n/a'} ` +
           `promptUpdatedAt=${input.promptConfig?.updatedAt ?? 'n/a'} ` +
-          `personaLength=${input.promptConfig?.systemPrompt?.length ?? 0} ` +
-          `agencyPolicyLength=${input.agencyPolicy?.systemPrompt?.length ?? 0} ` +
+          `personaLengthRaw=${input.promptConfig?.systemPrompt?.length ?? 0} ` +
+          `agencyPolicyLengthRaw=${input.agencyPolicy?.systemPrompt?.length ?? 0} ` +
           `businessNotesContainsOldDemoTerms=${oldDemoFinding.hit} ` +
           `oldDemoTermsFound=${JSON.stringify(oldDemoFinding.termsFound)}`,
       );
@@ -384,7 +421,10 @@ export class ConversationOrchestrationService {
 
       // Step 4: Build AI routing request (includes KB context)
       const bookingCapabilityForPrompt = await this.resolveBookingCapabilityForGovernor(input.tenantId);
+      const promptPerf0 = performance.now();
       const systemPrompt = this.buildSystemPromptWithRuntimeGreeting(input, bookingCapabilityForPrompt);
+      const prompt_build_ms = Math.round(performance.now() - promptPerf0);
+
       const routingInbound = batch.length > 1 ? batchSummary.combinedText : latestMsg;
       const routingRequest = this.buildRoutingRequest(
         input,
@@ -395,9 +435,12 @@ export class ConversationOrchestrationService {
       );
 
       // Step 5: Call AI router placeholder
+      const routingPerf0 = performance.now();
       const routing = await this.aiRouter.route(routingRequest);
+      const routing_ms = Math.round(performance.now() - routingPerf0);
 
       // Step 6: Build structured reply plan
+      const planPerf0 = performance.now();
       const replyPlan = await this.replyPlanner.planReply({
         tenantId: input.tenantId,
         routing,
@@ -429,6 +472,7 @@ export class ConversationOrchestrationService {
             : 'collect_details_only',
         },
       });
+      const plan_reply_ms = Math.round(performance.now() - planPerf0);
 
       // Inspect the planned reply bubbles for option lists (A/B/C, 1./2., bullets) and capture
       // them into option memory so the next user reply ("A") can be resolved against them.
@@ -470,6 +514,16 @@ export class ConversationOrchestrationService {
           `primaryIntent=${batchSummary.primaryIntent} secondaryIntents=${JSON.stringify(batchSummary.secondaryIntents)} ` +
           `intentsPerMessage=${JSON.stringify(batchSummary.intentsPerMessage)} ` +
           `replyAnsweredIntentCount=na unansweredIntentReasons=${JSON.stringify([])}`,
+      );
+
+      const ingress = input.orchestrationIngressTimings;
+      const orchestration_reply_ms = Date.now() - orchWallStartReplyPath;
+      this.logger.log(
+        `replyPipelineTiming: conversationId=${conversationId} ` +
+          `batch_to_orchestration_start_ms=${ingress?.batchToOrchestrationStartMs ?? 'na'} ` +
+          `debounce_ms=${ingress?.debounceConfiguredMs ?? 'na'} ` +
+          `memory_load_ms=${memory_load_ms} kb_retrieval_ms=${kb_retrieval_ms} prompt_build_ms=${prompt_build_ms} ` +
+          `routing_ms=${routing_ms} plan_reply_ms=${plan_reply_ms} orchestration_reply_ms=${orchestration_reply_ms}`,
       );
 
       // Step 7: Persist orchestration log
@@ -775,28 +829,29 @@ export class ConversationOrchestrationService {
     }
   }
 
-  private buildSystemPrompt(input: OrchestrationInput): string {
-    const tenantPrompt = input.promptConfig?.systemPrompt?.trim();
-    const agencyPrompt = input.agencyPolicy?.systemPrompt?.trim();
-
-    if (tenantPrompt && agencyPrompt) {
-      return `${agencyPrompt}\n\n---\n\nSubaccount bot instructions:\n${tenantPrompt}`;
-    }
-    if (tenantPrompt) return tenantPrompt;
-    if (agencyPrompt) return agencyPrompt;
-
-    return 'You are a helpful AI assistant.';
-  }
-
   /**
-   * Appends backend-computed local time context so the model greets with the correct period
-   * (e.g. Good evening at 21:00 Singapore) instead of guessing from model training cut-off.
+   * Runtime system prompt for router + generation: compact persona/agency bodies (full text remains stored in DB).
    */
   private buildSystemPromptWithRuntimeGreeting(
     input: OrchestrationInput,
     bookingCapability: 'collect_details_only' | 'live_slot_booking',
   ): string {
-    const base = this.buildSystemPrompt(input);
+    const tenantRaw = (input.promptConfig?.systemPrompt ?? '').trim();
+    const agencyRaw = (input.agencyPolicy?.systemPrompt ?? '').trim();
+    const compact = compactPersonaPolicyForGeneration({
+      tenantPrompt: tenantRaw,
+      agencyPrompt: agencyRaw,
+    });
+
+    let base = 'You are a helpful AI assistant.';
+    if (compact.agencyBody.trim() && compact.tenantBody.trim()) {
+      base = `${compact.agencyBody.trim()}\n\n---\n\nSubaccount bot instructions:\n${compact.tenantBody.trim()}`;
+    } else if (compact.tenantBody.trim()) {
+      base = compact.tenantBody.trim();
+    } else if (compact.agencyBody.trim()) {
+      base = compact.agencyBody.trim();
+    }
+
     const tenantTz = input.tenant?.timeZone?.trim();
     const businessTimezone = tenantTz || resolveAppTimeZone();
     const snap = getBusinessLocalNow(businessTimezone);
@@ -812,7 +867,15 @@ export class ConversationOrchestrationService {
       bookingCapability,
       handoverCapability: input.tenant?.ghlLocationId ? 'tag_and_notify' : 'collect_details_only',
     });
-    return `${base}\n\n${block}${caps}`;
+    const assembled = `${base}\n\n${block}${caps}`;
+    const runtimePromptCharLength = assembled.length;
+    const estimatedPromptTokens = estimateApproxTokens(runtimePromptCharLength);
+    this.logger.log(
+      `Runtime prompt footprint: personaLengthRaw=${tenantRaw.length} agencyPolicyLengthRaw=${agencyRaw.length} ` +
+        `personaCompactTruncated=${compact.tenantTruncated} agencyCompactTruncated=${compact.agencyTruncated} ` +
+        `runtimePromptCharLength=${runtimePromptCharLength} estimatedPromptTokens=${estimatedPromptTokens}`,
+    );
+    return assembled;
   }
 
   private buildRoutingRequest(
@@ -884,6 +947,9 @@ export class ConversationOrchestrationService {
       metadata['kbChunksConsidered'] = retrievalMeta.chunksConsidered;
       metadata['kbRetrievalMode'] = retrievalMeta.retrievalMode;
       metadata['kbTopScore'] = retrievalMeta.topScore;
+      if (retrievalMeta.kbSkippedReason !== undefined) {
+        metadata['kbSkippedReason'] = retrievalMeta.kbSkippedReason;
+      }
       if (retrievalMeta.kbQuery !== undefined) metadata['kbQuery'] = retrievalMeta.kbQuery;
       if (retrievalMeta.retrievedSectionTitles !== undefined) {
         metadata['kbRetrievedSectionTitles'] = retrievalMeta.retrievedSectionTitles;

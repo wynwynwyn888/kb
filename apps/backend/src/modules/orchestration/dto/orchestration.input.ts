@@ -46,4 +46,10 @@ export interface OrchestrationInput {
   };
   /** Recent inbound customer texts (oldest → newest): latest **N** CONTACT messages in this debounced batch. */
   recentInboundBatch?: string[];
+
+  /** Optional timings from inbound worker ingress (milliseconds, numeric only — no payloads). */
+  orchestrationIngressTimings?: {
+    batchToOrchestrationStartMs?: number | null;
+    debounceConfiguredMs?: number | null;
+  };
 }

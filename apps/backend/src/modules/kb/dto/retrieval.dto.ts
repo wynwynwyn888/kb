@@ -101,4 +101,6 @@ export interface RetrievalMeta {
   topScores?: number[];
   /** Distinct document ids for chunks passed to the model. */
   documentIds?: string[];
+  /** Set when retrieval was skipped upstream (diagnostics only). */
+  kbSkippedReason?: string;
 }

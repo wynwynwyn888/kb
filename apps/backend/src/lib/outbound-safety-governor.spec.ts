@@ -11,11 +11,12 @@ import { classifyConversationIntent } from '../modules/conversation-policy/conve
 
 describe('outbound-safety-governor', () => {
   describe('textClaimsBookingConfirmed', () => {
-    it('flags common confirmation claims', () => {
+    it('flags committed calendar claims', () => {
       expect(textClaimsBookingConfirmed('Your appointment is confirmed for tomorrow')).toBe(true);
       expect(textClaimsBookingConfirmed("I've booked you for 3pm")).toBe(true);
       expect(textClaimsBookingConfirmed('Booking is confirmed')).toBe(true);
       expect(textClaimsBookingConfirmed('Please arrive for your appointment')).toBe(true);
+      expect(textClaimsBookingConfirmed('Your slot has been booked')).toBe(true);
     });
 
     it('does not flag tentative wording', () => {
@@ -25,6 +26,24 @@ describe('outbound-safety-governor', () => {
           "I've noted those details. Our team will confirm the appointment availability with you before anything is locked in.",
         ),
       ).toBe(false);
+    });
+
+    it('does not rewrite transport-fee confirmation offers', () => {
+      expect(
+        textClaimsBookingConfirmed('Our team can confirm the transport fee when you arrive.'),
+      ).toBe(false);
+    });
+
+    it('does not rewrite uncertain fee disclaimers', () => {
+      expect(textClaimsBookingConfirmed("I don't have the exact fee right now")).toBe(false);
+    });
+
+    it('explicit appointment confirmation flags', () => {
+      expect(textClaimsBookingConfirmed('Your appointment is confirmed for 3pm')).toBe(true);
+    });
+
+    it('explicit slot booked wording flags', () => {
+      expect(textClaimsBookingConfirmed('Your slot has been booked')).toBe(true);
     });
   });
 

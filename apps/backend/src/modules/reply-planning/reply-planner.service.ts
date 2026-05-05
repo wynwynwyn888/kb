@@ -301,6 +301,7 @@ export class ReplyPlannerService {
           ? 'concise_repeat'
           : 'none';
 
+    const generationStarted = Date.now();
     const liveDraft = await this.generationService.generateDraft({
       tenantId,
       incomingMessage: incomingForGen,
@@ -337,12 +338,13 @@ export class ReplyPlannerService {
           }
         : {}),
     });
+    const generation_ms = Date.now() - generationStarted;
 
     const trimmed = stripModelThinking(liveDraft.content ?? '').trim();
     if (trimmed.length > 0) {
       const gma = liveDraft.generationModelActuallyUsed ?? liveDraft.generationModel;
       this.logger.log(
-        `Live draft generated: ${trimmed.length} chars (generationModelActuallyUsed=${gma ?? 'n/a'}, configuredModel=${liveDraft.configuredModel ?? 'n/a'})`,
+        `Live draft generated: generation_ms=${generation_ms} ${trimmed.length} chars (generationModelActuallyUsed=${gma ?? 'n/a'}, configuredModel=${liveDraft.configuredModel ?? 'n/a'})`,
       );
       return {
         text: trimmed,
@@ -357,6 +359,10 @@ export class ReplyPlannerService {
         fallbackUsed: liveDraft.fallbackUsed ?? Boolean(liveDraft.usedOpenAiFallback),
       };
     }
+
+    this.logger.log(
+      `generationTiming: placeholder_path generation_ms=${generation_ms} configuredModel=${liveDraft.configuredModel ?? 'n/a'} skipReason=${liveDraft.skipReason ?? 'n/a'}`,
+    );
 
     const fallbackReason =
       liveDraft.skipReason ??

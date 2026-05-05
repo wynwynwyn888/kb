@@ -77,6 +77,53 @@ export class ReplyPlannerService {
    * - Otherwise attempt live generation via GenerationService
    * - Fall back to deterministic drafting if generation is unavailable or fails
    */
+  /**
+   * Pure option-letter reply: no LLM, no menu grounding rewrite (we already trust the option line).
+   */
+  buildOptionSelectionTemplateReply(params: {
+    conversationId: string;
+    routing: RoutingResponse;
+    templateBody: string;
+    latestIntent: ConversationIntent;
+    latestUserMessage: string;
+    menuSelectionActive: boolean;
+  }): ReplyDecision {
+    const { conversationId, routing, templateBody, latestIntent, latestUserMessage, menuSelectionActive } =
+      params;
+
+    const guarded = applyOutboundPolicyGuard({
+      latestIntent,
+      menuSelectionActive,
+      draftText: templateBody,
+    });
+    const afterHours = applyBusinessHoursGroundingGuard({
+      latestIntent,
+      userMessage: latestUserMessage,
+      kbChunks: [],
+      draftText: guarded,
+    });
+    const afterKbLeak = sanitizeOutboundInternalKbLeak(afterHours, latestIntent, []);
+    const bubbles = this.formatIntoBubbles(afterKbLeak);
+    this.logLiveWhitespaceDebug({
+      rawDraft: afterKbLeak,
+      bubbles,
+      latestUserMessage,
+      inboundBatchCount: 1,
+    });
+
+    return {
+      planStatus: 'PLANNED',
+      responseMode: routing.responseMode,
+      handoverRecommended: routing.handoverRecommended,
+      confidence: routing.confidence,
+      rationale: routing.reasoning,
+      bubbles,
+      suggestedActions: this.suggestActions(routing, []),
+      draftProvenance: 'option_selection_template',
+      routingRecommendedModel: routing.recommendedModel,
+    };
+  }
+
   async planReply(params: {
     tenantId: string;
     routing: RoutingResponse;

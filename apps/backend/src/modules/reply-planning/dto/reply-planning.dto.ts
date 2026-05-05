@@ -36,6 +36,7 @@ export interface SuggestedAction {
  * - `live_generation` — bubble text came from the provider/model path.
  * - `placeholder_fallback` — deterministic template/KB/memory/generic text; **not** model output.
  * - `policy_reply` — deterministic reply from the conversation policy layer (menu prompt, selection, etc.).
+ * - `option_selection_template` — pure letter/digit menu pick; fixed copy, no LLM.
  *
  * When `placeholder_fallback`, `draftFallbackReason` is set when known:
  * `no_agency` | `no_provider` | `generation_failed`.
@@ -48,7 +49,7 @@ export interface ReplyDecision {
   rationale: string;
   bubbles: ReplyBubbleDraft[];
   suggestedActions: SuggestedAction[];
-  draftProvenance?: 'live_generation' | 'placeholder_fallback' | 'policy_reply';
+  draftProvenance?: 'live_generation' | 'placeholder_fallback' | 'policy_reply' | 'option_selection_template';
   draftFallbackReason?: 'no_agency' | 'no_provider' | 'generation_failed';
   /** `agencies.active_ai_provider` when live generation ran (non-HANDOVER). */
   agencyActiveProvider?: string;

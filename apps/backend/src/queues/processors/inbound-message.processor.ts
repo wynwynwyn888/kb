@@ -866,11 +866,15 @@ export class InboundMessageProcessor extends WorkerHost {
 
     const latestIntent = latestText ? classifyConversationIntent(latestText) : 'UNKNOWN';
     const combinedText = orchestrationBatch.join('\n\n').trim();
+    const clip = (lines: string[]) => lines.map(t => t.slice(0, 100));
     this.logger.log(
-      `Debounce processing batch: conversationId=${conversationId}, inboundBatchCount=${orchestrationBatch.length}, ` +
-        `uniqueProviderMessageCount=${new Set(orchestrationBatch).size}, latestIntent=${latestIntent}, ` +
-        `orderedMessagesPreview=${JSON.stringify(orchestrationBatch.map(t => t.slice(0, 100)))} ` +
-        `combinedTextPreviewLen=${combinedText.length}`,
+      `Debounce inbound batches: conversationId=${conversationId} ` +
+        `orchestrationInboundCount=${orchestrationBatch.length} ` +
+        `resetDetectionInboundCount=${resetDetectionBatch.length} ` +
+        `resetDetectionBatchPreview=${JSON.stringify(clip(resetDetectionBatch))} ` +
+        `orchestrationBatchPreview=${JSON.stringify(clip(orchestrationBatch))} ` +
+        `uniqueOrchestrationLines=${new Set(orchestrationBatch).size} latestIntent=${latestIntent} ` +
+        `orchestrationCombinedTextPreviewLen=${combinedText.length}`,
     );
 
     await this.executeOrchestrationPipeline({
@@ -942,7 +946,10 @@ export class InboundMessageProcessor extends WorkerHost {
         resetDetectionBatch,
       })
     ) {
-      this.logger.log(`Orchestration skipped (chat reset command): conversationId=${conversationId}`);
+      this.logger.log(
+        `Orchestration skipped (chat reset command): conversationId=${conversationId} ` +
+          `orchestrationSkippedReason=chat_reset_command`,
+      );
       return;
     }
 

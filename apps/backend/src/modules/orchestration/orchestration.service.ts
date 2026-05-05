@@ -39,6 +39,10 @@ import {
   type AisbpPolicyStateV1,
 } from '../conversation-policy/conversation-policy-state';
 import { resolveShortSelection, shouldSkipKbForPureOptionLetterSelection } from '../conversation-policy/option-resolver';
+import {
+  buildOptionSelectionCustomerReply,
+  parseSelectedOptionTitleDescription,
+} from '../../lib/option-selection-template';
 import { stripInternalGuidanceFromChunks } from '../../lib/kb-internal-guidance';
 import { interpretRetrievalChunks } from '../../lib/kb-chunk-interpretation';
 import { resolveOperatingHoursConflictsAmongChunks } from '../../lib/kb-operating-hours-conflict';
@@ -163,10 +167,15 @@ export class ConversationOrchestrationService {
         routingIntent = 'SHORT_SELECTION';
       }
 
+      let parsedDeterministicOptionLine: ReturnType<typeof parseSelectedOptionTitleDescription> | null = null;
       if (deterministicOptionPick) {
+        parsedDeterministicOptionLine = parseSelectedOptionTitleDescription(deterministicOptionPick.selectedText);
+        const descPresent = Boolean(parsedDeterministicOptionLine.description?.trim());
         this.logger.log(
           `optionSelectionResolved: optionSelectionResolved=true selectedOptionLabel=${deterministicOptionPick.selectedLabel} ` +
-            `selectedOptionPreview=${JSON.stringify(deterministicOptionPick.selectedText.slice(0, 120))} optionSelectionSource=lastAssistantOptions`,
+            `selectedOptionPreview=${JSON.stringify(deterministicOptionPick.selectedText.slice(0, 120))} ` +
+            `selectedOptionTitle=${JSON.stringify(parsedDeterministicOptionLine.title)} ` +
+            `selectedOptionDescriptionPresent=${descPresent} optionSelectionSource=lastAssistantOptions`,
         );
       }
 
@@ -452,61 +461,109 @@ export class ConversationOrchestrationService {
           `topScores=${JSON.stringify(kbChunks.map(c => c.relevanceScore))}`,
       );
 
-      // Step 4: Build AI routing request (includes KB context)
-      const bookingCapabilityForPrompt = await this.resolveBookingCapabilityForGovernor(input.tenantId);
-      const promptPerf0 = performance.now();
-      const systemPrompt = this.buildSystemPromptWithRuntimeGreeting(input, bookingCapabilityForPrompt);
-      const prompt_build_ms = Math.round(performance.now() - promptPerf0);
+      const useOptionSelectionTemplate =
+        Boolean(
+          optionLetterToken &&
+            deterministicOptionPick &&
+            parsedDeterministicOptionLine &&
+            parsedDeterministicOptionLine.title.trim().length > 0 &&
+            !policyOutcome.policyForcedReply?.trim() &&
+            policyOutcome.resolvedSelection,
+        );
 
-      const routingInbound = batch.length > 1 ? batchSummary.combinedText : latestMsg;
-      const routingRequest = this.buildRoutingRequest(
-        input,
-        memory,
-        systemPrompt,
-        kbChunks,
-        routingInbound,
-      );
+      let routing: RoutingResponse;
+      let replyPlan: ReplyDecision;
+      let prompt_build_ms: number;
+      let routing_ms: number;
+      let plan_reply_ms: number;
 
-      // Step 5: Call AI router placeholder
-      const routingPerf0 = performance.now();
-      const routing = await this.aiRouter.route(routingRequest);
-      const routing_ms = Math.round(performance.now() - routingPerf0);
+      if (useOptionSelectionTemplate && parsedDeterministicOptionLine) {
+        const descPresentTpl = Boolean(parsedDeterministicOptionLine.description?.trim());
+        this.logger.log(
+          `optionSelectionTemplateUsed=true selectedOptionTitle=${JSON.stringify(parsedDeterministicOptionLine.title.trim())} ` +
+            `selectedOptionDescriptionPresent=${descPresentTpl} llmSkippedForOptionSelection=true`,
+        );
 
-      // Step 6: Build structured reply plan
-      const planPerf0 = performance.now();
-      const replyPlan = await this.replyPlanner.planReply({
-        tenantId: input.tenantId,
-        routing,
-        kbChunks,
-        memory: memory.entries,
-        systemPrompt,
-        conversationId,
-        channel: input.conversation?.channel ?? 'WHATSAPP',
-        temperature: input.promptConfig?.temperature,
-        maxTokens: input.promptConfig?.maxTokens,
-        policyContext: {
+        routing = {
+          recommendedModel: 'n/a',
+          responseMode: 'fast',
+          draftReply: null,
+          handoverRecommended: false,
+          bookingIntentDetected: false,
+          tagsSuggested: [],
+          confidence: 1,
+          reasoning: 'deterministic_option_selection_template',
+        };
+        prompt_build_ms = 0;
+        routing_ms = 0;
+        const templateBody = buildOptionSelectionCustomerReply(parsedDeterministicOptionLine);
+        const planPerf0 = performance.now();
+        replyPlan = this.replyPlanner.buildOptionSelectionTemplateReply({
+          conversationId,
+          routing,
+          templateBody,
           latestIntent: policyOutcome.latestIntent,
-          resolvedSelection: policyOutcome.resolvedSelection,
-          conversationStateSummary: policyOutcome.conversationStateSummary,
-          policyForcedReply: policyOutcome.policyForcedReply,
-          policyReplyKind: policyOutcome.policyReplyKind,
-          menuSelectionActive: policyOutcome.menuSelectionActive,
           latestUserMessage: latestMsg,
-          combinedHumanMessagesText: batch.length > 1 ? batchSummary.combinedText : undefined,
-          inboundBatchCount: batch.length,
-          batchPrimaryIntent: batchSummary.primaryIntent,
-          batchSecondaryIntents: batchSummary.secondaryIntents,
-          repeatedHumanTextDetected: repeatMeta.repeatedHumanTextDetected,
-          repeatedHumanTextAction: repeatMeta.repeatedHumanTextAction,
-          suppressColourRecommendations: isUnsupportedSalonScopeQuery(latestMsg),
-          bookingCapability: bookingCapabilityForPrompt,
-          handoverCapability: input.tenant?.ghlLocationId?.trim()
-            ? 'tag_and_notify'
-            : 'collect_details_only',
-          ...(optionMenuSourceExcerpt ? { optionMenuSourceExcerpt } : {}),
-        },
-      });
-      const plan_reply_ms = Math.round(performance.now() - planPerf0);
+          menuSelectionActive: policyOutcome.menuSelectionActive,
+        });
+        plan_reply_ms = Math.round(performance.now() - planPerf0);
+      } else {
+        // Step 4: Build AI routing request (includes KB context)
+        const bookingCapabilityForPrompt = await this.resolveBookingCapabilityForGovernor(input.tenantId);
+        const promptPerf0 = performance.now();
+        const systemPrompt = this.buildSystemPromptWithRuntimeGreeting(input, bookingCapabilityForPrompt);
+        prompt_build_ms = Math.round(performance.now() - promptPerf0);
+
+        const routingInbound = batch.length > 1 ? batchSummary.combinedText : latestMsg;
+        const routingRequest = this.buildRoutingRequest(
+          input,
+          memory,
+          systemPrompt,
+          kbChunks,
+          routingInbound,
+        );
+
+        // Step 5: Call AI router placeholder
+        const routingPerf0 = performance.now();
+        routing = await this.aiRouter.route(routingRequest);
+        routing_ms = Math.round(performance.now() - routingPerf0);
+
+        // Step 6: Build structured reply plan
+        const planPerf0 = performance.now();
+        replyPlan = await this.replyPlanner.planReply({
+          tenantId: input.tenantId,
+          routing,
+          kbChunks,
+          memory: memory.entries,
+          systemPrompt,
+          conversationId,
+          channel: input.conversation?.channel ?? 'WHATSAPP',
+          temperature: input.promptConfig?.temperature,
+          maxTokens: input.promptConfig?.maxTokens,
+          policyContext: {
+            latestIntent: policyOutcome.latestIntent,
+            resolvedSelection: policyOutcome.resolvedSelection,
+            conversationStateSummary: policyOutcome.conversationStateSummary,
+            policyForcedReply: policyOutcome.policyForcedReply,
+            policyReplyKind: policyOutcome.policyReplyKind,
+            menuSelectionActive: policyOutcome.menuSelectionActive,
+            latestUserMessage: latestMsg,
+            combinedHumanMessagesText: batch.length > 1 ? batchSummary.combinedText : undefined,
+            inboundBatchCount: batch.length,
+            batchPrimaryIntent: batchSummary.primaryIntent,
+            batchSecondaryIntents: batchSummary.secondaryIntents,
+            repeatedHumanTextDetected: repeatMeta.repeatedHumanTextDetected,
+            repeatedHumanTextAction: repeatMeta.repeatedHumanTextAction,
+            suppressColourRecommendations: isUnsupportedSalonScopeQuery(latestMsg),
+            bookingCapability: bookingCapabilityForPrompt,
+            handoverCapability: input.tenant?.ghlLocationId?.trim()
+              ? 'tag_and_notify'
+              : 'collect_details_only',
+            ...(optionMenuSourceExcerpt ? { optionMenuSourceExcerpt } : {}),
+          },
+        });
+        plan_reply_ms = Math.round(performance.now() - planPerf0);
+      }
 
       // Inspect the planned reply bubbles for option lists (A/B/C, 1./2., bullets) and capture
       // them into option memory so the next user reply ("A") can be resolved against them.

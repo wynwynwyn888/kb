@@ -126,8 +126,24 @@ export class KbController {
     }
   }
 
+  @Post('vaults/:vaultId/duplicate')
+  @ApiOperation({ summary: 'Duplicate vault shell (name + description); does not copy documents' })
+  async duplicateVault(
+    @Param('vaultId') vaultId: string,
+    @Query('tenantId') tenantId: string | undefined,
+    @CurrentUser() user: SessionUser,
+  ) {
+    if (!tenantId?.trim()) throw new BadRequestException('tenantId query parameter is required');
+    await this.assertTenantScope(user, tenantId);
+    try {
+      return await this.kbService.duplicateVault(tenantId.trim(), vaultId.trim());
+    } catch (e) {
+      throw new BadRequestException(mapKbError(e));
+    }
+  }
+
   @Delete('vaults/:vaultId')
-  @ApiOperation({ summary: 'Delete an empty vault, or move documents to reassignToVaultId first' })
+  @ApiOperation({ summary: 'Delete an empty non-default vault (must have zero documents)' })
   async deleteVault(
     @Param('vaultId') vaultId: string,
     @Query('tenantId') tenantId: string | undefined,
@@ -339,6 +355,7 @@ export class KbController {
       query: dto.query,
       topK,
       intentHint: dto.intentHint?.trim() || undefined,
+      vaultId: dto.vaultId?.trim() || undefined,
     });
   }
 

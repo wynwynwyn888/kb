@@ -38,28 +38,35 @@ export class OrchestrationGuards {
       return this.buildOutcome(ghlGuard.decision, guards);
     }
 
-    // Guard 3: Handover paused
+    // Guard 3: Conversation automation paused (GHL conversation status)
+    const automationGuard = await this.checkConversationAutomationPaused(input);
+    guards.push(automationGuard);
+    if (automationGuard.decision !== 'PROCEED') {
+      return this.buildOutcome(automationGuard.decision, guards);
+    }
+
+    // Guard 4: Handover paused
     const handoverGuard = await this.checkHandoverPaused(input);
     guards.push(handoverGuard);
     if (handoverGuard.decision !== 'PROCEED') {
       return this.buildOutcome(handoverGuard.decision, guards);
     }
 
-    // Guard 4: Quota available
+    // Guard 5: Quota available
     const quotaGuard = await this.checkQuotaAvailable(input);
     guards.push(quotaGuard);
     if (quotaGuard.decision !== 'PROCEED') {
       return this.buildOutcome(quotaGuard.decision, guards);
     }
 
-    // Guard 5: Supported message type
+    // Guard 6: Supported message type
     const typeGuard = await this.checkMessageType(input);
     guards.push(typeGuard);
     if (typeGuard.decision !== 'PROCEED') {
       return this.buildOutcome(typeGuard.decision, guards);
     }
 
-    // Guard 6: Supported channel
+    // Guard 7: Supported channel
     const channelGuard = await this.checkChannel(input);
     guards.push(channelGuard);
     if (channelGuard.decision !== 'PROCEED') {
@@ -105,6 +112,24 @@ export class OrchestrationGuards {
       };
     }
     return { decision: 'PROCEED', guardName: 'ghl_connected' };
+  }
+
+  private async checkConversationAutomationPaused(
+    input: OrchestrationInput,
+  ): Promise<GuardResult> {
+    const raw = input.conversation?.status;
+    const status = typeof raw === 'string' ? raw.toUpperCase() : '';
+    if (status === 'PAUSED') {
+      this.logger.debug(
+        `Guard SKIP_AUTOMATION_PAUSED for conversation=${input.conversationId ?? 'n/a'}`,
+      );
+      return {
+        decision: 'SKIP_AUTOMATION_PAUSED',
+        guardName: 'automation_paused',
+        reason: 'Conversation automation is PAUSED',
+      };
+    }
+    return { decision: 'PROCEED', guardName: 'automation_paused' };
   }
 
   private async checkHandoverPaused(input: OrchestrationInput): Promise<GuardResult> {

@@ -1533,6 +1533,18 @@ export async function deleteKbVault(
   });
 }
 
+export async function duplicateKbVault(
+  token: string,
+  tenantId: string,
+  vaultId: string,
+): Promise<{ id: string }> {
+  const q = new URLSearchParams({ tenantId });
+  return apiRequest<{ id: string }>(`/kb/vaults/${encodeURIComponent(vaultId)}/duplicate?${q}`, {
+    token,
+    method: 'POST',
+  });
+}
+
 export async function setKbDocumentVault(
   token: string,
   documentId: string,
@@ -1719,7 +1731,14 @@ export async function deleteKbDocument(token: string, tenantId: string, document
 
 export async function searchKb(
   token: string,
-  dto: { tenantId: string; query: string; topK?: number; conversationId?: string; intentHint?: string },
+  dto: {
+    tenantId: string;
+    query: string;
+    topK?: number;
+    conversationId?: string;
+    intentHint?: string;
+    vaultId?: string;
+  },
 ): Promise<KbSearchResponse> {
   return apiRequest(`/kb/search`, { token, method: 'POST', body: JSON.stringify(dto) });
 }

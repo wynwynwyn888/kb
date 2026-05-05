@@ -179,7 +179,7 @@ describe('OrchestrationGuards', () => {
       mockFrom(mockSupabase, 'quota_wallets', { total_quota: 100, used_quota: 10 });
       const result = await guards.runGuards(input);
       expect(result.final).toBe('PROCEED');
-      expect(result.guards.length).toBe(6);
+      expect(result.guards.length).toBe(7);
     });
   });
 });

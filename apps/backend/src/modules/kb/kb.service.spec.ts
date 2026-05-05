@@ -88,6 +88,19 @@ describe('KbService', () => {
     });
   });
 
+  describe('retrieve — assistant profile document allowlist', () => {
+    it('returns no chunks when documentIdAllowlist is empty (no KB scope)', async () => {
+      const r = await service.retrieve({
+        tenantId: 't1',
+        conversationId: 'c1',
+        query: 'hello',
+        documentIdAllowlist: [],
+      });
+      expect(r.chunks).toEqual([]);
+      expect(r.totalConsidered).toBe(0);
+    });
+  });
+
   describe('toRetrievalChunk', () => {
     it('clamps relevanceScore to [0, 1]', () => {
       const raw = {

@@ -23,6 +23,32 @@ import {
   parsePromptSections,
 } from '../../lib/tenant-bot-profile-prompt';
 
+/** Result of resolving KB document scope for the active assistant profile (live orchestration). */
+export type KbDocumentAllowlistForActiveProfileResult =
+  | {
+      kind: 'all';
+      kbVaultAccessMode: 'all_vaults';
+      /** No active profile row — tenant-wide READY KB (legacy). */
+      noActiveProfile: boolean;
+      selectedVaultCount: 0;
+      /** Not computed for full-tenant retrieval */
+      allowedDocumentCount: null;
+    }
+  | {
+      kind: 'none';
+      kbVaultAccessMode: 'selected_vaults';
+      reason: 'profileKnowledgeVaultsEmpty' | 'selectedVaultsNoDocuments';
+      selectedVaultCount: number;
+      allowedDocumentCount: 0;
+    }
+  | {
+      kind: 'allowlist';
+      kbVaultAccessMode: 'selected_vaults';
+      documentIds: string[];
+      selectedVaultCount: number;
+      allowedDocumentCount: number;
+    };
+
 export interface TenantBotProfileDto {
   id: string;
   tenantId: string;
@@ -794,13 +820,7 @@ export class BotProfilesService {
   /**
    * Resolves which knowledge document IDs the active assistant profile may use for KB retrieval.
    */
-  async getKbDocumentAllowlistForActiveProfile(
-    tenantId: string,
-  ): Promise<
-    | { kind: 'all' }
-    | { kind: 'none'; reason: 'profileKnowledgeVaultsEmpty' | 'selectedVaultsNoDocuments' }
-    | { kind: 'allowlist'; documentIds: string[] }
-  > {
+  async getKbDocumentAllowlistForActiveProfile(tenantId: string): Promise<KbDocumentAllowlistForActiveProfileResult> {
     await this.ensureMigratedForTenant(tenantId);
     const supabase = getSupabaseService();
     const { data: prof } = await supabase
@@ -809,11 +829,25 @@ export class BotProfilesService {
       .eq('tenant_id', tenantId)
       .eq('is_active', true)
       .maybeSingle();
-    if (!prof?.id) return { kind: 'all' };
+    if (!prof?.id) {
+      return {
+        kind: 'all',
+        kbVaultAccessMode: 'all_vaults',
+        noActiveProfile: true,
+        selectedVaultCount: 0,
+        allowedDocumentCount: null,
+      };
+    }
 
     const access = String(prof['knowledge_access_mode'] ?? '').trim();
     if (access !== KNOWLEDGE_ACCESS_SELECTED_VAULTS) {
-      return { kind: 'all' };
+      return {
+        kind: 'all',
+        kbVaultAccessMode: 'all_vaults',
+        noActiveProfile: false,
+        selectedVaultCount: 0,
+        allowedDocumentCount: null,
+      };
     }
 
     const { data: links } = await supabase
@@ -822,7 +856,13 @@ export class BotProfilesService {
       .eq('profile_id', prof['id'] as string);
     const vaultIds = (links ?? []).map(l => l['vault_id'] as string).filter(Boolean);
     if (vaultIds.length === 0) {
-      return { kind: 'none', reason: 'profileKnowledgeVaultsEmpty' };
+      return {
+        kind: 'none',
+        kbVaultAccessMode: 'selected_vaults',
+        reason: 'profileKnowledgeVaultsEmpty',
+        selectedVaultCount: 0,
+        allowedDocumentCount: 0,
+      };
     }
 
     const { data: docs } = await supabase
@@ -833,9 +873,21 @@ export class BotProfilesService {
       .in('vault_id', vaultIds);
     const ids = (docs ?? []).map(d => d.id as string).filter(Boolean);
     if (ids.length === 0) {
-      return { kind: 'none', reason: 'selectedVaultsNoDocuments' };
+      return {
+        kind: 'none',
+        kbVaultAccessMode: 'selected_vaults',
+        reason: 'selectedVaultsNoDocuments',
+        selectedVaultCount: vaultIds.length,
+        allowedDocumentCount: 0,
+      };
     }
-    return { kind: 'allowlist', documentIds: ids };
+    return {
+      kind: 'allowlist',
+      kbVaultAccessMode: 'selected_vaults',
+      documentIds: ids,
+      selectedVaultCount: vaultIds.length,
+      allowedDocumentCount: ids.length,
+    };
   }
 
   /** Orchestration: active profile text + linked reply settings. Falls back to legacy prompt row if needed. */

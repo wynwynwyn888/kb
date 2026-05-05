@@ -692,10 +692,30 @@ export class ConversationOrchestrationService {
       let documentIdAllowlist: string[] | null | undefined = undefined;
       if (kbFilter.kind === 'allowlist') {
         documentIdAllowlist = kbFilter.documentIds;
+        this.logger.debug(
+          `kbRetrievalVaultAccess tenant=${input.tenantId} conversation=${conversationId} ` +
+            `kbVaultAccessMode=${kbFilter.kbVaultAccessMode} selectedVaultCount=${kbFilter.selectedVaultCount} ` +
+            `allowedDocumentCount=${kbFilter.allowedDocumentCount}`,
+        );
       } else if (kbFilter.kind === 'none') {
         documentIdAllowlist = [];
-        this.logger.warn(
-          `KB retrieval skipped: tenant=${input.tenantId} reason=${kbFilter.reason} conversation=${conversationId}`,
+        if (kbFilter.reason === 'profileKnowledgeVaultsEmpty') {
+          this.logger.warn(
+            `profileKnowledgeVaultsEmpty tenant=${input.tenantId} conversation=${conversationId} ` +
+              `kbVaultAccessMode=selected_vaults selectedVaultCount=0 allowedDocumentCount=0`,
+          );
+        } else {
+          this.logger.warn(
+            `KB retrieval skipped tenant=${input.tenantId} conversation=${conversationId} ` +
+              `reason=${kbFilter.reason} kbVaultAccessMode=selected_vaults ` +
+              `selectedVaultCount=${kbFilter.selectedVaultCount} allowedDocumentCount=0`,
+          );
+        }
+      } else {
+        this.logger.debug(
+          `kbRetrievalVaultAccess tenant=${input.tenantId} conversation=${conversationId} ` +
+            `kbVaultAccessMode=${kbFilter.kbVaultAccessMode} noActiveProfile=${kbFilter.noActiveProfile} ` +
+            `selectedVaultCount=0 allowedDocumentCount=null`,
         );
       }
 
@@ -843,6 +863,7 @@ export class ConversationOrchestrationService {
       PROCEED: 'PROCEED',
       SKIP_BOT_DISABLED: 'SKIP_BOT_DISABLED',
       SKIP_GHL_DISCONNECTED: 'SKIP_GHL_DISCONNECTED',
+      SKIP_AUTOMATION_PAUSED: 'SKIP_AUTOMATION_PAUSED',
       SKIP_HANDOVER_ACTIVE: 'SKIP_HANDOVER_ACTIVE',
       SKIP_QUOTA_EXHAUSTED: 'SKIP_QUOTA_EXHAUSTED',
       SKIP_UNSUPPORTED_MESSAGE_TYPE: 'SKIP_UNSUPPORTED_MESSAGE_TYPE',

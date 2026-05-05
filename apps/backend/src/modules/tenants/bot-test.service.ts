@@ -103,8 +103,11 @@ export class BotTestService {
 
     const kbFilter = await this.botProfiles.getKbDocumentAllowlistForActiveProfile(tenantId);
     let documentIdAllowlist: string[] | null | undefined = undefined;
-    if (kbFilter.kind === 'allowlist') documentIdAllowlist = kbFilter.documentIds;
-    else if (kbFilter.kind === 'none') documentIdAllowlist = [];
+    if (kbFilter.kind === 'allowlist') {
+      documentIdAllowlist = kbFilter.documentIds;
+    } else if (kbFilter.kind === 'none') {
+      documentIdAllowlist = [];
+    }
 
     const kbResult = await this.kbService.retrieve({
       tenantId,

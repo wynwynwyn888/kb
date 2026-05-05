@@ -178,7 +178,13 @@ describe('BotProfilesService', () => {
       return {};
     });
     const out = await svc.getKbDocumentAllowlistForActiveProfile(tenantId);
-    expect(out).toEqual({ kind: 'all' });
+    expect(out).toEqual({
+      kind: 'all',
+      kbVaultAccessMode: 'all_vaults',
+      noActiveProfile: false,
+      selectedVaultCount: 0,
+      allowedDocumentCount: null,
+    });
   });
 
   it('getKbDocumentAllowlistForActiveProfile returns none when selected_vaults but no vault links', async () => {
@@ -216,7 +222,13 @@ describe('BotProfilesService', () => {
       return {};
     });
     const out = await svc.getKbDocumentAllowlistForActiveProfile(tenantId);
-    expect(out).toEqual({ kind: 'none', reason: 'profileKnowledgeVaultsEmpty' });
+    expect(out).toEqual({
+      kind: 'none',
+      kbVaultAccessMode: 'selected_vaults',
+      reason: 'profileKnowledgeVaultsEmpty',
+      selectedVaultCount: 0,
+      allowedDocumentCount: 0,
+    });
   });
 
   it('getKbDocumentAllowlistForActiveProfile returns allowlist for selected vault READY docs', async () => {
@@ -265,7 +277,13 @@ describe('BotProfilesService', () => {
       return {};
     });
     const out = await svc.getKbDocumentAllowlistForActiveProfile(tenantId);
-    expect(out).toEqual({ kind: 'allowlist', documentIds: ['doc-a', 'doc-b'] });
+    expect(out).toEqual({
+      kind: 'allowlist',
+      kbVaultAccessMode: 'selected_vaults',
+      documentIds: ['doc-a', 'doc-b'],
+      selectedVaultCount: 1,
+      allowedDocumentCount: 2,
+    });
   });
 
   it('getKbDocumentAllowlistForActiveProfile returns none when selected vaults have no READY docs', async () => {
@@ -314,6 +332,46 @@ describe('BotProfilesService', () => {
       return {};
     });
     const out = await svc.getKbDocumentAllowlistForActiveProfile(tenantId);
-    expect(out).toEqual({ kind: 'none', reason: 'selectedVaultsNoDocuments' });
+    expect(out).toEqual({
+      kind: 'none',
+      kbVaultAccessMode: 'selected_vaults',
+      reason: 'selectedVaultsNoDocuments',
+      selectedVaultCount: 1,
+      allowedDocumentCount: 0,
+    });
+  });
+
+  it('getKbDocumentAllowlistForActiveProfile returns all with noActiveProfile when no active profile', async () => {
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'tenant_bot_profiles') {
+        return {
+          select: (cols: string, opts?: { count?: string; head?: boolean }) => {
+            if (opts?.head) {
+              // Non-zero count skips ensureMigratedForTenant legacy migration (no tenant_prompt_configs mock needed)
+              return { eq: () => Promise.resolve({ count: 1, error: null }) };
+            }
+            if (String(cols).includes('knowledge_access_mode')) {
+              return {
+                eq: () => ({
+                  eq: () => ({
+                    maybeSingle: () => Promise.resolve({ data: null, error: null }),
+                  }),
+                }),
+              };
+            }
+            return {};
+          },
+        };
+      }
+      return {};
+    });
+    const out = await svc.getKbDocumentAllowlistForActiveProfile(tenantId);
+    expect(out).toEqual({
+      kind: 'all',
+      kbVaultAccessMode: 'all_vaults',
+      noActiveProfile: true,
+      selectedVaultCount: 0,
+      allowedDocumentCount: null,
+    });
   });
 });

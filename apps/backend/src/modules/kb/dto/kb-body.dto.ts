@@ -98,4 +98,9 @@ export class KbSearchBodyDto {
   @IsOptional()
   @IsString()
   intentHint?: string;
+
+  /** When set, search only chunks for documents in this vault (Knowledge page scope). */
+  @IsOptional()
+  @IsUUID()
+  vaultId?: string;
 }

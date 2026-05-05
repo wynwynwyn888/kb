@@ -30,6 +30,7 @@ import {
   KB_RICH_TEXT_SOURCE_METADATA_KEY,
   reconstructEditableNoteFromChunks,
 } from '../../lib/kb-rich-text-source';
+import { KB_VAULT_DELETE_HAS_DOCUMENTS_MSG, kbDuplicateVaultDisplayName } from './kb-vault-messages';
 
 const DEFAULT_TOP_K = 5;
 /** Default rows returned for KB search UI (client may display fewer). */
@@ -81,13 +82,20 @@ export class KbService {
   ): Promise<RetrievalResult> {
     const { tenantId, conversationId, query: queryText, topK = DEFAULT_TOP_K, documentIdAllowlist } = query;
 
+    const docScope =
+      documentIdAllowlist === undefined
+        ? 'all_ready'
+        : documentIdAllowlist === null
+          ? 'null'
+          : documentIdAllowlist.length === 0
+            ? 'no_documents'
+            : `allowlist(${documentIdAllowlist.length})`;
     this.logger.debug(
-      `KB retrieval started: tenant=${tenantId}, conversation=${conversationId}, topK=${topK} ` +
-        `allowlist=${documentIdAllowlist === undefined ? 'all' : documentIdAllowlist === null ? 'null' : documentIdAllowlist.length}`,
+      `KB retrieval started: tenant=${tenantId}, conversation=${conversationId}, topK=${topK} docScope=${docScope}`,
     );
 
     // Load READY chunks (optionally restricted to assistant profile vault access)
-    const chunks = await this.loadTenantChunks(tenantId, documentIdAllowlist);
+    const chunks = await this.loadTenantChunks(tenantId, documentIdAllowlist, undefined);
     if (chunks.length === 0) {
       this.logger.debug(`KB retrieval: no chunks found for tenant=${tenantId}`);
       return {
@@ -133,9 +141,10 @@ export class KbService {
     query: string;
     topK?: number;
     intentHint?: string;
+    vaultId?: string;
   }): Promise<KbSearchResponse> {
     const topK = Math.min(50, Math.max(1, Math.floor(params.topK ?? KB_SEARCH_DEFAULT_TOP_K)));
-    const chunks = await this.loadTenantChunks(params.tenantId);
+    const chunks = await this.loadTenantChunks(params.tenantId, undefined, params.vaultId?.trim() || undefined);
     const ranked = rankChunksForKbSearch(params.query, chunks as ScorableChunk[], {
       intentHint: params.intentHint,
       topK,
@@ -1169,7 +1178,7 @@ export class KbService {
   async deleteVault(
     tenantId: string,
     vaultId: string,
-    opts?: { reassignToVaultId?: string },
+    _opts?: { reassignToVaultId?: string },
   ): Promise<{ ok: true }> {
     const { count, error: cErr } = await this.supabase
       .from('knowledge_documents')
@@ -1179,18 +1188,7 @@ export class KbService {
     if (cErr) throw new Error(cErr.message);
     const n = count ?? 0;
     if (n > 0) {
-      const target = opts?.reassignToVaultId?.trim();
-      if (!target) {
-        throw new Error(
-          `Vault has ${n} document(s). Provide reassignToVaultId or move documents before deleting.`,
-        );
-      }
-      const { error: mv } = await this.supabase
-        .from('knowledge_documents')
-        .update({ vault_id: target, updated_at: new Date().toISOString() })
-        .eq('tenant_id', tenantId)
-        .eq('vault_id', vaultId);
-      if (mv) throw new Error(mv.message);
+      throw new Error(KB_VAULT_DELETE_HAS_DOCUMENTS_MSG);
     }
     const { data: vrow } = await this.supabase
       .from('knowledge_vaults')
@@ -1206,6 +1204,35 @@ export class KbService {
     return { ok: true };
   }
 
+  /**
+   * Duplicate vault metadata only (empty vault). Name becomes "{original} copy".
+   * Knowledge items are not copied.
+   */
+  async duplicateVault(tenantId: string, sourceVaultId: string): Promise<{ id: string }> {
+    const { data: src, error: se } = await this.supabase
+      .from('knowledge_vaults')
+      .select('id, name, description')
+      .eq('tenant_id', tenantId)
+      .eq('id', sourceVaultId)
+      .maybeSingle();
+    if (se || !src?.id) throw new Error('Vault not found');
+
+    const newName = kbDuplicateVaultDisplayName(String(src.name ?? 'Vault'));
+    const now = new Date().toISOString();
+    const id = randomUUID();
+    const { error } = await this.supabase.from('knowledge_vaults').insert({
+      id,
+      tenant_id: tenantId,
+      name: newName,
+      description: src.description === null || src.description === undefined ? null : String(src.description),
+      is_default: false,
+      created_at: now,
+      updated_at: now,
+    });
+    if (error) throw new Error(error.message);
+    return { id };
+  }
+
   async setDocumentVault(tenantId: string, documentId: string, vaultId: string): Promise<{ ok: true }> {
     const { error } = await this.supabase
       .from('knowledge_documents')
@@ -1219,6 +1246,7 @@ export class KbService {
   private async loadTenantChunks(
     tenantId: string,
     documentIdAllowlist?: string[] | null,
+    vaultId?: string | null,
   ): Promise<
     Array<{
       id: string;
@@ -1236,6 +1264,11 @@ export class KbService {
       .select('id, title, source, updated_at')
       .eq('tenant_id', tenantId)
       .eq('status', 'READY');
+
+    const v = vaultId?.trim();
+    if (v) {
+      docQuery = docQuery.eq('vault_id', v);
+    }
 
     if (documentIdAllowlist !== undefined && documentIdAllowlist !== null) {
       if (documentIdAllowlist.length === 0) return [];

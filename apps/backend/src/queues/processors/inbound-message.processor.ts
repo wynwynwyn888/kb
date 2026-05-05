@@ -22,6 +22,10 @@ import {
 import { matchChatResetCommand } from '../../lib/chat-reset-command';
 import { ConversationResetService } from '../../modules/conversations/conversation-reset.service';
 import { InboundAutoTaggingService } from '../../modules/intent-tags/inbound-auto-tagging.service';
+import {
+  AudioTranscriptionService,
+  VOICE_NOTE_TRANSCRIPTION_FAILED_USER_MESSAGE,
+} from '../../modules/transcription/audio-transcription.service';
 
 export interface InboundMessageJobData {
   locationId: string;
@@ -37,6 +41,10 @@ export interface InboundMessageJobData {
   contactPhone?: string;
   contactEmail?: string;
   contactFieldsFromExtendedWebhook?: boolean;
+  /** Inbound audio media URL from GHL webhook (attachments / media). */
+  audioMediaUrl?: string | null;
+  /** When true, run speech-to-text before persisting message content. */
+  voiceInboundNeedsTranscribe?: boolean;
 }
 
 export interface OrchestrateDebouncedJobData {
@@ -65,6 +73,7 @@ export class InboundMessageProcessor extends WorkerHost {
     private readonly orchestrationService: ConversationOrchestrationService,
     private readonly conversationResetService: ConversationResetService,
     private readonly inboundAutoTagging: InboundAutoTaggingService,
+    private readonly audioTranscription: AudioTranscriptionService,
     @InjectQueue(QUEUES.SEND_BUBBLE) private readonly sendBubbleQueue: Queue,
     @InjectQueue(QUEUES.INBOUND_MESSAGE_PROCESSOR) private readonly inboundQueue: Queue,
   ) {
@@ -93,10 +102,12 @@ export class InboundMessageProcessor extends WorkerHost {
       contactPhone,
       contactEmail,
       contactFieldsFromExtendedWebhook,
+      audioMediaUrl,
+      voiceInboundNeedsTranscribe,
     } = job.data;
 
     this.logger.log(
-      `Inbound persist: conversationGhlId=${ghlConversationId}, type=${messageType}, smokeImmediate=${Boolean(smokeImmediate)}`,
+      `Inbound persist: conversationGhlId=${ghlConversationId}, type=${messageType}, smokeImmediate=${Boolean(smokeImmediate)}, voiceInboundNeedsTranscribe=${Boolean(voiceInboundNeedsTranscribe)}`,
     );
 
     if (webhookEventId) {
@@ -117,18 +128,33 @@ export class InboundMessageProcessor extends WorkerHost {
         locationId,
       );
 
+      const resolved = await this.resolveVoiceInboundContent(
+        {
+          messageContent,
+          messageType,
+          audioMediaUrl: audioMediaUrl ?? null,
+          voiceInboundNeedsTranscribe: Boolean(voiceInboundNeedsTranscribe),
+        },
+        tenant.id,
+        conversation.id,
+        webhookEventId,
+      );
+
       await this.addMessage(conversation.id, {
         direction: 'INBOUND',
         sender: 'CONTACT',
-        content: messageContent,
-        contentType: messageType,
+        content: resolved.content,
+        contentType: resolved.persistContentType,
         metadata: {
           ghlMessageId: webhookEventId,
           receivedAt: timestamp,
+          ...resolved.voiceMetadata,
         },
       });
 
-      this.logger.log(`Inbound message stored: conversationId=${conversation.id}, messageType=${messageType}`);
+      this.logger.log(
+        `Inbound message stored: conversationId=${conversation.id}, messageType=${resolved.persistContentType}`,
+      );
 
       if (smokeImmediate) {
         this.logger.log(`Debounce bypassed (smokeImmediate): conversationId=${conversation.id}`);
@@ -139,7 +165,7 @@ export class InboundMessageProcessor extends WorkerHost {
           ghlContactId,
           ghlConversationId,
           webhookEventId,
-          latestInboundText: messageContent,
+          latestInboundText: resolved.content,
           contactDisplayName,
           contactPhone,
           contactEmail,
@@ -202,6 +228,90 @@ export class InboundMessageProcessor extends WorkerHost {
       }
       throw error;
     }
+  }
+
+  /**
+   * Voice / audio inbound: transcribe server-side and persist plain text for the existing orchestration path.
+   * Raw audio is never forwarded to the text reply model — only the transcript (or a safe fallback string).
+   */
+  private async resolveVoiceInboundContent(
+    job: Pick<InboundMessageJobData, 'messageContent' | 'messageType' | 'audioMediaUrl' | 'voiceInboundNeedsTranscribe'>,
+    tenantId: string,
+    conversationId: string,
+    webhookEventId?: string,
+  ): Promise<{
+    content: string;
+    persistContentType: InboundMessageJobData['messageType'];
+    voiceMetadata: Record<string, unknown>;
+  }> {
+    if (!job.voiceInboundNeedsTranscribe) {
+      return {
+        content: job.messageContent,
+        persistContentType: job.messageType,
+        voiceMetadata: {},
+      };
+    }
+
+    const url = (job.audioMediaUrl ?? '').trim();
+    const caption = String(job.messageContent ?? '').trim();
+
+    if (!url) {
+      this.logger.warn(
+        `audioTranscriptionFailed ${JSON.stringify({
+          tenantId,
+          conversationId,
+          webhookEventId: webhookEventId ?? null,
+          errorCode: 'missing_media_url',
+        })}`,
+      );
+      return {
+        content: VOICE_NOTE_TRANSCRIPTION_FAILED_USER_MESSAGE,
+        persistContentType: 'text',
+        voiceMetadata: {
+          inboundVoiceNote: true,
+          voiceTranscriptionStatus: 'missing_media_url',
+        },
+      };
+    }
+
+    let mediaHost: string | null = null;
+    try {
+      mediaHost = new URL(url).hostname;
+    } catch {
+      mediaHost = null;
+    }
+
+    const tx = await this.audioTranscription.transcribeRemoteMedia({
+      tenantId,
+      mediaUrl: url,
+      conversationId,
+      webhookEventId,
+    });
+
+    if (tx.ok) {
+      const combined = caption ? `${tx.transcript}\n\n${caption}` : tx.transcript;
+      return {
+        content: combined,
+        persistContentType: 'text',
+        voiceMetadata: {
+          inboundVoiceNote: true,
+          voiceTranscriptionStatus: 'succeeded',
+          voiceOriginalMediaHost: mediaHost,
+          voiceMediaBytes: tx.mediaBytes,
+          voiceMediaContentType: tx.contentType,
+        },
+      };
+    }
+
+    return {
+      content: VOICE_NOTE_TRANSCRIPTION_FAILED_USER_MESSAGE,
+      persistContentType: 'text',
+      voiceMetadata: {
+        inboundVoiceNote: true,
+        voiceTranscriptionStatus: 'failed',
+        voiceOriginalMediaHost: mediaHost,
+      },
+    };
   }
 
   private async runOrchestrationAfterDebounce(job: Job<OrchestrateDebouncedJobData>): Promise<void> {

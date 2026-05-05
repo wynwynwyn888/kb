@@ -183,5 +183,60 @@ describe('WebhooksService', () => {
         expect.any(Object),
       );
     });
+
+    it('enqueues inbound audio with attachment URL and voice transcription flag', async () => {
+      (mockSupabase.from as jest.Mock).mockImplementation((table: string) => {
+        if (table === 'tenants') {
+          return {
+            select: () => ({
+              eq: () => ({ single: async () => ({ data: { id: 'tnt_1' }, error: null }) }),
+            }),
+          };
+        }
+        if (table === 'tenant_ghl_connections') {
+          return {
+            select: () => ({
+              eq: () => ({
+                eq: () => ({ single: async () => ({ data: { tenant_id: 'tnt_1', status: 'CONNECTED' }, error: null }) }),
+              }),
+            }),
+          };
+        }
+        if (table === 'webhook_events') {
+          return {
+            select: () => ({
+              eq: () => ({
+                eq: () => ({ single: async () => ({ data: null, error: { code: 'PGRST116' } }) }),
+              }),
+            }),
+            insert: () => ({ select: () => ({ single: async () => ({ data: { id: 'evt_voice' }, error: null }) }) }),
+          };
+        }
+        return {};
+      });
+
+      await service.handleGhlWebhook(
+        makePayload({
+          data: {
+            id: 'msg_voice',
+            conversationId: 'conv_1',
+            contactId: 'c1',
+            message: '',
+            messageType: 'audio',
+            attachments: [{ url: 'https://cdn.example.com/inbound.m4a', contentType: 'audio/mp4' }],
+          } as never,
+        }),
+      );
+
+      expect(mockQueue.add).toHaveBeenCalledWith(
+        'persist',
+        expect.objectContaining({
+          messageType: 'audio',
+          audioMediaUrl: 'https://cdn.example.com/inbound.m4a',
+          voiceInboundNeedsTranscribe: true,
+        }),
+        expect.any(Object),
+      );
+    });
   });
 });

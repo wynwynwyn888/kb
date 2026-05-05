@@ -44,15 +44,17 @@ jestGlobal.mock('../modules/orchestration/orchestration.service', () => ({
   })),
 }));
 
-function makeJobData(overrides = {}) {
+function makeJobData(overrides: Record<string, unknown> = {}) {
   return {
-    locationId: overrides['locationId' as string] ?? 'loc_1',
-    ghlConversationId: overrides['ghlConversationId' as string] ?? 'conv_123',
-    ghlContactId: overrides['ghlContactId' as string] ?? 'contact_1',
-    messageContent: overrides['messageContent' as string] ?? 'Hello',
-    messageType: overrides['messageType' as string] ?? 'text',
-    timestamp: overrides['timestamp' as string] ?? '2026-01-01T00:00:00Z',
-    webhookEventId: overrides['webhookEventId' as string] ?? 'evt_1',
+    locationId: (overrides['locationId'] as string) ?? 'loc_1',
+    ghlConversationId: (overrides['ghlConversationId'] as string) ?? 'conv_123',
+    ghlContactId: (overrides['ghlContactId'] as string) ?? 'contact_1',
+    messageContent: (overrides['messageContent'] as string) ?? 'Hello',
+    messageType: (overrides['messageType'] as string) ?? 'text',
+    timestamp: (overrides['timestamp'] as string) ?? '2026-01-01T00:00:00Z',
+    webhookEventId: (overrides['webhookEventId'] as string) ?? 'evt_1',
+    /** Run orchestration in-process so this suite can assert send-bubble enqueue without a delayed worker. */
+    smokeImmediate: overrides['smokeImmediate'] === false ? false : true,
   };
 }
 
@@ -133,10 +135,18 @@ describe('InboundMessageProcessor (happy path)', () => {
       clearHandoverAfterAllowedReset: jestGlobal.fn(async () => {}),
       buildConfirmationReplyPlan: jestGlobal.fn(() => ({ bubbles: [] })),
     };
+    const mockAudioTranscription = {
+      transcribeRemoteMedia: jestGlobal.fn(async () => ({
+        ok: false as const,
+        errorCode: 'unused_in_happy_path',
+        userFacingFallback: true,
+      })),
+    };
     processor = new InboundMessageProcessor(
       new OrchestrationService(),
       mockReset as never,
       { evaluateAndApplyAutoTags: jestGlobal.fn(async () => {}) } as never,
+      mockAudioTranscription as never,
       { add: mockQueueAdd } as never,
       { add: mockQueueAdd } as never,
     );

@@ -20,6 +20,7 @@ jestGlobal.mock('../../modules/conversation-policy/conversation-intent', () => (
 import type { Job } from 'bullmq';
 
 import { InboundMessageProcessor } from './inbound-message.processor';
+import { VOICE_NOTE_TRANSCRIPTION_FAILED_USER_MESSAGE } from '../../modules/transcription/audio-transcription.service';
 
 const CONV_ID = 'c1111111-1111-1111-1111-111111111111';
 
@@ -65,6 +66,15 @@ const mockResetService = {
 
 const mockInboundAutoTagging = {
   evaluateAndApplyAutoTags: jestGlobal.fn(async () => {}),
+};
+
+const mockAudioTranscription = {
+  transcribeRemoteMedia: jestGlobal.fn(async () => ({
+    ok: true as const,
+    transcript: 'voice transcript',
+    mediaBytes: 12,
+    contentType: 'audio/mpeg',
+  })),
 };
 
 const mockSupabase = {
@@ -132,10 +142,17 @@ describe('InboundMessageProcessor', () => {
   beforeEach(() => {
     jestGlobal.clearAllMocks();
     orchestrate.mockResolvedValue({ outcome: 'SKIP' });
+    mockAudioTranscription.transcribeRemoteMedia.mockImplementation(async () => ({
+      ok: true as const,
+      transcript: 'voice transcript',
+      mediaBytes: 12,
+      contentType: 'audio/mpeg',
+    }));
     processor = new InboundMessageProcessor(
       mockOrchestration as never,
       mockResetService as never,
       mockInboundAutoTagging as never,
+      mockAudioTranscription as never,
       { add: mockSendBubbleQueueAdd } as never,
       { add: mockInboundQueueAdd } as never,
     );
@@ -561,5 +578,194 @@ describe('InboundMessageProcessor', () => {
     );
     expect(mockResetService.clearHandoverAfterAllowedReset).toHaveBeenCalledWith(CONV_ID, 'tenant-1');
     expect(orchestrate).not.toHaveBeenCalled();
+  });
+
+  it('persist: audio with media URL transcribes and stores transcript as message text', async () => {
+    let inserted: Record<string, unknown> | null = null;
+    mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'tenants') {
+        return {
+          select: () => ({
+            eq: () => ({
+              single: async () => ({ data: { id: 'tenant-1' }, error: null }),
+            }),
+          }),
+        };
+      }
+      if (table === 'conversations') {
+        return makeConversationsTableMock({ id: CONV_ID });
+      }
+      if (table === 'messages') {
+        return {
+          insert: (row: Record<string, unknown>) => {
+            inserted = row;
+            return { error: null };
+          },
+        };
+      }
+      return {} as never;
+    });
+
+    mockAudioTranscription.transcribeRemoteMedia.mockResolvedValueOnce({
+      ok: true,
+      transcript: 'Please book me for Saturday',
+      mediaBytes: 100,
+      contentType: 'audio/mpeg',
+    });
+
+    await processor.process(
+      makeJob('persist', {
+        locationId: 'loc_1',
+        ghlConversationId: 'ghl_conv_1',
+        ghlContactId: 'ct_1',
+        messageContent: '',
+        messageType: 'audio',
+        timestamp: '2026-01-01T00:00:00Z',
+        smokeImmediate: false,
+        audioMediaUrl: 'https://cdn.example.com/voice.m4a',
+        voiceInboundNeedsTranscribe: true,
+      }),
+    );
+
+    expect(mockAudioTranscription.transcribeRemoteMedia).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tenantId: 'tenant-1',
+        mediaUrl: 'https://cdn.example.com/voice.m4a',
+      }),
+    );
+    expect(inserted?.['content']).toBe('Please book me for Saturday');
+    expect(inserted?.['contentType']).toBe('TEXT');
+    const meta = inserted?.['metadata'] as Record<string, unknown> | undefined;
+    expect(meta?.['voiceTranscriptionStatus']).toBe('succeeded');
+    expect(meta?.['inboundVoiceNote']).toBe(true);
+  });
+
+  it('persist: empty body + attachment path transcribes when voice flag is set', async () => {
+    let inserted: Record<string, unknown> | null = null;
+    mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'tenants') {
+        return {
+          select: () => ({
+            eq: () => ({
+              single: async () => ({ data: { id: 'tenant-1' }, error: null }),
+            }),
+          }),
+        };
+      }
+      if (table === 'conversations') {
+        return makeConversationsTableMock({ id: CONV_ID });
+      }
+      if (table === 'messages') {
+        return {
+          insert: (row: Record<string, unknown>) => {
+            inserted = row;
+            return { error: null };
+          },
+        };
+      }
+      return {} as never;
+    });
+
+    await processor.process(
+      makeJob('persist', {
+        locationId: 'loc_1',
+        ghlConversationId: 'ghl_conv_1',
+        ghlContactId: 'ct_1',
+        messageContent: '',
+        messageType: 'unknown',
+        timestamp: '2026-01-01T00:00:00Z',
+        smokeImmediate: false,
+        audioMediaUrl: 'https://cdn.example.com/note.mp3',
+        voiceInboundNeedsTranscribe: true,
+      }),
+    );
+
+    expect(mockAudioTranscription.transcribeRemoteMedia).toHaveBeenCalled();
+    expect(inserted?.['content']).toBe('voice transcript');
+  });
+
+  it('persist: transcription failure stores safe fallback text', async () => {
+    let inserted: Record<string, unknown> | null = null;
+    mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'tenants') {
+        return {
+          select: () => ({
+            eq: () => ({
+              single: async () => ({ data: { id: 'tenant-1' }, error: null }),
+            }),
+          }),
+        };
+      }
+      if (table === 'conversations') {
+        return makeConversationsTableMock({ id: CONV_ID });
+      }
+      if (table === 'messages') {
+        return {
+          insert: (row: Record<string, unknown>) => {
+            inserted = row;
+            return { error: null };
+          },
+        };
+      }
+      return {} as never;
+    });
+
+    mockAudioTranscription.transcribeRemoteMedia.mockResolvedValueOnce({
+      ok: false,
+      errorCode: 'openai_500',
+      userFacingFallback: true,
+    });
+
+    await processor.process(
+      makeJob('persist', {
+        locationId: 'loc_1',
+        ghlConversationId: 'ghl_conv_1',
+        ghlContactId: 'ct_1',
+        messageContent: '',
+        messageType: 'audio',
+        timestamp: '2026-01-01T00:00:00Z',
+        smokeImmediate: false,
+        audioMediaUrl: 'https://cdn.example.com/bad.m4a',
+        voiceInboundNeedsTranscribe: true,
+      }),
+    );
+
+    expect(inserted?.['content']).toBe(VOICE_NOTE_TRANSCRIPTION_FAILED_USER_MESSAGE);
+    expect((inserted?.['metadata'] as Record<string, unknown>)?.['voiceTranscriptionStatus']).toBe('failed');
+  });
+
+  it('persist: normal text inbound does not call transcription', async () => {
+    mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'tenants') {
+        return {
+          select: () => ({
+            eq: () => ({
+              single: async () => ({ data: { id: 'tenant-1' }, error: null }),
+            }),
+          }),
+        };
+      }
+      if (table === 'conversations') {
+        return makeConversationsTableMock({ id: CONV_ID });
+      }
+      if (table === 'messages') {
+        return { insert: () => ({ error: null }) };
+      }
+      return {} as never;
+    });
+
+    await processor.process(
+      makeJob('persist', {
+        locationId: 'loc_1',
+        ghlConversationId: 'ghl_conv_1',
+        ghlContactId: 'ct_1',
+        messageContent: 'Hello',
+        messageType: 'text',
+        timestamp: '2026-01-01T00:00:00Z',
+        smokeImmediate: false,
+      }),
+    );
+
+    expect(mockAudioTranscription.transcribeRemoteMedia).not.toHaveBeenCalled();
   });
 });

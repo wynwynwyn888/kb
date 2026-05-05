@@ -18,6 +18,10 @@ import {
 import { formatPostgrestError } from '../../lib/format-postgrest-error';
 import { extractGhlInboundDedupeKeys } from './ghl-webhook-dedupe';
 import { extractInboundContactFields } from './ghl-inbound-contact-extract';
+import {
+  extractGhlInboundAudioMediaUrl,
+  ghlInboundShouldTranscribeVoice,
+} from './ghl-inbound-audio-media';
 
 @Injectable()
 export class WebhooksService {
@@ -183,12 +187,24 @@ export class WebhooksService {
     const data = (payload.data || {}) as unknown as Record<string, unknown>;
     const extracted = extractInboundContactFields(data);
 
+    const messageContent = (typeof data['message'] === 'string' && data['message']) || '';
+    const messageType = this.mapMessageType(typeof data['messageType'] === 'string' ? data['messageType'] : undefined);
+    const audioMediaUrl = extractGhlInboundAudioMediaUrl(data);
+    const voiceInboundNeedsTranscribe = ghlInboundShouldTranscribeVoice({
+      messageType,
+      messageContent,
+      audioMediaUrl,
+      rawData: data,
+    });
+
     return {
       ghlLocationId: payload.locationId,
       ghlConversationId: (typeof data['conversationId'] === 'string' && data['conversationId']) || '',
       ghlContactId: (typeof data['contactId'] === 'string' && data['contactId']) || '',
-      messageContent: (typeof data['message'] === 'string' && data['message']) || '',
-      messageType: this.mapMessageType(typeof data['messageType'] === 'string' ? data['messageType'] : undefined),
+      messageContent,
+      messageType,
+      audioMediaUrl: audioMediaUrl ?? null,
+      voiceInboundNeedsTranscribe,
       timestamp: payload.timestamp || new Date().toISOString(),
       externalEventId,
       eventType: payload.event,
@@ -285,6 +301,8 @@ export class WebhooksService {
       contactPhone: payload.contactPhone ?? undefined,
       contactEmail: payload.contactEmail ?? undefined,
       contactFieldsFromExtendedWebhook: Boolean(payload.contactFieldsFromExtendedWebhook),
+      audioMediaUrl: payload.audioMediaUrl ?? undefined,
+      voiceInboundNeedsTranscribe: Boolean(payload.voiceInboundNeedsTranscribe),
     };
 
     await this.inboundQueue.add('persist', jobData, {

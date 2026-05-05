@@ -31,6 +31,10 @@ export interface NormalizedWebhookPayload {
   eventType: string;
   dedupeKey: string;
   channelRaw: string | null;
+  /** HTTP(S) URL for inbound voice/audio media when GHL sends attachments instead of plain text. */
+  audioMediaUrl?: string | null;
+  /** When true, the inbound worker should transcribe before persisting text for orchestration. */
+  voiceInboundNeedsTranscribe?: boolean;
   /** When true, contact display/phone used snake_case or alternate GHL webhook keys (not only contactName/phoneNumber). */
   contactFieldsFromExtendedWebhook?: boolean | null;
   contactDisplayName?: string | null;

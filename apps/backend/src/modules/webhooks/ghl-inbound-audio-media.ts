@@ -53,15 +53,51 @@ export function normalizeGhlBodyForPlaceholderClassification(value: unknown): st
   return s.trim();
 }
 
-function stripOuterBracketPair(n: string): string {
-  let t = n.trim();
-  if (t.length >= 2 && t.startsWith('[') && t.endsWith(']')) {
-    return t.slice(1, -1).trim();
-  }
-  if (t.length >= 2 && t.startsWith('(') && t.endsWith(')')) {
-    return t.slice(1, -1).trim();
+/** Full-width angle brackets (GHL workflow sometimes emits these). */
+const FW_LT = '\uFF1C'; // ＜
+const FW_GT = '\uFF1E'; // ＞
+
+const MAX_PLACEHOLDER_WRAPPER_PEELS = 16;
+
+/**
+ * Strip outer wrappers only when the entire normalized string matches one pair — never peels
+ * fragments inside prose (e.g. "please >AUDIO< thanks").
+ */
+function peelGhlPlaceholderOuterWrappers(normalized: string): string {
+  let t = normalized.trim();
+  for (let i = 0; i < MAX_PLACEHOLDER_WRAPPER_PEELS; i++) {
+    const len = t.length;
+    if (len < 3) break;
+
+    const f = t[0];
+    const l = t[len - 1];
+    let inner: string | null = null;
+
+    if (f === '[' && l === ']') inner = t.slice(1, -1);
+    else if (f === '(' && l === ')') inner = t.slice(1, -1);
+    else if (f === '<' && l === '>') inner = t.slice(1, -1);
+    else if (f === '>' && l === '<') inner = t.slice(1, -1);
+    else if (f === FW_LT && l === FW_GT) inner = t.slice(1, -1);
+    else if (f === FW_GT && l === FW_LT) inner = t.slice(1, -1);
+
+    if (inner === null || inner.trim().length === 0) break;
+
+    const next = normalizeGhlBodyForPlaceholderClassification(inner);
+    if (next === t) break;
+    t = next;
   }
   return t;
+}
+
+function isGhlUnsupportedPlaceholderPhrase(s: string): boolean {
+  return (
+    /\bthis message type is not supported\b/i.test(s) ||
+    /\bmessage type is not supported\b/i.test(s) ||
+    /\bvoice message\b/i.test(s) ||
+    /\baudio message\b/i.test(s) ||
+    /\bunsupported message\b/i.test(s) ||
+    /\bunsupported audio\b/i.test(s)
+  );
 }
 
 /** Single-string classifier — use `resolveGhlAudioPlaceholderFromInbound` for workflow-flat bodies. */
@@ -86,7 +122,15 @@ export function classifyGhlAudioPlaceholderBody(value: unknown): GhlAudioPlaceho
     return 'UNKNOWN';
   }
 
-  const core = stripOuterBracketPair(n).toLowerCase();
+  const peeled = peelGhlPlaceholderOuterWrappers(n);
+  if (peeled === fallbackNormInbound || peeled === fallbackNormFailed) {
+    return 'UNKNOWN';
+  }
+  if (/\bvoice note\b/i.test(peeled)) {
+    return 'UNKNOWN';
+  }
+
+  const core = peeled.toLowerCase();
   if (core === 'audio') {
     return 'AUDIO';
   }
@@ -94,22 +138,7 @@ export function classifyGhlAudioPlaceholderBody(value: unknown): GhlAudioPlaceho
     return 'VOICE';
   }
 
-  if (/\bthis message type is not supported\b/i.test(n)) {
-    return 'UNSUPPORTED';
-  }
-  if (/\bmessage type is not supported\b/i.test(n)) {
-    return 'UNSUPPORTED';
-  }
-  if (/\bvoice message\b/i.test(n)) {
-    return 'UNSUPPORTED';
-  }
-  if (/\baudio message\b/i.test(n)) {
-    return 'UNSUPPORTED';
-  }
-  if (/\bunsupported message\b/i.test(n)) {
-    return 'UNSUPPORTED';
-  }
-  if (/\bunsupported audio\b/i.test(n)) {
+  if (isGhlUnsupportedPlaceholderPhrase(n) || isGhlUnsupportedPlaceholderPhrase(peeled)) {
     return 'UNSUPPORTED';
   }
 

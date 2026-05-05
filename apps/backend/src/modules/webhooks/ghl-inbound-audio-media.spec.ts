@@ -129,8 +129,18 @@ describe('ghl-inbound-audio-media', () => {
       ['(AUDIO)', 'AUDIO'],
       ['audio', 'AUDIO'],
       ['Audio', 'AUDIO'],
+      ['>AUDIO<', 'AUDIO'],
+      ['<AUDIO>', 'AUDIO'],
+      ['＞AUDIO＜', 'AUDIO'],
+      ['＜AUDIO＞', 'AUDIO'],
+      ['>VOICE<', 'VOICE'],
+      ['<VOICE>', 'VOICE'],
     ])('classifies %p as %p', (input, kind) => {
       expect(classifyGhlAudioPlaceholderBody(input)).toBe(kind);
+    });
+
+    it('does not treat angle placeholders embedded in prose as AUDIO', () => {
+      expect(classifyGhlAudioPlaceholderBody('please >AUDIO< thanks')).toBe('UNKNOWN');
     });
 
     it('does not treat prose containing "voice note" as a placeholder', () => {

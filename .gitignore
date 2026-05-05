@@ -28,6 +28,10 @@ Thumbs.db
 *.log
 logs/
 
+# Local backups
+docker-compose.hostinger.yml.bak.*
+*.bak.*
+
 # Prisma
 *.db
 *.db-journal

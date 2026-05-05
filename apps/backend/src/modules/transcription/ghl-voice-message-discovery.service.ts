@@ -696,6 +696,10 @@ export class GhlVoiceMessageDiscoveryService {
         ok: true;
         messageId: string;
         audioMediaUrl?: string;
+        detectedCollectionPath: string;
+        attachmentUrlFound?: boolean;
+        audioMediaUrlShape?: { host: string; pathLen: number } | null;
+        debugLatestMessageSamples?: Record<string, unknown>[];
         candidateReason: string;
         candidateCount: number;
       }
@@ -732,6 +736,7 @@ export class GhlVoiceMessageDiscoveryService {
     }
 
     let lastCandidateCount = 0;
+    const debugShapesEnabled = process.env['GHL_VOICE_DEBUG_SHAPES'] === 'true';
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       if (attempt > 1) await sleep(delayMs);
       const listResult = await this.tryListMessages({
@@ -773,6 +778,10 @@ export class GhlVoiceMessageDiscoveryService {
         .filter((c): c is RankedCandidate => Boolean(c));
       lastCandidateCount = candidates.length;
 
+      const directUrlPresentInCandidates = candidates.some((c) => Boolean(c.audioMediaUrl));
+      const shouldLogLatestSamples =
+        debugShapesEnabled || !directUrlPresentInCandidates || lastCandidateCount === 0;
+
       this.logger.log(
         JSON.stringify({
           voiceMessageDiscoveryAttempt: true,
@@ -785,7 +794,10 @@ export class GhlVoiceMessageDiscoveryService {
           detectedCollectionPath: extracted.detectedCollectionPath,
           rawItemCount: rows.length,
           candidateCount: lastCandidateCount,
-          latestMessageSamples: rows.slice(0, 5).map((r, i) => safeMessageSample(r, i)),
+          directAudioMediaUrlPresent: directUrlPresentInCandidates,
+          ...(shouldLogLatestSamples
+            ? { latestMessageSamples: rows.slice(0, 5).map((r, i) => safeMessageSample(r, i)) }
+            : {}),
         }),
       );
 
@@ -824,14 +836,21 @@ export class GhlVoiceMessageDiscoveryService {
             candidateReason: best.reason,
             attachmentUrlFound: direct ? winExtract.attachmentUrlFound : false,
             ...(winExtract.audioMediaUrlShape ? { audioMediaUrlShape: winExtract.audioMediaUrlShape } : {}),
+            detectedCollectionPath: extracted.detectedCollectionPath,
             candidateCount: lastCandidateCount,
           }),
         );
         if (id || direct) {
+          const debugLatestMessageSamples =
+            direct ? rows.slice(0, 5).map((r, i) => safeMessageSample(r, i)) : undefined;
           return {
             ok: true,
             messageId: id ?? '',
             audioMediaUrl: direct ?? undefined,
+            detectedCollectionPath: extracted.detectedCollectionPath,
+            attachmentUrlFound: direct ? winExtract.attachmentUrlFound : false,
+            audioMediaUrlShape: direct ? winExtract.audioMediaUrlShape : null,
+            debugLatestMessageSamples,
             candidateReason: best.reason,
             candidateCount: lastCandidateCount,
           };

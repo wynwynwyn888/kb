@@ -426,6 +426,18 @@ export class InboundMessageProcessor extends WorkerHost {
               },
             };
           }
+          this.logger.warn(
+            JSON.stringify({
+              voiceDiscoveryTranscriptionFailedAfterDirectMediaUrl: true,
+              directAudioMediaUrlPresent: true,
+              attachmentUrlFound: Boolean(discovered.attachmentUrlFound),
+              audioMediaUrlShape: discovered.audioMediaUrlShape ?? null,
+              candidateReason: discovered.candidateReason,
+              candidateCount: discovered.candidateCount,
+              detectedCollectionPath: discovered.detectedCollectionPath,
+              latestMessageSamples: discovered.debugLatestMessageSamples ?? [],
+            }),
+          );
           return {
             content: job.messageContent,
             persistContentType: 'text',
@@ -595,6 +607,18 @@ export class InboundMessageProcessor extends WorkerHost {
             },
           };
         }
+        this.logger.warn(
+          JSON.stringify({
+            voiceDiscoveryTranscriptionFailedAfterDirectMediaUrl: true,
+            directAudioMediaUrlPresent: true,
+            attachmentUrlFound: Boolean(discoveredMsg.attachmentUrlFound),
+            audioMediaUrlShape: discoveredMsg.audioMediaUrlShape ?? null,
+            candidateReason: discoveredMsg.candidateReason,
+            candidateCount: discoveredMsg.candidateCount,
+            detectedCollectionPath: discoveredMsg.detectedCollectionPath,
+            latestMessageSamples: discoveredMsg.debugLatestMessageSamples ?? [],
+          }),
+        );
         return {
           content: job.messageContent,
           persistContentType: 'text',

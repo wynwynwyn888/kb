@@ -5,7 +5,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { getSupabaseService } from '../../lib/supabase';
 import { decrypt } from '../../lib/encryption';
-import { classifyGhlAudioPlaceholderBody } from '../webhooks/ghl-inbound-audio-media';
+import {
+  classifyGhlAudioPlaceholderBody,
+  type GhlAudioPlaceholderKind,
+} from '../webhooks/ghl-inbound-audio-media';
 
 const LIST_TIMEOUT_MS = 35_000;
 const MESSAGE_LIMIT = 40;
@@ -145,6 +148,70 @@ function inboundLikeDirectionSource(s: string): boolean {
   return /(inbound|customer|contact|user|client)/i.test(s);
 }
 
+function attachmentSampleNodes(attachments: unknown, maxNodes: number): unknown[] {
+  if (attachments == null) return [];
+  if (Array.isArray(attachments)) return attachments.slice(0, maxNodes);
+  const rec = asRecord(attachments);
+  if (rec) return Object.values(rec).slice(0, maxNodes);
+  return [];
+}
+
+function describeMediaAttachmentNodeShape(node: unknown): Record<string, unknown> {
+  if (node === null || node === undefined) return { nodeType: 'null' };
+  if (typeof node === 'string') {
+    const http = /^https?:\/\//i.test(node);
+    return {
+      nodeType: 'string',
+      stringLen: node.length,
+      ...(http ? { urlShape: safeUrlShape(node) } : {}),
+    };
+  }
+  if (Array.isArray(node)) {
+    return { nodeType: 'array', arrayLen: node.length };
+  }
+  const r = asRecord(node);
+  if (!r) return { nodeType: typeof node };
+  const urlFieldShapes: Record<string, { host: string; pathLen: number } | null> = {};
+  for (const key of URL_KEYS) {
+    const v = r[key];
+    if (typeof v === 'string' && /^https?:\/\//i.test(v)) {
+      urlFieldShapes[String(key)] = safeUrlShape(v);
+    }
+  }
+  const mimeRaw = r['mimeType'] ?? r['contentType'];
+  const nameRaw = r['fileName'] ?? r['filename'] ?? r['name'];
+  let extOnly: string | undefined;
+  if (typeof nameRaw === 'string' && nameRaw.includes('.')) {
+    const m = /\.([a-z0-9]+)$/i.exec(nameRaw);
+    extOnly = m?.[1]?.toLowerCase();
+  }
+  return {
+    nodeType: 'object',
+    keySample: Object.keys(r).slice(0, 20),
+    ...(Object.keys(urlFieldShapes).length ? { urlFieldShapes } : {}),
+    ...(mimeRaw != null && String(mimeRaw).trim()
+      ? { mimeTypePresent: true, mimeTypeShort: String(mimeRaw).slice(0, 40) }
+      : { mimeTypePresent: false }),
+    ...(typeof nameRaw === 'string' && nameRaw.trim()
+      ? { filenamePresent: true, ...(extOnly ? { filenameExtOnly: extOnly } : {}) }
+      : { filenamePresent: false }),
+  };
+}
+
+function attachmentShapeSamples(attachments: unknown): Record<string, unknown>[] {
+  return attachmentSampleNodes(attachments, 3).map(describeMediaAttachmentNodeShape);
+}
+
+function mediaShapeSamples(media: unknown): Record<string, unknown>[] {
+  if (media == null) return [];
+  if (Array.isArray(media)) {
+    return media.slice(0, 3).map(describeMediaAttachmentNodeShape);
+  }
+  const r = asRecord(media);
+  if (r) return Object.values(r).slice(0, 3).map(describeMediaAttachmentNodeShape);
+  return [describeMediaAttachmentNodeShape(media)];
+}
+
 function attachmentMediaStats(row: Record<string, unknown>): {
   hasAttachments: boolean;
   attachmentCount: number;
@@ -169,12 +236,26 @@ function attachmentMediaStats(row: Record<string, unknown>): {
     }
   };
 
-  if (Array.isArray(attachments)) {
+  if (attachments != null) {
     hasAttachments = true;
-    attachmentCount = attachments.length;
-    for (const item of attachments) {
-      const r = asRecord(item);
-      if (r) inspectNode(r);
+    if (Array.isArray(attachments)) {
+      attachmentCount = attachments.length;
+      for (const item of attachments) {
+        const r = asRecord(item);
+        if (r) inspectNode(r);
+      }
+    } else {
+      const r = asRecord(attachments);
+      if (r) {
+        attachmentCount = Object.keys(r).length;
+        for (const v of Object.values(r)) {
+          const rec = asRecord(v);
+          if (rec) inspectNode(rec);
+        }
+      } else if (typeof attachments === 'string') {
+        attachmentCount = 1;
+        if (hasAudioHintInString(attachments)) hasAudioHint = true;
+      }
     }
   }
 
@@ -191,6 +272,9 @@ function attachmentMediaStats(row: Record<string, unknown>): {
       if (r) {
         mediaKeyNodeCount = Object.keys(r).length > 0 ? 1 : 0;
         inspectNode(r);
+      } else if (typeof media === 'string') {
+        mediaKeyNodeCount = 1;
+        if (hasAudioHintInString(media)) hasAudioHint = true;
       }
     }
   }
@@ -198,83 +282,188 @@ function attachmentMediaStats(row: Record<string, unknown>): {
   return { hasAttachments, attachmentCount, hasMedia, mediaKeyNodeCount, hasAudioHint };
 }
 
-function extractUrlFromNode(node: Record<string, unknown>): string | null {
-  for (const key of URL_KEYS) {
-    const v = firstNonEmptyString([node[key]]);
-    if (v && /^https?:\/\//i.test(v)) return v;
-  }
-  return null;
-}
-
-function audioUrlLooksDownloadable(url: string): boolean {
-  if (!/^https?:\/\//i.test(url)) return false;
+function audioUrlHasAudioExtension(url: string): boolean {
   const lower = url.toLowerCase();
-  return (
-    lower.includes('storage.googleapis.com') ||
-    lower.includes('stark-media') ||
-    /\.(mp3|ogg|oga|m4a|wav|webm|aac|amr)(\?|#|$)/i.test(lower) ||
-    lower.includes('/audio/')
-  );
+  return /\.(mp3|ogg|oga|m4a|wav|webm|aac|amr)(\?|#|$)/i.test(lower);
 }
 
-function walkNodesForMedia(
-  root: unknown,
+function audioUrlStarkMediaHint(url: string): boolean {
+  try {
+    return new URL(url).pathname.toLowerCase().includes('stark-media');
+  } catch {
+    return url.toLowerCase().includes('stark-media');
+  }
+}
+
+function mimeAndFilenameFromParent(parent: Record<string, unknown> | undefined): {
+  mime: string;
+  fileName: string;
+} {
+  const mime = String(parent?.['contentType'] ?? parent?.['mimeType'] ?? '').toLowerCase();
+  const fileName = String(parent?.['fileName'] ?? parent?.['filename'] ?? parent?.['name'] ?? '').toLowerCase();
+  return { mime, fileName };
+}
+
+/** Strict: non-placeholder rows — require audio signals on URL or parent metadata. */
+function strictAudioUrlAcceptable(url: string, parent: Record<string, unknown> | undefined): boolean {
+  if (!/^https?:\/\//i.test(url)) return false;
+  const { mime, fileName } = mimeAndFilenameFromParent(parent);
+  if (mime.startsWith('audio/')) return true;
+  if (audioUrlHasAudioExtension(url)) return true;
+  if (audioUrlHasAudioExtension(fileName)) return true;
+  return audioUrlStarkMediaHint(url);
+}
+
+function placeholderRowUrlAcceptable(url: string): boolean {
+  return /^https?:\/\//i.test(url);
+}
+
+const NESTED_URL_CONTAINERS = [
+  'file',
+  'media',
+  'attachment',
+  'download',
+  'metadata',
+  'data',
+  'value',
+] as const;
+
+function collectMediaSubtreeRoots(message: Record<string, unknown>): unknown[] {
+  const roots: unknown[] = [];
+  const push = (v: unknown) => {
+    if (v === null || v === undefined) return;
+    roots.push(v);
+  };
+
+  push(message['attachments']);
+  push(message['media']);
+  push(message['files']);
+
+  const nested = [asRecord(message['message']), asRecord(message['payload']), asRecord(message['customData']), asRecord(message['data'])];
+  for (const r of nested) {
+    if (!r) continue;
+    push(r['attachments']);
+    push(r['media']);
+    push(r['files']);
+  }
+  return roots;
+}
+
+function dfsMediaSubtree(
+  node: unknown,
   depth: number,
   seen: WeakSet<object>,
-): { url: string | null; mediaKeyNodeCount: number } {
-  if (depth < 0 || !root || typeof root !== 'object') return { url: null, mediaKeyNodeCount: 0 };
-  if (seen.has(root as object)) return { url: null, mediaKeyNodeCount: 0 };
-  seen.add(root as object);
+  parentObject: Record<string, unknown> | undefined,
+  placeholderRelaxed: boolean,
+): { url: string | null; visitedNodes: number } {
+  if (depth < 0 || node === null || node === undefined) return { url: null, visitedNodes: 0 };
 
-  if (Array.isArray(root)) {
-    let nodes = 0;
-    for (const item of root) {
-      const r = walkNodesForMedia(item, depth - 1, seen);
-      nodes += r.mediaKeyNodeCount;
-      if (r.url) return { url: r.url, mediaKeyNodeCount: nodes };
+  if (typeof node === 'string') {
+    const ok = placeholderRelaxed ? placeholderRowUrlAcceptable(node) : strictAudioUrlAcceptable(node, parentObject);
+    return ok ? { url: node, visitedNodes: 1 } : { url: null, visitedNodes: 1 };
+  }
+
+  if (typeof node !== 'object') return { url: null, visitedNodes: 1 };
+
+  if (seen.has(node as object)) return { url: null, visitedNodes: 0 };
+  seen.add(node as object);
+
+  let visited = 1;
+
+  if (Array.isArray(node)) {
+    for (const item of node) {
+      const hit = dfsMediaSubtree(item, depth - 1, seen, parentObject, placeholderRelaxed);
+      visited += hit.visitedNodes;
+      if (hit.url) return { url: hit.url, visitedNodes: visited };
     }
-    return { url: null, mediaKeyNodeCount: nodes };
+    return { url: null, visitedNodes: visited };
   }
 
-  const rec = root as Record<string, unknown>;
-  let nodes = 0;
-  const direct = extractUrlFromNode(rec);
-  if (direct && audioUrlLooksDownloadable(direct)) {
-    return { url: direct, mediaKeyNodeCount: 1 };
-  }
-  nodes += 1;
+  const rec = node as Record<string, unknown>;
 
-  const likelyChildKeys = [
-    'attachments',
-    'media',
-    'files',
-    'message',
-    'payload',
-    'customData',
-    'data',
-  ];
-  for (const k of likelyChildKeys) {
-    if (!(k in rec)) continue;
-    const r = walkNodesForMedia(rec[k], depth - 1, seen);
-    nodes += r.mediaKeyNodeCount;
-    if (r.url) return { url: r.url, mediaKeyNodeCount: nodes };
+  for (const nk of NESTED_URL_CONTAINERS) {
+    if (!(nk in rec)) continue;
+    const hit = dfsMediaSubtree(rec[nk], depth - 1, seen, rec, placeholderRelaxed);
+    visited += hit.visitedNodes;
+    if (hit.url) return { url: hit.url, visitedNodes: visited };
   }
 
-  return { url: null, mediaKeyNodeCount: nodes };
+  for (const key of URL_KEYS) {
+    if (!(key in rec)) continue;
+    const raw = rec[key];
+    if (typeof raw === 'string' && raw.trim()) {
+      const v = raw.trim();
+      const ok = placeholderRelaxed ? placeholderRowUrlAcceptable(v) : strictAudioUrlAcceptable(v, rec);
+      if (ok) return { url: v, visitedNodes: visited };
+    }
+  }
+
+  const keyList = Object.keys(rec);
+  keyList.sort((a, b) => a.localeCompare(b));
+  for (const key of keyList) {
+    if ((NESTED_URL_CONTAINERS as readonly string[]).includes(key)) continue;
+    if ((URL_KEYS as readonly string[]).includes(key)) continue;
+    const hit = dfsMediaSubtree(rec[key], depth - 1, seen, rec, placeholderRelaxed);
+    visited += hit.visitedNodes;
+    if (hit.url) return { url: hit.url, visitedNodes: visited };
+  }
+
+  return { url: null, visitedNodes: visited };
 }
 
 export function extractGhlMessageAudioMediaUrl(
   message: Record<string, unknown>,
-): { audioMediaUrl: string | null; audioMediaUrlShape: { host: string; pathLen: number } | null; mediaKeyNodeCount: number } {
-  const walked = walkNodesForMedia(message, 5, new WeakSet<object>());
+  bodyPlaceholderKind?: GhlAudioPlaceholderKind,
+): {
+  audioMediaUrl: string | null;
+  audioMediaUrlShape: { host: string; pathLen: number } | null;
+  mediaKeyNodeCount: number;
+  attachmentUrlFound: boolean;
+} {
+  const relaxed = bodyPlaceholderKind === 'AUDIO' || bodyPlaceholderKind === 'VOICE';
+
+  const seen = new WeakSet<object>();
+
+  let attachmentUrlFound = false;
+  let bestUrl: string | null = null;
+  let visitedTotal = 0;
+
+  for (const root of collectMediaSubtreeRoots(message)) {
+    const hit = dfsMediaSubtree(root, 8, seen, undefined, relaxed);
+    visitedTotal += hit.visitedNodes;
+    if (hit.url) {
+      bestUrl = hit.url;
+      attachmentUrlFound = true;
+      break;
+    }
+  }
+
+  if (!bestUrl) {
+    for (const key of URL_KEYS) {
+      const raw = message[key];
+      if (typeof raw !== 'string' || !raw.trim()) continue;
+      const v = raw.trim();
+      const ok = relaxed ? placeholderRowUrlAcceptable(v) : strictAudioUrlAcceptable(v, message);
+      if (ok) {
+        bestUrl = v;
+        attachmentUrlFound = false;
+        break;
+      }
+    }
+  }
+
+  const mediaKeyNodeCount = Math.max(1, visitedTotal);
   return {
-    audioMediaUrl: walked.url,
-    audioMediaUrlShape: walked.url ? safeUrlShape(walked.url) : null,
-    mediaKeyNodeCount: walked.mediaKeyNodeCount,
+    audioMediaUrl: bestUrl,
+    audioMediaUrlShape: bestUrl ? safeUrlShape(bestUrl) : null,
+    mediaKeyNodeCount,
+    attachmentUrlFound,
   };
 }
 
 type CandidateReason =
+  | 'placeholder_attachment_url'
+  | 'inbound_audio_type_with_direct_url'
   | 'inbound_with_direct_audio_url'
   | 'inbound_placeholder_audio_or_voice'
   | 'inbound_audio_type'
@@ -285,10 +474,13 @@ type RankedCandidate = {
   reason: CandidateReason;
   score: number;
   audioMediaUrl: string | null;
+  attachmentUrlFound: boolean;
 };
 
 function scoreCandidateReason(reason: CandidateReason): number {
-  if (reason === 'inbound_with_direct_audio_url') return 400;
+  if (reason === 'placeholder_attachment_url') return 500;
+  if (reason === 'inbound_audio_type_with_direct_url') return 400;
+  if (reason === 'inbound_with_direct_audio_url') return 390;
   if (reason === 'inbound_placeholder_audio_or_voice') return 300;
   if (reason === 'inbound_audio_type') return 200;
   return 100;
@@ -299,6 +491,7 @@ function candidateFromRow(row: Record<string, unknown>): RankedCandidate | null 
   const bodyKind = classifyGhlAudioPlaceholderBody(body);
   const directionSource = directionSourceOf(row);
   const inboundLike = inboundLikeDirectionSource(directionSource);
+  const ph = bodyKind === 'AUDIO' || bodyKind === 'VOICE';
   const typeBundle = [
     String(row['type'] ?? ''),
     String(row['messageType'] ?? ''),
@@ -307,20 +500,64 @@ function candidateFromRow(row: Record<string, unknown>): RankedCandidate | null 
   ].join(' ');
   const typeAudio = /voice|audio|VoiceMessage|AudioMessage/i.test(typeBundle);
   const stats = attachmentMediaStats(row);
-  const extracted = extractGhlMessageAudioMediaUrl(row);
+  const extracted = extractGhlMessageAudioMediaUrl(row, bodyKind);
   const directUrl = extracted.audioMediaUrl;
 
-  if (inboundLike && directUrl) {
-    return { row, reason: 'inbound_with_direct_audio_url', score: scoreCandidateReason('inbound_with_direct_audio_url'), audioMediaUrl: directUrl };
+  const attFound = extracted.attachmentUrlFound;
+
+  if (inboundLike && directUrl && ph) {
+    return {
+      row,
+      reason: 'placeholder_attachment_url',
+      score: scoreCandidateReason('placeholder_attachment_url'),
+      audioMediaUrl: directUrl,
+      attachmentUrlFound: attFound,
+    };
   }
-  if (inboundLike && (bodyKind === 'AUDIO' || bodyKind === 'VOICE')) {
-    return { row, reason: 'inbound_placeholder_audio_or_voice', score: scoreCandidateReason('inbound_placeholder_audio_or_voice'), audioMediaUrl: directUrl };
+  if (inboundLike && directUrl && (typeAudio || stats.hasAudioHint)) {
+    return {
+      row,
+      reason: 'inbound_audio_type_with_direct_url',
+      score: scoreCandidateReason('inbound_audio_type_with_direct_url'),
+      audioMediaUrl: directUrl,
+      attachmentUrlFound: attFound,
+    };
+  }
+  if (inboundLike && directUrl) {
+    return {
+      row,
+      reason: 'inbound_with_direct_audio_url',
+      score: scoreCandidateReason('inbound_with_direct_audio_url'),
+      audioMediaUrl: directUrl,
+      attachmentUrlFound: attFound,
+    };
+  }
+  if (inboundLike && ph) {
+    return {
+      row,
+      reason: 'inbound_placeholder_audio_or_voice',
+      score: scoreCandidateReason('inbound_placeholder_audio_or_voice'),
+      audioMediaUrl: directUrl,
+      attachmentUrlFound: attFound,
+    };
   }
   if (inboundLike && (typeAudio || stats.hasAudioHint || directUrl)) {
-    return { row, reason: 'inbound_audio_type', score: scoreCandidateReason('inbound_audio_type'), audioMediaUrl: directUrl };
+    return {
+      row,
+      reason: 'inbound_audio_type',
+      score: scoreCandidateReason('inbound_audio_type'),
+      audioMediaUrl: directUrl,
+      attachmentUrlFound: attFound,
+    };
   }
   if (!inboundLike && directUrl) {
-    return { row, reason: 'latest_direct_audio_url_no_direction', score: scoreCandidateReason('latest_direct_audio_url_no_direction'), audioMediaUrl: directUrl };
+    return {
+      row,
+      reason: 'latest_direct_audio_url_no_direction',
+      score: scoreCandidateReason('latest_direct_audio_url_no_direction'),
+      audioMediaUrl: directUrl,
+      attachmentUrlFound: attFound,
+    };
   }
   return null;
 }
@@ -346,7 +583,7 @@ function safeMessageSample(row: Record<string, unknown>, index: number): Record<
   const body = extractBody(row);
   const bodyKind = classifyGhlAudioPlaceholderBody(body);
   const stats = attachmentMediaStats(row);
-  const extracted = extractGhlMessageAudioMediaUrl(row);
+  const extracted = extractGhlMessageAudioMediaUrl(row, bodyKind);
   const dateAdded = firstNonEmptyString([row['dateAdded'], row['createdAt'], row['timestamp']]);
   return {
     index,
@@ -370,6 +607,8 @@ function safeMessageSample(row: Record<string, unknown>, index: number): Record<
     hasMedia: stats.hasMedia,
     mediaKeyNodeCount: extracted.mediaKeyNodeCount,
     audioMediaUrlShape: extracted.audioMediaUrlShape,
+    attachmentShapeSample: attachmentShapeSamples(row['attachments']),
+    mediaShapeSample: mediaShapeSamples(row['media']),
     dateAdded: dateAdded ? dateAdded.slice(0, 25) : undefined,
   };
 }
@@ -564,6 +803,8 @@ export class GhlVoiceMessageDiscoveryService {
       if (best) {
         const id = resolveMessageRowId(best.row);
         const direct = best.audioMediaUrl;
+        const bodyKind = classifyGhlAudioPlaceholderBody(extractBody(best.row));
+        const winExtract = extractGhlMessageAudioMediaUrl(best.row, bodyKind);
         if (direct) {
           this.logger.log(
             JSON.stringify({
@@ -571,6 +812,7 @@ export class GhlVoiceMessageDiscoveryService {
               audioMediaUrlShape: safeUrlShape(direct),
               messageIdPresent: Boolean(id),
               candidateReason: best.reason,
+              attachmentUrlFound: winExtract.attachmentUrlFound,
             }),
           );
         }
@@ -580,6 +822,8 @@ export class GhlVoiceMessageDiscoveryService {
             discoveredMessageIdPresent: Boolean(id),
             directAudioMediaUrlPresent: Boolean(direct),
             candidateReason: best.reason,
+            attachmentUrlFound: direct ? winExtract.attachmentUrlFound : false,
+            ...(winExtract.audioMediaUrlShape ? { audioMediaUrlShape: winExtract.audioMediaUrlShape } : {}),
             candidateCount: lastCandidateCount,
           }),
         );

@@ -287,7 +287,9 @@ export class InboundMessageProcessor extends WorkerHost {
       messageId: params.messageId,
     });
     if (!fetched.ok) {
-      return { ok: false, failureReason: fetched.reason };
+      const fr =
+        fetched.reason === 'http_422' ? 'recording_fetch_http_422' : fetched.reason;
+      return { ok: false, failureReason: fr };
     }
     const tx = await this.audioTranscription.transcribeAudioBuffer({
       tenantId: params.tenantId,

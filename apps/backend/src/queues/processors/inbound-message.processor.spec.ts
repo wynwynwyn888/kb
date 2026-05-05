@@ -1145,6 +1145,67 @@ describe('InboundMessageProcessor', () => {
     expect(meta?.['voiceTranscriptionStatus']).toBe('media_url_missing');
   });
 
+  it('persist: discovery id but recording 422 — voiceRetrievalFailureReason recording_fetch_http_422', async () => {
+    process.env['GHL_VOICE_FETCH_RECORDING_BY_MESSAGE_ID'] = 'true';
+    process.env['GHL_VOICE_DISCOVER_MESSAGE_ID'] = 'true';
+    process.env['GHL_VOICE_DISCOVER_DELAY_MS'] = '0';
+
+    mockGhlVoiceMessageDiscovery.discoverVoicePlaceholderMessageId.mockResolvedValue({
+      ok: true,
+      messageId: 'mid_422',
+      candidateCount: 1,
+    });
+    mockGhlVoiceRecordingFetch.tryFetchRecording.mockResolvedValue({
+      ok: false as const,
+      reason: 'http_422',
+    });
+
+    let inserted: Record<string, unknown> | null = null;
+    mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'tenants') {
+        return {
+          select: () => ({
+            eq: () => ({
+              single: async () => ({ data: { id: 'tenant-1' }, error: null }),
+            }),
+          }),
+        };
+      }
+      if (table === 'conversations') {
+        return makeConversationsTableMock({ id: CONV_ID });
+      }
+      if (table === 'messages') {
+        return {
+          insert: (row: Record<string, unknown>) => {
+            inserted = row;
+            return { error: null };
+          },
+        };
+      }
+      return {} as never;
+    });
+
+    await processor.process(
+      makeJob('persist', {
+        locationId: 'loc_1',
+        ghlConversationId: 'ghl_conv_422',
+        ghlContactId: 'ct_1',
+        messageContent: VOICE_INBOUND_PLACEHOLDER_NO_MEDIA_USER_MESSAGE,
+        messageType: 'text',
+        timestamp: '2026-01-01T00:00:00Z',
+        smokeImmediate: false,
+        voiceInboundNeedsTranscribe: false,
+        voiceInboundAudioPlaceholderWithoutMediaUrl: true,
+        voiceInboundPlaceholderKind: 'AUDIO',
+        voiceInboundPlaceholderRawBody: '>AUDIO<',
+      }),
+    );
+
+    const meta = inserted?.['metadata'] as Record<string, unknown> | undefined;
+    expect(meta?.['voiceRetrievalFailureReason']).toBe('recording_fetch_http_422');
+    expect(meta?.['voiceTranscriptionStatus']).toBe('media_url_missing');
+  });
+
   it('persist: normal text does not run message-id discovery', async () => {
     process.env['GHL_VOICE_DISCOVER_MESSAGE_ID'] = 'true';
 

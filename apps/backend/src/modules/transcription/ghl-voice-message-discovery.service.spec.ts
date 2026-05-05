@@ -1,6 +1,9 @@
 import { jest as jestGlobal } from '@jest/globals';
 import { Logger } from '@nestjs/common';
-import { GhlVoiceMessageDiscoveryService } from './ghl-voice-message-discovery.service';
+import {
+  extractGhlMessageAudioMediaUrl,
+  GhlVoiceMessageDiscoveryService,
+} from './ghl-voice-message-discovery.service';
 
 const mockSupabase = {
   from: jestGlobal.fn(),
@@ -27,6 +30,88 @@ function connectedTokenRow() {
     }),
   };
 }
+
+describe('extractGhlMessageAudioMediaUrl', () => {
+  it('accepts attachments array of string URLs (stark-media path)', () => {
+    const r = extractGhlMessageAudioMediaUrl(
+      {
+        attachments: ['https://storage.googleapis.com/b/stark-media/voice123'],
+      },
+      'UNKNOWN',
+    );
+    expect(r.audioMediaUrl).toContain('stark-media');
+    expect(r.attachmentUrlFound).toBe(true);
+  });
+
+  it('accepts attachments object map of string URLs', () => {
+    const r = extractGhlMessageAudioMediaUrl(
+      {
+        attachments: {
+          '0': 'https://storage.googleapis.com/b/stark-media/a',
+          '1': 'https://ignore.example.com/x',
+        },
+      },
+      'UNKNOWN',
+    );
+    expect(r.audioMediaUrl).toContain('stark-media');
+    expect(r.attachmentUrlFound).toBe(true);
+  });
+
+  it('reads attachments[0].file.url', () => {
+    const r = extractGhlMessageAudioMediaUrl(
+      {
+        attachments: [{ file: { url: 'https://storage.googleapis.com/x/stark-media/f.ogg' } }],
+      },
+      'UNKNOWN',
+    );
+    expect(r.audioMediaUrl).toMatch(/stark-media/);
+    expect(r.attachmentUrlFound).toBe(true);
+  });
+
+  it('reads attachments[0].metadata.url', () => {
+    const r = extractGhlMessageAudioMediaUrl(
+      {
+        attachments: [{ metadata: { url: 'https://storage.googleapis.com/x/stark-media/n' } }],
+      },
+      'UNKNOWN',
+    );
+    expect(r.audioMediaUrl).toMatch(/stark-media/);
+  });
+
+  it('AUDIO placeholder accepts first https attachment URL without extension', () => {
+    const r = extractGhlMessageAudioMediaUrl(
+      {
+        body: 'AUDIO',
+        attachments: ['https://files.example.com/no-ext-voice'],
+      },
+      'AUDIO',
+    );
+    expect(r.audioMediaUrl).toBe('https://files.example.com/no-ext-voice');
+    expect(r.attachmentUrlFound).toBe(true);
+  });
+
+  it('rejects non-placeholder row with random image URL in attachment', () => {
+    const r = extractGhlMessageAudioMediaUrl(
+      {
+        body: 'hello there',
+        attachments: [{ url: 'https://evil.example.com/pixel.gif' }],
+      },
+      'UNKNOWN',
+    );
+    expect(r.audioMediaUrl).toBeNull();
+  });
+
+  it('accepts non-placeholder row when attachment has audio mime', () => {
+    const r = extractGhlMessageAudioMediaUrl(
+      {
+        body: 'Order status',
+        attachments: [{ url: 'https://cdn.example.com/bin', mimeType: 'audio/ogg' }],
+      },
+      'UNKNOWN',
+    );
+    expect(r.audioMediaUrl).toBe('https://cdn.example.com/bin');
+  });
+});
 
 describe('GhlVoiceMessageDiscoveryService', () => {
   let svc: GhlVoiceMessageDiscoveryService;
@@ -253,6 +338,39 @@ describe('GhlVoiceMessageDiscoveryService', () => {
       placeholderKind: 'AUDIO',
     });
     expect(res).toEqual(expect.objectContaining({ ok: true, messageId: 'm5' }));
+  });
+
+  it('returns direct media URL for attachments array of string stark-media URLs', async () => {
+    global.fetch = jestGlobal.fn(async () =>
+      ({
+        ok: true,
+        json: async () => ({
+          messages: [
+            {
+              id: 'm6s',
+              direction: 'inbound',
+              body: '>AUDIO<',
+              attachments: ['https://storage.googleapis.com/bucket/stark-media/abc/nofext'],
+            },
+          ],
+        }),
+      }) as never,
+    );
+    const res = await svc.discoverVoicePlaceholderMessageId({
+      tenantId: 't1',
+      locationId: 'loc1',
+      conversationId: 'conv1',
+      webhookTimestampIso: '2026-01-01T00:00:03Z',
+      placeholderKind: 'AUDIO',
+    });
+    expect(res).toEqual(
+      expect.objectContaining({
+        ok: true,
+        messageId: 'm6s',
+        candidateReason: 'placeholder_attachment_url',
+        audioMediaUrl: expect.stringContaining('stark-media'),
+      }),
+    );
   });
 
   it('returns direct media URL candidate for storage.googleapis.com/stark-media path', async () => {

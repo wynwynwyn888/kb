@@ -40,6 +40,12 @@ export interface NormalizedWebhookPayload {
    * replaced with a safe customer message and transcription was skipped.
    */
   voiceInboundAudioPlaceholderWithoutMediaUrl?: boolean;
+  /** When placeholder path: short classification label for logs (AUDIO, VOICE_MESSAGE, …). */
+  voiceInboundPlaceholderKind?: string;
+  /** Raw inbound body before placeholder replacement — used for optional GHL recording fetch. */
+  voiceInboundPlaceholderRawBody?: string;
+  /** GHL message id from webhook data.id when present. */
+  ghlInboundMessageId?: string;
   /** When true, contact display/phone used snake_case or alternate GHL webhook keys (not only contactName/phoneNumber). */
   contactFieldsFromExtendedWebhook?: boolean | null;
   contactDisplayName?: string | null;

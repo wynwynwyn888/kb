@@ -354,5 +354,59 @@ describe('WebhooksService', () => {
         expect.any(Object),
       );
     });
+
+    it('does not treat customer text containing "voice note" as a GHL audio placeholder', async () => {
+      (mockSupabase.from as jest.Mock).mockImplementation((table: string) => {
+        if (table === 'tenants') {
+          return {
+            select: () => ({
+              eq: () => ({ single: async () => ({ data: { id: 'tnt_1' }, error: null }) }),
+            }),
+          };
+        }
+        if (table === 'tenant_ghl_connections') {
+          return {
+            select: () => ({
+              eq: () => ({
+                eq: () => ({ single: async () => ({ data: { tenant_id: 'tnt_1', status: 'CONNECTED' }, error: null }) }),
+              }),
+            }),
+          };
+        }
+        if (table === 'webhook_events') {
+          return {
+            select: () => ({
+              eq: () => ({
+                eq: () => ({ single: async () => ({ data: null, error: { code: 'PGRST116' } }) }),
+              }),
+            }),
+            insert: () => ({ select: () => ({ single: async () => ({ data: { id: 'evt_vn' }, error: null }) }) }),
+          };
+        }
+        return {};
+      });
+
+      const prose = 'If you get stuck, you can always send a voice note and we will help.';
+      await service.handleGhlWebhook(
+        makePayload({
+          data: {
+            id: 'msg_vn',
+            conversationId: 'conv_1',
+            contactId: 'c1',
+            message: prose,
+            messageType: 'text',
+          } as never,
+        }),
+      );
+
+      expect(mockQueue.add).toHaveBeenCalledWith(
+        'persist',
+        expect.objectContaining({
+          messageContent: prose,
+          voiceInboundAudioPlaceholderWithoutMediaUrl: false,
+        }),
+        expect.any(Object),
+      );
+    });
   });
 });

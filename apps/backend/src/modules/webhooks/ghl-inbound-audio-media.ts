@@ -26,19 +26,66 @@ const URL_FIELD_KEYS = [
   'href',
 ] as const;
 
-/** GHL / WhatsApp often sends a text placeholder instead of real body when type is "unsupported". */
+/**
+ * Classify GHL/Workflow short audio/voice placeholder bodies. Avoids matching "voice note" inside
+ * normal customer sentences; prefers exact short tokens or known GHL multi-word strings.
+ */
+export function classifyGhlAudioPlaceholderBody(message: string): {
+  isPlaceholder: boolean;
+  /** Machine-friendly label for logs (e.g. AUDIO, VOICE_MESSAGE). */
+  placeholderKind?: string;
+} {
+  const raw = message.trim();
+  if (!raw) {
+    return { isPlaceholder: false };
+  }
+
+  // Customer prose often mentions "voice note" — never classify as GHL placeholder via this phrase.
+  if (/\bvoice note\b/i.test(raw)) {
+    return { isPlaceholder: false };
+  }
+
+  // Exact short token: optional one pair of [] or () around audio|voice
+  const debracket = raw.replace(/^\[/, '').replace(/\]$/, '').replace(/^\(/, '').replace(/\)$/, '').trim();
+  const token = debracket.toLowerCase();
+  if (token === 'audio') {
+    return { isPlaceholder: true, placeholderKind: 'AUDIO' };
+  }
+  if (token === 'voice') {
+    return { isPlaceholder: true, placeholderKind: 'VOICE' };
+  }
+
+  // Whole-string title-case single words (GHL sometimes sends "Audio" / "Voice" alone)
+  if (/^(Audio|Voice)$/.test(raw)) {
+    return { isPlaceholder: true, placeholderKind: raw === 'Voice' ? 'VOICE' : 'AUDIO' };
+  }
+
+  // Known multi-word GHL / channel placeholders (word boundaries — avoids false positives in long text)
+  if (/\bthis message type is not supported\b/i.test(raw)) {
+    return { isPlaceholder: true, placeholderKind: 'GHL_MSG_TYPE_UNSUPPORTED' };
+  }
+  if (/\bmessage type is not supported\b/i.test(raw)) {
+    return { isPlaceholder: true, placeholderKind: 'GHL_MSG_TYPE_UNSUPPORTED' };
+  }
+  if (/\bvoice message\b/i.test(raw)) {
+    return { isPlaceholder: true, placeholderKind: 'VOICE_MESSAGE' };
+  }
+  if (/\baudio message\b/i.test(raw)) {
+    return { isPlaceholder: true, placeholderKind: 'AUDIO_MESSAGE' };
+  }
+  if (/\bunsupported message\b/i.test(raw)) {
+    return { isPlaceholder: true, placeholderKind: 'UNSUPPORTED_MESSAGE' };
+  }
+  if (/\bunsupported audio\b/i.test(raw)) {
+    return { isPlaceholder: true, placeholderKind: 'UNSUPPORTED_AUDIO' };
+  }
+
+  return { isPlaceholder: false };
+}
+
+/** @deprecated use classifyGhlAudioPlaceholderBody — kept for call sites that only need a boolean. */
 export function ghlBodyIndicatesAudioPlaceholder(message: string): boolean {
-  const t = message.trim().toLowerCase();
-  if (!t) return false;
-  const needles = [
-    'this message type is not supported',
-    'message type is not supported',
-    'audio message',
-    'voice message',
-    'unsupported message',
-    'unsupported audio',
-  ];
-  return needles.some((n) => t.includes(n));
+  return classifyGhlAudioPlaceholderBody(message).isPlaceholder;
 }
 
 /**

@@ -141,12 +141,21 @@ describe('InboundMessageProcessor (happy path)', () => {
         errorCode: 'unused_in_happy_path',
         userFacingFallback: true,
       })),
+      transcribeAudioBuffer: jestGlobal.fn(async () => ({
+        ok: false as const,
+        errorCode: 'unused',
+        userFacingFallback: true,
+      })),
+    };
+    const mockGhlRecordingFetch = {
+      tryFetchRecording: jestGlobal.fn(async () => ({ ok: false as const, reason: 'disabled' })),
     };
     processor = new InboundMessageProcessor(
       new OrchestrationService(),
       mockReset as never,
       { evaluateAndApplyAutoTags: jestGlobal.fn(async () => {}) } as never,
       mockAudioTranscription as never,
+      mockGhlRecordingFetch as never,
       { add: mockQueueAdd } as never,
       { add: mockQueueAdd } as never,
     );

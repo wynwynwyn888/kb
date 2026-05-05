@@ -22,7 +22,7 @@ import {
   collectGhlInboundMediaRootNodes,
   extractGhlInboundAudioMediaUrl,
   extractGhlInboundMessageBodyString,
-  ghlBodyIndicatesAudioPlaceholder,
+  classifyGhlAudioPlaceholderBody,
   ghlInboundShouldTranscribeVoice,
   VOICE_INBOUND_PLACEHOLDER_NO_MEDIA_USER_MESSAGE,
 } from './ghl-inbound-audio-media';
@@ -204,8 +204,9 @@ export class WebhooksService {
       workflowFlatRaw,
     });
 
+    const placeholderClass = classifyGhlAudioPlaceholderBody(rawMessageBody);
     const voiceInboundAudioPlaceholderWithoutMediaUrl =
-      ghlBodyIndicatesAudioPlaceholder(rawMessageBody) && !audioMediaUrl;
+      placeholderClass.isPlaceholder && !audioMediaUrl;
 
     let messageContent = rawMessageBody;
     let messageType = messageTypeMapped;
@@ -238,16 +239,19 @@ export class WebhooksService {
         voiceInboundNeedsTranscribe,
         voiceInboundAudioPlaceholderWithoutMediaUrl,
       });
-      if (voiceInboundAudioPlaceholderWithoutMediaUrl) {
-        this.logger.log(
-          JSON.stringify({
-            voiceInboundAudioPlaceholderWithoutMediaUrl: true,
-            rawMessageType: rawMessageType ?? null,
-            mappedMessageType: messageType,
-          }),
-        );
-      }
     }
+
+    if (runInboundShapeDiagnostics && voiceInboundAudioPlaceholderWithoutMediaUrl) {
+      this.logger.log(
+        JSON.stringify({
+          voiceInboundAudioPlaceholderWithoutMediaUrl: true,
+          bodyPlaceholderKind: placeholderClass.placeholderKind ?? 'UNKNOWN',
+        }),
+      );
+    }
+
+    const ghlInboundMessageId =
+      typeof data['id'] === 'string' && data['id'].trim() ? data['id'].trim() : undefined;
 
     return {
       ghlLocationId: payload.locationId,
@@ -258,6 +262,11 @@ export class WebhooksService {
       audioMediaUrl: audioMediaUrl ?? null,
       voiceInboundNeedsTranscribe,
       voiceInboundAudioPlaceholderWithoutMediaUrl,
+      voiceInboundPlaceholderKind: placeholderClass.placeholderKind,
+      voiceInboundPlaceholderRawBody: voiceInboundAudioPlaceholderWithoutMediaUrl
+        ? rawMessageBody
+        : undefined,
+      ghlInboundMessageId,
       timestamp: payload.timestamp || new Date().toISOString(),
       externalEventId,
       eventType: payload.event,
@@ -479,6 +488,8 @@ export class WebhooksService {
       voiceInboundAudioPlaceholderWithoutMediaUrl: Boolean(
         payload.voiceInboundAudioPlaceholderWithoutMediaUrl,
       ),
+      voiceInboundPlaceholderRawBody: payload.voiceInboundPlaceholderRawBody,
+      ghlInboundMessageId: payload.ghlInboundMessageId,
     };
 
     await this.inboundQueue.add('persist', jobData, {

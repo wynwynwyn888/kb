@@ -71,11 +71,21 @@ const mockInboundAutoTagging = {
   evaluateAndApplyAutoTags: jestGlobal.fn(async () => {}),
 };
 
+const mockGhlVoiceRecordingFetch = {
+  tryFetchRecording: jestGlobal.fn(async () => ({ ok: false as const, reason: 'test_disabled' })),
+};
+
 const mockAudioTranscription = {
   transcribeRemoteMedia: jestGlobal.fn(async () => ({
     ok: true as const,
     transcript: 'voice transcript',
     mediaBytes: 12,
+    contentType: 'audio/mpeg',
+  })),
+  transcribeAudioBuffer: jestGlobal.fn(async () => ({
+    ok: true as const,
+    transcript: 'buffer transcript',
+    mediaBytes: 8,
     contentType: 'audio/mpeg',
   })),
 };
@@ -151,11 +161,16 @@ describe('InboundMessageProcessor', () => {
       mediaBytes: 12,
       contentType: 'audio/mpeg',
     }));
+    mockGhlVoiceRecordingFetch.tryFetchRecording.mockImplementation(async () => ({
+      ok: false as const,
+      reason: 'test_disabled',
+    }));
     processor = new InboundMessageProcessor(
       mockOrchestration as never,
       mockResetService as never,
       mockInboundAutoTagging as never,
       mockAudioTranscription as never,
+      mockGhlVoiceRecordingFetch as never,
       { add: mockSendBubbleQueueAdd } as never,
       { add: mockInboundQueueAdd } as never,
     );
@@ -817,5 +832,84 @@ describe('InboundMessageProcessor', () => {
     const meta = inserted?.['metadata'] as Record<string, unknown> | undefined;
     expect(meta?.['voiceInboundAudioPlaceholderWithoutMediaUrl']).toBe(true);
     expect(meta?.['inboundVoiceNote']).toBe(true);
+    expect(meta?.['voiceTranscriptionStatus']).toBe('media_url_missing');
+  });
+
+  it('persist: feature-flag recording fetch + buffer transcribe skips placeholder fallback', async () => {
+    const prev = process.env['GHL_VOICE_FETCH_RECORDING_BY_MESSAGE_ID'];
+    process.env['GHL_VOICE_FETCH_RECORDING_BY_MESSAGE_ID'] = 'true';
+
+    let inserted: Record<string, unknown> | null = null;
+    mockGhlVoiceRecordingFetch.tryFetchRecording.mockResolvedValue({
+      ok: true,
+      buffer: Buffer.from([1, 2, 3]),
+      contentType: 'audio/mpeg',
+    });
+    mockAudioTranscription.transcribeAudioBuffer.mockResolvedValue({
+      ok: true as const,
+      transcript: 'from ghl recording api',
+      mediaBytes: 3,
+      contentType: 'audio/mpeg',
+    });
+
+    mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'tenants') {
+        return {
+          select: () => ({
+            eq: () => ({
+              single: async () => ({ data: { id: 'tenant-1' }, error: null }),
+            }),
+          }),
+        };
+      }
+      if (table === 'conversations') {
+        return makeConversationsTableMock({ id: CONV_ID });
+      }
+      if (table === 'messages') {
+        return {
+          insert: (row: Record<string, unknown>) => {
+            inserted = row;
+            return { error: null };
+          },
+        };
+      }
+      return {} as never;
+    });
+
+    try {
+      await processor.process(
+        makeJob('persist', {
+          locationId: 'loc_1',
+          ghlConversationId: 'ghl_conv_1',
+          ghlContactId: 'ct_1',
+          messageContent: VOICE_INBOUND_PLACEHOLDER_NO_MEDIA_USER_MESSAGE,
+          messageType: 'text',
+          timestamp: '2026-01-01T00:00:00Z',
+          smokeImmediate: false,
+          voiceInboundNeedsTranscribe: false,
+          voiceInboundAudioPlaceholderWithoutMediaUrl: true,
+          voiceInboundPlaceholderRawBody: 'AUDIO',
+          ghlInboundMessageId: 'ghl_msg_rec_1',
+        }),
+      );
+
+      expect(mockGhlVoiceRecordingFetch.tryFetchRecording).toHaveBeenCalledWith({
+        tenantId: 'tenant-1',
+        locationId: 'loc_1',
+        messageId: 'ghl_msg_rec_1',
+      });
+      expect(mockAudioTranscription.transcribeAudioBuffer).toHaveBeenCalled();
+      expect(mockAudioTranscription.transcribeRemoteMedia).not.toHaveBeenCalled();
+      expect(inserted?.['content']).toBe('from ghl recording api');
+      const meta = inserted?.['metadata'] as Record<string, unknown> | undefined;
+      expect(meta?.['voiceTranscriptionStatus']).toBe('succeeded');
+      expect(meta?.['voiceRecordingFetchedFromGhl']).toBe(true);
+    } finally {
+      if (prev === undefined) {
+        delete process.env['GHL_VOICE_FETCH_RECORDING_BY_MESSAGE_ID'];
+      } else {
+        process.env['GHL_VOICE_FETCH_RECORDING_BY_MESSAGE_ID'] = prev;
+      }
+    }
   });
 });

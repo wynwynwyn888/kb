@@ -26,6 +26,8 @@ import {
   AudioTranscriptionService,
   VOICE_NOTE_TRANSCRIPTION_FAILED_USER_MESSAGE,
 } from '../../modules/transcription/audio-transcription.service';
+import { GhlVoiceRecordingFetchService } from '../../modules/transcription/ghl-voice-recording-fetch.service';
+import { classifyGhlAudioPlaceholderBody } from '../../modules/webhooks/ghl-inbound-audio-media';
 
 export interface InboundMessageJobData {
   locationId: string;
@@ -47,6 +49,10 @@ export interface InboundMessageJobData {
   voiceInboundNeedsTranscribe?: boolean;
   /** GHL placeholder voice inbound with no media URL — persist metadata only, no transcription. */
   voiceInboundAudioPlaceholderWithoutMediaUrl?: boolean;
+  /** Raw placeholder body before webhook replaced message text (Phase 1B). */
+  voiceInboundPlaceholderRawBody?: string;
+  /** Outbound GHL message id from webhook data.id (recording fetch). */
+  ghlInboundMessageId?: string;
 }
 
 export interface OrchestrateDebouncedJobData {
@@ -76,6 +82,7 @@ export class InboundMessageProcessor extends WorkerHost {
     private readonly conversationResetService: ConversationResetService,
     private readonly inboundAutoTagging: InboundAutoTaggingService,
     private readonly audioTranscription: AudioTranscriptionService,
+    private readonly ghlVoiceRecordingFetch: GhlVoiceRecordingFetchService,
     @InjectQueue(QUEUES.SEND_BUBBLE) private readonly sendBubbleQueue: Queue,
     @InjectQueue(QUEUES.INBOUND_MESSAGE_PROCESSOR) private readonly inboundQueue: Queue,
   ) {
@@ -107,6 +114,8 @@ export class InboundMessageProcessor extends WorkerHost {
       audioMediaUrl,
       voiceInboundNeedsTranscribe,
       voiceInboundAudioPlaceholderWithoutMediaUrl,
+      voiceInboundPlaceholderRawBody,
+      ghlInboundMessageId,
     } = job.data;
 
     this.logger.log(
@@ -140,10 +149,13 @@ export class InboundMessageProcessor extends WorkerHost {
           voiceInboundAudioPlaceholderWithoutMediaUrl: Boolean(
             voiceInboundAudioPlaceholderWithoutMediaUrl,
           ),
+          voiceInboundPlaceholderRawBody,
+          ghlInboundMessageId,
         },
         tenant.id,
         conversation.id,
         webhookEventId,
+        locationId,
       );
 
       await this.addMessage(conversation.id, {
@@ -248,15 +260,61 @@ export class InboundMessageProcessor extends WorkerHost {
       | 'audioMediaUrl'
       | 'voiceInboundNeedsTranscribe'
       | 'voiceInboundAudioPlaceholderWithoutMediaUrl'
+      | 'voiceInboundPlaceholderRawBody'
+      | 'ghlInboundMessageId'
     >,
     tenantId: string,
     conversationId: string,
-    webhookEventId?: string,
+    webhookEventId: string | undefined,
+    locationId: string,
   ): Promise<{
     content: string;
     persistContentType: InboundMessageJobData['messageType'];
     voiceMetadata: Record<string, unknown>;
   }> {
+    const fetchRecordingEnabled =
+      process.env['GHL_VOICE_FETCH_RECORDING_BY_MESSAGE_ID'] === 'true';
+    const rawPh = job.voiceInboundPlaceholderRawBody?.trim();
+    const msgId = job.ghlInboundMessageId?.trim();
+    const noMediaUrl = !(job.audioMediaUrl ?? '').trim();
+
+    if (
+      fetchRecordingEnabled &&
+      noMediaUrl &&
+      msgId &&
+      rawPh &&
+      classifyGhlAudioPlaceholderBody(rawPh).isPlaceholder
+    ) {
+      const fetched = await this.ghlVoiceRecordingFetch.tryFetchRecording({
+        tenantId,
+        locationId,
+        messageId: msgId,
+      });
+      if (fetched.ok) {
+        const tx = await this.audioTranscription.transcribeAudioBuffer({
+          tenantId,
+          buffer: fetched.buffer,
+          contentType: fetched.contentType,
+          conversationId,
+          webhookEventId,
+          sourceLabel: 'ghl_recording_api',
+        });
+        if (tx.ok) {
+          return {
+            content: tx.transcript,
+            persistContentType: 'text',
+            voiceMetadata: {
+              inboundVoiceNote: true,
+              voiceTranscriptionStatus: 'succeeded',
+              voiceRecordingFetchedFromGhl: true,
+              voiceMediaBytes: tx.mediaBytes,
+              voiceMediaContentType: tx.contentType,
+            },
+          };
+        }
+      }
+    }
+
     if (job.voiceInboundAudioPlaceholderWithoutMediaUrl) {
       return {
         content: job.messageContent,
@@ -264,6 +322,7 @@ export class InboundMessageProcessor extends WorkerHost {
         voiceMetadata: {
           inboundVoiceNote: true,
           voiceInboundAudioPlaceholderWithoutMediaUrl: true,
+          voiceTranscriptionStatus: 'media_url_missing',
         },
       };
     }

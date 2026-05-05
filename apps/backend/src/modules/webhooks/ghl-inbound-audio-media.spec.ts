@@ -1,4 +1,5 @@
 import {
+  classifyGhlAudioPlaceholderBody,
   collectGhlInboundMediaRootNodes,
   extractGhlInboundAudioMediaUrl,
   extractGhlInboundMessageBodyString,
@@ -103,6 +104,21 @@ describe('ghl-inbound-audio-media', () => {
 
     it('returns false for normal text', () => {
       expect(ghlBodyIndicatesAudioPlaceholder('Book a table')).toBe(false);
+    });
+  });
+
+  describe('classifyGhlAudioPlaceholderBody (Phase 1B short placeholders)', () => {
+    it('treats bare AUDIO, [AUDIO], and (AUDIO) as audio placeholder', () => {
+      expect(classifyGhlAudioPlaceholderBody('AUDIO').isPlaceholder).toBe(true);
+      expect(classifyGhlAudioPlaceholderBody('[AUDIO]').placeholderKind).toBe('AUDIO');
+      expect(classifyGhlAudioPlaceholderBody('(AUDIO)').isPlaceholder).toBe(true);
+    });
+
+    it('does not treat prose containing "voice note" as a placeholder', () => {
+      expect(
+        classifyGhlAudioPlaceholderBody('Please send me a voice note when you can').isPlaceholder,
+      ).toBe(false);
+      expect(classifyGhlAudioPlaceholderBody('I left a voice note yesterday').isPlaceholder).toBe(false);
     });
   });
 

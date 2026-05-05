@@ -8,7 +8,7 @@ export const VOICE_NOTE_TRANSCRIPTION_FAILED_USER_MESSAGE =
 
 /** Persisted inbound text when GHL sends an audio/voice placeholder but no downloadable media URL. */
 export const VOICE_INBOUND_PLACEHOLDER_NO_MEDIA_USER_MESSAGE =
-  "We couldn't access this voice note from the chat provider. Please type your message or try sending the voice note again.";
+  "I received your audio message, but I couldn't access the audio file. Could you please type your request or resend it as text?";
 
 const MAX_DOWNLOAD_BYTES = 25 * 1024 * 1024;
 const DOWNLOAD_TIMEOUT_MS = 60_000;
@@ -26,13 +26,7 @@ function safeUrlMeta(mediaUrl: string): { host: string; pathLen: number } {
   }
 }
 
-function inferFilename(mediaUrl: string, contentType: string | null): string {
-  try {
-    const base = new URL(mediaUrl).pathname.split('/').pop();
-    if (base && /\.[a-z0-9]{2,4}$/i.test(base)) return base.slice(0, 200);
-  } catch {
-    /* ignore */
-  }
+export function inferAudioFilenameFromMime(contentType: string | null): string {
   const ct = (contentType ?? '').toLowerCase();
   if (ct.includes('mpeg') || ct.includes('mp3')) return 'audio.mp3';
   if (ct.includes('mp4') || ct.includes('m4a')) return 'audio.m4a';
@@ -40,6 +34,16 @@ function inferFilename(mediaUrl: string, contentType: string | null): string {
   if (ct.includes('ogg')) return 'audio.ogg';
   if (ct.includes('wav')) return 'audio.wav';
   return 'audio.bin';
+}
+
+function inferFilename(mediaUrl: string, contentType: string | null): string {
+  try {
+    const base = new URL(mediaUrl).pathname.split('/').pop();
+    if (base && /\.[a-z0-9]{2,4}$/i.test(base)) return base.slice(0, 200);
+  } catch {
+    /* ignore */
+  }
+  return inferAudioFilenameFromMime(contentType);
 }
 
 type ProviderRow = {
@@ -206,6 +210,84 @@ export class AudioTranscriptionService {
       );
 
       return { ok: true, transcript, mediaBytes, contentType };
+    } catch (e) {
+      const code = e instanceof Error ? e.message : 'unknown';
+      this.logger.warn(
+        `audioTranscriptionFailed ${JSON.stringify({
+          tenantId: params.tenantId,
+          conversationId: params.conversationId ?? null,
+          webhookEventId: params.webhookEventId ?? null,
+          errorCode: code,
+          mediaBytes,
+        })}`,
+      );
+      return { ok: false, errorCode: code, userFacingFallback: true };
+    }
+  }
+
+  /**
+   * Transcribe an in-memory audio buffer (e.g. GHL recording API). Same privacy rules as URL path.
+   */
+  async transcribeAudioBuffer(params: {
+    tenantId: string;
+    buffer: Buffer;
+    contentType: string | null;
+    conversationId?: string;
+    webhookEventId?: string;
+    sourceLabel?: string;
+  }): Promise<
+    | { ok: true; transcript: string; mediaBytes: number; contentType: string | null }
+    | { ok: false; errorCode: string; userFacingFallback: true }
+  > {
+    const mediaBytes = params.buffer.length;
+    const model = transcribeModelFromEnv();
+    const src = params.sourceLabel ?? 'buffer';
+
+    this.logger.log(
+      `audioTranscriptionStarted ${JSON.stringify({
+        tenantId: params.tenantId,
+        conversationId: params.conversationId ?? null,
+        webhookEventId: params.webhookEventId ?? null,
+        mediaHost: src,
+        mediaPathLen: mediaBytes,
+        model,
+      })}`,
+    );
+
+    try {
+      const agencyId = await this.getAgencyId(params.tenantId);
+      if (!agencyId) throw new Error('no_agency');
+      const { data: row, error: rowErr } = await this.supabase
+        .from('agency_model_providers')
+        .select('provider, api_key, endpoint, settings')
+        .eq('agency_id', agencyId)
+        .eq('provider', 'OPENAI')
+        .maybeSingle();
+      if (rowErr || !row) throw new Error('no_openai_row');
+      const pr = row as ProviderRow;
+      const apiKey = pr.api_key?.trim() ?? '';
+      if (!isUsableOpenAiFallbackKey(apiKey)) throw new Error('no_api_key');
+
+      const filename = inferAudioFilenameFromMime(params.contentType);
+      const transcript = await this.callOpenAiTranscription({
+        apiKey,
+        endpoint: pr.endpoint,
+        buffer: params.buffer,
+        filename,
+        mimeHint: params.contentType,
+      });
+
+      this.logger.log(
+        `audioTranscriptionSucceeded ${JSON.stringify({
+          tenantId: params.tenantId,
+          conversationId: params.conversationId ?? null,
+          webhookEventId: params.webhookEventId ?? null,
+          transcriptCharCount: transcript.length,
+          mediaBytes,
+        })}`,
+      );
+
+      return { ok: true, transcript, mediaBytes, contentType: params.contentType };
     } catch (e) {
       const code = e instanceof Error ? e.message : 'unknown';
       this.logger.warn(

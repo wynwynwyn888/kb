@@ -1,4 +1,5 @@
 import {
+  bodyPlaceholderCandidateShapeForLog,
   classifyGhlAudioPlaceholderBody,
   collectGhlInboundMediaRootNodes,
   extractGhlInboundAudioMediaUrl,
@@ -6,9 +7,12 @@ import {
   ghlAttachmentsHintAudio,
   ghlBodyIndicatesAudioPlaceholder,
   ghlInboundShouldTranscribeVoice,
+  normalizeGhlBodyForPlaceholderClassification,
+  resolveGhlAudioPlaceholderFromInbound,
   urlFilenameHintsAudio,
   VOICE_INBOUND_PLACEHOLDER_NO_MEDIA_USER_MESSAGE,
 } from './ghl-inbound-audio-media';
+import { VOICE_NOTE_TRANSCRIPTION_FAILED_USER_MESSAGE } from '../transcription/audio-transcription.service';
 
 describe('ghl-inbound-audio-media', () => {
   describe('extractGhlInboundAudioMediaUrl', () => {
@@ -107,18 +111,72 @@ describe('ghl-inbound-audio-media', () => {
     });
   });
 
-  describe('classifyGhlAudioPlaceholderBody (Phase 1B short placeholders)', () => {
-    it('treats bare AUDIO, [AUDIO], and (AUDIO) as audio placeholder', () => {
-      expect(classifyGhlAudioPlaceholderBody('AUDIO').isPlaceholder).toBe(true);
-      expect(classifyGhlAudioPlaceholderBody('[AUDIO]').placeholderKind).toBe('AUDIO');
-      expect(classifyGhlAudioPlaceholderBody('(AUDIO)').isPlaceholder).toBe(true);
+  describe('normalizeGhlBodyForPlaceholderClassification', () => {
+    it('strips quotes and collapses CR/LF', () => {
+      expect(normalizeGhlBodyForPlaceholderClassification(' AUDIO\r\n')).toBe('AUDIO');
+      expect(normalizeGhlBodyForPlaceholderClassification('"AUDIO"')).toBe('AUDIO');
+      expect(normalizeGhlBodyForPlaceholderClassification("'AUDIO'")).toBe('AUDIO');
+    });
+  });
+
+  describe('classifyGhlAudioPlaceholderBody', () => {
+    it.each([
+      ['AUDIO', 'AUDIO'],
+      ['"AUDIO"', 'AUDIO'],
+      ["'AUDIO'", 'AUDIO'],
+      [' AUDIO\r\n', 'AUDIO'],
+      ['[AUDIO]', 'AUDIO'],
+      ['(AUDIO)', 'AUDIO'],
+      ['audio', 'AUDIO'],
+      ['Audio', 'AUDIO'],
+    ])('classifies %p as %p', (input, kind) => {
+      expect(classifyGhlAudioPlaceholderBody(input)).toBe(kind);
     });
 
     it('does not treat prose containing "voice note" as a placeholder', () => {
-      expect(
-        classifyGhlAudioPlaceholderBody('Please send me a voice note when you can').isPlaceholder,
-      ).toBe(false);
-      expect(classifyGhlAudioPlaceholderBody('I left a voice note yesterday').isPlaceholder).toBe(false);
+      expect(classifyGhlAudioPlaceholderBody('Please send me a voice note when you can')).toBe('UNKNOWN');
+      expect(classifyGhlAudioPlaceholderBody('I left a voice note yesterday')).toBe('UNKNOWN');
+    });
+
+    it('does not classify our safe fallback copy as a placeholder', () => {
+      expect(classifyGhlAudioPlaceholderBody(VOICE_INBOUND_PLACEHOLDER_NO_MEDIA_USER_MESSAGE)).toBe(
+        'UNKNOWN',
+      );
+      expect(classifyGhlAudioPlaceholderBody(VOICE_NOTE_TRANSCRIPTION_FAILED_USER_MESSAGE)).toBe('UNKNOWN');
+    });
+
+    it('maps legacy unsupported phrases to UNSUPPORTED', () => {
+      expect(classifyGhlAudioPlaceholderBody('This Message type is not supported')).toBe('UNSUPPORTED');
+      expect(classifyGhlAudioPlaceholderBody('voice message')).toBe('UNSUPPORTED');
+    });
+  });
+
+  describe('resolveGhlAudioPlaceholderFromInbound', () => {
+    it('uses workflowFlatRaw.customData.message when canonical message is empty', () => {
+      const r = resolveGhlAudioPlaceholderFromInbound(
+        { message: '', messageType: 'TextMessage' } as Record<string, unknown>,
+        { customData: { message: 'AUDIO' } } as Record<string, unknown>,
+      );
+      expect(r.kind).toBe('AUDIO');
+      expect(r.matchedRawBody).toBe('AUDIO');
+    });
+
+    it('reads AUDIO from workflowFlatRaw.body when message is blank', () => {
+      const r = resolveGhlAudioPlaceholderFromInbound(
+        { message: '' } as Record<string, unknown>,
+        { body: 'AUDIO' } as Record<string, unknown>,
+      );
+      expect(r.kind).toBe('AUDIO');
+    });
+  });
+
+  describe('bodyPlaceholderCandidateShapeForLog', () => {
+    it('returns length and char codes without leaking long payloads', () => {
+      const s = bodyPlaceholderCandidateShapeForLog('AUDIO');
+      expect(s?.length).toBe(5);
+      expect(s?.startsWithCharCode).toBe('A'.charCodeAt(0));
+      expect(s?.endsWithCharCode).toBe('O'.charCodeAt(0));
+      expect(s?.normalizedPreview).toBe('AUDIO');
     });
   });
 
@@ -156,6 +214,18 @@ describe('ghl-inbound-audio-media', () => {
           messageContent: 'This Message type is not supported',
           audioMediaUrl: 'https://cdn.example.com/a.ogg',
           rawData: {},
+        }),
+      ).toBe(true);
+    });
+
+    it('transcribes when placeholder is only on workflowFlatRaw and URL exists', () => {
+      expect(
+        ghlInboundShouldTranscribeVoice({
+          messageType: 'text',
+          messageContent: '',
+          audioMediaUrl: 'https://cdn.example.com/a.m4a',
+          rawData: { message: '' } as Record<string, unknown>,
+          workflowFlatRaw: { customData: { message: 'AUDIO' } } as Record<string, unknown>,
         }),
       ).toBe(true);
     });

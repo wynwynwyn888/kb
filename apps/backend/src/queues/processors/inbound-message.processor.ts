@@ -283,7 +283,7 @@ export class InboundMessageProcessor extends WorkerHost {
       noMediaUrl &&
       msgId &&
       rawPh &&
-      classifyGhlAudioPlaceholderBody(rawPh).isPlaceholder
+      classifyGhlAudioPlaceholderBody(rawPh) !== 'UNKNOWN'
     ) {
       const fetched = await this.ghlVoiceRecordingFetch.tryFetchRecording({
         tenantId,

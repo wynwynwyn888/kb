@@ -3,7 +3,16 @@
  * We collect likely audio attachment URLs from common shapes without coupling to one schema.
  */
 
+import {
+  VOICE_INBOUND_PLACEHOLDER_NO_MEDIA_USER_MESSAGE,
+  VOICE_NOTE_TRANSCRIPTION_FAILED_USER_MESSAGE,
+} from '../transcription/audio-transcription.service';
+
 export { VOICE_INBOUND_PLACEHOLDER_NO_MEDIA_USER_MESSAGE } from '../transcription/audio-transcription.service';
+
+export type GhlAudioPlaceholderKind = 'AUDIO' | 'VOICE' | 'UNSUPPORTED' | 'UNKNOWN';
+
+const ZW_RE = /[\u200B-\u200D\uFEFF\u2060\u180E]/g;
 
 function asNonEmptyString(v: unknown): string | null {
   return typeof v === 'string' && v.trim().length > 0 ? v.trim() : null;
@@ -27,65 +36,190 @@ const URL_FIELD_KEYS = [
 ] as const;
 
 /**
- * Classify GHL/Workflow short audio/voice placeholder bodies. Avoids matching "voice note" inside
- * normal customer sentences; prefers exact short tokens or known GHL multi-word strings.
+ * Normalize inbound copy so workflow-flat quirks (ZWSP, CR/LF, JSON quotes) still match AUDIO/VOICE tokens.
  */
-export function classifyGhlAudioPlaceholderBody(message: string): {
-  isPlaceholder: boolean;
-  /** Machine-friendly label for logs (e.g. AUDIO, VOICE_MESSAGE). */
-  placeholderKind?: string;
-} {
-  const raw = message.trim();
-  if (!raw) {
-    return { isPlaceholder: false };
+export function normalizeGhlBodyForPlaceholderClassification(value: unknown): string {
+  let s = String(value ?? '');
+  s = s.replace(ZW_RE, '');
+  s = s.replace(/[\r\n]+/g, ' ');
+  s = s.replace(/\s+/g, ' ').trim();
+  if (s.length >= 2) {
+    const a = s[0];
+    const b = s[s.length - 1];
+    if ((a === '"' && b === '"') || (a === "'" && b === "'")) {
+      s = s.slice(1, -1).replace(/\s+/g, ' ').trim();
+    }
   }
-
-  // Customer prose often mentions "voice note" — never classify as GHL placeholder via this phrase.
-  if (/\bvoice note\b/i.test(raw)) {
-    return { isPlaceholder: false };
-  }
-
-  // Exact short token: optional one pair of [] or () around audio|voice
-  const debracket = raw.replace(/^\[/, '').replace(/\]$/, '').replace(/^\(/, '').replace(/\)$/, '').trim();
-  const token = debracket.toLowerCase();
-  if (token === 'audio') {
-    return { isPlaceholder: true, placeholderKind: 'AUDIO' };
-  }
-  if (token === 'voice') {
-    return { isPlaceholder: true, placeholderKind: 'VOICE' };
-  }
-
-  // Whole-string title-case single words (GHL sometimes sends "Audio" / "Voice" alone)
-  if (/^(Audio|Voice)$/.test(raw)) {
-    return { isPlaceholder: true, placeholderKind: raw === 'Voice' ? 'VOICE' : 'AUDIO' };
-  }
-
-  // Known multi-word GHL / channel placeholders (word boundaries — avoids false positives in long text)
-  if (/\bthis message type is not supported\b/i.test(raw)) {
-    return { isPlaceholder: true, placeholderKind: 'GHL_MSG_TYPE_UNSUPPORTED' };
-  }
-  if (/\bmessage type is not supported\b/i.test(raw)) {
-    return { isPlaceholder: true, placeholderKind: 'GHL_MSG_TYPE_UNSUPPORTED' };
-  }
-  if (/\bvoice message\b/i.test(raw)) {
-    return { isPlaceholder: true, placeholderKind: 'VOICE_MESSAGE' };
-  }
-  if (/\baudio message\b/i.test(raw)) {
-    return { isPlaceholder: true, placeholderKind: 'AUDIO_MESSAGE' };
-  }
-  if (/\bunsupported message\b/i.test(raw)) {
-    return { isPlaceholder: true, placeholderKind: 'UNSUPPORTED_MESSAGE' };
-  }
-  if (/\bunsupported audio\b/i.test(raw)) {
-    return { isPlaceholder: true, placeholderKind: 'UNSUPPORTED_AUDIO' };
-  }
-
-  return { isPlaceholder: false };
+  return s.trim();
 }
 
-/** @deprecated use classifyGhlAudioPlaceholderBody — kept for call sites that only need a boolean. */
+function stripOuterBracketPair(n: string): string {
+  let t = n.trim();
+  if (t.length >= 2 && t.startsWith('[') && t.endsWith(']')) {
+    return t.slice(1, -1).trim();
+  }
+  if (t.length >= 2 && t.startsWith('(') && t.endsWith(')')) {
+    return t.slice(1, -1).trim();
+  }
+  return t;
+}
+
+/** Single-string classifier — use `resolveGhlAudioPlaceholderFromInbound` for workflow-flat bodies. */
+export function classifyGhlAudioPlaceholderBody(value: unknown): GhlAudioPlaceholderKind {
+  const n = normalizeGhlBodyForPlaceholderClassification(value);
+  if (!n) {
+    return 'UNKNOWN';
+  }
+
+  const fallbackNormInbound = normalizeGhlBodyForPlaceholderClassification(
+    VOICE_INBOUND_PLACEHOLDER_NO_MEDIA_USER_MESSAGE,
+  );
+  const fallbackNormFailed = normalizeGhlBodyForPlaceholderClassification(
+    VOICE_NOTE_TRANSCRIPTION_FAILED_USER_MESSAGE,
+  );
+  if (n === fallbackNormInbound || n === fallbackNormFailed) {
+    return 'UNKNOWN';
+  }
+
+  // Customer prose mentions "voice note" — never a GHL short placeholder.
+  if (/\bvoice note\b/i.test(n)) {
+    return 'UNKNOWN';
+  }
+
+  const core = stripOuterBracketPair(n).toLowerCase();
+  if (core === 'audio') {
+    return 'AUDIO';
+  }
+  if (core === 'voice') {
+    return 'VOICE';
+  }
+
+  if (/\bthis message type is not supported\b/i.test(n)) {
+    return 'UNSUPPORTED';
+  }
+  if (/\bmessage type is not supported\b/i.test(n)) {
+    return 'UNSUPPORTED';
+  }
+  if (/\bvoice message\b/i.test(n)) {
+    return 'UNSUPPORTED';
+  }
+  if (/\baudio message\b/i.test(n)) {
+    return 'UNSUPPORTED';
+  }
+  if (/\bunsupported message\b/i.test(n)) {
+    return 'UNSUPPORTED';
+  }
+  if (/\bunsupported audio\b/i.test(n)) {
+    return 'UNSUPPORTED';
+  }
+
+  return 'UNKNOWN';
+}
+
+function readMessageLikeString(row: Record<string, unknown>): string {
+  const m = row['message'];
+  if (typeof m === 'string') return m;
+  if (m && typeof m === 'object' && !Array.isArray(m)) {
+    const o = m as Record<string, unknown>;
+    return (
+      asNonEmptyString(o['text']) ??
+      asNonEmptyString(o['body']) ??
+      asNonEmptyString(o['content']) ??
+      asNonEmptyString(o['message']) ??
+      ''
+    );
+  }
+  return '';
+}
+
+function readBodyLikeString(row: Record<string, unknown>): string {
+  const b = row['body'];
+  if (typeof b === 'string') return b;
+  if (b && typeof b === 'object' && !Array.isArray(b)) {
+    const o = b as Record<string, unknown>;
+    return asNonEmptyString(o['text']) ?? asNonEmptyString(o['body']) ?? asNonEmptyString(o['content']) ?? '';
+  }
+  return '';
+}
+
+/**
+ * Collect possible workflow / canonical text fields in priority order (first non-UNKNOWN wins).
+ */
+export function collectGhlInboundPlaceholderBodyCandidates(
+  data: Record<string, unknown>,
+  workflowFlatRaw?: Record<string, unknown>,
+): string[] {
+  const out: string[] = [];
+  const push = (s: string) => {
+    if (typeof s === 'string' && s.trim()) out.push(s);
+  };
+
+  push(extractGhlInboundMessageBodyString(data));
+  push(typeof data['body'] === 'string' ? data['body'] : readBodyLikeString(data));
+
+  if (workflowFlatRaw) {
+    push(typeof workflowFlatRaw['message'] === 'string' ? workflowFlatRaw['message'] : readMessageLikeString(workflowFlatRaw));
+    push(typeof workflowFlatRaw['body'] === 'string' ? workflowFlatRaw['body'] : readBodyLikeString(workflowFlatRaw));
+    const cd = workflowFlatRaw['customData'];
+    if (cd && typeof cd === 'object' && !Array.isArray(cd)) {
+      const cdr = cd as Record<string, unknown>;
+      push(typeof cdr['message'] === 'string' ? cdr['message'] : readMessageLikeString(cdr));
+      push(typeof cdr['body'] === 'string' ? cdr['body'] : readBodyLikeString(cdr));
+    }
+  }
+
+  return out;
+}
+
+export function resolveGhlAudioPlaceholderFromInbound(
+  data: Record<string, unknown>,
+  workflowFlatRaw?: Record<string, unknown>,
+): {
+  kind: GhlAudioPlaceholderKind;
+  /** Raw substring that matched (for recording fetch / metadata). */
+  matchedRawBody: string | null;
+  /** Prefer this for diagnostics when kind is UNKNOWN (first substantive candidate). */
+  shapeSourceRaw: string;
+} {
+  const candidates = collectGhlInboundPlaceholderBodyCandidates(data, workflowFlatRaw);
+  for (const c of candidates) {
+    const kind = classifyGhlAudioPlaceholderBody(c);
+    if (kind !== 'UNKNOWN') {
+      return { kind, matchedRawBody: c, shapeSourceRaw: c };
+    }
+  }
+  const shapeSourceRaw =
+    candidates[0] ??
+    extractGhlInboundMessageBodyString(data) ??
+    readBodyLikeString(data) ??
+    '';
+  return { kind: 'UNKNOWN', matchedRawBody: null, shapeSourceRaw };
+}
+
+/** Safe diagnostics: no URLs/tokens inside preview. */
+export function bodyPlaceholderCandidateShapeForLog(raw: string): {
+  length: number;
+  startsWithCharCode: number;
+  endsWithCharCode: number;
+  normalizedPreview: string;
+} | null {
+  const s = String(raw ?? '');
+  if (!s.length) return null;
+  const norm = normalizeGhlBodyForPlaceholderClassification(s);
+  const preview = norm
+    .replace(/https?:\/\/[^\s]+/gi, '[url]')
+    .replace(/\bsk-[a-zA-Z0-9_-]{10,}\b/gi, '[token]')
+    .slice(0, 80);
+  return {
+    length: s.length,
+    startsWithCharCode: s.charCodeAt(0),
+    endsWithCharCode: s.charCodeAt(s.length - 1),
+    normalizedPreview: preview,
+  };
+}
+
 export function ghlBodyIndicatesAudioPlaceholder(message: string): boolean {
-  return classifyGhlAudioPlaceholderBody(message).isPlaceholder;
+  return classifyGhlAudioPlaceholderBody(message) !== 'UNKNOWN';
 }
 
 /**
@@ -318,7 +452,8 @@ export function ghlInboundShouldTranscribeVoice(params: {
   const url = params.audioMediaUrl?.trim() || '';
   const body = String(params.messageContent ?? '').trim();
   const bodyEmpty = !body;
-  const placeholder = ghlBodyIndicatesAudioPlaceholder(params.messageContent);
+  const ph = resolveGhlAudioPlaceholderFromInbound(params.rawData, params.workflowFlatRaw);
+  const placeholder = ph.kind !== 'UNKNOWN';
 
   if (params.messageType === 'audio') {
     return true;

@@ -40,7 +40,7 @@ export interface NormalizedWebhookPayload {
    * replaced with a safe customer message and transcription was skipped.
    */
   voiceInboundAudioPlaceholderWithoutMediaUrl?: boolean;
-  /** When placeholder path: short classification label for logs (AUDIO, VOICE_MESSAGE, …). */
+  /** When placeholder path: classifyGhlAudioPlaceholderBody result (AUDIO, VOICE, UNSUPPORTED). */
   voiceInboundPlaceholderKind?: string;
   /** Raw inbound body before placeholder replacement — used for optional GHL recording fetch. */
   voiceInboundPlaceholderRawBody?: string;

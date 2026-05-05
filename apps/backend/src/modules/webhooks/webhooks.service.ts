@@ -19,10 +19,12 @@ import { formatPostgrestError } from '../../lib/format-postgrest-error';
 import { extractGhlInboundDedupeKeys } from './ghl-webhook-dedupe';
 import { extractInboundContactFields } from './ghl-inbound-contact-extract';
 import {
+  type GhlAudioPlaceholderKind,
   collectGhlInboundMediaRootNodes,
   extractGhlInboundAudioMediaUrl,
   extractGhlInboundMessageBodyString,
-  classifyGhlAudioPlaceholderBody,
+  resolveGhlAudioPlaceholderFromInbound,
+  bodyPlaceholderCandidateShapeForLog,
   ghlInboundShouldTranscribeVoice,
   VOICE_INBOUND_PLACEHOLDER_NO_MEDIA_USER_MESSAGE,
 } from './ghl-inbound-audio-media';
@@ -194,7 +196,14 @@ export class WebhooksService {
     const extracted = extractInboundContactFields(data);
     const envelope = payload as unknown as Record<string, unknown>;
 
-    const rawMessageBody = extractGhlInboundMessageBodyString(data);
+    const rawMessageBody =
+      extractGhlInboundMessageBodyString(data) ||
+      (typeof data['body'] === 'string' ? data['body'] : '');
+
+    const placeholderResolved = resolveGhlAudioPlaceholderFromInbound(data, workflowFlatRaw);
+    const bodyPlaceholderKind: GhlAudioPlaceholderKind = placeholderResolved.kind;
+    const isAudioPlaceholderInbound = bodyPlaceholderKind !== 'UNKNOWN';
+
     const rawMessageType =
       typeof data['messageType'] === 'string' ? data['messageType'] : undefined;
     const messageTypeMapped = this.mapMessageType(rawMessageType);
@@ -204,9 +213,7 @@ export class WebhooksService {
       workflowFlatRaw,
     });
 
-    const placeholderClass = classifyGhlAudioPlaceholderBody(rawMessageBody);
-    const voiceInboundAudioPlaceholderWithoutMediaUrl =
-      placeholderClass.isPlaceholder && !audioMediaUrl;
+    const voiceInboundAudioPlaceholderWithoutMediaUrl = isAudioPlaceholderInbound && !audioMediaUrl;
 
     let messageContent = rawMessageBody;
     let messageType = messageTypeMapped;
@@ -230,6 +237,10 @@ export class WebhooksService {
     const runInboundShapeDiagnostics =
       evNorm === 'conversation_message_created' || evNorm === 'inboundmessage';
 
+    const bodyPlaceholderCandidateShape = bodyPlaceholderCandidateShapeForLog(
+      placeholderResolved.shapeSourceRaw,
+    );
+
     if (runInboundShapeDiagnostics) {
       this.logGhlInboundNormalizeDiagnostics(payload, data, envelope, workflowFlatRaw, {
         rawMessageType: rawMessageType ?? null,
@@ -238,6 +249,8 @@ export class WebhooksService {
         audioMediaUrlForShape: audioMediaUrl,
         voiceInboundNeedsTranscribe,
         voiceInboundAudioPlaceholderWithoutMediaUrl,
+        bodyPlaceholderKind,
+        bodyPlaceholderCandidateShape,
       });
     }
 
@@ -245,7 +258,7 @@ export class WebhooksService {
       this.logger.log(
         JSON.stringify({
           voiceInboundAudioPlaceholderWithoutMediaUrl: true,
-          bodyPlaceholderKind: placeholderClass.placeholderKind ?? 'UNKNOWN',
+          bodyPlaceholderKind,
         }),
       );
     }
@@ -262,9 +275,9 @@ export class WebhooksService {
       audioMediaUrl: audioMediaUrl ?? null,
       voiceInboundNeedsTranscribe,
       voiceInboundAudioPlaceholderWithoutMediaUrl,
-      voiceInboundPlaceholderKind: placeholderClass.placeholderKind,
+      voiceInboundPlaceholderKind: isAudioPlaceholderInbound ? bodyPlaceholderKind : undefined,
       voiceInboundPlaceholderRawBody: voiceInboundAudioPlaceholderWithoutMediaUrl
-        ? rawMessageBody
+        ? placeholderResolved.matchedRawBody ?? undefined
         : undefined,
       ghlInboundMessageId,
       timestamp: payload.timestamp || new Date().toISOString(),
@@ -308,6 +321,8 @@ export class WebhooksService {
       audioMediaUrlForShape: string | null;
       voiceInboundNeedsTranscribe: boolean;
       voiceInboundAudioPlaceholderWithoutMediaUrl: boolean;
+      bodyPlaceholderKind: GhlAudioPlaceholderKind;
+      bodyPlaceholderCandidateShape: ReturnType<typeof bodyPlaceholderCandidateShapeForLog>;
     },
   ): void {
     const msgRaw = data['message'];
@@ -393,6 +408,8 @@ export class WebhooksService {
         audioMediaUrlShape: this.inboundUrlShapeMeta(ctx.audioMediaUrlForShape),
         voiceInboundNeedsTranscribe: ctx.voiceInboundNeedsTranscribe,
         voiceInboundAudioPlaceholderWithoutMediaUrl: ctx.voiceInboundAudioPlaceholderWithoutMediaUrl,
+        bodyPlaceholderKind: ctx.bodyPlaceholderKind,
+        bodyPlaceholderCandidateShape: ctx.bodyPlaceholderCandidateShape,
       }),
     );
   }

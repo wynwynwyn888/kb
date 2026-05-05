@@ -3,7 +3,14 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useParams } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
-import { getGhlConnection, getTenantById, type GhlConnectionStatus, type WorkspaceBotMode } from '@/lib/api';
+import {
+  getGhlConnection,
+  getTenantById,
+  listKbDocuments,
+  type GhlConnectionStatus,
+  type WorkspaceBotMode,
+} from '@/lib/api';
+import type { KnowledgeSetupStatus } from '@/lib/workspace-settings-display';
 
 export type TenantSettingsPromptSnap = {
   name: string;
@@ -26,6 +33,7 @@ export type TenantSettingsContextValue = {
   ghl: GhlConnectionStatus | null;
   ghlLoadErr: string;
   canRenameWorkspace: boolean;
+  knowledgeSetupStatus: KnowledgeSetupStatus;
 };
 
 const TenantSettingsContext = createContext<TenantSettingsContextValue | null>(null);
@@ -46,6 +54,7 @@ export function TenantSettingsProvider({ children }: { children: ReactNode }) {
   const [promptConfigSnap, setPromptConfigSnap] = useState<TenantSettingsPromptSnap | null>(null);
   const [ghl, setGhl] = useState<GhlConnectionStatus | null>(null);
   const [ghlLoadErr, setGhlLoadErr] = useState('');
+  const [knowledgeSetupStatus, setKnowledgeSetupStatus] = useState<KnowledgeSetupStatus>('unknown');
 
   useEffect(() => {
     if (!token || !tenantId) return;
@@ -55,15 +64,21 @@ export function TenantSettingsProvider({ children }: { children: ReactNode }) {
       setErr('');
       setGhlLoadErr('');
       try {
-        const [tenant, g] = await Promise.all([
+        const [tenant, g, kbDocs] = await Promise.all([
           getTenantById(token, tenantId),
           getGhlConnection(token, tenantId).catch(e => {
             if (!cancelled) setGhlLoadErr(e instanceof Error ? e.message : 'CRM connection could not be loaded');
             return null;
           }),
+          listKbDocuments(token, tenantId).catch(() => null),
         ]);
         if (cancelled) return;
         if (g) setGhl(g);
+        if (kbDocs === null) {
+          setKnowledgeSetupStatus('unknown');
+        } else {
+          setKnowledgeSetupStatus(Array.isArray(kbDocs) && kbDocs.length > 0 ? 'ready' : 'empty');
+        }
         setTenantName(tenant?.name ?? null);
         setTenantAgencyId(tenant?.agencyId ?? null);
         setTenantStatus(tenant?.status ?? null);
@@ -109,6 +124,7 @@ export function TenantSettingsProvider({ children }: { children: ReactNode }) {
       ghl,
       ghlLoadErr,
       canRenameWorkspace,
+      knowledgeSetupStatus,
     }),
     [
       tenantId,
@@ -124,6 +140,7 @@ export function TenantSettingsProvider({ children }: { children: ReactNode }) {
       ghl,
       ghlLoadErr,
       canRenameWorkspace,
+      knowledgeSetupStatus,
     ],
   );
 

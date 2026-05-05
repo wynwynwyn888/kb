@@ -16,6 +16,16 @@ import {
   mvpLabelStyle,
   mvpPrimaryButtonStyle,
 } from '@/components/app/mvp-ui';
+import {
+  assistantProfileSetupLabel,
+  clientAiRepliesShortLabel,
+  clientCrmStatusSummary,
+  crmLastCheckedIso,
+  formatWorkspaceSettingsDateTime,
+  ghlLocationDisplayLabel,
+  knowledgeSetupLabel,
+  replyStyleLabelFromTemperature,
+} from '@/lib/workspace-settings-display';
 import { WorkspaceBotModeSection } from './WorkspaceBotModeSection';
 import { useTenantSettings } from './tenant-settings-context';
 
@@ -27,12 +37,12 @@ export function TenantSettingsGeneralContent() {
     base,
     reload,
     tenantName,
-    tenantStatus,
     botMode,
     promptConfigSnap,
     ghl,
     ghlLoadErr,
     canRenameWorkspace,
+    knowledgeSetupStatus,
   } = useTenantSettings();
 
   const [nameDraft, setNameDraft] = useState('');
@@ -44,7 +54,20 @@ export function TenantSettingsGeneralContent() {
     setNameDraft((tenantName ?? '').trim() ? (tenantName ?? '') : '');
   }, [tenantName]);
 
-  const aiModeLabel = botMode === 'off' ? 'Off' : botMode === 'suggestive' ? 'Suggestive' : 'Auto';
+  const aiSummary = clientAiRepliesShortLabel(botMode);
+  const replyStyleSummary =
+    promptConfigSnap != null ? replyStyleLabelFromTemperature(Number(promptConfigSnap.temperature)) : 'Needs setup';
+  const crmSummary = ghl && !ghlLoadErr ? clientCrmStatusSummary(ghl) : ghlLoadErr ? 'Could not load' : 'Not connected';
+  const crmPillTone =
+    ghl && !ghlLoadErr
+      ? ghl.status === 'CONNECTED'
+        ? 'ok'
+        : ghl.status === 'DISCONNECTED'
+          ? 'neutral'
+          : 'warn'
+      : 'neutral';
+
+  const crmCardTitle = ghl && !ghlLoadErr && ghl.status === 'CONNECTED' ? 'Connected CRM' : 'CRM connection';
 
   return (
     <>
@@ -62,7 +85,15 @@ export function TenantSettingsGeneralContent() {
           ) : null}
         </div>
         <div style={{ flex: '1 1 280px', minWidth: 0 }}>
-          <SectionCard title="CRM connection" subtitle="Connection status and saved location for this workspace." accent="muted">
+          <SectionCard
+            title={crmCardTitle}
+            subtitle={
+              ghl && !ghlLoadErr && ghl.status === 'CONNECTED'
+                ? 'This workspace is connected to its CRM location and ready for live delivery.'
+                : 'Link a CRM location so conversations and automations can run end-to-end.'
+            }
+            accent="muted"
+          >
             {ghlLoadErr ? (
               <p style={{ fontSize: '0.84rem', color: '#b91c1c', margin: 0 }}>{ghlLoadErr}</p>
             ) : ghl ? (
@@ -71,33 +102,36 @@ export function TenantSettingsGeneralContent() {
                   rows={[
                     {
                       label: 'Status',
-                      value: (
-                        <StatusPill
-                          label={ghl.status}
-                          tone={ghl.status === 'CONNECTED' ? 'ok' : ghl.status === 'DISCONNECTED' ? 'neutral' : 'warn'}
-                        />
-                      ),
+                      value: <StatusPill label={crmSummary} tone={crmPillTone} />,
                     },
-                    { label: 'Location', value: ghl.ghlLocationId?.trim() ? 'Saved' : 'Not saved' },
-                    { label: 'Verified', value: ghl.verifiedAt ? ghl.verifiedAt : '—' },
+                    {
+                      label: 'Location',
+                      value: ghlLocationDisplayLabel(ghl),
+                    },
+                    {
+                      label: 'Last checked',
+                      value: formatWorkspaceSettingsDateTime(crmLastCheckedIso(ghl)),
+                    },
                   ]}
                 />
                 <div style={{ marginTop: '0.85rem' }}>
                   <Link href={`${base}/ghl-status`} style={appFloatingSecondaryButtonStyle}>
-                    Manage CRM
+                    Manage CRM connection
                   </Link>
                 </div>
               </div>
             ) : (
-              <p style={{ fontSize: '0.84rem', color: 'var(--aisbp-muted, #64748b)', margin: 0 }}>CRM is not connected yet.</p>
+              <p style={{ fontSize: '0.84rem', color: 'var(--aisbp-muted, #64748b)', margin: 0 }}>
+                No CRM connection has been saved for this workspace yet.
+              </p>
             )}
           </SectionCard>
         </div>
       </div>
 
       {canRenameWorkspace && token && tenantId ? (
-        <div id="workspace-rename" style={{ scrollMarginTop: '1rem', marginBottom: '1.1rem' }}>
-          <SectionCard title="Workspace name" subtitle="Renaming is limited to agency staff so client-facing lists stay tidy." accent="muted">
+        <div id="workspace-details" style={{ scrollMarginTop: '1rem', marginBottom: '1.1rem' }}>
+          <SectionCard title="Workspace details" subtitle="Update the display name shown inside this dashboard." accent="muted">
             {nameMsg ? <SuccessBanner message={nameMsg} /> : null}
             {nameErr ? <p style={{ fontSize: '0.84rem', color: '#b91c1c', margin: '0 0 0.65rem' }}>{nameErr}</p> : null}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem', maxWidth: '420px' }}>
@@ -107,10 +141,10 @@ export function TenantSettingsGeneralContent() {
                   type="text"
                   value={nameDraft}
                   onChange={e => {
-                        setNameDraft(e.target.value);
-                        setNameMsg('');
-                        setNameErr('');
-                      }}
+                    setNameDraft(e.target.value);
+                    setNameMsg('');
+                    setNameErr('');
+                  }}
                   disabled={nameSaving}
                   autoComplete="off"
                   style={mvpInputStyle}
@@ -131,7 +165,7 @@ export function TenantSettingsGeneralContent() {
                       name: nameDraft.trim(),
                     });
                     setNameDraft(updated.name);
-                    setNameMsg('Workspace name saved.');
+                    setNameMsg('Changes saved.');
                     emitTenantWorkspaceMetaChanged(tenantId);
                     reload();
                   } catch (e) {
@@ -141,42 +175,44 @@ export function TenantSettingsGeneralContent() {
                   }
                 }}
               >
-                {nameSaving ? 'Saving…' : 'Save name'}
+                {nameSaving ? 'Saving…' : 'Save changes'}
               </button>
             </div>
           </SectionCard>
         </div>
       ) : null}
 
-      <SectionCard title="Bot status" subtitle="Details for this workspace." accent="default">
+      <SectionCard title="Setup summary" subtitle="How this workspace looks at a glance." accent="default">
         <KeyValueRows
           rows={[
-            { label: 'Workspace', value: tenantName ?? '—' },
             {
-              label: 'Account',
-              value: tenantStatus ? <StatusPill label={tenantStatus} tone="neutral" /> : '—',
+              label: 'Assistant profile',
+              value: assistantProfileSetupLabel(promptConfigSnap),
             },
             {
-              label: 'AI mode',
-              value: <StatusPill label={aiModeLabel} tone={botMode === 'off' ? 'neutral' : 'ok'} />,
+              label: 'AI replies',
+              value: aiSummary,
             },
             {
-              label: 'Bot instructions',
-              value: promptConfigSnap ? `${promptConfigSnap.name}${promptConfigSnap.isActive ? ' (active)' : ''}` : 'Not configured yet',
+              label: 'CRM',
+              value: crmSummary,
+            },
+            {
+              label: 'Knowledge',
+              value: knowledgeSetupLabel(knowledgeSetupStatus),
             },
             {
               label: 'Reply style',
-              value: promptConfigSnap != null ? String(promptConfigSnap.temperature) : '—',
-            },
-            {
-              label: 'Model override',
-              value: promptConfigSnap?.modelOverride?.trim() || '—',
+              value: replyStyleSummary,
             },
           ]}
         />
-        <div style={{ marginTop: '0.85rem' }}>
+        <div style={{ marginTop: '0.85rem', display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
           <Link href={`${base}/goals`} style={appFloatingSecondaryButtonStyle}>
-            Open bot instructions
+            Bot instructions
+          </Link>
+          <Link href={`${base}/knowledge`} style={appFloatingSecondaryButtonStyle}>
+            Knowledge base
           </Link>
         </div>
       </SectionCard>

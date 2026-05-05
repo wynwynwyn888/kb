@@ -2,11 +2,15 @@
 
 import { useState } from 'react';
 import type { WorkspaceBotMode } from '@/lib/api';
+import {
+  clientAiRepliesDescription,
+  isClientSelectableBotMode,
+  SUGGESTIVE_MODE_NOTICE,
+} from '@/lib/workspace-settings-display';
 
-const options: { id: WorkspaceBotMode; label: string; line: string }[] = [
-  { id: 'off', label: 'Off', line: 'Stops automatic AI replies' },
-  { id: 'suggestive', label: 'Suggestive', line: 'Builds replies without auto-sending to CRM' },
-  { id: 'autopilot', label: 'Auto', line: 'Sends replies to the conversation automatically' },
+const clientOptions: { id: 'off' | 'autopilot'; label: string }[] = [
+  { id: 'off', label: 'Off' },
+  { id: 'autopilot', label: 'Auto' },
 ];
 
 export function WorkspaceBotModeSection(props: {
@@ -20,6 +24,7 @@ export function WorkspaceBotModeSection(props: {
 
   const select = async (m: WorkspaceBotMode) => {
     if (m === mode || saving || disabled) return;
+    if (!isClientSelectableBotMode(m)) return;
     setErr('');
     setSaving(true);
     try {
@@ -52,7 +57,7 @@ export function WorkspaceBotModeSection(props: {
             letterSpacing: '-0.02em',
           }}
         >
-          Bot mode
+          AI replies
         </h2>
         <p
           style={{
@@ -63,10 +68,27 @@ export function WorkspaceBotModeSection(props: {
             maxWidth: '36rem',
           }}
         >
-          Choose how this workspace uses AI for incoming conversations. Requires a connected CRM account for live
-          delivery.
+          Choose whether the assistant sends automatic replies in this workspace.
         </p>
       </div>
+
+      {mode === 'suggestive' ? (
+        <p
+          style={{
+            margin: '0 0 0.65rem',
+            fontSize: '0.78rem',
+            color: 'var(--aisbp-muted, #64748b)',
+            lineHeight: 1.5,
+            padding: '0.55rem 0.65rem',
+            borderRadius: '8px',
+            background: 'var(--aisbp-stat-tile-bg, #f8fafc)',
+            border: '1px solid var(--aisbp-border, #e2e8f0)',
+          }}
+          role="status"
+        >
+          {SUGGESTIVE_MODE_NOTICE}
+        </p>
+      ) : null}
 
       {err ? (
         <p style={{ margin: '0 0 0.6rem', fontSize: '0.8rem', color: '#b91c1c' }} role="alert">
@@ -81,23 +103,23 @@ export function WorkspaceBotModeSection(props: {
           gap: '0.55rem',
         }}
         role="radiogroup"
-        aria-label="Bot mode"
+        aria-label="AI replies"
       >
-        {options.map(o => {
-          const selected = mode === o.id;
+        {clientOptions.map(o => {
+          const matches = mode !== 'suggestive' && mode === o.id;
           return (
             <button
               key={o.id}
               type="button"
               role="radio"
-              aria-checked={selected}
+              aria-checked={matches}
               disabled={saving || disabled}
               onClick={() => void select(o.id)}
               style={{
                 textAlign: 'left' as const,
                 borderRadius: '10px',
-                border: selected ? '2px solid #0f62fe' : '1px solid var(--aisbp-border, #e2e8f0)',
-                background: selected ? 'rgba(15, 98, 254, 0.12)' : 'var(--aisbp-stat-tile-bg, #f8fafc)',
+                border: matches ? '2px solid #0f62fe' : '1px solid var(--aisbp-border, #e2e8f0)',
+                background: matches ? 'rgba(15, 98, 254, 0.12)' : 'var(--aisbp-stat-tile-bg, #f8fafc)',
                 padding: '0.65rem 0.7rem',
                 cursor: saving || disabled ? 'not-allowed' : 'pointer',
                 opacity: disabled ? 0.5 : 1,
@@ -112,12 +134,14 @@ export function WorkspaceBotModeSection(props: {
                 style={{
                   fontSize: '0.82rem',
                   fontWeight: 700,
-                  color: selected ? '#0f62fe' : 'var(--aisbp-text-heading, #0f172a)',
+                  color: matches ? '#0f62fe' : 'var(--aisbp-text-heading, #0f172a)',
                 }}
               >
                 {o.label}
               </span>
-              <span style={{ fontSize: '0.7rem', color: 'var(--aisbp-muted, #64748b)', lineHeight: 1.4 }}>{o.line}</span>
+              <span style={{ fontSize: '0.7rem', color: 'var(--aisbp-muted, #64748b)', lineHeight: 1.4 }}>
+                {clientAiRepliesDescription(o.id)}
+              </span>
             </button>
           );
         })}

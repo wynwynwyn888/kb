@@ -13,7 +13,7 @@ export default function TenantAssistantTestBotPage() {
   return (
     <div style={{ maxWidth: 920, margin: '0 auto' }}>
       <PageHeader
-        title="Test Bot"
+        title="Assistant Preview"
         eyebrow="Assistant"
       />
       <p
@@ -25,8 +25,8 @@ export default function TenantAssistantTestBotPage() {
           lineHeight: 1.55,
         }}
       >
-        Try the <strong>active</strong> assistant profile: persona, goals, business notes, selected vaults, automation,
-        booking, handover, and follow-up behaviour match what customers see (within sandbox limits).
+        Send a sample customer message to see how this assistant would respond using its current instructions, selected
+        vaults, and this workspace&apos;s automation rules.
       </p>
       {token ? <BotTestPanel token={token} subaccountId={tenantId} variant="default" /> : null}
     </div>

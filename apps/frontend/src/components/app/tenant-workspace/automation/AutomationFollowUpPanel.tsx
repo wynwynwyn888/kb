@@ -154,6 +154,12 @@ export function AutomationFollowUpPanel() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
       {loadErr ? <ErrorBanner message={loadErr} /> : null}
 
+      <SectionCard title="Workspace scope" subtitle="Follow-up settings currently apply across this workspace." accent="muted">
+        <p style={{ margin: 0, fontSize: '0.86rem', color: 'var(--aisbp-text-secondary)', lineHeight: 1.55 }}>
+          The active assistant uses these settings when replying. Scheduling/execution may be gated by conversation state and rollout flags.
+        </p>
+      </SectionCard>
+
       <SectionCard
         title="Follow-up assistant"
         subtitle="Stored configuration for when a contact stops replying. Sending is not wired yet."

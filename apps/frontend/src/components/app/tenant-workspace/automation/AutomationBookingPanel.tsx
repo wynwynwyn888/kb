@@ -683,6 +683,16 @@ export function AutomationBookingPanel() {
       ) : (
         <>
           <SectionCard
+            title="Workspace scope"
+            subtitle="Booking settings currently apply across this workspace."
+            accent="muted"
+          >
+            <p style={{ margin: 0, fontSize: '0.86rem', color: 'var(--aisbp-text-secondary)', lineHeight: 1.55 }}>
+              The active assistant uses these settings when replying.
+            </p>
+          </SectionCard>
+
+          <SectionCard
             title="Calendar tools"
             subtitle="Use these tools to confirm CRM calendar access before enabling live booking workflows."
             accent="muted"

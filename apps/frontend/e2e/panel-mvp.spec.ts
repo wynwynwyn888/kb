@@ -123,6 +123,12 @@ test.describe('B–C. Agency + tenant surfaces (logged-in)', () => {
     await expect(page.getByRole('heading', { level: 1, name: 'Assistant' })).toBeVisible({
       timeout: 25_000,
     });
+    await expect(page.getByRole('link', { name: 'Preview' })).toBeVisible({ timeout: 25_000 });
+    await expect(page.getByText('Quick actions')).toHaveCount(0);
+    await expect(page.getByText(/Workspace tagging/i)).toBeVisible({ timeout: 25_000 });
+    await expect(page.getByText(/Workspace booking/i)).toBeVisible({ timeout: 25_000 });
+    await expect(page.getByText(/Workspace follow-up/i)).toBeVisible({ timeout: 25_000 });
+    await expect(page.getByText(/Knowledge vault status/i)).toBeVisible({ timeout: 25_000 });
 
     await page.goto(`/app/tenant/${tenantId}/prompt`, { waitUntil: 'domcontentloaded' });
     await expect(page).toHaveURL(new RegExp(`/app/tenant/${tenantId}/assistant/instructions`));
@@ -154,6 +160,9 @@ test.describe('B–C. Agency + tenant surfaces (logged-in)', () => {
     await expect(page.getByRole('heading', { level: 1, name: 'Diagnostics' })).toBeVisible({
       timeout: 25_000,
     });
+
+    await page.goto(`/app/tenant/${tenantId}/assistant/automation/tags`, { waitUntil: 'domcontentloaded' });
+    await expect(page.getByText('Agency smoke test')).toBeVisible({ timeout: 25_000 });
   });
 });
 

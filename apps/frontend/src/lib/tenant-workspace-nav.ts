@@ -123,7 +123,7 @@ export function buildTenantSidebarNav(tenantId: string, opts: { showAdvanced: bo
         },
         {
           href: `${assistantBase}/test-bot`,
-          label: 'Test Bot',
+          label: 'Preview',
           match: p => p === `${assistantBase}/test-bot`,
         },
       ],

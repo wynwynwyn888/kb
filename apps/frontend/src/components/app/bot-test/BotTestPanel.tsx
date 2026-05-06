@@ -209,7 +209,7 @@ export function BotTestPanel(props: {
   };
 
   const emptyCopy =
-    'Send a sample question to preview how the bot responds using this workspace’s prompt and knowledge.';
+    "Send a sample customer message to see how this assistant would respond using its current instructions, selected vaults, and this workspace's automation rules.";
 
   const botAvatar = (
     <div
@@ -248,12 +248,12 @@ export function BotTestPanel(props: {
         }}
       >
         <h2 style={{ fontSize: embedded ? '1.05rem' : '1.2rem', fontWeight: 700, margin: 0, color: '#0f172a', letterSpacing: '-0.02em' }}>
-          {embedded ? 'Preview bot reply' : 'Test your bot'}
+          {embedded ? 'Preview bot reply' : 'Preview a reply'}
         </h2>
         <p style={{ fontSize: '0.8125rem', color: '#64748b', margin: '0.35rem 0 0', lineHeight: 1.5 }}>
           {embedded
             ? 'Uses this workspace’s prompt and assistant profile knowledge access.'
-            : 'Preview the reply your bot would send to a customer.'}
+            : "Send a sample customer message to see how this assistant would respond using its current instructions, selected vaults, and this workspace's automation rules."}
         </p>
       </div>
       {panelBanner ? (
@@ -413,7 +413,7 @@ export function BotTestPanel(props: {
               value={input}
               onChange={e => setInput(e.target.value)}
               disabled={sending}
-              placeholder="Ask a customer-style question…"
+              placeholder="Ask as a customer..."
               aria-label="Test message"
               style={{
                 flex: 1,

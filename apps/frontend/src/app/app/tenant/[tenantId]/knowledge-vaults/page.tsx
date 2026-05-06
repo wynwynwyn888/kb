@@ -1956,7 +1956,7 @@ export default function SubaccountKnowledgePage() {
           >
             Create and manage reusable content for your assistants. To try replies with the live assistant profile, use{' '}
             <Link href={`/app/tenant/${subId}/assistant/test-bot`} style={{ color: PRIMARY, fontWeight: 600 }}>
-              Assistant → Test Bot
+              Assistant → Preview
             </Link>
             .
           </p>

@@ -68,9 +68,11 @@ export function AutomationWorkspaceLayout({
             maxWidth: '42rem',
           }}
         >
-          Rules for the active assistant profile: CRM tags, booking calendar, follow-ups, and handover — using this
-          workspace&apos;s CRM resources.
+          Automation rules currently apply to this workspace. The active assistant uses these rules when replying.
+          Profile-specific automation is planned for a future release. CRM tags, calendars, and contacts are synced from
+          this workspace connection.
         </p>
+        {/* TODO: When profile-scoped automation is implemented, replace workspace-level copy and wire automation settings through assistant_profile_id with tenant fallback. */}
       </header>
 
       <nav

@@ -92,7 +92,8 @@ function parseTagOptionValue(v: string): { tagId?: string; tagName?: string } {
 export function AutomationTagsPanel() {
   const params = useParams();
   const tenantId = params['tenantId'] as string;
-  const { token } = useAuth();
+  const { token, user } = useAuth();
+  const isAgencyStaff = Boolean(user?.agencyRole);
 
   const [loadErr, setLoadErr] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
@@ -409,9 +410,12 @@ export function AutomationTagsPanel() {
 
       <SectionCard
         title="Automatic tagging"
-        subtitle="Rules define valid CRM tags only — the assistant cannot invent tags outside this list. Customer-facing replies never mention internal tags."
+        subtitle="Enable or disable automatic tagging for the active assistant profile. Tag rules reference synced CRM tags from the workspace connection."
         accent="default"
       >
+        <p style={{ fontSize: '0.84rem', color: 'var(--aisbp-muted)', lineHeight: 1.55, margin: '0 0 0.85rem' }}>
+          Tag rules currently apply across this workspace.
+        </p>
         {tagsLoading || !tagging ? (
           <LoadingBlock />
         ) : (
@@ -433,7 +437,14 @@ export function AutomationTagsPanel() {
         )}
       </SectionCard>
 
-      <SectionCard title="CRM tags" subtitle="Sync from CRM, or create and delete tags for this location." accent="muted">
+      <SectionCard
+        title="CRM tags"
+        subtitle="Workspace resource: synced from the connected CRM. Tag rules are saved under Assistant → Automation."
+        accent="muted"
+      >
+        <p style={{ fontSize: '0.84rem', color: 'var(--aisbp-muted)', lineHeight: 1.55, margin: '0 0 0.85rem' }}>
+          CRM tags are synced from the workspace connection. Tag rules currently apply across this workspace.
+        </p>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
           <button type="button" disabled={dim} onClick={() => void onSyncTags()} style={btn('secondary', dim)}>
             Sync CRM tags
@@ -728,41 +739,46 @@ export function AutomationTagsPanel() {
         ) : null}
       </SectionCard>
 
-      <SectionCard
-        title="Smoke test — apply tag to CRM contact"
-        subtitle="Use a test CRM contact only. This applies the selected tag directly in CRM."
-        accent="muted"
-      >
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.65rem', alignItems: 'flex-end' }}>
-          <label style={{ ...mvpLabelStyle, display: 'flex', flexDirection: 'column', gap: '0.35rem', minWidth: 200 }}>
-            Contact ID
-            <input
-              value={testContactId}
-              onChange={e => setTestContactId(e.target.value)}
-              placeholder="CRM contact id"
-              style={mvpInputStyle}
-            />
-          </label>
-          <label style={{ ...mvpLabelStyle, display: 'flex', flexDirection: 'column', gap: '0.35rem', minWidth: 200 }}>
-            CRM tag
-            <select
-              value={testTagName}
-              onChange={e => setTestTagName(e.target.value)}
-              style={mvpSelectStyle}
-            >
-              <option value="">—</option>
-              {approvedTags.map(t => (
-                <option key={`smoke-${t.name}`} value={t.name}>
-                  {t.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button type="button" disabled={dim} onClick={() => void onTestTag()} style={btn('primary', dim)}>
-            Apply test tag
-          </button>
-        </div>
-      </SectionCard>
+      {isAgencyStaff ? (
+        <SectionCard
+          title="Agency smoke test"
+          subtitle="Agency-only tool. This applies the selected tag directly in GHL."
+          accent="muted"
+        >
+          <p style={{ margin: '0 0 0.65rem', fontSize: '0.85rem', color: 'var(--aisbp-muted)', lineHeight: 1.45 }}>
+            Apply a CRM tag to a test contact
+          </p>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.65rem', alignItems: 'flex-end' }}>
+            <label style={{ ...mvpLabelStyle, display: 'flex', flexDirection: 'column', gap: '0.35rem', minWidth: 200 }}>
+              Contact ID
+              <input
+                value={testContactId}
+                onChange={e => setTestContactId(e.target.value)}
+                placeholder="CRM contact id"
+                style={mvpInputStyle}
+              />
+            </label>
+            <label style={{ ...mvpLabelStyle, display: 'flex', flexDirection: 'column', gap: '0.35rem', minWidth: 200 }}>
+              CRM tag
+              <select
+                value={testTagName}
+                onChange={e => setTestTagName(e.target.value)}
+                style={mvpSelectStyle}
+              >
+                <option value="">—</option>
+                {approvedTags.map(t => (
+                  <option key={`smoke-${t.name}`} value={t.name}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button type="button" disabled={dim} onClick={() => void onTestTag()} style={btn('primary', dim)}>
+              Apply test tag
+            </button>
+          </div>
+        </SectionCard>
+      ) : null}
 
       {feedback ? (
         <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--aisbp-muted)' }} role="status">

@@ -122,6 +122,14 @@ test.describe('Panel gaps (narrow)', () => {
     await expect(page.getByRole('button', { name: 'Add member' })).toBeVisible();
   });
 
+  test('3a2. Tenant Automation Tags: classifier visible; agency smoke test hidden', async ({ page }) => {
+    await login(page, tenantAdminEmail, tenantAdminPassword);
+    const tenantId = overrideTenantId || seededTenantAId;
+    await page.goto(`/app/tenant/${tenantId}/assistant/automation/tags`, { waitUntil: 'domcontentloaded' });
+    await expect(page.getByText('Test classifier')).toBeVisible({ timeout: 25_000 });
+    await expect(page.getByText('Agency smoke test')).toHaveCount(0);
+  });
+
   test('3b. Tenant Team: add, role change, remove (optional profile UUID)', async ({ page }) => {
     test.skip(
       !extraTenantAProfileId,

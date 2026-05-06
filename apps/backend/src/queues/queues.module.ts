@@ -20,15 +20,21 @@ import { ActionGatingModule } from '../modules/action-gating/action-gating.modul
 import { IntentTagsModule } from '../modules/intent-tags/intent-tags.module';
 import { TranscriptionModule } from '../modules/transcription/transcription.module';
 import { FollowUpEngineModule } from '../modules/follow-up-engine/follow-up-engine.module';
+import { FollowUpQueueModule } from './follow-up-queue.module';
 
 @Module({
   imports: [
+    // Register all queues except follow-up here — follow-up is registered via FollowUpQueueModule
+    // (also imported by FollowUpEngineModule) to avoid double registration.
     BullModule.registerQueue(
-      ...Object.entries(queueConfig).map(([name, config]) => ({
-        name,
-        defaultJobOptions: config.defaultJobOptions,
-      })),
+      ...Object.entries(queueConfig)
+        .filter(([name]) => name !== QUEUES.FOLLOW_UP)
+        .map(([name, config]) => ({
+          name,
+          defaultJobOptions: config.defaultJobOptions,
+        })),
     ),
+    FollowUpQueueModule,
     OrchestrationModule,
     OutboundModule,
     ConversationsModule,

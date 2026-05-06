@@ -6,10 +6,13 @@ import { KbModule } from '../kb/kb.module';
 import { GenerationModule } from '../generation/generation.module';
 import { AgencyAiConfigModule } from '../agency-ai-config/agency-ai-config.module';
 import { ConversationsModule } from '../conversations/conversations.module';
+import { FollowUpQueueModule } from '../../queues/follow-up-queue.module';
 import { FollowUpEngineService } from './follow-up-engine.service';
 
 @Module({
   imports: [
+    // BullQueue_follow-up — required for @InjectQueue(QUEUES.FOLLOW_UP) on FollowUpEngineService
+    FollowUpQueueModule,
     FollowUpSettingsModule,
     OutboundModule,
     PromptsModule,

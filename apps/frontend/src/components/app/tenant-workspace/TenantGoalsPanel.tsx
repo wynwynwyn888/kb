@@ -41,7 +41,7 @@ const DEFAULT_NEW_PROFILE = 'New profile';
 
 const textareaStyle = {
   ...mvpInputStyle,
-  minHeight: '96px',
+  minHeight: '160px',
   resize: 'vertical' as const,
   fontFamily: 'inherit',
   fontSize: '0.9rem',
@@ -124,6 +124,42 @@ const deleteBtnStyle: CSSProperties = {
   fontSize: '0.78rem',
   fontWeight: 500,
   cursor: 'pointer',
+};
+
+const pageWidthProfiles: CSSProperties = {
+  maxWidth: 1120,
+  margin: '0 auto',
+};
+
+const pageWidthInstructions: CSSProperties = {
+  maxWidth: 1040,
+  margin: '0 auto',
+};
+
+const profilesGrid: CSSProperties = {
+  display: 'grid',
+  gap: '0.85rem',
+  gridTemplateColumns: 'repeat(1, minmax(0, 1fr))',
+};
+
+const profilesGridMd: CSSProperties = {
+  display: 'grid',
+  gap: '0.85rem',
+  gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
+};
+
+const profilesGridLg: CSSProperties = {
+  display: 'grid',
+  gap: '0.85rem',
+  gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+};
+
+const profileBentoCard: CSSProperties = {
+  border: '1px solid rgba(226, 232, 240, 0.95)',
+  borderRadius: 14,
+  padding: '1rem 1.05rem',
+  background: 'var(--aisbp-surface, #fff)',
+  boxShadow: '0 6px 22px rgba(15, 23, 42, 0.06)',
 };
 
 function profileListCardStyle(selected: boolean): CSSProperties {
@@ -708,7 +744,7 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
   };
 
   return (
-    <div>
+    <div style={mode === 'profiles' ? pageWidthProfiles : mode === 'instructions' ? pageWidthInstructions : undefined}>
       <style
         dangerouslySetInnerHTML={{
           __html: `
@@ -716,6 +752,11 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
 @media (min-width: 960px) {
   #${layoutStyleId} { grid-template-columns: minmax(240px, 300px) minmax(0, 1fr); }
 }
+
+/* Mode-specific layouts */
+#aisbp-profiles-grid { display: grid; gap: 0.85rem; grid-template-columns: repeat(1, minmax(0, 1fr)); }
+@media (min-width: 768px) { #aisbp-profiles-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 1080px) { #aisbp-profiles-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 `,
         }}
       />
@@ -861,7 +902,410 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
             </div>
           )}
 
-          <div id={layoutStyleId}>
+          {mode === 'profiles' ? (
+            <>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '0.75rem', margin: '0.25rem 0 0.85rem' }}>
+                <h2 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 800, color: 'var(--aisbp-text-heading, #0f172a)' }}>
+                  Assistant profiles
+                </h2>
+                <button type="button" onClick={onNewProfile} style={secondaryBtnStyle}>
+                  Create new profile
+                </button>
+              </div>
+
+              <div id="aisbp-profiles-grid">
+                {sortedProfiles.map(p => (
+                  <div key={p.id} style={profileBentoCard}>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.5rem', marginBottom: '0.4rem' }}>
+                      <span style={{ fontSize: '1.05rem', fontWeight: 850, color: 'var(--aisbp-text-heading, #0f172a)' }}>
+                        {p.name.trim() || 'Untitled'}
+                      </span>
+                      {p.isActive ? <LiveBadge /> : <DraftBadge />}
+                      {p.isActive ? (
+                        <span style={{ fontSize: '0.78rem', fontWeight: 650, color: 'var(--aisbp-muted, #64748b)' }}>
+                          Currently live
+                        </span>
+                      ) : null}
+                    </div>
+
+                    <p style={{ fontSize: '0.8rem', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 0.35rem' }}>
+                      Vaults: <strong style={{ fontWeight: 650, color: 'var(--aisbp-text-secondary, #334155)' }}>
+                        {activeAssistantVaultsSummary(p.knowledgeAccessMode, p.selectedVaultIds?.length ?? 0)}
+                      </strong>
+                    </p>
+                    <p style={{ fontSize: '0.76rem', color: 'var(--aisbp-muted, #94a3b8)', margin: '0 0 0.85rem' }}>
+                      Last updated {formatProfileUpdatedAt(p.updatedAt)}
+                    </p>
+
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.45rem', alignItems: 'center' }}>
+                      <button
+                        type="button"
+                        onClick={() => void goToInstructionsEditor(p.id)}
+                        style={{ ...secondaryBtnStyle, padding: '0.4rem 0.7rem' }}
+                      >
+                        Edit instructions
+                      </button>
+                      {!p.isActive ? (
+                        <button
+                          type="button"
+                          onClick={() => activateProfileById(p.id)}
+                          style={{ ...secondaryBtnStyle, padding: '0.4rem 0.7rem' }}
+                        >
+                          Set live
+                        </button>
+                      ) : null}
+                      <button
+                        type="button"
+                        onClick={() => duplicateProfileById(p.id)}
+                        style={{ ...secondaryBtnStyle, padding: '0.4rem 0.7rem' }}
+                      >
+                        Duplicate
+                      </button>
+                      <button
+                        type="button"
+                        disabled={profiles.length <= 1 || p.isActive}
+                        title={p.isActive ? LIVE_DELETE_HINT : undefined}
+                        aria-label={p.isActive ? LIVE_DELETE_HINT : 'Delete profile'}
+                        onClick={() => onDeleteProfile(p.id)}
+                        style={{
+                          ...deleteBtnStyle,
+                          padding: '0.45rem 0.65rem',
+                          opacity: p.isActive ? 0.45 : 1,
+                          cursor: p.isActive || profiles.length <= 1 ? 'not-allowed' : 'pointer',
+                        }}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                ))}
+
+                <button
+                  type="button"
+                  onClick={onNewProfile}
+                  style={{
+                    ...profileBentoCard,
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    borderStyle: 'dashed',
+                    color: 'var(--aisbp-text-secondary, #334155)',
+                    background: 'var(--aisbp-card-subtle, #fafafa)',
+                  }}
+                >
+                  <div style={{ fontSize: '0.85rem', fontWeight: 800, marginBottom: '0.35rem' }}>Create new profile</div>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--aisbp-muted, #64748b)', lineHeight: 1.45 }}>
+                    Start a new persona + vault selection for this workspace.
+                  </div>
+                </button>
+              </div>
+            </>
+          ) : mode === 'instructions' ? (
+            <div ref={instructionsRef} style={{ minWidth: 0 }}>
+              {!selectedProfileId ? (
+                <p style={{ fontSize: '0.88rem', color: 'var(--aisbp-muted, #64748b)' }}>Select a profile to edit.</p>
+              ) : (
+                <form onSubmit={onSavePrompt}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', alignItems: 'center', marginBottom: '0.75rem' }}>
+                    <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--aisbp-muted)' }}>
+                      Editing: <strong style={{ color: 'var(--aisbp-text-secondary)' }}>{activeProfile?.name?.trim() || 'Active assistant'}</strong>
+                    </p>
+                    <Link href={`/app/tenant/${subaccountId}/assistant/profiles`} style={{ fontSize: '0.85rem', fontWeight: 650, color: '#2563eb', textDecoration: 'none' }}>
+                      Switch profile →
+                    </Link>
+                  </div>
+                  <div style={sectionCard}>
+                    <h3 style={sectionTitleStyle}>Profile details</h3>
+                    <div style={{ marginBottom: '0.5rem' }}>
+                      {selectedRow?.isActive ? (
+                        <span style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--aisbp-muted, #64748b)' }}>
+                          Live assistant <LiveBadge />
+                        </span>
+                      ) : (
+                        <div>
+                          <span style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--aisbp-muted, #64748b)' }}>
+                            <DraftBadge /> <span style={{ fontWeight: 600 }}>Not used for live replies</span>
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                    <div style={{ marginBottom: '0.55rem' }}>
+                      <label style={mvpLabelStyle}>Profile name</label>
+                      <input
+                        style={{ ...mvpInputStyle, maxWidth: '100%' }}
+                        value={profileName}
+                        onChange={e => setProfileName(e.target.value)}
+                        autoComplete="off"
+                        aria-label="Profile name"
+                      />
+                    </div>
+                    <div style={{ marginBottom: 0 }}>
+                      <label style={mvpLabelStyle}>Description</label>
+                      <input
+                        style={{ ...mvpInputStyle, maxWidth: '100%' }}
+                        value={description}
+                        onChange={e => setDescription(e.target.value)}
+                        placeholder="Short label for your team"
+                        autoComplete="off"
+                      />
+                      <p style={{ ...mvpFieldHint, marginBottom: 0 }}>Shown in the profile list only.</p>
+                    </div>
+                  </div>
+
+                  <div style={sectionCard}>
+                    <h3 style={sectionTitleStyle}>Persona</h3>
+                    <p style={{ ...mvpFieldHint, margin: '-0.25rem 0 0.5rem' }}>How the assistant should sound and behave.</p>
+                    <textarea style={textareaStyle} value={persona} onChange={e => setPersona(e.target.value)} aria-label="Persona" />
+                    <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginTop: 8 }}>
+                      <span style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)' }}>{countWords(persona)} words</span>
+                      <button
+                        type="button"
+                        style={expandTextBtn}
+                        onClick={() => {
+                          setExpandDraft(persona);
+                          setExpandField('persona');
+                        }}
+                      >
+                        Expand
+                      </button>
+                    </div>
+                  </div>
+
+                  <div style={sectionCard}>
+                    <h3 style={sectionTitleStyle}>Conversation goals</h3>
+                    <p style={{ ...mvpFieldHint, margin: '-0.25rem 0 0.5rem' }}>What this assistant should try to achieve.</p>
+                    <textarea style={textareaStyle} value={goals} onChange={e => setGoals(e.target.value)} aria-label="Conversation goals" />
+                    <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginTop: 8 }}>
+                      <span style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)' }}>{countWords(goals)} words</span>
+                      <button
+                        type="button"
+                        style={expandTextBtn}
+                        onClick={() => {
+                          setExpandDraft(goals);
+                          setExpandField('goals');
+                        }}
+                      >
+                        Expand
+                      </button>
+                    </div>
+                  </div>
+
+                  <div style={sectionCard}>
+                    <h3 style={sectionTitleStyle}>Business notes</h3>
+                    <p style={{ ...mvpFieldHint, margin: '-0.25rem 0 0.5rem' }}>Facts, policies, and context for this workspace.</p>
+                    <textarea style={textareaStyle} value={additional} onChange={e => setAdditional(e.target.value)} aria-label="Business notes" />
+                    <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginTop: 8 }}>
+                      <span style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)' }}>{countWords(additional)} words</span>
+                      <button
+                        type="button"
+                        style={expandTextBtn}
+                        onClick={() => {
+                          setExpandDraft(additional);
+                          setExpandField('additional');
+                        }}
+                      >
+                        Expand
+                      </button>
+                    </div>
+                  </div>
+
+                  <div style={sectionCard}>
+                    <h3 style={sectionTitleStyle}>Knowledge used by this assistant</h3>
+                    <p style={{ fontSize: '0.82rem', color: 'var(--aisbp-text-secondary, #334155)', margin: '0.35rem 0 0.75rem', lineHeight: 1.45 }}>
+                      Vaults are groups of FAQs, notes, and files. Configure vault content under Knowledge.
+                    </p>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
+                      <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.45rem', fontSize: '0.88rem', cursor: 'pointer', color: 'var(--aisbp-text-heading, #0f172a)' }}>
+                        <input
+                          type="radio"
+                          name="knowledge-access-mode"
+                          checked={knowledgeAccessMode === KNOWLEDGE_ACCESS_ALL_VAULTS}
+                          onChange={() => setKnowledgeAccessMode(KNOWLEDGE_ACCESS_ALL_VAULTS)}
+                          style={{ marginTop: '0.2rem' }}
+                        />
+                        <span>
+                          <strong style={{ fontWeight: 700 }}>Use all vaults</strong>
+                          <span style={{ display: 'block', fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)', marginTop: '0.15rem' }}>
+                            Default — search every knowledge vault in this workspace.
+                          </span>
+                        </span>
+                      </label>
+                      <label style={{ display: 'flex', alignItems: 'flex-start', gap: '0.45rem', fontSize: '0.88rem', cursor: 'pointer', color: 'var(--aisbp-text-heading, #0f172a)' }}>
+                        <input
+                          type="radio"
+                          name="knowledge-access-mode"
+                          checked={knowledgeAccessMode === KNOWLEDGE_ACCESS_SELECTED_VAULTS}
+                          onChange={() => setKnowledgeAccessMode(KNOWLEDGE_ACCESS_SELECTED_VAULTS)}
+                          style={{ marginTop: '0.2rem' }}
+                        />
+                        <span>
+                          <strong style={{ fontWeight: 700 }}>Selected vaults</strong>
+                          <span style={{ display: 'block', fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)', marginTop: '0.15rem' }}>
+                            Only the vaults you check below are searched for this assistant.
+                          </span>
+                        </span>
+                      </label>
+                    </div>
+                    {knowledgeAccessMode === KNOWLEDGE_ACCESS_SELECTED_VAULTS && kbVaults.length === 0 ? (
+                      <p style={{ margin: '0.75rem 0 0', fontSize: '0.82rem', color: 'var(--aisbp-muted, #64748b)', lineHeight: 1.45 }}>
+                        No knowledge vaults yet. Create one in Knowledge Base.
+                      </p>
+                    ) : null}
+                    {knowledgeAccessMode === KNOWLEDGE_ACCESS_SELECTED_VAULTS && kbVaults.length > 0 ? (
+                      <div style={{ marginTop: '0.75rem', paddingTop: '0.75rem', borderTop: '1px solid rgba(226, 232, 240, 0.85)', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                        <p style={{ fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--aisbp-muted, #64748b)', margin: 0 }}>
+                          Choose vaults
+                        </p>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                          {kbVaults.map(v => {
+                            const checked = selectedVaultIds.includes(v.id);
+                            return (
+                              <label key={v.id} style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', fontSize: '0.85rem', cursor: 'pointer' }}>
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() => {
+                                    setSelectedVaultIds(prev => {
+                                      const s = new Set(prev);
+                                      if (s.has(v.id)) s.delete(v.id);
+                                      else s.add(v.id);
+                                      return sortVaultIds([...s]);
+                                    });
+                                  }}
+                                />
+                                <span>
+                                  {v.name}
+                                  {v.isDefault ? (
+                                    <span style={{ fontSize: '0.72rem', color: 'var(--aisbp-muted, #94a3b8)', marginLeft: '0.35rem' }}>(default)</span>
+                                  ) : null}
+                                </span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                        {kbVaults.length === 1 ? (
+                          <p style={{ margin: 0, fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)', lineHeight: 1.45 }}>
+                            Only one vault exists. Create more vaults in Knowledge Base.
+                          </p>
+                        ) : null}
+                        {selectedVaultIds.length === 0 ? (
+                          <p style={{ margin: 0, fontSize: '0.8rem', color: 'rgb(154, 52, 18)', lineHeight: 1.45, padding: '0.45rem 0.55rem', borderRadius: 8, background: 'rgba(251, 191, 36, 0.15)', border: '1px solid rgba(251, 191, 36, 0.45)' }}>
+                            Select at least one vault or use all vaults.
+                          </p>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <details style={{ ...sectionCard, marginBottom: '1.15rem' }}>
+                    <summary style={{ cursor: 'pointer', fontSize: '0.95rem', fontWeight: 700, color: 'var(--aisbp-text-heading, #0f172a)', listStyle: 'none' }}>
+                      Advanced
+                    </summary>
+                    <div style={{ marginTop: '0.65rem', display: 'grid', gap: '0.65rem' }}>
+                      <div style={{ display: 'grid', gap: '0.65rem', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))' }}>
+                        <div>
+                          <label style={mvpLabelStyle}>Reply style</label>
+                          <select value={tempPreset} onChange={e => setTempPreset(e.target.value as TempPreset)} style={mvpInputStyle} disabled={!policy.allowResponseStyleOverride}>
+                            <option value="precise">Precise</option>
+                            <option value="balanced">Balanced</option>
+                            <option value="creative">Creative</option>
+                          </select>
+                        </div>
+                        <div>
+                          <span style={mvpLabelStyle}>Reply length</span>
+                          <select
+                            value={lengthKey}
+                            onChange={e => {
+                              const v = e.target.value as (typeof LENGTH_PRESETS)[number]['value'];
+                              setLengthKey(v);
+                              const opt = LENGTH_PRESETS.find(o => o.value === v);
+                              if (opt && opt.value !== 'custom') setMaxTokens(opt.tokens);
+                            }}
+                            style={mvpInputStyle}
+                            disabled={!policy.allowMaxTokensOverride}
+                          >
+                            {LENGTH_PRESETS.map(o => (
+                              <option key={o.value} value={o.value}>
+                                {o.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label style={mvpLabelStyle}>Maximum reply length</label>
+                          <input
+                            type="number"
+                            value={maxTokens}
+                            onChange={e => setMaxTokens(parseInt(e.target.value, 10) || 0)}
+                            style={mvpInputStyle}
+                            disabled={!policy.allowMaxTokensOverride}
+                            min={policy.maxTokensMin}
+                            max={policy.maxTokensMax}
+                          />
+                        </div>
+                        {showAdvancedModel ? (
+                          <div>
+                            <label style={mvpLabelStyle}>Model override</label>
+                            <input
+                              style={mvpInputStyle}
+                              value={modelOverride}
+                              onChange={e => setModelOverride(e.target.value)}
+                              placeholder="Optional model ID"
+                              autoComplete="off"
+                            />
+                          </div>
+                        ) : null}
+                      </div>
+                      <div>
+                        <label style={mvpLabelStyle}>Tone rules</label>
+                        <textarea style={textareaStyle} value={toneRules} onChange={e => setToneRules(e.target.value)} aria-label="Tone rules" />
+                      </div>
+                      <div>
+                        <label style={mvpLabelStyle}>Booking behavior</label>
+                        <textarea style={textareaStyle} value={bookingBehaviorNotes} onChange={e => setBookingBehaviorNotes(e.target.value)} aria-label="Booking behavior notes" />
+                      </div>
+                      <div>
+                        <label style={mvpLabelStyle}>Escalation behavior</label>
+                        <textarea style={textareaStyle} value={escalationBehaviorNotes} onChange={e => setEscalationBehaviorNotes(e.target.value)} aria-label="Escalation behavior notes" />
+                      </div>
+                      <div>
+                        <label style={mvpLabelStyle}>Knowledge vault notes</label>
+                        <textarea style={textareaStyle} value={knowledgeScopeNotes} onChange={e => setKnowledgeScopeNotes(e.target.value)} aria-label="Knowledge vault notes" />
+                      </div>
+                    </div>
+                  </details>
+
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.45rem', alignItems: 'center', marginBottom: '0.5rem' }}>
+                    <button type="submit" style={mvpPrimaryButtonStyle} disabled={saving || !selectedProfileId}>
+                      {saving ? 'Saving…' : 'Save changes'}
+                    </button>
+                    {!selectedRow?.isActive ? (
+                      <button type="button" onClick={() => selectedProfileId && activateProfileById(selectedProfileId)} style={secondaryBtnStyle} disabled={!selectedProfileId}>
+                        Set live
+                      </button>
+                    ) : null}
+                    <button type="button" onClick={() => selectedProfileId && duplicateProfileById(selectedProfileId)} style={secondaryBtnStyle} disabled={!selectedProfileId}>
+                      Duplicate
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => selectedProfileId && onDeleteProfile(selectedProfileId)}
+                      style={{
+                        ...deleteBtnStyle,
+                        opacity: selectedRow?.isActive ? 0.45 : 1,
+                        cursor: !selectedProfileId || profiles.length <= 1 || selectedRow?.isActive ? 'not-allowed' : 'pointer',
+                      }}
+                      disabled={!selectedProfileId || profiles.length <= 1 || Boolean(selectedRow?.isActive)}
+                      title={selectedRow?.isActive ? LIVE_DELETE_HINT : undefined}
+                      aria-label={selectedRow?.isActive ? LIVE_DELETE_HINT : 'Delete profile'}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
+          ) : (
+            <div id={layoutStyleId}>
             {showProfilesPane ? (
               <aside ref={profilesNavRef} style={{ minWidth: 0 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '0.75rem', marginBottom: '0.5rem' }}>
@@ -930,23 +1374,13 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                           </p>
                         </button>
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', alignItems: 'center' }}>
-                          {mode === 'profiles' ? (
-                            <button
-                              type="button"
-                              onClick={() => void goToInstructionsEditor(p.id)}
-                              style={{ ...secondaryBtnStyle, padding: '0.28rem 0.55rem', fontSize: '0.76rem' }}
-                            >
-                              Edit instructions
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => requestSelectProfile(p.id)}
-                              style={{ ...secondaryBtnStyle, padding: '0.28rem 0.55rem', fontSize: '0.76rem' }}
-                            >
-                              Edit profile
-                            </button>
-                          )}
+                          <button
+                            type="button"
+                            onClick={() => requestSelectProfile(p.id)}
+                            style={{ ...secondaryBtnStyle, padding: '0.28rem 0.55rem', fontSize: '0.76rem' }}
+                          >
+                            Edit profile
+                          </button>
                           {!p.isActive ? (
                             <button
                               type="button"
@@ -1009,16 +1443,6 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                 <p style={{ fontSize: '0.88rem', color: 'var(--aisbp-muted, #64748b)' }}>Select a profile to edit.</p>
               ) : (
                 <form onSubmit={onSavePrompt}>
-                  {mode === 'instructions' ? (
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', alignItems: 'center', marginBottom: '0.75rem' }}>
-                      <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--aisbp-muted)' }}>
-                        Editing: <strong style={{ color: 'var(--aisbp-text-secondary)' }}>{activeProfile?.name?.trim() || 'Active assistant'}</strong>
-                      </p>
-                      <Link href={`/app/tenant/${subaccountId}/assistant/profiles`} style={{ fontSize: '0.85rem', fontWeight: 650, color: '#2563eb', textDecoration: 'none' }}>
-                        Switch profile →
-                      </Link>
-                    </div>
-                  ) : null}
                   <div style={sectionCard}>
                     <h3 style={sectionTitleStyle}>Profile details</h3>
                     <div style={{ marginBottom: '0.5rem' }}>
@@ -1478,6 +1902,7 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
             </div>
             ) : null}
           </div>
+          )}
         </>
       ) : null}
 

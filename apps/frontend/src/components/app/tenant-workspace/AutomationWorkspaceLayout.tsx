@@ -3,6 +3,9 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import type { CSSProperties, ReactNode } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useAuth } from '@/contexts/AuthContext';
+import { listTenantBotProfiles, type TenantBotProfileRow } from '@/lib/api';
 import { tenantBasePath } from '@/lib/tenant-workspace-nav';
 
 const tabStyle = (active: boolean): CSSProperties => ({
@@ -33,6 +36,29 @@ export function AutomationWorkspaceLayout({
 }) {
   const pathname = usePathname() ?? '';
   const base = tenantBasePath(tenantId);
+  const { token } = useAuth();
+  const [profiles, setProfiles] = useState<TenantBotProfileRow[]>([]);
+
+  useEffect(() => {
+    if (!token || !tenantId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const list = await listTenantBotProfiles(token, tenantId);
+        if (!cancelled) setProfiles(Array.isArray(list) ? list : []);
+      } catch {
+        if (!cancelled) setProfiles([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [token, tenantId]);
+
+  const activeProfileName = useMemo(() => {
+    const active = profiles.find(p => p.isActive);
+    return (active?.name ?? '').trim() || null;
+  }, [profiles]);
 
   return (
     <div style={{ maxWidth: 960, margin: '0 auto' }}>
@@ -68,9 +94,12 @@ export function AutomationWorkspaceLayout({
             maxWidth: '42rem',
           }}
         >
-          Automation rules currently apply to this workspace. The active assistant uses these rules when replying.
-          Profile-specific automation is planned for a future release. CRM tags, calendars, and contacts are synced from
-          this workspace connection.
+          Automation currently applies across this workspace. All assistant profiles in this workspace use the same tagging,
+          booking, follow-up, and handover rules. Profile-specific automation is planned.
+        </p>
+        <p style={{ fontSize: '0.82rem', color: 'var(--aisbp-muted, #64748b)', margin: '0.5rem 0 0' }}>
+          <strong style={{ color: 'var(--aisbp-text-secondary, #334155)' }}>Active assistant:</strong>{' '}
+          {activeProfileName ?? '—'}
         </p>
         {/* TODO: When profile-scoped automation is implemented, replace workspace-level copy and wire automation settings through assistant_profile_id with tenant fallback. */}
       </header>

@@ -19,7 +19,7 @@ describe('assistant workspace scope copy', () => {
 
   it('automation header mentions workspace scope', () => {
     const t = read('src/components/app/tenant-workspace/AutomationWorkspaceLayout.tsx');
-    expect(t).toContain('Automation rules currently apply to this workspace');
+    expect(t).toContain('Automation currently applies across this workspace');
   });
 
   it('tag automation tab clarifies workspace scope', () => {

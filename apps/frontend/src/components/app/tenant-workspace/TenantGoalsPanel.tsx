@@ -2,7 +2,8 @@
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { useParams } from 'next/navigation';
+import Link from 'next/link';
+import { useParams, useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   getAgencyAiConfig,
@@ -284,12 +285,20 @@ function activeProfileLooksEmpty(row: TenantBotProfileRow): boolean {
 export type TenantGoalsPanelProps = {
   /** Deep-link from Assistant nav: scroll the profile list or instruction editors into view. */
   initialFocus?: 'profiles' | 'instructions' | 'all';
+  /**
+   * Controls which surface to render.
+   * - profiles: profile management only (no full editor by default)
+   * - instructions: edit active profile only (no full profile list UI)
+   * - all: legacy combined layout
+   */
+  mode?: 'profiles' | 'instructions' | 'all';
 };
 
-export function TenantGoalsPanel({ initialFocus = 'all' }: TenantGoalsPanelProps) {
+export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantGoalsPanelProps) {
   const params = useParams();
   const subaccountId = params['tenantId'] as string;
   const { token } = useAuth();
+  const router = useRouter();
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [loading, setLoading] = useState(true);
   const [profiles, setProfiles] = useState<TenantBotProfileRow[]>([]);
@@ -667,6 +676,37 @@ export function TenantGoalsPanel({ initialFocus = 'all' }: TenantGoalsPanelProps
 
   const showAdvancedModel = policy.allowModelOverride;
 
+  const showProfilesPane = mode === 'all' || mode === 'profiles';
+  const showInstructionsPane = mode === 'all' || mode === 'instructions';
+
+  useEffect(() => {
+    if (mode !== 'instructions') return;
+    if (loading) return;
+    if (!activeProfile?.id) return;
+    if (activeProfile.id === selectedProfileId) return;
+    setSelectedProfileId(activeProfile.id);
+    applyRowToForm(activeProfile);
+  }, [mode, loading, activeProfile?.id, selectedProfileId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const goToInstructionsEditor = async (profileId: string) => {
+    if (!token || !subaccountId) return;
+    const row = profiles.find(p => p.id === profileId);
+    if (!row) return;
+    setErr('');
+    setOk('');
+    try {
+      if (!row.isActive) {
+        await activateTenantBotProfile(token, subaccountId, profileId);
+        const refreshed = await listTenantBotProfiles(token, subaccountId);
+        const list = Array.isArray(refreshed) ? refreshed : [];
+        setProfiles(list);
+      }
+      router.push(`/app/tenant/${subaccountId}/assistant/instructions`);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Failed to switch active profile');
+    }
+  };
+
   return (
     <div>
       <style
@@ -682,11 +722,15 @@ export function TenantGoalsPanel({ initialFocus = 'all' }: TenantGoalsPanelProps
 
       <PageHeader
         title={
-          initialFocus === 'profiles'
-            ? 'Assistant · Profiles'
-            : initialFocus === 'instructions'
-              ? 'Assistant · Instructions'
-              : 'Assistant'
+          mode === 'profiles'
+            ? 'Assistant Profiles'
+            : mode === 'instructions'
+              ? 'Assistant Instructions'
+              : initialFocus === 'profiles'
+                ? 'Assistant · Profiles'
+                : initialFocus === 'instructions'
+                  ? 'Assistant · Instructions'
+                  : 'Assistant'
         }
         eyebrow="Client workspace"
       />
@@ -818,134 +862,163 @@ export function TenantGoalsPanel({ initialFocus = 'all' }: TenantGoalsPanelProps
           )}
 
           <div id={layoutStyleId}>
-            <aside ref={profilesNavRef} style={{ minWidth: 0 }}>
-              <h2
-                style={{
-                  fontSize: '0.78rem',
-                  fontWeight: 800,
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.05em',
-                  color: 'var(--aisbp-muted, #64748b)',
-                  margin: '0 0 0.5rem',
-                }}
-              >
-                Assistant profiles
-              </h2>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
-                {sortedProfiles.map(p => {
-                  const selected = p.id === selectedProfileId;
-                  return (
-                    <div key={p.id} style={profileListCardStyle(selected)}>
-                      <button
-                        type="button"
-                        onClick={() => requestSelectProfile(p.id)}
-                        style={{
-                          display: 'block',
-                          width: '100%',
-                          textAlign: 'left',
-                          padding: 0,
-                          marginBottom: '0.45rem',
-                          border: 'none',
-                          background: 'transparent',
-                          cursor: 'pointer',
-                          font: 'inherit',
-                        }}
-                      >
-                        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.35rem', marginBottom: '0.25rem' }}>
-                          <span style={{ fontWeight: 700, color: 'var(--aisbp-text-heading, #0f172a)', fontSize: '0.9rem' }}>
-                            {p.name.trim() || 'Untitled'}
-                          </span>
-                          {p.isActive ? <LiveBadge /> : <DraftBadge />}
-                        </div>
-                        {!p.isActive ? (
-                          <p style={{ fontSize: '0.72rem', color: 'var(--aisbp-muted, #94a3b8)', margin: '0 0 0.35rem' }}>
-                            Not used for live replies
-                          </p>
-                        ) : null}
-                        {p.description?.trim() ? (
-                          <p style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 0.35rem', lineHeight: 1.35 }}>
-                            {p.description.trim()}
-                          </p>
-                        ) : null}
-                        <p style={{ fontSize: '0.7rem', color: 'var(--aisbp-muted, #94a3b8)', margin: '0 0 0.2rem' }}>
-                          Vaults:{' '}
-                          {activeAssistantVaultsSummary(
-                            p.knowledgeAccessMode,
-                            p.selectedVaultIds?.length ?? 0,
-                          )}
-                        </p>
-                        <p style={{ fontSize: '0.7rem', color: 'var(--aisbp-muted, #94a3b8)', margin: 0 }}>
-                          Updated {formatProfileUpdatedAt(p.updatedAt)}
-                        </p>
-                      </button>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', alignItems: 'center' }}>
+            {showProfilesPane ? (
+              <aside ref={profilesNavRef} style={{ minWidth: 0 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '0.75rem', marginBottom: '0.5rem' }}>
+                  <h2
+                    style={{
+                      fontSize: '0.78rem',
+                      fontWeight: 800,
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.05em',
+                      color: 'var(--aisbp-muted, #64748b)',
+                      margin: 0,
+                    }}
+                  >
+                    Assistant profiles
+                  </h2>
+                  <button type="button" onClick={onNewProfile} style={{ ...secondaryBtnStyle, padding: '0.32rem 0.6rem', fontSize: '0.76rem' }}>
+                    Create new
+                  </button>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+                  {sortedProfiles.map(p => {
+                    const selected = p.id === selectedProfileId;
+                    return (
+                      <div key={p.id} style={profileListCardStyle(selected)}>
                         <button
                           type="button"
                           onClick={() => requestSelectProfile(p.id)}
-                          style={{ ...secondaryBtnStyle, padding: '0.28rem 0.55rem', fontSize: '0.76rem' }}
-                        >
-                          Edit profile
-                        </button>
-                        {!p.isActive ? (
-                          <button
-                            type="button"
-                            onClick={() => activateProfileById(p.id)}
-                            style={{ ...secondaryBtnStyle, padding: '0.28rem 0.55rem', fontSize: '0.76rem' }}
-                          >
-                            Set live
-                          </button>
-                        ) : (
-                          <span
-                            style={{
-                              fontSize: '0.76rem',
-                              color: 'var(--aisbp-muted, #64748b)',
-                              fontWeight: 600,
-                              padding: '0.28rem 0.35rem',
-                            }}
-                          >
-                            Currently live
-                          </span>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => duplicateProfileById(p.id)}
-                          style={{ ...secondaryBtnStyle, padding: '0.28rem 0.55rem', fontSize: '0.76rem' }}
-                        >
-                          Duplicate
-                        </button>
-                        <button
-                          type="button"
-                          disabled={profiles.length <= 1 || p.isActive}
-                          title={p.isActive ? LIVE_DELETE_HINT : undefined}
-                          aria-label={p.isActive ? LIVE_DELETE_HINT : 'Delete profile'}
-                          onClick={() => onDeleteProfile(p.id)}
                           style={{
-                            ...deleteBtnStyle,
-                            padding: '0.28rem 0.45rem',
-                            fontSize: '0.76rem',
-                            opacity: p.isActive ? 0.45 : 1,
-                            cursor: p.isActive || profiles.length <= 1 ? 'not-allowed' : 'pointer',
+                            display: 'block',
+                            width: '100%',
+                            textAlign: 'left',
+                            padding: 0,
+                            marginBottom: '0.45rem',
+                            border: 'none',
+                            background: 'transparent',
+                            cursor: 'pointer',
+                            font: 'inherit',
                           }}
                         >
-                          Delete
+                          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.35rem', marginBottom: '0.25rem' }}>
+                            <span style={{ fontWeight: 700, color: 'var(--aisbp-text-heading, #0f172a)', fontSize: '0.9rem' }}>
+                              {p.name.trim() || 'Untitled'}
+                            </span>
+                            {p.isActive ? <LiveBadge /> : <DraftBadge />}
+                          </div>
+                          {!p.isActive ? (
+                            <p style={{ fontSize: '0.72rem', color: 'var(--aisbp-muted, #94a3b8)', margin: '0 0 0.35rem' }}>
+                              Not used for live replies
+                            </p>
+                          ) : null}
+                          {p.description?.trim() ? (
+                            <p style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 0.35rem', lineHeight: 1.35 }}>
+                              {p.description.trim()}
+                            </p>
+                          ) : null}
+                          <p style={{ fontSize: '0.7rem', color: 'var(--aisbp-muted, #94a3b8)', margin: '0 0 0.2rem' }}>
+                            Vaults:{' '}
+                            {activeAssistantVaultsSummary(
+                              p.knowledgeAccessMode,
+                              p.selectedVaultIds?.length ?? 0,
+                            )}
+                          </p>
+                          <p style={{ fontSize: '0.7rem', color: 'var(--aisbp-muted, #94a3b8)', margin: 0 }}>
+                            Updated {formatProfileUpdatedAt(p.updatedAt)}
+                          </p>
                         </button>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', alignItems: 'center' }}>
+                          {mode === 'profiles' ? (
+                            <button
+                              type="button"
+                              onClick={() => void goToInstructionsEditor(p.id)}
+                              style={{ ...secondaryBtnStyle, padding: '0.28rem 0.55rem', fontSize: '0.76rem' }}
+                            >
+                              Edit instructions
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => requestSelectProfile(p.id)}
+                              style={{ ...secondaryBtnStyle, padding: '0.28rem 0.55rem', fontSize: '0.76rem' }}
+                            >
+                              Edit profile
+                            </button>
+                          )}
+                          {!p.isActive ? (
+                            <button
+                              type="button"
+                              onClick={() => activateProfileById(p.id)}
+                              style={{ ...secondaryBtnStyle, padding: '0.28rem 0.55rem', fontSize: '0.76rem' }}
+                            >
+                              Set live
+                            </button>
+                          ) : (
+                            <span
+                              style={{
+                                fontSize: '0.76rem',
+                                color: 'var(--aisbp-muted, #64748b)',
+                                fontWeight: 600,
+                                padding: '0.28rem 0.35rem',
+                              }}
+                            >
+                              Currently live
+                            </span>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => duplicateProfileById(p.id)}
+                            style={{ ...secondaryBtnStyle, padding: '0.28rem 0.55rem', fontSize: '0.76rem' }}
+                          >
+                            Duplicate
+                          </button>
+                          <button
+                            type="button"
+                            disabled={profiles.length <= 1 || p.isActive}
+                            title={p.isActive ? LIVE_DELETE_HINT : undefined}
+                            aria-label={p.isActive ? LIVE_DELETE_HINT : 'Delete profile'}
+                            onClick={() => onDeleteProfile(p.id)}
+                            style={{
+                              ...deleteBtnStyle,
+                              padding: '0.28rem 0.45rem',
+                              fontSize: '0.76rem',
+                              opacity: p.isActive ? 0.45 : 1,
+                              cursor: p.isActive || profiles.length <= 1 ? 'not-allowed' : 'pointer',
+                            }}
+                          >
+                            Delete
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
-              {isDirty ? (
-                <p style={{ fontSize: '0.75rem', color: 'rgb(180, 83, 9)', margin: '0.6rem 0 0', fontWeight: 600 }}>
-                  Unsaved changes
-                </p>
-              ) : null}
-            </aside>
+                    );
+                  })}
+                </div>
+                {isDirty ? (
+                  <p style={{ fontSize: '0.75rem', color: 'rgb(180, 83, 9)', margin: '0.6rem 0 0', fontWeight: 600 }}>
+                    Unsaved changes
+                  </p>
+                ) : null}
+              </aside>
+            ) : null}
 
-            <div ref={instructionsRef} style={{ minWidth: 0 }}>
+            {showInstructionsPane ? (
+              <div ref={instructionsRef} style={{ minWidth: 0 }}>
               {!selectedProfileId ? (
                 <p style={{ fontSize: '0.88rem', color: 'var(--aisbp-muted, #64748b)' }}>Select a profile to edit.</p>
               ) : (
                 <form onSubmit={onSavePrompt}>
+                  {mode === 'instructions' ? (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', alignItems: 'center', marginBottom: '0.75rem' }}>
+                      <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--aisbp-muted)' }}>
+                        Editing: <strong style={{ color: 'var(--aisbp-text-secondary)' }}>{activeProfile?.name?.trim() || 'Active assistant'}</strong>
+                      </p>
+                      <Link href={`/app/tenant/${subaccountId}/assistant/profiles`} style={{ fontSize: '0.85rem', fontWeight: 650, color: '#2563eb', textDecoration: 'none' }}>
+                        Switch profile →
+                      </Link>
+                    </div>
+                  ) : null}
                   <div style={sectionCard}>
                     <h3 style={sectionTitleStyle}>Profile details</h3>
                     <div style={{ marginBottom: '0.5rem' }}>
@@ -1403,6 +1476,7 @@ export function TenantGoalsPanel({ initialFocus = 'all' }: TenantGoalsPanelProps
                 </form>
               )}
             </div>
+            ) : null}
           </div>
         </>
       ) : null}

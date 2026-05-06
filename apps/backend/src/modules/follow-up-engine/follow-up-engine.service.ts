@@ -14,6 +14,7 @@ import { BotProfilesService } from '../prompts/bot-profiles.service';
 import { OutboundSendService } from '../outbound/outbound-send.service';
 import { OutboundSafetyGovernorService } from '../outbound/outbound-safety-governor.service';
 import { formatLiveCustomerDraftForPreview } from '../../lib/live-outbound-preview';
+import { toBullSafeFollowUpJobId } from './follow-up-bull-job-id';
 import type { MemoryEntry } from '../orchestration/dto/memory-entry';
 import type { RetrievalChunk } from '../kb/dto/retrieval.dto';
 import type { ReplyDecision } from '../reply-planning/dto';
@@ -138,17 +139,6 @@ export class FollowUpEngineService {
 
     const scheduleVersion = await this.bumpFollowUpScheduleVersion(conversationId, 'outbound_sent');
 
-    this.logger.log(
-      `followUpScheduled ${JSON.stringify({
-        tenantId,
-        conversationId,
-        contactId,
-        scheduleVersion,
-        enabledSteps: enabledSteps.length,
-        sentAtIso,
-      })}`,
-    );
-
     for (const step of enabledSteps) {
       const dueAtIso = this.computeDueAtIso(sentAtIso, step.delayAmount, String(step.delayUnit));
       const rowId = randomUUID();
@@ -172,18 +162,60 @@ export class FollowUpEngineService {
         continue;
       }
       const delayMs = Math.max(0, Date.parse(dueAtIso) - Date.now());
-      const jobId = `fu:${conversationId}:${scheduleVersion}:${step.stepNumber}`;
-      await this.followUpQueue.add(
-        'follow-up',
-        { kind: 'send_step', followUpJobId: rowId } satisfies FollowUpProcessorJob,
-        {
-          jobId,
-          delay: delayMs,
-          attempts: 2,
-          backoff: { type: 'exponential', delay: 2000 },
-          removeOnComplete: true,
-          removeOnFail: false,
-        },
+      const bullJobId = toBullSafeFollowUpJobId(rowId);
+      try {
+        await this.followUpQueue.add(
+          'follow-up',
+          { kind: 'send_step', followUpJobId: rowId } satisfies FollowUpProcessorJob,
+          {
+            jobId: bullJobId,
+            delay: delayMs,
+            attempts: 2,
+            backoff: { type: 'exponential', delay: 2000 },
+            removeOnComplete: true,
+            removeOnFail: false,
+          },
+        );
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        try {
+          await this.markJobFailed(rowId, 'queue_enqueue_failed', { error: msg, bullJobId });
+        } catch (markErr) {
+          const markMsg = markErr instanceof Error ? markErr.message : String(markErr);
+          this.logger.warn(
+            `followUpScheduleMarkFailedAfterEnqueueError ${JSON.stringify({
+              tenantId,
+              conversationId,
+              followUpJobId: rowId,
+              bullJobId,
+              stepNumber: step.stepNumber,
+              err: markMsg,
+            })}`,
+          );
+        }
+        this.logger.warn(
+          `followUpScheduleEnqueueFailed ${JSON.stringify({
+            tenantId,
+            conversationId,
+            followUpJobId: rowId,
+            bullJobId,
+            stepNumber: step.stepNumber,
+            err: msg,
+          })}`,
+        );
+        continue;
+      }
+      this.logger.log(
+        `followUpScheduled ${JSON.stringify({
+          tenantId,
+          conversationId,
+          contactId,
+          followUpJobId: rowId,
+          stepNumber: step.stepNumber,
+          dueAtIso,
+          delayMs,
+          scheduleVersion,
+        })}`,
       );
     }
   }
@@ -551,6 +583,24 @@ export class FollowUpEngineService {
   }
 
   private async deferJob(followUpJobId: string, nextDueAtIso: string, reason: string, meta?: Record<string, unknown>): Promise<void> {
+    const delayMs = Math.max(0, Date.parse(nextDueAtIso) - Date.now());
+    try {
+      await this.followUpQueue.add(
+        'follow-up',
+        { kind: 'send_step', followUpJobId } satisfies FollowUpProcessorJob,
+        {
+          delay: delayMs,
+          attempts: 2,
+          backoff: { type: 'exponential', delay: 2000 },
+          removeOnComplete: true,
+          removeOnFail: false,
+        },
+      );
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      this.logger.warn(`followUpDeferEnqueueFailed ${JSON.stringify({ followUpJobId, err: msg })}`);
+      throw e;
+    }
     await this.supabase
       .from('conversation_follow_up_jobs')
       .update({
@@ -560,18 +610,6 @@ export class FollowUpEngineService {
         last_defer_meta: meta ?? {},
       })
       .eq('id', followUpJobId);
-    const delayMs = Math.max(0, Date.parse(nextDueAtIso) - Date.now());
-    await this.followUpQueue.add(
-      'follow-up',
-      { kind: 'send_step', followUpJobId } satisfies FollowUpProcessorJob,
-      {
-        delay: delayMs,
-        attempts: 2,
-        backoff: { type: 'exponential', delay: 2000 },
-        removeOnComplete: true,
-        removeOnFail: false,
-      },
-    );
   }
 
   private async markJobSkipped(followUpJobId: string, reason: string, meta?: Record<string, unknown>): Promise<void> {

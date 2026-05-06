@@ -43,7 +43,8 @@ export type CustomFieldType = (typeof CUSTOM_FIELD_TYPES)[number];
 export const FOLLOW_UP_DELAY_UNITS = ['minutes', 'hours', 'days'] as const;
 export type FollowUpDelayUnit = (typeof FOLLOW_UP_DELAY_UNITS)[number];
 
-export const FOLLOW_UP_STEP_MODES = ['fixed', 'ai'] as const;
+/** Canonical API values (do not invent new ones). */
+export const FOLLOW_UP_STEP_MODES = ['fixed_message', 'ai_decides'] as const;
 export type FollowUpStepMode = (typeof FOLLOW_UP_STEP_MODES)[number];
 
 export const FOLLOW_UP_ACTIVE_HOURS_TIMEZONE_MODES = ['BUSINESS', 'CONTACT'] as const;

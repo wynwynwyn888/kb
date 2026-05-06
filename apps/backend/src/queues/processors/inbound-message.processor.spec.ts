@@ -90,6 +90,10 @@ const mockGhlVoiceConversationDiscovery = {
   })),
 };
 
+const mockFollowUpEngine = {
+  noteInboundFromContact: jestGlobal.fn(async () => {}),
+};
+
 const mockAudioTranscription = {
   transcribeRemoteMedia: jestGlobal.fn(async () => ({
     ok: true as const,
@@ -203,6 +207,7 @@ describe('InboundMessageProcessor', () => {
       mockGhlVoiceRecordingFetch as never,
       mockGhlVoiceMessageDiscovery as never,
       mockGhlVoiceConversationDiscovery as never,
+      mockFollowUpEngine as never,
       { add: mockSendBubbleQueueAdd } as never,
       { add: mockInboundQueueAdd } as never,
     );

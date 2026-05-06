@@ -31,6 +31,7 @@ import { DebugModule } from './modules/debug/debug.module';
 import { BookingSettingsModule } from './modules/booking-settings/booking-settings.module';
 import { IntentTagsModule } from './modules/intent-tags/intent-tags.module';
 import { FollowUpSettingsModule } from './modules/follow-up-settings/follow-up-settings.module';
+import { FollowUpEngineModule } from './modules/follow-up-engine/follow-up-engine.module';
 
 @Module({
   imports: [
@@ -111,6 +112,7 @@ import { FollowUpSettingsModule } from './modules/follow-up-settings/follow-up-s
     BookingSettingsModule,
     IntentTagsModule,
     FollowUpSettingsModule,
+    FollowUpEngineModule,
   ],
   providers: [
     // Global rate limit guard

@@ -10,6 +10,7 @@ import { ConversationsService } from '../../modules/conversations/conversations.
 import { ActionGatingService } from '../../modules/action-gating/action-gating.service';
 import { ActionIntentExecutorService } from '../../modules/action-execution/action-intent-executor.service';
 import { OutboundSafetyGovernorService } from '../../modules/outbound/outbound-safety-governor.service';
+import { FollowUpEngineService } from '../../modules/follow-up-engine/follow-up-engine.service';
 
 export interface SendBubbleJobData {
   conversationId: string;
@@ -32,6 +33,7 @@ export class SendBubbleProcessor extends WorkerHost {
     private readonly actionGatingService: ActionGatingService,
     private readonly actionExecutor: ActionIntentExecutorService,
     private readonly outboundSafetyGovernor: OutboundSafetyGovernorService,
+    private readonly followUpEngine: FollowUpEngineService,
   ) {
     super();
   }
@@ -144,6 +146,27 @@ export class SendBubbleProcessor extends WorkerHost {
       );
       for (const r of bookResults) {
         this.logger.log(`Book intent ${r.id} ${r.status}: ${r.errorNote ?? 'ok'}`);
+      }
+    }
+
+    // Step 5: Follow-up scheduling — only after a successful outbound send.
+    if (summary.succeeded > 0 && summary.failed === 0 && replyPlan.planStatus === 'PLANNED') {
+      try {
+        await this.followUpEngine.scheduleAfterOutboundSend({
+          tenantId,
+          conversationId,
+          contactId,
+          ghlLocationId,
+          sentAtIso: new Date().toISOString(),
+        });
+      } catch (e) {
+        this.logger.warn(
+          `followUpScheduleHookFailed ${JSON.stringify({
+            tenantId,
+            conversationId,
+            msg: e instanceof Error ? e.message : String(e),
+          })}`,
+        );
       }
     }
 

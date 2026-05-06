@@ -261,29 +261,42 @@ export interface FollowUpStepDto {
 export function parseFollowUpSteps(raw: unknown): FollowUpStepDto[] {
   if (raw === undefined || raw === null) return [];
   if (!Array.isArray(raw)) throw new BadRequestException('steps must be an array');
-  if (raw.length > 5) throw new BadRequestException('At most 5 follow-up steps');
+  if (raw.length > 10) throw new BadRequestException('At most 10 follow-up steps');
   const out: FollowUpStepDto[] = [];
   let n = 0;
   for (const item of raw) {
     if (!item || typeof item !== 'object') throw new BadRequestException('Each step must be an object');
     const o = item as Record<string, unknown>;
     n += 1;
-    const delayAmount = typeof o['delayAmount'] === 'number' && o['delayAmount'] > 0 ? Math.floor(o['delayAmount']) : 1;
+    const delayRaw = o['delayAmount'];
+    if (typeof delayRaw !== 'number' || !Number.isFinite(delayRaw) || delayRaw <= 0) {
+      throw new BadRequestException(`Step ${n}: delayAmount must be a positive number`);
+    }
+    const delayAmount = Math.floor(delayRaw);
     const delayUnit = typeof o['delayUnit'] === 'string' ? o['delayUnit'].trim() : 'hours';
     if (!FOLLOW_UP_DELAY_UNITS.includes(delayUnit as (typeof FOLLOW_UP_DELAY_UNITS)[number])) {
       throw new BadRequestException('delayUnit must be minutes, hours, or days');
     }
-    const mode = typeof o['mode'] === 'string' ? o['mode'].trim() : 'fixed';
+    const modeRaw = typeof o['mode'] === 'string' ? o['mode'].trim() : '';
+    const modeLower = modeRaw.toLowerCase();
+    // Accept legacy values on input, but normalize to canonical API values.
+    const mode =
+      modeLower === 'fixed' || modeLower === 'fixed_message'
+        ? 'fixed_message'
+        : modeLower === 'ai' || modeLower === 'ai_decides'
+          ? 'ai_decides'
+          : '';
     if (!FOLLOW_UP_STEP_MODES.includes(mode as (typeof FOLLOW_UP_STEP_MODES)[number])) {
-      throw new BadRequestException('step mode must be fixed or ai');
+      throw new BadRequestException('step mode must be fixed_message or ai_decides');
     }
     const enabled = Boolean(o['enabled']);
     const fixedMessage = typeof o['fixedMessage'] === 'string' ? o['fixedMessage'] : undefined;
     const aiInstruction = typeof o['aiInstruction'] === 'string' ? o['aiInstruction'] : undefined;
-    if (mode === 'fixed' && enabled && !(fixedMessage ?? '').trim()) {
+    if (mode === 'fixed_message' && enabled && !(fixedMessage ?? '').trim()) {
       throw new BadRequestException(`Step ${n}: fixed message required when enabled`);
     }
-    if (mode === 'ai' && enabled && !(aiInstruction ?? '').trim()) {
+    if (mode === 'ai_decides' && enabled && !(aiInstruction ?? '').trim()) {
+      // Defaulting is applied in the follow-up settings service (so GET-after-PATCH is deterministic).
       throw new BadRequestException(`Step ${n}: AI instruction required when enabled`);
     }
     out.push({

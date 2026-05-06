@@ -19,6 +19,9 @@ export const QUEUES = {
 
   // Periodic analytics rollup
   ANALYTICS_ROLLUP: 'analytics-rollup',
+
+  // Follow-up automation (delayed jobs, due checks, sends)
+  FOLLOW_UP: 'follow-up',
 } as const;
 
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];
@@ -78,6 +81,14 @@ export const queueConfig: Record<QueueName, {
       backoff: { type: 'fixed', delay: 0 },
       removeOnComplete: true,
       removeOnFail: true,
+    },
+  },
+  [QUEUES.FOLLOW_UP]: {
+    defaultJobOptions: {
+      attempts: 1,
+      backoff: { type: 'fixed', delay: 0 },
+      removeOnComplete: true,
+      removeOnFail: false, // keep failures for debugging follow-up decisions
     },
   },
 };

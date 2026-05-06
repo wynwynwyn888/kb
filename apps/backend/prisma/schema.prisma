@@ -224,6 +224,35 @@ model TenantFollowUpSettings {
   @@map("tenant_follow_up_settings")
 }
 
+/// Per-conversation scheduled follow-up jobs (worker-driven).
+model ConversationFollowUpJob {
+  id              String   @id @default(uuid())
+  tenantId        String   @map("tenant_id")
+  conversationId  String   @map("conversation_id")
+  contactId       String   @map("contact_id")
+  ghlLocationId   String   @map("ghl_location_id")
+  stepNumber      Int      @map("step_number")
+  scheduleVersion Int      @map("schedule_version")
+  scheduledAt     DateTime @map("scheduled_at")
+  dueAt           DateTime @map("due_at")
+  status          String   @default("PENDING")
+  decidedAt       DateTime? @map("decided_at")
+  sentAt          DateTime? @map("sent_at")
+  decisionReason  String?  @map("decision_reason")
+  decisionMeta    Json     @default("{}") @map("decision_meta")
+  lastDeferReason String?  @map("last_defer_reason")
+  lastDeferMeta   Json     @default("{}") @map("last_defer_meta")
+  stepSnapshotJson Json    @default("{}") @map("step_snapshot_json")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@index([tenantId])
+  @@index([conversationId])
+  @@index([status])
+  @@index([dueAt])
+  @@map("conversation_follow_up_jobs")
+}
+
 // Tenant user roles
 enum TenantRole {
   ADMIN

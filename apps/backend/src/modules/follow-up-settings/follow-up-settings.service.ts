@@ -32,6 +32,9 @@ export interface TenantFollowUpSettingsDto {
   steps: FollowUpStepApi[];
 }
 
+const DEFAULT_AI_INSTRUCTION =
+  'Gentle nudge only. Do not sound salesy. Follow up based on the previous conversation context.';
+
 const DEFAULT: TenantFollowUpSettingsDto = {
   enabled: false,
   maxFollowUps: 3,
@@ -44,6 +47,18 @@ const DEFAULT: TenantFollowUpSettingsDto = {
   activeHoursWindows: parseActiveHoursWindowsJson({}),
   steps: [],
 };
+
+function normalizeStepsWithDefaults(steps: FollowUpStepApi[]): FollowUpStepApi[] {
+  return steps.map((s) => {
+    const mode = String(s.mode ?? '').trim();
+    if (mode === 'ai_decides') {
+      const aiInstruction = typeof s.aiInstruction === 'string' ? s.aiInstruction : '';
+      const nextInstr = aiInstruction.trim() ? aiInstruction : DEFAULT_AI_INSTRUCTION;
+      return { ...s, aiInstruction: nextInstr };
+    }
+    return s;
+  });
+}
 
 function rowToDto(row: Record<string, unknown>): TenantFollowUpSettingsDto {
   const rawSteps = row['steps_json'];
@@ -68,7 +83,7 @@ function rowToDto(row: Record<string, unknown>): TenantFollowUpSettingsDto {
   const mf = Number(row['max_follow_ups'] ?? 3);
   return {
     enabled: Boolean(row['enabled']),
-    maxFollowUps: Number.isFinite(mf) ? Math.min(5, Math.max(1, Math.floor(mf))) : 3,
+    maxFollowUps: Number.isFinite(mf) ? Math.min(10, Math.max(1, Math.floor(mf))) : 3,
     stopOnCustomerReply: Boolean(row['stop_on_customer_reply']),
     stopOnBookingCompleted: Boolean(row['stop_on_booking_completed']),
     stopOnEscalated: Boolean(row['stop_on_escalated']),
@@ -76,7 +91,7 @@ function rowToDto(row: Record<string, unknown>): TenantFollowUpSettingsDto {
     businessHoursOnly: Boolean(row['business_hours_only']),
     activeHoursTimezoneMode,
     activeHoursWindows,
-    steps,
+    steps: normalizeStepsWithDefaults(steps),
   };
 }
 
@@ -110,7 +125,7 @@ export class FollowUpSettingsService {
     if (o['maxFollowUps'] !== undefined) {
       const n = Number(o['maxFollowUps']);
       if (!Number.isFinite(n)) throw new BadRequestException('maxFollowUps must be a number');
-      maxFollowUps = Math.min(5, Math.max(1, Math.floor(n)));
+      maxFollowUps = Math.min(10, Math.max(1, Math.floor(n)));
     }
 
     const stopOnCustomerReply =
@@ -135,6 +150,18 @@ export class FollowUpSettingsService {
     let steps = current.steps;
     if (o['steps'] !== undefined) {
       steps = parseFollowUpSteps(o['steps']);
+    }
+    steps = normalizeStepsWithDefaults(steps);
+
+    // Enforce enabled-step requirements (defaults are applied above for ai_decides).
+    for (const s of steps) {
+      if (!s.enabled) continue;
+      if (String(s.mode) === 'fixed_message' && !(s.fixedMessage ?? '').trim()) {
+        throw new BadRequestException(`Step ${s.stepNumber}: fixed message required when enabled`);
+      }
+      if (String(s.mode) === 'ai_decides' && !(s.aiInstruction ?? '').trim()) {
+        throw new BadRequestException(`Step ${s.stepNumber}: AI instruction required when enabled`);
+      }
     }
 
     const now = new Date().toISOString();
@@ -165,6 +192,16 @@ export class FollowUpSettingsService {
       });
       if (error) throw new BadRequestException(error.message);
     }
+
+    this.logger.log(
+      `followUpSettingsSaved ${JSON.stringify({
+        tenantId,
+        enabled,
+        businessHoursOnly,
+        stepsTotal: steps.length,
+        stepsEnabled: steps.filter(s => s.enabled).length,
+      })}`,
+    );
 
     return this.getFollowUpSettings(tenantId);
   }

@@ -57,6 +57,8 @@ describe('Handover Active → No Outbound Reply', () => {
       actionGatingService,
       actionExecutor,
       outboundGovernor,
+      // Follow-up scheduling is not under test here
+      { scheduleAfterOutboundSend: jestGlobal.fn() } as never,
     );
   });
 

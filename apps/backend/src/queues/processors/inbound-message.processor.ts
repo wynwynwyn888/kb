@@ -31,6 +31,7 @@ import { GhlVoiceRecordingFetchService } from '../../modules/transcription/ghl-v
 import { GhlVoiceMessageDiscoveryService } from '../../modules/transcription/ghl-voice-message-discovery.service';
 import { GhlVoiceConversationDiscoveryService } from '../../modules/transcription/ghl-voice-conversation-discovery.service';
 import { classifyGhlAudioPlaceholderBody } from '../../modules/webhooks/ghl-inbound-audio-media';
+import { FollowUpEngineService } from '../../modules/follow-up-engine/follow-up-engine.service';
 
 export interface InboundMessageJobData {
   locationId: string;
@@ -96,6 +97,7 @@ export class InboundMessageProcessor extends WorkerHost {
     private readonly ghlVoiceRecordingFetch: GhlVoiceRecordingFetchService,
     private readonly ghlVoiceMessageDiscovery: GhlVoiceMessageDiscoveryService,
     private readonly ghlVoiceConversationDiscovery: GhlVoiceConversationDiscoveryService,
+    private readonly followUpEngine: FollowUpEngineService,
     @InjectQueue(QUEUES.SEND_BUBBLE) private readonly sendBubbleQueue: Queue,
     @InjectQueue(QUEUES.INBOUND_MESSAGE_PROCESSOR) private readonly inboundQueue: Queue,
   ) {
@@ -191,6 +193,24 @@ export class InboundMessageProcessor extends WorkerHost {
       this.logger.log(
         `Inbound message stored: conversationId=${conversation.id}, messageType=${resolved.persistContentType}`,
       );
+
+      // Follow-up stop conditions: customer replied (and opt-out detection) are based on real persisted inbound messages.
+      try {
+        await this.followUpEngine.noteInboundFromContact({
+          tenantId: tenant.id,
+          conversationId: conversation.id,
+          inboundText: resolved.content,
+          inboundAtIso: timestamp,
+        });
+      } catch (e) {
+        this.logger.warn(
+          `followUpInboundHookFailed ${JSON.stringify({
+            tenantId: tenant.id,
+            conversationId: conversation.id,
+            msg: e instanceof Error ? e.message : String(e),
+          })}`,
+        );
+      }
       const webhookParsedAt = Date.parse(timestamp);
       const webhook_to_persist_ms = Number.isFinite(webhookParsedAt) ? Date.now() - webhookParsedAt : null;
       this.logger.log(

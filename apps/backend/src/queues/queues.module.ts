@@ -10,6 +10,7 @@ import { SendBubbleProcessor } from './processors/send-bubble.processor';
 import { KbIngestProcessor } from './processors/kb-ingest.processor';
 import { HandoverNotifyProcessor } from './processors/handover-notify.processor';
 import { QuotaThresholdAlertProcessor } from './processors/quota-threshold-alert.processor';
+import { FollowUpProcessor } from './processors/follow-up.processor';
 
 // Feature modules
 import { OrchestrationModule } from '../modules/orchestration/orchestration.module';
@@ -18,6 +19,7 @@ import { ConversationsModule } from '../modules/conversations/conversations.modu
 import { ActionGatingModule } from '../modules/action-gating/action-gating.module';
 import { IntentTagsModule } from '../modules/intent-tags/intent-tags.module';
 import { TranscriptionModule } from '../modules/transcription/transcription.module';
+import { FollowUpEngineModule } from '../modules/follow-up-engine/follow-up-engine.module';
 
 @Module({
   imports: [
@@ -33,6 +35,7 @@ import { TranscriptionModule } from '../modules/transcription/transcription.modu
     ActionGatingModule,
     IntentTagsModule,
     TranscriptionModule,
+    FollowUpEngineModule,
   ],
   providers: [
     InboundMessageProcessor,
@@ -40,6 +43,7 @@ import { TranscriptionModule } from '../modules/transcription/transcription.modu
     KbIngestProcessor,
     HandoverNotifyProcessor,
     QuotaThresholdAlertProcessor,
+    FollowUpProcessor,
   ],
   exports: [BullModule],
 })

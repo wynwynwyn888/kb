@@ -41,6 +41,9 @@ const DAYS: { key: string; label: string }[] = [
   { key: 'sun', label: 'Sunday' },
 ];
 
+const DEFAULT_AI_INSTRUCTION =
+  'Gentle nudge only. Do not sound salesy. Follow up based on the previous conversation context.';
+
 function cardStyle(): CSSProperties {
   return {
     border: '1px solid var(--aisbp-border)',
@@ -95,6 +98,23 @@ export function AutomationFollowUpPanel() {
     }
   };
 
+  const validateBeforeSave = (f: TenantFollowUpSettings): string | null => {
+    for (const step of f.steps) {
+      if (!step.enabled) continue;
+      if (step.mode === 'fixed_message') {
+        if (!(step.fixedMessage ?? '').trim()) {
+          return `Step ${step.stepNumber}: fixed message is required when enabled.`;
+        }
+      } else if (step.mode === 'ai_decides') {
+        const instr = (step.aiInstruction ?? '').trim();
+        if (!instr) {
+          return `Step ${step.stepNumber}: AI instruction is required when enabled.`;
+        }
+      }
+    }
+    return null;
+  };
+
   const updateStep = (idx: number, patch: Partial<FollowUpStepSetting>) => {
     setFollowUp(prev => {
       if (!prev) return prev;
@@ -109,7 +129,7 @@ export function AutomationFollowUpPanel() {
   const addStep = () => {
     setFollowUp(prev => {
       if (!prev) return prev;
-      if (prev.steps.length >= 5) return prev;
+      if (prev.steps.length >= 10) return prev;
       const n = prev.steps.length + 1;
       return {
         ...prev,
@@ -119,8 +139,9 @@ export function AutomationFollowUpPanel() {
             stepNumber: n,
             delayAmount: 2,
             delayUnit: 'hours',
-            mode: 'fixed',
+            mode: 'fixed_message',
             fixedMessage: '',
+            aiInstruction: DEFAULT_AI_INSTRUCTION,
             enabled: true,
           },
         ],
@@ -156,13 +177,13 @@ export function AutomationFollowUpPanel() {
 
       <SectionCard title="Workspace scope" subtitle="Follow-up settings currently apply across this workspace." accent="muted">
         <p style={{ margin: 0, fontSize: '0.86rem', color: 'var(--aisbp-text-secondary)', lineHeight: 1.55 }}>
-          The active assistant uses these settings when replying. Scheduling/execution may be gated by conversation state and rollout flags.
+          These settings apply across this workspace. Follow-up automation runs in the backend worker and is gated by conversation state (replies, handover, booking, opt-out) and active hours when enabled.
         </p>
       </SectionCard>
 
       <SectionCard
         title="Follow-up assistant"
-        subtitle="Stored configuration for when a contact stops replying. Sending is not wired yet."
+        subtitle="Configure what to send when a contact stops replying."
         accent="muted"
       >
         {loading || !followUp ? (
@@ -183,18 +204,10 @@ export function AutomationFollowUpPanel() {
             </label>
 
             <label style={{ display: 'block', fontSize: '0.8rem', marginBottom: '0.85rem' }}>
-              Maximum follow-ups (1–5)
-              <select
-                value={followUp.maxFollowUps}
-                onChange={e => setFollowUp({ ...followUp, maxFollowUps: Number(e.target.value) })}
-                style={{ display: 'block', marginTop: '0.25rem', padding: '0.4rem', borderRadius: 8 }}
-              >
-                {[1, 2, 3, 4, 5].map(n => (
-                  <option key={n} value={n}>
-                    {n}
-                  </option>
-                ))}
-              </select>
+              Maximum follow-ups
+              <div style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted)', marginTop: '0.25rem', lineHeight: 1.45 }}>
+                Determined by the number of enabled steps below.
+              </div>
             </label>
 
             <p style={{ fontSize: '0.82rem', fontWeight: 600, margin: '0 0 0.35rem' }}>Stop follow-up when</p>
@@ -304,12 +317,11 @@ export function AutomationFollowUpPanel() {
                 </table>
               </div>
               <p style={{ fontSize: '0.76rem', color: 'var(--aisbp-muted)', lineHeight: 1.45, marginTop: '0.65rem' }}>
-                When scheduling ships: if a step becomes due outside these windows, it will wait for the next allowed window
-                (preview — not enforced yet).
+                If a step becomes due outside these windows, it will defer to the next allowed window.
               </p>
             </div>
 
-            <p style={{ fontSize: '0.82rem', fontWeight: 600, margin: '0 0 0.5rem' }}>Follow-up sequence (up to 5)</p>
+            <p style={{ fontSize: '0.82rem', fontWeight: 600, margin: '0 0 0.5rem' }}>Follow-up sequence (up to 10)</p>
             {followUp.steps.map((step, idx) => (
               <div key={idx} style={cardStyle()}>
                 <div style={{ fontSize: '0.78rem', fontWeight: 700, marginBottom: '0.35rem' }}>Step {step.stepNumber}</div>
@@ -339,14 +351,24 @@ export function AutomationFollowUpPanel() {
                   Send mode{' '}
                   <select
                     value={step.mode}
-                    onChange={e => updateStep(idx, { mode: e.target.value as 'fixed' | 'ai' })}
+                    onChange={e => {
+                      const v = e.target.value as FollowUpStepSetting['mode'];
+                      if (v === 'ai_decides') {
+                        updateStep(idx, {
+                          mode: v,
+                          aiInstruction: (step.aiInstruction ?? '').trim() ? step.aiInstruction : DEFAULT_AI_INSTRUCTION,
+                        });
+                      } else {
+                        updateStep(idx, { mode: v });
+                      }
+                    }}
                     style={{ padding: '0.3rem', borderRadius: 6 }}
                   >
-                    <option value="fixed">Fixed message</option>
-                    <option value="ai">AI decides</option>
+                    <option value="fixed_message">Fixed message</option>
+                    <option value="ai_decides">AI decides</option>
                   </select>
                 </label>
-                {step.mode === 'fixed' ? (
+                {step.mode === 'fixed_message' ? (
                   <textarea
                     value={step.fixedMessage ?? ''}
                     onChange={e => updateStep(idx, { fixedMessage: e.target.value })}
@@ -358,7 +380,7 @@ export function AutomationFollowUpPanel() {
                   <textarea
                     value={step.aiInstruction ?? ''}
                     onChange={e => updateStep(idx, { aiInstruction: e.target.value })}
-                    placeholder="Instruction for AI (stored only)"
+                    placeholder="Instruction for AI"
                     rows={2}
                     style={{ width: '100%', marginTop: '0.35rem', padding: '0.35rem', borderRadius: 8 }}
                   />
@@ -381,7 +403,7 @@ export function AutomationFollowUpPanel() {
                 </button>
               </div>
             ))}
-            {followUp.steps.length < 5 ? (
+            {followUp.steps.length < 10 ? (
               <button
                 type="button"
                 disabled={busy !== null}
@@ -390,12 +412,24 @@ export function AutomationFollowUpPanel() {
               >
                 Add step
               </button>
-            ) : null}
+            ) : (
+              <p style={{ margin: '0 0 0.75rem', fontSize: '0.85rem', color: 'var(--aisbp-muted)' }}>
+                Maximum 10 follow-up steps reached.
+              </p>
+            )}
 
             <button
               type="button"
               disabled={busy !== null}
-              onClick={() => void save()}
+              onClick={() => {
+                if (!followUp) return;
+                const err = validateBeforeSave(followUp);
+                if (err) {
+                  setBanner(err);
+                  return;
+                }
+                void save();
+              }}
               style={{ ...btn('primary', busy !== null), fontSize: '0.9rem' }}
             >
               Save follow-up settings

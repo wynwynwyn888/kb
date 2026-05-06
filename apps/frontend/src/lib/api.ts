@@ -454,7 +454,7 @@ export interface FollowUpStepSetting {
   stepNumber: number;
   delayAmount: number;
   delayUnit: 'minutes' | 'hours' | 'days';
-  mode: 'fixed' | 'ai';
+  mode: 'fixed_message' | 'ai_decides';
   fixedMessage?: string;
   aiInstruction?: string;
   enabled: boolean;

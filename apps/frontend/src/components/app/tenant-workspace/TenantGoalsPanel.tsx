@@ -126,6 +126,29 @@ const deleteBtnStyle: CSSProperties = {
   cursor: 'pointer',
 };
 
+const successBtnStyle: CSSProperties = {
+  padding: '0.45rem 0.85rem',
+  borderRadius: '8px',
+  border: '1px solid rgba(34, 197, 94, 0.35)',
+  background: 'rgba(34, 197, 94, 0.12)',
+  color: 'rgb(21, 128, 61)',
+  fontSize: '0.85rem',
+  fontWeight: 800,
+  cursor: 'pointer',
+};
+
+const dangerTextBtnStyle: CSSProperties = {
+  border: 'none',
+  background: 'transparent',
+  color: 'rgb(185, 28, 28)',
+  fontSize: '0.85rem',
+  fontWeight: 750,
+  cursor: 'pointer',
+  padding: '0.35rem 0.25rem',
+  textDecoration: 'underline',
+  textUnderlineOffset: 3,
+};
+
 const pageWidthProfiles: CSSProperties = {
   maxWidth: 1120,
   margin: '0 auto',
@@ -160,6 +183,18 @@ const profileBentoCard: CSSProperties = {
   padding: '1rem 1.05rem',
   background: 'var(--aisbp-surface, #fff)',
   boxShadow: '0 6px 22px rgba(15, 23, 42, 0.06)',
+};
+
+const modalPanel: CSSProperties = {
+  background: 'var(--aisbp-modal-bg, #fff)',
+  borderRadius: 16,
+  width: 'min(560px, 100%)',
+  overflow: 'hidden',
+  display: 'flex',
+  flexDirection: 'column',
+  maxWidth: '100%',
+  boxShadow: '0 24px 48px rgba(15, 23, 42, 0.2)',
+  border: '1px solid var(--aisbp-modal-border, #e2e8f0)',
 };
 
 function profileListCardStyle(selected: boolean): CSSProperties {
@@ -362,6 +397,15 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
   const [expandField, setExpandField] = useState<null | 'persona' | 'goals' | 'additional'>(null);
   const [expandDraft, setExpandDraft] = useState('');
 
+  const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [createName, setCreateName] = useState('');
+  const [createDescription, setCreateDescription] = useState('');
+  const [createSubmitting, setCreateSubmitting] = useState(false);
+
+  const [deleteModalProfile, setDeleteModalProfile] = useState<TenantBotProfileRow | null>(null);
+  const [deleteTyped, setDeleteTyped] = useState('');
+  const [deleteSubmitting, setDeleteSubmitting] = useState(false);
+
   const baselineRef = useRef<FormBaseline | null>(null);
   const profilesNavRef = useRef<HTMLDivElement | null>(null);
   const instructionsRef = useRef<HTMLDivElement | null>(null);
@@ -405,9 +449,14 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
     JSON.stringify(formSnapshot) !== JSON.stringify(baselineRef.current);
 
   const sortedProfiles = useMemo(() => {
+    // Stable default ordering: createdAt ascending (oldest first).
+    // TODO: If we add a profile sort_order later, prefer it and fallback to createdAt.
     return [...profiles].sort((a, b) => {
-      if (a.isActive !== b.isActive) return a.isActive ? -1 : 1;
-      return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+      const aCreated = a.createdAt ? new Date(a.createdAt).getTime() : Number.NaN;
+      const bCreated = b.createdAt ? new Date(b.createdAt).getTime() : Number.NaN;
+      if (!Number.isNaN(aCreated) && !Number.isNaN(bCreated) && aCreated !== bCreated) return aCreated - bCreated;
+      // Fallback only (should be rare): keep deterministic ordering.
+      return new Date(a.updatedAt).getTime() - new Date(b.updatedAt).getTime();
     });
   }, [profiles]);
 
@@ -577,27 +626,28 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
     }
   };
 
-  const onNewProfile = async () => {
+  const openCreateModal = async () => {
     if (!token) return;
-    if (
-      isDirty &&
-      !window.confirm('You have unsaved changes. Discard them and create a new profile?')
-    ) {
-      return;
-    }
+    if (isDirty && !window.confirm('You have unsaved changes. Discard them and create a new profile?')) return;
+    setErr('');
+    setOk('');
+    setCreateName('');
+    setCreateDescription('');
+    setCreateModalOpen(true);
+  };
+
+  const onCreateProfile = async () => {
+    if (!token) return;
+    const name = createName.trim();
+    const description = createDescription.trim();
+    if (!name) return;
+    setCreateSubmitting(true);
     setErr('');
     setOk('');
     try {
-      const used = new Set(profiles.map(p => p.name));
-      let name = DEFAULT_NEW_PROFILE;
-      let n = 2;
-      while (used.has(name)) {
-        name = `${DEFAULT_NEW_PROFILE} (${n})`;
-        n += 1;
-      }
       const created = await createTenantBotProfile(token, subaccountId, {
         name,
-        description: '',
+        description,
         persona: '',
         conversationGoals: '',
         businessNotes: '',
@@ -610,12 +660,16 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
         setActive: false,
       });
       const refreshed = await listTenantBotProfiles(token, subaccountId);
-      setProfiles(Array.isArray(refreshed) ? refreshed : []);
+      const list = Array.isArray(refreshed) ? refreshed : [];
+      setProfiles(list);
       setSelectedProfileId(created.id);
       applyRowToForm(created);
+      setCreateModalOpen(false);
       setOk('Draft created. Save your changes, then set active when ready.');
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Could not create profile');
+    } finally {
+      setCreateSubmitting(false);
     }
   };
 
@@ -679,20 +733,29 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
   };
 
   const onDeleteProfile = async (profileId: string) => {
-    if (!token) return;
-    const row = profiles.find(x => x.id === profileId);
+    const row = profiles.find(x => x.id === profileId) ?? null;
     if (!row) return;
-    if (row.isActive) return;
+    setErr('');
+    setOk('');
+    setDeleteTyped('');
+    setDeleteModalProfile(row);
+  };
+
+  const confirmDeleteProfile = async () => {
+    if (!token) return;
+    if (!deleteModalProfile) return;
+    if (deleteModalProfile.isActive) return;
     if (profiles.length <= 1) return;
-    if (!window.confirm(`Delete assistant profile “${row.name}”? This cannot be undone.`)) return;
+    if (deleteTyped !== 'delete') return;
+    setDeleteSubmitting(true);
     setErr('');
     setOk('');
     try {
-      await deleteTenantBotProfile(token, subaccountId, profileId);
+      await deleteTenantBotProfile(token, subaccountId, deleteModalProfile.id);
       const refreshed = await listTenantBotProfiles(token, subaccountId);
       const list = Array.isArray(refreshed) ? refreshed : [];
       setProfiles(list);
-      if (selectedProfileId === profileId) {
+      if (selectedProfileId === deleteModalProfile.id) {
         const next = list.find(x => x.isActive) ?? list[0] ?? null;
         if (next) {
           setSelectedProfileId(next.id);
@@ -702,9 +765,13 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
           baselineRef.current = null;
         }
       }
+      setDeleteModalProfile(null);
+      setDeleteTyped('');
       setOk('Profile deleted.');
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Delete failed');
+    } finally {
+      setDeleteSubmitting(false);
     }
   };
 
@@ -868,7 +935,7 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                 <button type="button" onClick={() => duplicateProfileById(activeProfile.id)} style={secondaryBtnStyle}>
                   Duplicate
                 </button>
-                <button type="button" onClick={onNewProfile} style={secondaryBtnStyle}>
+                <button type="button" onClick={openCreateModal} style={secondaryBtnStyle}>
                   Create new profile
                 </button>
               </div>
@@ -896,7 +963,7 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
               <p style={{ fontSize: '0.85rem', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 0.65rem' }}>
                 Set a profile active below, or create a new one.
               </p>
-              <button type="button" onClick={onNewProfile} style={secondaryBtnStyle}>
+              <button type="button" onClick={openCreateModal} style={secondaryBtnStyle}>
                 Create new profile
               </button>
             </div>
@@ -908,7 +975,7 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                 <h2 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 800, color: 'var(--aisbp-text-heading, #0f172a)' }}>
                   Assistant profiles
                 </h2>
-                <button type="button" onClick={onNewProfile} style={secondaryBtnStyle}>
+                <button type="button" onClick={openCreateModal} style={secondaryBtnStyle}>
                   Create new profile
                 </button>
               </div>
@@ -916,63 +983,85 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
               <div id="aisbp-profiles-grid">
                 {sortedProfiles.map(p => (
                   <div key={p.id} style={profileBentoCard}>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.5rem', marginBottom: '0.4rem' }}>
-                      <span style={{ fontSize: '1.05rem', fontWeight: 850, color: 'var(--aisbp-text-heading, #0f172a)' }}>
-                        {p.name.trim() || 'Untitled'}
-                      </span>
-                      {p.isActive ? <LiveBadge /> : <DraftBadge />}
-                      {p.isActive ? (
-                        <span style={{ fontSize: '0.78rem', fontWeight: 650, color: 'var(--aisbp-muted, #64748b)' }}>
-                          Currently live
-                        </span>
-                      ) : null}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', alignItems: 'flex-start', marginBottom: '0.6rem' }}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.5rem', marginBottom: '0.2rem' }}>
+                          <span style={{ fontSize: '1.05rem', fontWeight: 850, color: 'var(--aisbp-text-heading, #0f172a)' }}>
+                            {p.name.trim() || 'Untitled'}
+                          </span>
+                          {p.isActive ? <LiveBadge /> : <DraftBadge />}
+                        </div>
+                        <p style={{ margin: 0, fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)' }}>
+                          Vaults:{' '}
+                          <strong style={{ fontWeight: 700, color: 'var(--aisbp-text-secondary, #334155)' }}>
+                            {activeAssistantVaultsSummary(p.knowledgeAccessMode, p.selectedVaultIds?.length ?? 0)}
+                          </strong>
+                        </p>
+                      </div>
+
+                      <div style={{ flex: 'none', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        {!p.isActive ? (
+                          <button
+                            type="button"
+                            onClick={() => activateProfileById(p.id)}
+                            style={successBtnStyle}
+                            data-action="set-live"
+                            data-variant="primary"
+                          >
+                            Set live
+                          </button>
+                        ) : (
+                          <span
+                            style={{
+                              fontSize: '0.78rem',
+                              fontWeight: 750,
+                              color: 'rgb(21, 128, 61)',
+                              padding: '0.28rem 0.5rem',
+                              borderRadius: 999,
+                              border: '1px solid rgba(34, 197, 94, 0.35)',
+                              background: 'rgba(34, 197, 94, 0.10)',
+                            }}
+                          >
+                            Currently live
+                          </span>
+                        )}
+                      </div>
                     </div>
 
-                    <p style={{ fontSize: '0.8rem', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 0.35rem' }}>
-                      Vaults: <strong style={{ fontWeight: 650, color: 'var(--aisbp-text-secondary, #334155)' }}>
-                        {activeAssistantVaultsSummary(p.knowledgeAccessMode, p.selectedVaultIds?.length ?? 0)}
-                      </strong>
-                    </p>
                     <p style={{ fontSize: '0.76rem', color: 'var(--aisbp-muted, #94a3b8)', margin: '0 0 0.85rem' }}>
                       Last updated {formatProfileUpdatedAt(p.updatedAt)}
                     </p>
 
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.45rem', alignItems: 'center' }}>
-                      <button
-                        type="button"
-                        onClick={() => void goToInstructionsEditor(p.id)}
-                        style={{ ...secondaryBtnStyle, padding: '0.4rem 0.7rem' }}
-                      >
-                        Edit instructions
-                      </button>
-                      {!p.isActive ? (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.45rem', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.45rem', alignItems: 'center' }}>
                         <button
                           type="button"
-                          onClick={() => activateProfileById(p.id)}
+                          onClick={() => void goToInstructionsEditor(p.id)}
                           style={{ ...secondaryBtnStyle, padding: '0.4rem 0.7rem' }}
                         >
-                          Set live
+                          Edit instructions
                         </button>
-                      ) : null}
+                        <button
+                          type="button"
+                          onClick={() => duplicateProfileById(p.id)}
+                          style={{ ...secondaryBtnStyle, padding: '0.4rem 0.7rem' }}
+                        >
+                          Duplicate
+                        </button>
+                      </div>
+
                       <button
                         type="button"
-                        onClick={() => duplicateProfileById(p.id)}
-                        style={{ ...secondaryBtnStyle, padding: '0.4rem 0.7rem' }}
-                      >
-                        Duplicate
-                      </button>
-                      <button
-                        type="button"
-                        disabled={profiles.length <= 1 || p.isActive}
-                        title={p.isActive ? LIVE_DELETE_HINT : undefined}
-                        aria-label={p.isActive ? LIVE_DELETE_HINT : 'Delete profile'}
-                        onClick={() => onDeleteProfile(p.id)}
+                        onClick={() => void onDeleteProfile(p.id)}
                         style={{
-                          ...deleteBtnStyle,
-                          padding: '0.45rem 0.65rem',
-                          opacity: p.isActive ? 0.45 : 1,
+                          ...dangerTextBtnStyle,
+                          opacity: p.isActive || profiles.length <= 1 ? 0.45 : 1,
                           cursor: p.isActive || profiles.length <= 1 ? 'not-allowed' : 'pointer',
                         }}
+                        disabled={p.isActive || profiles.length <= 1}
+                        title={p.isActive ? 'You cannot delete the live assistant profile. Set another profile live first.' : undefined}
+                        aria-label={p.isActive ? 'Cannot delete live assistant profile' : 'Delete profile'}
+                        data-action="delete-profile"
                       >
                         Delete
                       </button>
@@ -982,7 +1071,7 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
 
                 <button
                   type="button"
-                  onClick={onNewProfile}
+                  onClick={openCreateModal}
                   style={{
                     ...profileBentoCard,
                     cursor: 'pointer',
@@ -1321,7 +1410,7 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                   >
                     Assistant profiles
                   </h2>
-                  <button type="button" onClick={onNewProfile} style={{ ...secondaryBtnStyle, padding: '0.32rem 0.6rem', fontSize: '0.76rem' }}>
+                  <button type="button" onClick={openCreateModal} style={{ ...secondaryBtnStyle, padding: '0.32rem 0.6rem', fontSize: '0.76rem' }}>
                     Create new
                   </button>
                 </div>
@@ -1995,6 +2084,154 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                 style={mvpPrimaryButtonStyle}
               >
                 Save
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {createModalOpen ? (
+        <div
+          style={expandModalOverlay}
+          role="presentation"
+          onClick={e => {
+            if (e.target === e.currentTarget) setCreateModalOpen(false);
+          }}
+        >
+          <div style={modalPanel} role="dialog" aria-modal="true" onClick={e => e.stopPropagation()}>
+            <div style={{ padding: '1rem 1.15rem', borderBottom: '1px solid var(--aisbp-modal-divider, #f1f5f9)' }}>
+              <h2 style={{ fontSize: '1.05rem', fontWeight: 800, margin: 0, color: 'var(--aisbp-text-heading, #0f172a)' }}>
+                Create assistant profile
+              </h2>
+              <p style={{ margin: '0.35rem 0 0', fontSize: '0.85rem', color: 'var(--aisbp-muted, #64748b)', lineHeight: 1.45 }}>
+                Profiles contain instructions and a knowledge vault selection. Automation remains workspace-scoped.
+              </p>
+            </div>
+            <div style={{ padding: '1rem 1.15rem', display: 'grid', gap: '0.75rem' }}>
+              <div>
+                <label style={mvpLabelStyle}>Profile name</label>
+                <input
+                  value={createName}
+                  onChange={e => setCreateName(e.target.value)}
+                  style={mvpInputStyle}
+                  placeholder="e.g. DapperDog (live)"
+                  autoComplete="off"
+                  aria-label="New profile name"
+                />
+              </div>
+              <div>
+                <label style={mvpLabelStyle}>Description (optional)</label>
+                <input
+                  value={createDescription}
+                  onChange={e => setCreateDescription(e.target.value)}
+                  style={mvpInputStyle}
+                  placeholder="Shown in the profile list"
+                  autoComplete="off"
+                  aria-label="New profile description"
+                />
+              </div>
+            </div>
+            <div
+              style={{
+                padding: '0.85rem 1.15rem',
+                borderTop: '1px solid var(--aisbp-modal-divider, #f1f5f9)',
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: '0.5rem',
+                justifyContent: 'flex-end',
+              }}
+            >
+              <button type="button" onClick={() => setCreateModalOpen(false)} style={secondaryBtnStyle}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void onCreateProfile()}
+                style={mvpPrimaryButtonStyle}
+                disabled={createSubmitting || createName.trim() === ''}
+                aria-label="Create profile"
+              >
+                {createSubmitting ? 'Creating…' : 'Create profile'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {deleteModalProfile ? (
+        <div
+          style={expandModalOverlay}
+          role="presentation"
+          onClick={e => {
+            if (e.target === e.currentTarget) setDeleteModalProfile(null);
+          }}
+        >
+          <div style={modalPanel} role="dialog" aria-modal="true" onClick={e => e.stopPropagation()}>
+            <div style={{ padding: '1rem 1.15rem', borderBottom: '1px solid var(--aisbp-modal-divider, #f1f5f9)' }}>
+              <h2 style={{ fontSize: '1.05rem', fontWeight: 800, margin: 0, color: 'var(--aisbp-text-heading, #0f172a)' }}>
+                Delete assistant profile?
+              </h2>
+              {deleteModalProfile.isActive ? (
+                <p style={{ margin: '0.45rem 0 0', fontSize: '0.85rem', color: 'rgb(154, 52, 18)', lineHeight: 1.45 }}>
+                  You cannot delete the live assistant profile. Set another profile live first.
+                </p>
+              ) : (
+                <p style={{ margin: '0.45rem 0 0', fontSize: '0.85rem', color: 'var(--aisbp-muted, #64748b)', lineHeight: 1.45 }}>
+                  This will permanently delete “{deleteModalProfile.name?.trim() || 'Untitled'}”. This cannot be undone.
+                </p>
+              )}
+            </div>
+
+            {!deleteModalProfile.isActive ? (
+              <div style={{ padding: '1rem 1.15rem', display: 'grid', gap: '0.65rem' }}>
+                <div>
+                  <label style={mvpLabelStyle}>Type “delete” to confirm</label>
+                  <input
+                    value={deleteTyped}
+                    onChange={e => setDeleteTyped(e.target.value)}
+                    style={mvpInputStyle}
+                    autoComplete="off"
+                    spellCheck={false}
+                    aria-label="Type delete to confirm"
+                  />
+                </div>
+              </div>
+            ) : null}
+
+            <div
+              style={{
+                padding: '0.85rem 1.15rem',
+                borderTop: '1px solid var(--aisbp-modal-divider, #f1f5f9)',
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: '0.5rem',
+                justifyContent: 'flex-end',
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => {
+                  setDeleteModalProfile(null);
+                  setDeleteTyped('');
+                }}
+                style={secondaryBtnStyle}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void confirmDeleteProfile()}
+                disabled={deleteSubmitting || deleteModalProfile.isActive || deleteTyped !== 'delete'}
+                style={{
+                  ...secondaryBtnStyle,
+                  border: '1px solid rgba(239, 68, 68, 0.45)',
+                  background: 'rgba(239, 68, 68, 0.10)',
+                  color: 'rgb(185, 28, 28)',
+                  fontWeight: 800,
+                }}
+                aria-label="Delete profile"
+              >
+                {deleteSubmitting ? 'Deleting…' : 'Delete profile'}
               </button>
             </div>
           </div>

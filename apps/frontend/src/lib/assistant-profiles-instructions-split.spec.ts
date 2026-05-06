@@ -24,6 +24,16 @@ describe('assistant profiles vs instructions surfaces', () => {
     expect(t).toContain('Delete');
   });
 
+  it('profiles UX uses a primary set-live and safe modals', () => {
+    const t = read('src/components/app/tenant-workspace/TenantGoalsPanel.tsx');
+    expect(t).toContain('data-action="set-live"');
+    expect(t).toContain('data-variant="primary"');
+    expect(t).toContain('Delete assistant profile?');
+    expect(t).toContain('Type “delete” to confirm');
+    expect(t).toContain('Create assistant profile');
+    expect(t).toContain('aria-label="Create profile"');
+  });
+
   it('instructions surface includes active editing label and switch profile link', () => {
     const t = read('src/components/app/tenant-workspace/TenantGoalsPanel.tsx');
     expect(t).toContain('Editing:');

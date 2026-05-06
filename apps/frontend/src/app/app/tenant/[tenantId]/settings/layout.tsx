@@ -1,12 +1,6 @@
-'use client';
+import type { ReactNode } from 'react';
 
-import { TenantSettingsProvider } from '@/components/app/tenant-workspace/tenant-settings-context';
-import { TenantSettingsShell } from '@/components/app/tenant-workspace/TenantSettingsShell';
-
-export default function TenantSettingsLayout({ children }: { children: React.ReactNode }) {
-  return (
-    <TenantSettingsProvider>
-      <TenantSettingsShell>{children}</TenantSettingsShell>
-    </TenantSettingsProvider>
-  );
+/** Legacy `/settings` layout — pages redirect to `/control-panel`. */
+export default function LegacyTenantSettingsLayout({ children }: { children: ReactNode }) {
+  return <>{children}</>;
 }

@@ -1,21 +1,33 @@
 'use client';
 
 import Link from 'next/link';
+import { usePathname, useRouter } from 'next/navigation';
 import type { ReactNode } from 'react';
+import { useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { EmptyState, ErrorBanner, LoadingBlock, PageHeader } from '@/components/app/mvp-ui';
+import { isAgencyOnlyAdvancedRoute, tenantBasePath } from '@/lib/tenant-workspace-nav';
 
 /**
  * Ensures tenant-only users cannot open another tenant's URL. Agency users may open any tenant path (API still enforces data).
  */
 export function TenantWorkspaceGate({ tenantId, children }: { tenantId: string; children: ReactNode }) {
   const { user, loading } = useAuth();
+  const pathname = usePathname() ?? '';
+  const router = useRouter();
+
+  const isAgencyStaff = Boolean(user?.agencyRole);
+  const tenantAdvancedBlocked = !isAgencyStaff && isAgencyOnlyAdvancedRoute(pathname, tenantId);
+
+  useEffect(() => {
+    if (loading || !tenantAdvancedBlocked) return;
+    router.replace(`${tenantBasePath(tenantId)}/assistant`);
+  }, [loading, tenantAdvancedBlocked, router, tenantId]);
 
   if (loading) {
     return <LoadingBlock message="Checking access…" />;
   }
 
-  const isAgencyStaff = Boolean(user?.agencyRole);
   const isCorrectTenant = user?.tenantId != null && user.tenantId === tenantId;
 
   if (!isAgencyStaff && !isCorrectTenant) {
@@ -29,7 +41,7 @@ export function TenantWorkspaceGate({ tenantId, children }: { tenantId: string; 
         />
         <p style={{ marginTop: '1rem', fontSize: '0.9rem' }}>
           {user?.tenantId ? (
-            <Link href={`/app/tenant/${user.tenantId}/goals`} style={{ color: '#0070f3', fontWeight: 600 }}>
+            <Link href={`/app/tenant/${user.tenantId}/assistant`} style={{ color: '#0070f3', fontWeight: 600 }}>
               Open your subaccount workspace →
             </Link>
           ) : user?.agencyRole ? (
@@ -44,6 +56,10 @@ export function TenantWorkspaceGate({ tenantId, children }: { tenantId: string; 
         </p>
       </div>
     );
+  }
+
+  if (tenantAdvancedBlocked) {
+    return <LoadingBlock message="Opening workspace…" />;
   }
 
   return <>{children}</>;

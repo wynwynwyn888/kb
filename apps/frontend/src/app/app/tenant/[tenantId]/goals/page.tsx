@@ -1,7 +1,6 @@
-'use client';
+import { redirect } from 'next/navigation';
 
-import { TenantGoalsPanel } from '@/components/app/tenant-workspace/TenantGoalsPanel';
-
-export default function TenantGoalsPage() {
-  return <TenantGoalsPanel />;
+/** Legacy route — goals editing lives under Assistant → Instructions. */
+export default function LegacyTenantGoalsPage({ params }: { params: { tenantId: string } }) {
+  redirect(`/app/tenant/${params.tenantId}/assistant/instructions`);
 }

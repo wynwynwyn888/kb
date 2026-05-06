@@ -31,7 +31,7 @@ export default function AppEntryPage() {
       return;
     }
     if (hasTenant) {
-      router.replace(`/app/tenant/${user.tenantId}/goals`);
+      router.replace(`/app/tenant/${user.tenantId}/assistant`);
       return;
     }
     router.replace('/login');

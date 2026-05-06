@@ -18,10 +18,10 @@ const tabStyle = (active: boolean): CSSProperties => ({
 });
 
 const TABS: { suffix: string; label: string }[] = [
-  { suffix: '/automation/tags', label: 'Tags' },
-  { suffix: '/automation/booking', label: 'Booking' },
-  { suffix: '/automation/follow-up', label: 'Follow-up' },
-  { suffix: '/automation/escalation', label: 'Human Escalation' },
+  { suffix: '/assistant/automation/tags', label: 'Tags' },
+  { suffix: '/assistant/automation/booking', label: 'Booking' },
+  { suffix: '/assistant/automation/follow-up', label: 'Follow-up' },
+  { suffix: '/assistant/automation/escalation', label: 'Human Escalation' },
 ];
 
 export function AutomationWorkspaceLayout({
@@ -46,7 +46,7 @@ export function AutomationWorkspaceLayout({
             margin: '0 0 0.35rem',
           }}
         >
-          Automation
+          Assistant
         </p>
         <h1
           style={{
@@ -57,7 +57,7 @@ export function AutomationWorkspaceLayout({
             letterSpacing: '-0.03em',
           }}
         >
-          Workspace automation
+          Automation
         </h1>
         <p
           style={{
@@ -68,7 +68,8 @@ export function AutomationWorkspaceLayout({
             maxWidth: '42rem',
           }}
         >
-          Tags, booking intake, follow-ups, and escalation — scoped to this client workspace.
+          Rules for the active assistant profile: CRM tags, booking calendar, follow-ups, and handover — using this
+          workspace&apos;s CRM resources.
         </p>
       </header>
 

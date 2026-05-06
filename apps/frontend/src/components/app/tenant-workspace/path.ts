@@ -3,10 +3,13 @@
  */
 export function getWorkspacePathSuffix(pathname: string, activeTenantId: string): string {
   const prefix = `/app/tenant/${activeTenantId}`;
-  if (!pathname.startsWith(prefix)) return '/goals';
+  if (!pathname.startsWith(prefix)) return '/assistant';
   let suffix = pathname.slice(prefix.length);
-  if (!suffix || suffix === '/') return '/goals';
-  if (suffix === '/bot' || suffix === '/prompt') return '/goals';
+  if (!suffix || suffix === '/') return '/assistant';
+  if (suffix === '/bot' || suffix === '/prompt' || suffix === '/goals') return '/assistant/instructions';
+  if (suffix === '/settings' || suffix.startsWith('/settings/')) {
+    return suffix.replace(/^\/settings/, '/control-panel');
+  }
   return suffix;
 }
 
@@ -22,5 +25,5 @@ export function getSubaccountSwitchHref(pathname: string, targetTenantId: string
     const fromId = m[1];
     return `/app/tenant/${targetTenantId}${getWorkspacePathSuffix(pathname, fromId)}`;
   }
-  return `/app/tenant/${targetTenantId}/goals`;
+  return `/app/tenant/${targetTenantId}/assistant`;
 }

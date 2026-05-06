@@ -1,10 +1,10 @@
 'use client';
 
-import type { TenantNavItem } from '@/lib/tenant-workspace-nav';
+import type { TenantNavIconId } from '@/lib/tenant-workspace-nav';
 
 const s = { width: 22, height: 22, viewBox: '0 0 24 24' as const, fill: 'none', stroke: 'currentColor', strokeWidth: 1.75, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const };
 
-export function TenantNavIcon({ icon }: { icon: TenantNavItem['icon'] }) {
+export function TenantNavIcon({ icon }: { icon: TenantNavIconId }) {
   switch (icon) {
     case 'settings':
       return (

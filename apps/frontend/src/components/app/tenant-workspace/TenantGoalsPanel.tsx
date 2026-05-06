@@ -281,7 +281,12 @@ function activeProfileLooksEmpty(row: TenantBotProfileRow): boolean {
   return noName && noBody;
 }
 
-export function TenantGoalsPanel() {
+export type TenantGoalsPanelProps = {
+  /** Deep-link from Assistant nav: scroll the profile list or instruction editors into view. */
+  initialFocus?: 'profiles' | 'instructions' | 'all';
+};
+
+export function TenantGoalsPanel({ initialFocus = 'all' }: TenantGoalsPanelProps) {
   const params = useParams();
   const subaccountId = params['tenantId'] as string;
   const { token } = useAuth();
@@ -313,6 +318,8 @@ export function TenantGoalsPanel() {
   const [expandDraft, setExpandDraft] = useState('');
 
   const baselineRef = useRef<FormBaseline | null>(null);
+  const profilesNavRef = useRef<HTMLDivElement | null>(null);
+  const instructionsRef = useRef<HTMLDivElement | null>(null);
 
   const formSnapshot = useMemo((): FormBaseline => {
     return {
@@ -446,6 +453,20 @@ export function TenantGoalsPanel() {
       cancelled = true;
     };
   }, [token, subaccountId, loadAttempt]);
+
+  useEffect(() => {
+    if (loading) return;
+    if (initialFocus === 'all') return;
+    const id = window.requestAnimationFrame(() => {
+      if (initialFocus === 'profiles') {
+        profilesNavRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+      if (initialFocus === 'instructions') {
+        instructionsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    });
+    return () => window.cancelAnimationFrame(id);
+  }, [initialFocus, loading, selectedProfileId]);
 
   const requestSelectProfile = (id: string) => {
     if (id === selectedProfileId) return;
@@ -659,7 +680,16 @@ export function TenantGoalsPanel() {
         }}
       />
 
-      <PageHeader title="Bot Instructions" eyebrow="Client workspace" />
+      <PageHeader
+        title={
+          initialFocus === 'profiles'
+            ? 'Assistant · Profiles'
+            : initialFocus === 'instructions'
+              ? 'Assistant · Instructions'
+              : 'Assistant'
+        }
+        eyebrow="Client workspace"
+      />
 
       {err && (
         <div style={{ marginBottom: '0.75rem' }}>
@@ -788,7 +818,7 @@ export function TenantGoalsPanel() {
           )}
 
           <div id={layoutStyleId}>
-            <aside style={{ minWidth: 0 }}>
+            <aside ref={profilesNavRef} style={{ minWidth: 0 }}>
               <h2
                 style={{
                   fontSize: '0.78rem',
@@ -911,7 +941,7 @@ export function TenantGoalsPanel() {
               ) : null}
             </aside>
 
-            <div style={{ minWidth: 0 }}>
+            <div ref={instructionsRef} style={{ minWidth: 0 }}>
               {!selectedProfileId ? (
                 <p style={{ fontSize: '0.88rem', color: 'var(--aisbp-muted, #64748b)' }}>Select a profile to edit.</p>
               ) : (

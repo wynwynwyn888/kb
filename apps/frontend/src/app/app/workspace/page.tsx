@@ -39,8 +39,8 @@ export default function WorkspaceChooserPage() {
           Open agency account
         </Link>
       </SectionCard>
-      <SectionCard title="Client workspace" subtitle="Bot instructions, knowledge, usage, team, and settings.">
-        <Link href={`/app/tenant/${user.tenantId}/settings`} style={appFloatingSecondaryButtonStyle}>
+      <SectionCard title="Client workspace" subtitle="Assistant, knowledge vaults, usage, team, and control panel.">
+        <Link href={`/app/tenant/${user.tenantId}/control-panel`} style={appFloatingSecondaryButtonStyle}>
           Open client workspace
         </Link>
       </SectionCard>

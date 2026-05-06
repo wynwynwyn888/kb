@@ -8,10 +8,9 @@ export function NavBar() {
       <a href="/dashboard/tenant">Subaccount</a>
       <a href="/tenants">Subaccounts</a>
       <a href="/prompts">Prompts</a>
-      <a href="/knowledge">Knowledge</a>
+      <a href="/app">Workspace</a>
       <a href="/conversations">Conversations</a>
       <a href="/quotas">Quotas</a>
-      <a href="/settings">Settings</a>
       <a href="/tester">Tester</a>
     </nav>
   );

@@ -47,8 +47,8 @@ test.describe('Panel gaps (narrow)', () => {
   test('1. Tenant AI prompt: edit, save, reload and revisit persist marker', async ({ page }) => {
     await login(page, agencyEmail, agencyPassword);
     const tenantId = await firstTenantIdFromDirectory(page);
-    await page.goto(`/app/tenant/${tenantId}/goals`, { waitUntil: 'domcontentloaded' });
-    await expect(page.getByRole('heading', { level: 1, name: 'Goals' })).toBeVisible({
+    await page.goto(`/app/tenant/${tenantId}/assistant/instructions`, { waitUntil: 'domcontentloaded' });
+    await expect(page.getByRole('heading', { level: 1, name: /Assistant · Instructions/i })).toBeVisible({
       timeout: 25_000,
     });
     const promptBox = page.getByLabel(/System prompt/i);
@@ -63,12 +63,12 @@ test.describe('Panel gaps (narrow)', () => {
     await expect(page.getByText(/Prompt saved\./)).toBeVisible({ timeout: 20_000 });
 
     await page.reload({ waitUntil: 'domcontentloaded' });
-    await expect(page.getByRole('heading', { level: 1, name: 'Goals' })).toBeVisible({
+    await expect(page.getByRole('heading', { level: 1, name: /Assistant · Instructions/i })).toBeVisible({
       timeout: 25_000,
     });
     await expect(page.getByLabel(/System prompt/i)).toContainText('[e2e-gap', { timeout: 25_000 });
 
-    await page.goto(`/app/tenant/${tenantId}/goals`, { waitUntil: 'domcontentloaded' });
+    await page.goto(`/app/tenant/${tenantId}/assistant/instructions`, { waitUntil: 'domcontentloaded' });
     await expect(page.getByLabel(/System prompt/i)).toContainText('[e2e-gap', { timeout: 25_000 });
   });
 

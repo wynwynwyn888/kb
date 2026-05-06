@@ -240,7 +240,7 @@ function AgencyGhlConnectionsInner() {
             {selected.ghlLocationId ? (
               <span style={{ fontSize: '0.78rem', color: '#64748b' }}>CRM location saved</span>
             ) : null}
-            <Link href={`/app/tenant/${selected.id}/goals`} style={{ fontSize: '0.8rem', fontWeight: 600, color: '#2563eb' }}>
+            <Link href={`/app/tenant/${selected.id}/assistant`} style={{ fontSize: '0.8rem', fontWeight: 600, color: '#2563eb' }}>
               Open workspace →
             </Link>
           </p>

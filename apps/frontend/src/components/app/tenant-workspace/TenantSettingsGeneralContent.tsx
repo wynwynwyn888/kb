@@ -198,7 +198,7 @@ export function TenantSettingsGeneralContent() {
               value: crmSummary,
             },
             {
-              label: 'Knowledge',
+              label: 'Knowledge vaults',
               value: knowledgeSetupLabel(knowledgeSetupStatus),
             },
             {
@@ -208,11 +208,11 @@ export function TenantSettingsGeneralContent() {
           ]}
         />
         <div style={{ marginTop: '0.85rem', display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-          <Link href={`${base}/goals`} style={appFloatingSecondaryButtonStyle}>
-            Bot instructions
+          <Link href={`${base}/assistant`} style={appFloatingSecondaryButtonStyle}>
+            Assistant
           </Link>
-          <Link href={`${base}/knowledge`} style={appFloatingSecondaryButtonStyle}>
-            Knowledge base
+          <Link href={`${base}/knowledge-vaults`} style={appFloatingSecondaryButtonStyle}>
+            Knowledge vaults
           </Link>
         </div>
       </SectionCard>

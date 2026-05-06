@@ -8,7 +8,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { WorkspaceSwitcher } from '@/components/app/WorkspaceSwitcher';
 import { BrandLogo } from '@/components/app/BrandLogo';
 import { TenantNavIcon } from '@/components/app/TenantNavIcon';
-import { buildTenantNavItems } from '@/lib/tenant-workspace-nav';
+import { buildTenantSidebarNav, type TenantNavNode } from '@/lib/tenant-workspace-nav';
 import { appFloatingSecondaryButtonStyle } from '@/components/app/mvp-ui';
 import { ThemeToggle } from '@/components/app/ThemeToggle';
 
@@ -31,6 +31,19 @@ const linkStyle = (active: boolean): CSSProperties => ({
   fontSize: '0.9rem',
   border: active ? '1px solid var(--aisbp-border, #e2e8f0)' : '1px solid transparent',
   boxShadow: active ? '0 4px 14px rgba(15, 23, 42, 0.07)' : 'none',
+});
+
+const tenantNavChildLinkStyle = (active: boolean): CSSProperties => ({
+  display: 'block',
+  padding: '0.38rem 0.65rem 0.38rem 2.15rem',
+  borderRadius: '8px',
+  textDecoration: 'none',
+  fontSize: '0.8rem',
+  fontWeight: active ? 700 : 600,
+  color: active ? 'var(--aisbp-tenant-nav-active-text, #0f62fe)' : 'var(--aisbp-nav-text, #64748b)',
+  background: active ? 'var(--aisbp-tenant-nav-active-bg, rgba(15, 98, 254, 0.08))' : 'transparent',
+  border: '1px solid',
+  borderColor: active ? 'rgba(15, 98, 254, 0.18)' : 'transparent',
 });
 
 function tenantNavLinkStyle(active: boolean): CSSProperties {
@@ -146,7 +159,9 @@ export function AppShell({ children }: { children: ReactNode }) {
     WebkitOverflowScrolling: 'touch' as const,
   };
 
-  const tenantNavItems = tenantIdFromPath ? buildTenantNavItems(tenantIdFromPath) : [];
+  const tenantNavNodes: TenantNavNode[] = tenantIdFromPath
+    ? buildTenantSidebarNav(tenantIdFromPath, { showAdvanced: Boolean(user?.agencyRole) })
+    : [];
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--aisbp-shell-bg, #f8fafc)' }}>
@@ -172,15 +187,52 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <WorkspaceSwitcher />
               </Suspense>
               <nav style={{ ...navStyle, marginTop: '1rem', flex: 1 }} aria-label="Client workspace">
-                {tenantNavItems.map(t => {
-                  const active = t.match(pathname);
+                {tenantNavNodes.map(node => {
+                  if (node.kind === 'leaf') {
+                    const active = node.match(pathname);
+                    return (
+                      <Link
+                        key={node.href}
+                        href={node.href}
+                        style={tenantNavLinkStyle(active)}
+                        aria-current={active ? 'page' : undefined}
+                      >
+                        <span style={{ display: 'flex', color: 'inherit', flexShrink: 0 }}>
+                          <TenantNavIcon icon={node.icon} />
+                        </span>
+                        <span>{node.label}</span>
+                      </Link>
+                    );
+                  }
+                  const groupActive = node.match(pathname);
                   return (
-                    <Link key={t.href} href={t.href} style={tenantNavLinkStyle(active)} aria-current={active ? 'page' : undefined}>
-                      <span style={{ display: 'flex', color: 'inherit', flexShrink: 0 }}>
-                        <TenantNavIcon icon={t.icon} />
-                      </span>
-                      <span>{t.label}</span>
-                    </Link>
+                    <div key={node.label} style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
+                      <Link
+                        href={node.overviewHref}
+                        style={tenantNavLinkStyle(groupActive)}
+                        aria-current={pathname === node.overviewHref || pathname === `${node.overviewHref}/` ? 'page' : undefined}
+                      >
+                        <span style={{ display: 'flex', color: 'inherit', flexShrink: 0 }}>
+                          <TenantNavIcon icon={node.icon} />
+                        </span>
+                        <span>{node.label}</span>
+                      </Link>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.08rem' }} role="group" aria-label={`${node.label} sections`}>
+                        {node.children.map(child => {
+                          const cActive = child.match(pathname);
+                          return (
+                            <Link
+                              key={child.href}
+                              href={child.href}
+                              style={tenantNavChildLinkStyle(cActive)}
+                              aria-current={cActive ? 'page' : undefined}
+                            >
+                              {child.label}
+                            </Link>
+                          );
+                        })}
+                      </div>
+                    </div>
                   );
                 })}
               </nav>

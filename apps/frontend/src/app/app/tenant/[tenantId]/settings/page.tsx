@@ -1,5 +1,5 @@
-import { TenantSettingsGeneralContent } from '@/components/app/tenant-workspace/TenantSettingsGeneralContent';
+import { redirect } from 'next/navigation';
 
-export default function TenantSettingsGeneralPage() {
-  return <TenantSettingsGeneralContent />;
+export default function LegacyTenantSettingsPage({ params }: { params: { tenantId: string } }) {
+  redirect(`/app/tenant/${params.tenantId}/control-panel`);
 }

@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import type { CSSProperties, ReactNode } from 'react';
+import { useAuth } from '@/contexts/AuthContext';
 import {
   ErrorBanner,
   LoadingBlock,
@@ -40,6 +41,8 @@ const statTile: CSSProperties = {
 
 export function TenantSettingsShell({ children }: { children: ReactNode }) {
   const pathname = usePathname() ?? '';
+  const { user } = useAuth();
+  const showWorkspaceAdvanced = Boolean(user?.agencyRole);
   const {
     base,
     loading,
@@ -53,9 +56,9 @@ export function TenantSettingsShell({ children }: { children: ReactNode }) {
     canRenameWorkspace,
   } = useTenantSettings();
 
-  const settingsRoot = `${base}/settings`;
-  const isGeneral = pathname === settingsRoot || pathname === `${settingsRoot}/`;
-  const isAdvanced = pathname.startsWith(`${settingsRoot}/advanced`);
+  const controlPanelRoot = `${base}/control-panel`;
+  const isGeneral = pathname === controlPanelRoot || pathname === `${controlPanelRoot}/`;
+  const isAdvanced = pathname.startsWith(`${controlPanelRoot}/advanced`);
 
   const aiShort = clientAiRepliesShortLabel(botMode);
   const assistantTile = assistantProfileSetupLabel(promptConfigSnap);
@@ -78,7 +81,7 @@ export function TenantSettingsShell({ children }: { children: ReactNode }) {
             margin: '0 0 0.35rem',
           }}
         >
-          Settings
+          Control panel
         </p>
         <h1
           style={{
@@ -89,7 +92,7 @@ export function TenantSettingsShell({ children }: { children: ReactNode }) {
             letterSpacing: '-0.03em',
           }}
         >
-          Workspace Settings
+          Workspace control panel
         </h1>
         <p
           style={{
@@ -157,11 +160,17 @@ export function TenantSettingsShell({ children }: { children: ReactNode }) {
                 </p>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem', alignItems: 'stretch', minWidth: '12rem' }}>
-                <Link href={`${base}/goals`} style={{ ...appFloatingPrimaryButtonStyle, textAlign: 'center' as const }}>
-                  Bot instructions
+                <Link
+                  href={`${base}/assistant`}
+                  style={{ ...appFloatingPrimaryButtonStyle, textAlign: 'center' as const }}
+                >
+                  Assistant
                 </Link>
-                <Link href={`${base}/knowledge`} style={{ ...appFloatingSecondaryButtonStyle, background: 'rgba(255,255,255,0.12)', borderColor: 'rgba(255,255,255,0.25)', color: '#f8fafc', boxShadow: 'none', textAlign: 'center' as const }}>
-                  Knowledge base
+                <Link
+                  href={`${base}/knowledge-vaults`}
+                  style={{ ...appFloatingSecondaryButtonStyle, background: 'rgba(255,255,255,0.12)', borderColor: 'rgba(255,255,255,0.25)', color: '#f8fafc', boxShadow: 'none', textAlign: 'center' as const }}
+                >
+                  Knowledge vaults
                 </Link>
                 <Link href={`${base}/ghl-status`} style={{ ...appFloatingSecondaryButtonStyle, background: 'rgba(255,255,255,0.12)', borderColor: 'rgba(255,255,255,0.25)', color: '#f8fafc', boxShadow: 'none', textAlign: 'center' as const }}>
                   CRM connection
@@ -199,13 +208,19 @@ export function TenantSettingsShell({ children }: { children: ReactNode }) {
             </div>
           </section>
 
-          <nav style={{ display: 'flex', flexWrap: 'wrap', gap: '0.45rem', marginBottom: '1.25rem' }} aria-label="Settings sections">
-            <Link href={settingsRoot} style={tabLinkStyle(isGeneral)} aria-current={isGeneral ? 'page' : undefined}>
+          <nav style={{ display: 'flex', flexWrap: 'wrap', gap: '0.45rem', marginBottom: '1.25rem' }} aria-label="Control panel sections">
+            <Link href={controlPanelRoot} style={tabLinkStyle(isGeneral)} aria-current={isGeneral ? 'page' : undefined}>
               General
             </Link>
-            <Link href={`${settingsRoot}/advanced`} style={tabLinkStyle(isAdvanced)} aria-current={isAdvanced ? 'page' : undefined}>
-              Advanced
-            </Link>
+            {showWorkspaceAdvanced ? (
+              <Link
+                href={`${controlPanelRoot}/advanced`}
+                style={tabLinkStyle(isAdvanced)}
+                aria-current={isAdvanced ? 'page' : undefined}
+              >
+                Advanced
+              </Link>
+            ) : null}
           </nav>
 
           {children}

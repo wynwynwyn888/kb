@@ -72,7 +72,7 @@ test('smoke: login, MVP routes, logout', async ({ page }) => {
   expect(tenantId, 'Set E2E_TENANT_ID or use an agency user with a tenant in the directory.').toBeTruthy();
 
   await page.goto(`/app/tenant/${tenantId}/prompt`);
-  await expect(page).toHaveURL(new RegExp(`/app/tenant/${tenantId}/goals`));
+  await expect(page).toHaveURL(new RegExp(`/app/tenant/${tenantId}/assistant`));
   await expect(page.getByRole('heading', { level: 1, name: 'Goals' })).toBeVisible({ timeout: 20_000 });
 
   await page.goto(`/app/tenant/${tenantId}/conversations`);
@@ -84,6 +84,6 @@ test('smoke: login, MVP routes, logout', async ({ page }) => {
   await page.getByRole('button', { name: 'Sign out' }).click();
   await expect(page).toHaveURL(/\/login/, { timeout: 15_000 });
 
-  await page.goto(`/app/tenant/${tenantId}/goals`);
+  await page.goto(`/app/tenant/${tenantId}/assistant`);
   await expect(page).toHaveURL(/\/login/, { timeout: 15_000 });
 });

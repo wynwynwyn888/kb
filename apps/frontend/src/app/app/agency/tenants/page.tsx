@@ -354,7 +354,7 @@ function TenantNameRow({
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', alignItems: 'flex-start' }}>
           <span style={{ fontWeight: 700, color: '#0f172a', fontSize: '0.95rem' }}>{t.name}</span>
           <Link
-            href={`/app/tenant/${t.id}/settings`}
+            href={`/app/tenant/${t.id}/control-panel`}
             style={{ fontSize: '0.78rem', fontWeight: 600, color: '#2563eb', textDecoration: 'none' }}
           >
             Rename in workspace settings →

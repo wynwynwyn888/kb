@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import type { ReactNode } from 'react';
+import { useAuth } from '@/contexts/AuthContext';
 import { isAdvancedPath, tenantBasePath } from '@/lib/tenant-workspace-nav';
 import type { CSSProperties } from 'react';
 
@@ -35,10 +36,12 @@ function advSubStyle(active: boolean): CSSProperties {
 export function TenantWorkspaceChrome({ tenantId, children }: { tenantId: string; children: ReactNode }) {
   const pathname = usePathname() ?? '';
   const base = tenantBasePath(tenantId);
+  const { user } = useAuth();
+  const showAdvancedChrome = Boolean(user?.agencyRole) && isAdvancedPath(pathname, tenantId);
 
   return (
     <div>
-      {isAdvancedPath(pathname, tenantId) ? (
+      {showAdvancedChrome ? (
         <nav style={advSubWrap} aria-label="Advanced tools">
           <Link
             href={`${base}/advanced`}

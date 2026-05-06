@@ -119,14 +119,14 @@ test.describe('B–C. Agency + tenant surfaces (logged-in)', () => {
     expect(tenantId, 'Need at least one tenant (seed) or E2E_TENANT_ID').toBeTruthy();
 
     await page.goto(`/app/tenant/${tenantId}`, { waitUntil: 'domcontentloaded' });
-    await expect(page).toHaveURL(new RegExp(`/app/tenant/${tenantId}/goals`));
-    await expect(page.getByRole('heading', { level: 1, name: 'Goals' })).toBeVisible({
+    await expect(page).toHaveURL(new RegExp(`/app/tenant/${tenantId}/assistant`));
+    await expect(page.getByRole('heading', { level: 1, name: 'Assistant' })).toBeVisible({
       timeout: 25_000,
     });
 
     await page.goto(`/app/tenant/${tenantId}/prompt`, { waitUntil: 'domcontentloaded' });
-    await expect(page).toHaveURL(new RegExp(`/app/tenant/${tenantId}/goals`));
-    await expect(page.getByRole('heading', { level: 1, name: 'Goals' })).toBeVisible({
+    await expect(page).toHaveURL(new RegExp(`/app/tenant/${tenantId}/assistant/instructions`));
+    await expect(page.getByRole('heading', { level: 1, name: /Assistant · Instructions/i })).toBeVisible({
       timeout: 25_000,
     });
 
@@ -140,8 +140,8 @@ test.describe('B–C. Agency + tenant surfaces (logged-in)', () => {
       timeout: 25_000,
     });
 
-    await page.goto(`/app/tenant/${tenantId}/knowledge`, { waitUntil: 'domcontentloaded' });
-    await expect(page.getByRole('heading', { level: 1, name: 'Knowledge' })).toBeVisible({
+    await page.goto(`/app/tenant/${tenantId}/knowledge-vaults`, { waitUntil: 'domcontentloaded' });
+    await expect(page.getByRole('heading', { level: 1, name: 'Knowledge Vaults' })).toBeVisible({
       timeout: 25_000,
     });
 
@@ -162,8 +162,8 @@ test.describe('Persistence spot-check (tenant prompt — own login, isolated)', 
     await loginAsAgency(page);
     const tenantId = await firstTenantIdFromDirectory(page);
     await page.goto(`/app/tenant/${tenantId}/prompt`, { waitUntil: 'domcontentloaded' });
-    await expect(page).toHaveURL(new RegExp(`/app/tenant/${tenantId}/goals`));
-    await expect(page.getByRole('heading', { level: 1, name: 'Goals' })).toBeVisible({
+    await expect(page).toHaveURL(new RegExp(`/app/tenant/${tenantId}/assistant/instructions`));
+    await expect(page.getByRole('heading', { level: 1, name: /Assistant · Instructions/i })).toBeVisible({
       timeout: 25_000,
     });
     const promptBox = page.getByLabel(/System prompt/i);
@@ -176,7 +176,7 @@ test.describe('Persistence spot-check (tenant prompt — own login, isolated)', 
       .getByRole('button', { name: 'Save' })
       .click();
     await expect(page.getByText(/Prompt saved\./)).toBeVisible({ timeout: 20_000 });
-    await page.goto(`/app/tenant/${tenantId}/goals`, { waitUntil: 'domcontentloaded' });
+    await page.goto(`/app/tenant/${tenantId}/assistant/instructions`, { waitUntil: 'domcontentloaded' });
     await expect(page.getByLabel(/System prompt/i)).toContainText('[e2e-qa', { timeout: 25_000 });
   });
 });

@@ -197,7 +197,7 @@ describe('HumanEscalationHoldingReplyService', () => {
     expect(sendBubbleAdd).not.toHaveBeenCalled();
   });
 
-  it('waiting-time reply can override generic cooldown once', async () => {
+  it('default → waiting_time inside cooldown is allowed', async () => {
     const recent = new Date(Date.now() - 30_000).toISOString();
     metadata = {
       humanEscalationInternalAlertSentAt: new Date(Date.now() - 11 * 60 * 1000).toISOString(),
@@ -232,6 +232,210 @@ describe('HumanEscalationHoldingReplyService', () => {
         replyPlanJson: expect.stringContaining('sorry for the wait'),
       }),
     );
+  });
+
+  it('extra_context → waiting_time inside cooldown is allowed', async () => {
+    const recent = new Date(Date.now() - 30_000).toISOString();
+    metadata = {
+      humanEscalationInternalAlertSentAt: new Date(Date.now() - 11 * 60 * 1000).toISOString(),
+      humanEscalationLastHoldingReplySentAt: recent,
+      humanEscalationLastHoldingReplyType: 'extra_context',
+      humanEscalationLastHoldingReplyText:
+        'Thank you for sharing that. I’ll pass this to the team so they have the full context when they take over.',
+    };
+    handoverReply.classifyAndCompose.mockResolvedValueOnce({
+      selectedType: 'waiting_time',
+      replyText:
+        'I’m sorry for the wait. Your request has been sent to the team, and they’ll attend to you as soon as they’re available.',
+      confidence: 0.95,
+      aiReason: 'waiting',
+      usedFallback: false,
+    });
+    const svc = new HumanEscalationHoldingReplyService(
+      { add: sendBubbleAdd } as never,
+      runtime as never,
+      handoverReply as never,
+    );
+    await svc.tryEnqueueHoldingReply({
+      tenantId: 't1',
+      conversationId: 'c1',
+      locationId: 'loc',
+      ghlContactId: 'ct1',
+      latestInboundText: 'btw may i know how long?',
+    });
+    expect(sendBubbleAdd).toHaveBeenCalledWith(
+      'send-bubble',
+      expect.objectContaining({
+        replyPlanJson: expect.stringContaining('sorry for the wait'),
+      }),
+    );
+  });
+
+  it('waiting_time → extra_context inside cooldown is allowed', async () => {
+    const recent = new Date(Date.now() - 30_000).toISOString();
+    metadata = {
+      humanEscalationInternalAlertSentAt: new Date(Date.now() - 11 * 60 * 1000).toISOString(),
+      humanEscalationLastHoldingReplySentAt: recent,
+      humanEscalationLastHoldingReplyType: 'waiting_time',
+      humanEscalationLastHoldingReplyText:
+        'I’m sorry for the wait. Your request has been sent to the team, and they’ll attend to you as soon as they’re available.',
+    };
+    handoverReply.classifyAndCompose.mockResolvedValueOnce({
+      selectedType: 'extra_context',
+      replyText:
+        'Thank you for sharing that. I’ll pass this to the team so they have the full context when they take over.',
+      confidence: 0.9,
+      aiReason: 'context',
+      usedFallback: false,
+    });
+    const svc = new HumanEscalationHoldingReplyService(
+      { add: sendBubbleAdd } as never,
+      runtime as never,
+      handoverReply as never,
+    );
+    await svc.tryEnqueueHoldingReply({
+      tenantId: 't1',
+      conversationId: 'c1',
+      locationId: 'loc',
+      ghlContactId: 'ct1',
+      latestInboundText: 'more details…',
+    });
+    expect(sendBubbleAdd).toHaveBeenCalledWith(
+      'send-bubble',
+      expect.objectContaining({
+        replyPlanJson: expect.stringContaining('pass this to the team'),
+      }),
+    );
+  });
+
+  it('same waiting_time within cooldown is suppressed', async () => {
+    const recent = new Date(Date.now() - 30_000).toISOString();
+    metadata = {
+      humanEscalationInternalAlertSentAt: new Date(Date.now() - 11 * 60 * 1000).toISOString(),
+      humanEscalationLastHoldingReplySentAt: recent,
+      humanEscalationLastHoldingReplyType: 'waiting_time',
+      humanEscalationLastHoldingReplyText:
+        'I’m sorry for the wait. Your request has been sent to the team, and they’ll attend to you as soon as they’re available.',
+    };
+    handoverReply.classifyAndCompose.mockResolvedValueOnce({
+      selectedType: 'waiting_time',
+      replyText:
+        'I’m sorry for the wait. Your request has been sent to the team, and they’ll attend to you as soon as they’re available.',
+      confidence: 0.95,
+      aiReason: 'waiting',
+      usedFallback: false,
+    });
+    const svc = new HumanEscalationHoldingReplyService(
+      { add: sendBubbleAdd } as never,
+      runtime as never,
+      handoverReply as never,
+    );
+    await svc.tryEnqueueHoldingReply({
+      tenantId: 't1',
+      conversationId: 'c1',
+      locationId: 'loc',
+      ghlContactId: 'ct1',
+      latestInboundText: 'when?',
+    });
+    expect(sendBubbleAdd).not.toHaveBeenCalled();
+  });
+
+  it('same extra_context within cooldown is suppressed', async () => {
+    const recent = new Date(Date.now() - 30_000).toISOString();
+    metadata = {
+      humanEscalationInternalAlertSentAt: new Date(Date.now() - 11 * 60 * 1000).toISOString(),
+      humanEscalationLastHoldingReplySentAt: recent,
+      humanEscalationLastHoldingReplyType: 'extra_context',
+      humanEscalationLastHoldingReplyText:
+        'Thank you for sharing that. I’ll pass this to the team so they have the full context when they take over.',
+    };
+    handoverReply.classifyAndCompose.mockResolvedValueOnce({
+      selectedType: 'extra_context',
+      replyText:
+        'Thank you for sharing that. I’ll pass this to the team so they have the full context when they take over.',
+      confidence: 0.9,
+      aiReason: 'context',
+      usedFallback: false,
+    });
+    const svc = new HumanEscalationHoldingReplyService(
+      { add: sendBubbleAdd } as never,
+      runtime as never,
+      handoverReply as never,
+    );
+    await svc.tryEnqueueHoldingReply({
+      tenantId: 't1',
+      conversationId: 'c1',
+      locationId: 'loc',
+      ghlContactId: 'ct1',
+      latestInboundText: 'more details',
+    });
+    expect(sendBubbleAdd).not.toHaveBeenCalled();
+  });
+
+  it('frustration after non-frustration inside cooldown is allowed', async () => {
+    const recent = new Date(Date.now() - 30_000).toISOString();
+    metadata = {
+      humanEscalationInternalAlertSentAt: new Date(Date.now() - 11 * 60 * 1000).toISOString(),
+      humanEscalationLastHoldingReplySentAt: recent,
+      humanEscalationLastHoldingReplyType: 'extra_context',
+      humanEscalationLastHoldingReplyText:
+        'Thank you for sharing that. I’ll pass this to the team so they have the full context when they take over.',
+    };
+    handoverReply.classifyAndCompose.mockResolvedValueOnce({
+      selectedType: 'frustration',
+      replyText:
+        'I understand this is frustrating. I’ve already flagged this for the team, and they’ll attend to you as soon as they’re available.',
+      confidence: 0.9,
+      aiReason: 'frustration',
+      usedFallback: false,
+    });
+    const svc = new HumanEscalationHoldingReplyService(
+      { add: sendBubbleAdd } as never,
+      runtime as never,
+      handoverReply as never,
+    );
+    await svc.tryEnqueueHoldingReply({
+      tenantId: 't1',
+      conversationId: 'c1',
+      locationId: 'loc',
+      ghlContactId: 'ct1',
+      latestInboundText: 'this is ridiculous',
+    });
+    expect(sendBubbleAdd).toHaveBeenCalled();
+  });
+
+  it('near-duplicate only suppresses if same type', async () => {
+    const recent = new Date(Date.now() - 30_000).toISOString();
+    metadata = {
+      humanEscalationInternalAlertSentAt: new Date(Date.now() - 11 * 60 * 1000).toISOString(),
+      humanEscalationLastHoldingReplySentAt: recent,
+      humanEscalationLastHoldingReplyType: 'waiting_time',
+      humanEscalationLastHoldingReplyText:
+        'I’m sorry for the wait. Your request has been sent to the team, and they’ll attend to you as soon as they’re available.',
+    };
+
+    // Different type, similar-ish text should still be allowed now.
+    handoverReply.classifyAndCompose.mockResolvedValueOnce({
+      selectedType: 'extra_context',
+      replyText:
+        'I’m sorry for the wait. Your request has been sent to the team, and they’ll attend to you as soon as they’re available.',
+      confidence: 0.9,
+      aiReason: 'test',
+      usedFallback: false,
+    });
+    const svc = new HumanEscalationHoldingReplyService(
+      { add: sendBubbleAdd } as never,
+      runtime as never,
+      handoverReply as never,
+    );
+    await svc.tryEnqueueHoldingReply({
+      tenantId: 't1',
+      conversationId: 'c1',
+      locationId: 'loc',
+      ghlContactId: 'ct1',
+      latestInboundText: 'extra context',
+    });
+    expect(sendBubbleAdd).toHaveBeenCalled();
   });
 
   it('does not enqueue in suggestive mode', async () => {

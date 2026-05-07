@@ -98,15 +98,12 @@ export class HumanEscalationHoldingReplyService {
     const text = ai.replyText;
 
     // Base cooldown: suppress repeated replies within 2 minutes.
-    // Exception: allow a waiting-time reply after a default reply, even within cooldown, unless
-    // we already sent a waiting-time reply recently (avoid spamming identical messages).
     if (elapsed !== null && elapsed < HOLDING_REPLY_BASE_COOLDOWN_MS) {
       const sameType = Boolean(lastType && selected === lastType);
-      const defaultToOther =
-        lastType === 'default' && (selected === 'waiting_time' || selected === 'extra_context' || selected === 'frustration');
-      const nearDup = lastText ? isNearDuplicate(lastText, text) : false;
+      const nearDup = sameType && lastText ? isNearDuplicate(lastText, text) : false;
 
-      if (sameType || (!defaultToOther && elapsed < HOLDING_REPLY_BASE_COOLDOWN_MS) || nearDup) {
+      // Rule: suppress identical type within cooldown (plus near-duplicate only when type is same).
+      if (sameType || nearDup) {
         const waitSec = Math.ceil((HOLDING_REPLY_BASE_COOLDOWN_MS - elapsed) / 1000);
         this.logger.log(
           `humanEscalationHoldingReplySuppressed ${JSON.stringify({
@@ -115,11 +112,23 @@ export class HumanEscalationHoldingReplyService {
             holdingReplyType: selected,
             lastHoldingReplyType: lastType ?? null,
             cooldownRemainingSec: waitSec,
-            reason: sameType ? 'same_type_within_cooldown' : nearDup ? 'near_duplicate_within_cooldown' : 'cooldown',
+            reason: sameType ? 'same_type_within_cooldown' : 'near_duplicate_within_cooldown',
           })}`,
         );
         return;
       }
+
+      // Rule: frustration is always allowed once inside cooldown unless last was frustration.
+      // Rule: semantic type change is allowed inside cooldown.
+      this.logger.log(
+        `humanEscalationHoldingReplyCooldownBypassed ${JSON.stringify({
+          tenantId,
+          conversationId,
+          fromType: lastType ?? null,
+          toType: selected,
+          reason: selected === 'frustration' ? 'frustration_allowed' : 'semantic_type_changed',
+        })}`,
+      );
     }
 
     const plan: ReplyDecision = {

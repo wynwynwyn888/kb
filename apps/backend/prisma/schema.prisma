@@ -115,6 +115,7 @@ model Tenant {
   taggingSettings    TenantTaggingSettings?
   tagRules           TenantTagRule[]
   followUpSettings   TenantFollowUpSettings?
+  humanEscalationSettings TenantHumanEscalationSettings?
   botProfiles        TenantBotProfile[]
   knowledgeVaults  KnowledgeVault[]
 
@@ -222,6 +223,20 @@ model TenantFollowUpSettings {
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@map("tenant_follow_up_settings")
+}
+
+/// Human escalation: internal team notify + runtime handover when customer asks for a person.
+model TenantHumanEscalationSettings {
+  tenantId                 String   @id @map("tenant_id")
+  enabled                  Boolean  @default(false)
+  teamNotificationNumber   String?  @map("team_notification_number")
+  optionalMessagePrefix    String?  @map("optional_message_prefix")
+  createdAt                DateTime @default(now()) @map("created_at")
+  updatedAt                DateTime @updatedAt @map("updated_at")
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("tenant_human_escalation_settings")
 }
 
 /// Per-conversation scheduled follow-up jobs (worker-driven).

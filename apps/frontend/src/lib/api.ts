@@ -472,7 +472,6 @@ export interface TenantFollowUpSettings {
   enabled: boolean;
   maxFollowUps: number;
   stopOnCustomerReply: boolean;
-  stopOnBookingCompleted: boolean;
   stopOnEscalated: boolean;
   stopOnOptOut: boolean;
   businessHoursOnly: boolean;
@@ -794,6 +793,31 @@ export async function patchTenantFollowUpSettings(
   patch: Partial<TenantFollowUpSettings>,
 ): Promise<TenantFollowUpSettings> {
   return apiRequest(`/tenants/${tenantId}/follow-up-settings`, {
+    token,
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  });
+}
+
+export interface TenantHumanEscalationSettings {
+  enabled: boolean;
+  teamNotificationNumber: string | null;
+  optionalMessagePrefix: string | null;
+}
+
+export async function getTenantHumanEscalationSettings(
+  token: string,
+  tenantId: string,
+): Promise<TenantHumanEscalationSettings> {
+  return apiRequest(`/tenants/${tenantId}/human-escalation-settings`, { token });
+}
+
+export async function patchTenantHumanEscalationSettings(
+  token: string,
+  tenantId: string,
+  patch: Partial<TenantHumanEscalationSettings>,
+): Promise<TenantHumanEscalationSettings> {
+  return apiRequest(`/tenants/${tenantId}/human-escalation-settings`, {
     token,
     method: 'PATCH',
     body: JSON.stringify(patch),

@@ -59,6 +59,7 @@ import {
 } from '../../lib/outbound-safety-governor';
 import { ConversationBookingFlowService } from '../booking-flow/conversation-booking-flow.service';
 import { BookingSettingsService } from '../booking-settings/booking-settings.service';
+import { HumanEscalationRuntimeService } from '../human-escalation/human-escalation-runtime.service';
 import { BotProfilesService } from '../prompts/bot-profiles.service';
 import {
   compactPersonaPolicyForGeneration,
@@ -82,6 +83,7 @@ export class ConversationOrchestrationService {
     private readonly bookingFlow: ConversationBookingFlowService,
     private readonly bookingSettings: BookingSettingsService,
     private readonly botProfiles: BotProfilesService,
+    private readonly humanEscalationRuntime: HumanEscalationRuntimeService,
   ) {}
 
   /**
@@ -301,6 +303,87 @@ export class ConversationOrchestrationService {
           guards: guardOutcome,
           routing: routingComplaint,
           replyPlan: complaintReplyPlan,
+          logId,
+        };
+      }
+
+      if (routingIntent === 'HUMAN_HANDOVER') {
+        try {
+          await this.humanEscalationRuntime.onHumanHandoverIntent({
+            tenantId: input.tenantId,
+            tenantDisplayName: input.tenant?.name,
+            conversationId,
+            contactId: input.conversation?.contactId ?? null,
+            latestInboundMessage: latestMsg,
+            memoryEntries: memory.entries,
+            contactPhone: input.incomingMessage.contactPhone ?? null,
+            contactDisplayName: input.incomingMessage.contactDisplayName ?? null,
+          });
+        } catch (e) {
+          this.logger.warn(
+            `humanEscalationRuntimeFailed ${JSON.stringify({
+              conversationId,
+              message: e instanceof Error ? e.message : String(e),
+            })}`,
+          );
+        }
+
+        const policyOutcomeHuman = this.conversationPolicy.evaluate({
+          intent: routingIntent,
+          incomingRaw: latestMsg,
+          memory: memory.entries,
+          policyState: policyStatePre,
+          kbChunksRanked: [],
+          tenantDisplayName: input.tenant?.name,
+          promptConfigUpdatedAtIso: input.promptConfig?.updatedAt ?? null,
+          kbDocumentUpdatedAtIso: null,
+          currentTenantId: input.tenantId ?? null,
+        });
+
+        await this.persistConversationPolicyMetadata(
+          conversationId,
+          (input.conversation?.metadata as Record<string, unknown>) ?? {},
+          policyOutcomeHuman.nextPolicyState,
+        );
+
+        const humanReplyPlan: ReplyDecision = {
+          planStatus: 'HANDOVER',
+          responseMode: 'handover',
+          handoverRecommended: true,
+          confidence: 0.95,
+          rationale: 'human_request:HUMAN_HANDOVER',
+          bubbles: [],
+          suggestedActions: [],
+          draftProvenance: 'human_escalation',
+        };
+
+        const routingHuman: RoutingResponse = {
+          recommendedModel: 'n/a',
+          responseMode: 'handover',
+          draftReply: null,
+          handoverRecommended: true,
+          bookingIntentDetected: false,
+          tagsSuggested: [],
+          confidence: 1,
+          reasoning: 'human_handover_short_circuit',
+        };
+
+        const logId = await this.persistOrchestrationLog(
+          input,
+          guardOutcome,
+          routingHuman,
+          null,
+          humanReplyPlan,
+        );
+
+        return {
+          success: true,
+          outcome: 'PROCEED',
+          conversationId,
+          webhookEventId,
+          guards: guardOutcome,
+          routing: routingHuman,
+          replyPlan: humanReplyPlan,
           logId,
         };
       }

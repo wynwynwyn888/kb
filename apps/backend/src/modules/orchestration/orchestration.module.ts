@@ -14,6 +14,7 @@ import { BookingFlowModule } from '../booking-flow/booking-flow.module';
 import { BookingSettingsModule } from '../booking-settings/booking-settings.module';
 
 import { PromptsModule } from '../prompts/prompts.module';
+import { HumanEscalationModule } from '../human-escalation/human-escalation.module';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { PromptsModule } from '../prompts/prompts.module';
     BookingFlowModule,
     BookingSettingsModule,
     PromptsModule,
+    HumanEscalationModule,
   ],
   providers: [
     ConversationOrchestrationService,

@@ -260,6 +260,35 @@ export class FollowUpEngineService {
     );
   }
 
+  /**
+   * When the conversation is escalated to humans, invalidate pending follow-up work and mark rows skipped.
+   */
+  async cancelPendingJobsForHumanEscalation(params: { tenantId: string; conversationId: string }): Promise<void> {
+    const { tenantId, conversationId } = params;
+    const scheduleVersion = await this.bumpFollowUpScheduleVersion(conversationId, 'human_escalated');
+    const { error } = await this.supabase
+      .from('conversation_follow_up_jobs')
+      .update({
+        status: 'SKIPPED',
+        decided_at: new Date().toISOString(),
+        decision_reason: 'human_escalated',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('conversation_id', conversationId)
+      .eq('status', 'PENDING');
+    if (error) {
+      this.logger.warn(`followUpSkipMarkFailed ${JSON.stringify({ conversationId, err: error.message })}`);
+    }
+    this.logger.log(
+      `followUpSkipped ${JSON.stringify({
+        tenantId,
+        conversationId,
+        reason: 'human_escalated',
+        scheduleVersion,
+      })}`,
+    );
+  }
+
   async processFollowUpJob(followUpJobId: string): Promise<void> {
     const { data: row, error } = await this.supabase
       .from('conversation_follow_up_jobs')
@@ -299,16 +328,9 @@ export class FollowUpEngineService {
       const inHandover = await this.conversations.isInHandover(conversationId);
       if (inHandover) {
         await this.markJobSkipped(followUpJobId, 'handover_active');
-        this.logger.log(`followUpBlocked ${JSON.stringify({ tenantId, conversationId, followUpJobId, reason: 'handover_active' })}`);
-        return;
-      }
-    }
-
-    if (settings.stopOnBookingCompleted) {
-      const bookingDone = await this.isBookingCompleted(conversationId);
-      if (bookingDone) {
-        await this.markJobSkipped(followUpJobId, 'booking_completed');
-        this.logger.log(`followUpBlocked ${JSON.stringify({ tenantId, conversationId, followUpJobId, reason: 'booking_completed' })}`);
+        this.logger.log(
+          `followUpSkipped ${JSON.stringify({ tenantId, conversationId, followUpJobId, reason: 'handover_active' })}`,
+        );
         return;
       }
     }
@@ -317,7 +339,9 @@ export class FollowUpEngineService {
       const opted = await this.isConversationOptedOut(conversationId);
       if (opted) {
         await this.markJobSkipped(followUpJobId, 'opted_out');
-        this.logger.log(`followUpBlocked ${JSON.stringify({ tenantId, conversationId, followUpJobId, reason: 'opted_out' })}`);
+        this.logger.log(
+          `followUpSkipped ${JSON.stringify({ tenantId, conversationId, followUpJobId, reason: 'opted_out' })}`,
+        );
         return;
       }
     }
@@ -326,7 +350,9 @@ export class FollowUpEngineService {
       const replied = await this.hasInboundAfter(conversationId, scheduledAtIso);
       if (replied) {
         await this.markJobSkipped(followUpJobId, 'customer_replied_after_scheduled');
-        this.logger.log(`followUpBlocked ${JSON.stringify({ tenantId, conversationId, followUpJobId, reason: 'customer_replied' })}`);
+        this.logger.log(
+          `followUpSkipped ${JSON.stringify({ tenantId, conversationId, followUpJobId, reason: 'customer_replied' })}`,
+        );
         return;
       }
     }
@@ -347,7 +373,9 @@ export class FollowUpEngineService {
         const nextUtcMs = this.computeNextActiveWindowUtcMs(settings.activeHoursWindows, tenantTz, snapNow);
         if (!nextUtcMs) {
           await this.markJobSkipped(followUpJobId, 'no_active_windows_configured');
-          this.logger.log(`followUpBlocked ${JSON.stringify({ tenantId, conversationId, followUpJobId, reason: 'no_active_windows' })}`);
+          this.logger.log(
+            `followUpSkipped ${JSON.stringify({ tenantId, conversationId, followUpJobId, reason: 'no_active_windows' })}`,
+          );
           return;
         }
         const nextIso = new Date(nextUtcMs).toISOString();
@@ -526,27 +554,6 @@ export class FollowUpEngineService {
       .limit(1);
     if (error) return false;
     return Array.isArray(data) && data.length > 0;
-  }
-
-  private async isBookingCompleted(conversationId: string): Promise<boolean> {
-    const { data } = await this.supabase.from('conversations').select('metadata').eq('id', conversationId).maybeSingle();
-    const meta = data?.metadata;
-    const o = meta && typeof meta === 'object' && !Array.isArray(meta) ? (meta as Record<string, unknown>) : {};
-    const booking = o['aisbp_booking'];
-    if (booking && typeof booking === 'object' && !Array.isArray(booking)) {
-      const st = (booking as Record<string, unknown>)['status'];
-      if (st === 'confirmed') return true;
-    }
-    // Backup: executed booking intent
-    const { data: intents } = await this.supabase
-      .from('action_intents')
-      .select('id')
-      .eq('conversation_id', conversationId)
-      .eq('action_type', 'UPDATE_CALENDAR')
-      .eq('status', 'EXECUTED')
-      .contains('params', { bookSlotIntent: true })
-      .limit(1);
-    return Array.isArray(intents) && intents.length > 0;
   }
 
   private isWithinActiveHours(windows: Record<string, { enabled: boolean; start: string; end: string }>, timeZone: string, at: Date): boolean {

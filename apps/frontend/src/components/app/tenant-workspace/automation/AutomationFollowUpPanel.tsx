@@ -223,14 +223,6 @@ export function AutomationFollowUpPanel() {
               <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
                 <input
                   type="checkbox"
-                  checked={followUp.stopOnBookingCompleted}
-                  onChange={e => setFollowUp({ ...followUp, stopOnBookingCompleted: e.target.checked })}
-                />
-                Booking completed
-              </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                <input
-                  type="checkbox"
                   checked={followUp.stopOnEscalated}
                   onChange={e => setFollowUp({ ...followUp, stopOnEscalated: e.target.checked })}
                 />

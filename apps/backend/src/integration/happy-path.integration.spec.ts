@@ -162,6 +162,9 @@ describe('InboundMessageProcessor (happy path)', () => {
         reason: 'disabled',
       })),
     };
+    const mockFollowUpEngine = {
+      noteInboundFromContact: jestGlobal.fn(async () => {}),
+    };
     processor = new InboundMessageProcessor(
       new OrchestrationService(),
       mockReset as never,
@@ -170,6 +173,7 @@ describe('InboundMessageProcessor (happy path)', () => {
       mockGhlRecordingFetch as never,
       mockGhlVoiceDiscovery as never,
       mockGhlConversationDiscovery as never,
+      mockFollowUpEngine as never,
       { add: mockQueueAdd } as never,
       { add: mockQueueAdd } as never,
     );

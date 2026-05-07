@@ -39,7 +39,7 @@ const DEFAULT: TenantFollowUpSettingsDto = {
   enabled: false,
   maxFollowUps: 3,
   stopOnCustomerReply: true,
-  stopOnBookingCompleted: true,
+  stopOnBookingCompleted: false,
   stopOnEscalated: true,
   stopOnOptOut: true,
   businessHoursOnly: false,
@@ -85,7 +85,8 @@ function rowToDto(row: Record<string, unknown>): TenantFollowUpSettingsDto {
     enabled: Boolean(row['enabled']),
     maxFollowUps: Number.isFinite(mf) ? Math.min(10, Math.max(1, Math.floor(mf))) : 3,
     stopOnCustomerReply: Boolean(row['stop_on_customer_reply']),
-    stopOnBookingCompleted: Boolean(row['stop_on_booking_completed']),
+    /** Legacy column ignored at runtime — always false for API consumers. */
+    stopOnBookingCompleted: false,
     stopOnEscalated: Boolean(row['stop_on_escalated']),
     stopOnOptOut: Boolean(row['stop_on_opt_out']),
     businessHoursOnly: Boolean(row['business_hours_only']),
@@ -130,8 +131,6 @@ export class FollowUpSettingsService {
 
     const stopOnCustomerReply =
       o['stopOnCustomerReply'] !== undefined ? Boolean(o['stopOnCustomerReply']) : current.stopOnCustomerReply;
-    const stopOnBookingCompleted =
-      o['stopOnBookingCompleted'] !== undefined ? Boolean(o['stopOnBookingCompleted']) : current.stopOnBookingCompleted;
     const stopOnEscalated = o['stopOnEscalated'] !== undefined ? Boolean(o['stopOnEscalated']) : current.stopOnEscalated;
     const stopOnOptOut = o['stopOnOptOut'] !== undefined ? Boolean(o['stopOnOptOut']) : current.stopOnOptOut;
     const businessHoursOnly =
@@ -170,7 +169,7 @@ export class FollowUpSettingsService {
       enabled,
       max_follow_ups: maxFollowUps,
       stop_on_customer_reply: stopOnCustomerReply,
-      stop_on_booking_completed: stopOnBookingCompleted,
+      stop_on_booking_completed: false,
       stop_on_escalated: stopOnEscalated,
       stop_on_opt_out: stopOnOptOut,
       business_hours_only: businessHoursOnly,

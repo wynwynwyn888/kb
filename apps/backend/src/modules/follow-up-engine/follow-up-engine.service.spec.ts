@@ -280,7 +280,6 @@ describe('FollowUpEngineService.processFollowUpJob', () => {
     (engine as any).getConversationFollowUpScheduleVersion = jestGlobal.fn(async () => 1);
     (engine as any).resolveTenantTimeZone = jestGlobal.fn(async () => 'Asia/Singapore');
     (engine as any).hasInboundAfter = jestGlobal.fn(async () => false);
-    (engine as any).isBookingCompleted = jestGlobal.fn(async () => false);
     (engine as any).isConversationOptedOut = jestGlobal.fn(async () => false);
 
     followUpSettings.getFollowUpSettings.mockResolvedValueOnce({
@@ -344,9 +343,6 @@ describe('FollowUpEngineService.processFollowUpJob', () => {
       if (table === 'messages') {
         return { select: () => ({ eq: () => ({ eq: () => ({ order: () => ({ limit: () => ({ maybeSingle: async () => ({ data: null, error: null }) }) }) }) }) }) };
       }
-      if (table === 'action_intents') {
-        return { select: () => ({ eq: () => ({ eq: () => ({ eq: () => ({ contains: () => ({ order: () => ({ limit: async () => ({ data: [], error: null }) }) }) }) }) }) }) };
-      }
       throw new Error(`unexpected table ${table}`);
     });
 
@@ -358,6 +354,32 @@ describe('FollowUpEngineService.processFollowUpJob', () => {
         replyPlan: expect.objectContaining({
           bubbles: [{ index: 0, text: 'governed' }],
         }),
+      }),
+    );
+  });
+
+  it('cancelPendingJobsForHumanEscalation bumps schedule and marks pending jobs skipped', async () => {
+    const engine = makeEngine();
+    (engine as any).bumpFollowUpScheduleVersion = jestGlobal.fn(async () => 7);
+    const jobUpdate = jestGlobal.fn().mockReturnValue({
+      eq: jestGlobal.fn().mockReturnValue({
+        eq: async () => ({ error: null }),
+      }),
+    });
+    mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'conversation_follow_up_jobs') {
+        return { update: jobUpdate };
+      }
+      throw new Error(`unexpected table ${table}`);
+    });
+
+    await engine.cancelPendingJobsForHumanEscalation({ tenantId: 't1', conversationId: 'c1' });
+
+    expect((engine as any).bumpFollowUpScheduleVersion).toHaveBeenCalledWith('c1', 'human_escalated');
+    expect(jobUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'SKIPPED',
+        decision_reason: 'human_escalated',
       }),
     );
   });

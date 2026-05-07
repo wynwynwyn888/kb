@@ -15,6 +15,15 @@ describe('HumanEscalationHoldingReplyService', () => {
   const runtime = {
     sendInternalUpdateDuringActiveHandover: jestGlobal.fn(async () => 'sent' as const),
   };
+  const handoverReply = {
+    classifyAndCompose: jestGlobal.fn(async () => ({
+      selectedType: 'default' as const,
+      replyText: 'Your request has already been sent to the team. They’ll attend to you as soon as they’re available.',
+      confidence: 0.9,
+      aiReason: 'test',
+      usedFallback: false,
+    })),
+  };
 
   let metadata: Record<string, unknown> = {};
 
@@ -45,7 +54,11 @@ describe('HumanEscalationHoldingReplyService', () => {
     metadata = {
       humanEscalationInternalAlertSentAt: new Date(Date.now() - 11 * 60 * 1000).toISOString(),
     };
-    const svc = new HumanEscalationHoldingReplyService({ add: sendBubbleAdd } as never, runtime as never);
+    const svc = new HumanEscalationHoldingReplyService(
+      { add: sendBubbleAdd } as never,
+      runtime as never,
+      handoverReply as never,
+    );
     await svc.tryEnqueueHoldingReply({
       tenantId: 't1',
       conversationId: 'c1',
@@ -59,7 +72,7 @@ describe('HumanEscalationHoldingReplyService', () => {
       expect.objectContaining({
         conversationId: 'c1',
         tenantId: 't1',
-        replyPlanJson: expect.stringContaining('A team member has been notified'),
+        replyPlanJson: expect.stringContaining('sent to the team'),
       }),
     );
   });
@@ -68,7 +81,19 @@ describe('HumanEscalationHoldingReplyService', () => {
     metadata = {
       humanEscalationInternalAlertSentAt: new Date(Date.now() - 11 * 60 * 1000).toISOString(),
     };
-    const svc = new HumanEscalationHoldingReplyService({ add: sendBubbleAdd } as never, runtime as never);
+    handoverReply.classifyAndCompose.mockResolvedValueOnce({
+      selectedType: 'waiting_time',
+      replyText:
+        'I’m sorry for the wait. Your request has been sent to the team, and they’ll attend to you as soon as they’re available.',
+      confidence: 0.9,
+      aiReason: 'waiting',
+      usedFallback: false,
+    });
+    const svc = new HumanEscalationHoldingReplyService(
+      { add: sendBubbleAdd } as never,
+      runtime as never,
+      handoverReply as never,
+    );
     await svc.tryEnqueueHoldingReply({
       tenantId: 't1',
       conversationId: 'c1',
@@ -79,7 +104,7 @@ describe('HumanEscalationHoldingReplyService', () => {
     expect(sendBubbleAdd).toHaveBeenCalledWith(
       'send-bubble',
       expect.objectContaining({
-        replyPlanJson: expect.stringContaining("I'm sorry for the wait"),
+        replyPlanJson: expect.stringContaining('sorry for the wait'),
       }),
     );
   });
@@ -88,7 +113,19 @@ describe('HumanEscalationHoldingReplyService', () => {
     metadata = {
       humanEscalationInternalAlertSentAt: new Date(Date.now() - 11 * 60 * 1000).toISOString(),
     };
-    const svc = new HumanEscalationHoldingReplyService({ add: sendBubbleAdd } as never, runtime as never);
+    handoverReply.classifyAndCompose.mockResolvedValueOnce({
+      selectedType: 'waiting_time',
+      replyText:
+        'I’m sorry for the wait. Your request has been sent to the team, and they’ll attend to you as soon as they’re available.',
+      confidence: 0.9,
+      aiReason: 'waiting',
+      usedFallback: false,
+    });
+    const svc = new HumanEscalationHoldingReplyService(
+      { add: sendBubbleAdd } as never,
+      runtime as never,
+      handoverReply as never,
+    );
     await svc.tryEnqueueHoldingReply({
       tenantId: 't1',
       conversationId: 'c1',
@@ -99,7 +136,7 @@ describe('HumanEscalationHoldingReplyService', () => {
     expect(sendBubbleAdd).toHaveBeenCalledWith(
       'send-bubble',
       expect.objectContaining({
-        replyPlanJson: expect.stringContaining("I'm sorry for the wait"),
+        replyPlanJson: expect.stringContaining('sorry for the wait'),
       }),
     );
   });
@@ -108,7 +145,19 @@ describe('HumanEscalationHoldingReplyService', () => {
     metadata = {
       humanEscalationInternalAlertSentAt: new Date(Date.now() - 11 * 60 * 1000).toISOString(),
     };
-    const svc = new HumanEscalationHoldingReplyService({ add: sendBubbleAdd } as never, runtime as never);
+    handoverReply.classifyAndCompose.mockResolvedValueOnce({
+      selectedType: 'extra_context',
+      replyText:
+        'Thank you for sharing that. I’ll pass this to the team so they have the full context when they take over.',
+      confidence: 0.9,
+      aiReason: 'context',
+      usedFallback: false,
+    });
+    const svc = new HumanEscalationHoldingReplyService(
+      { add: sendBubbleAdd } as never,
+      runtime as never,
+      handoverReply as never,
+    );
     await svc.tryEnqueueHoldingReply({
       tenantId: 't1',
       conversationId: 'c1',
@@ -119,7 +168,7 @@ describe('HumanEscalationHoldingReplyService', () => {
     expect(sendBubbleAdd).toHaveBeenCalledWith(
       'send-bubble',
       expect.objectContaining({
-        replyPlanJson: expect.stringContaining("I'll leave this here for the team to review"),
+        replyPlanJson: expect.stringContaining('pass this to the team'),
       }),
     );
   });
@@ -130,8 +179,14 @@ describe('HumanEscalationHoldingReplyService', () => {
       humanEscalationInternalAlertSentAt: new Date(Date.now() - 11 * 60 * 1000).toISOString(),
       humanEscalationLastHoldingReplySentAt: recent,
       humanEscalationLastHoldingReplyType: 'default',
+      humanEscalationLastHoldingReplyText:
+        'Your request has already been sent to the team. They’ll attend to you as soon as they’re available.',
     };
-    const svc = new HumanEscalationHoldingReplyService({ add: sendBubbleAdd } as never, runtime as never);
+    const svc = new HumanEscalationHoldingReplyService(
+      { add: sendBubbleAdd } as never,
+      runtime as never,
+      handoverReply as never,
+    );
     await svc.tryEnqueueHoldingReply({
       tenantId: 't1',
       conversationId: 'c1',
@@ -148,8 +203,22 @@ describe('HumanEscalationHoldingReplyService', () => {
       humanEscalationInternalAlertSentAt: new Date(Date.now() - 11 * 60 * 1000).toISOString(),
       humanEscalationLastHoldingReplySentAt: recent,
       humanEscalationLastHoldingReplyType: 'default',
+      humanEscalationLastHoldingReplyText:
+        'Your request has already been sent to the team. They’ll attend to you as soon as they’re available.',
     };
-    const svc = new HumanEscalationHoldingReplyService({ add: sendBubbleAdd } as never, runtime as never);
+    handoverReply.classifyAndCompose.mockResolvedValueOnce({
+      selectedType: 'waiting_time',
+      replyText:
+        'I’m sorry for the wait. Your request has been sent to the team, and they’ll attend to you as soon as they’re available.',
+      confidence: 0.9,
+      aiReason: 'waiting',
+      usedFallback: false,
+    });
+    const svc = new HumanEscalationHoldingReplyService(
+      { add: sendBubbleAdd } as never,
+      runtime as never,
+      handoverReply as never,
+    );
     await svc.tryEnqueueHoldingReply({
       tenantId: 't1',
       conversationId: 'c1',
@@ -160,7 +229,7 @@ describe('HumanEscalationHoldingReplyService', () => {
     expect(sendBubbleAdd).toHaveBeenCalledWith(
       'send-bubble',
       expect.objectContaining({
-        replyPlanJson: expect.stringContaining("I'm sorry for the wait"),
+        replyPlanJson: expect.stringContaining('sorry for the wait'),
       }),
     );
   });
@@ -169,7 +238,11 @@ describe('HumanEscalationHoldingReplyService', () => {
     metadata = {
       humanEscalationInternalAlertSentAt: new Date(Date.now() - 11 * 60 * 1000).toISOString(),
     };
-    const svc = new HumanEscalationHoldingReplyService({ add: sendBubbleAdd } as never, runtime as never);
+    const svc = new HumanEscalationHoldingReplyService(
+      { add: sendBubbleAdd } as never,
+      runtime as never,
+      handoverReply as never,
+    );
     await svc.tryEnqueueHoldingReply({
       tenantId: 't1',
       conversationId: 'c1',
@@ -186,7 +259,11 @@ describe('HumanEscalationHoldingReplyService', () => {
       humanEscalationInternalAlertSentAt: new Date(Date.now() - 11 * 60 * 1000).toISOString(),
       humanEscalationLastInternalUpdateSentAt: new Date(Date.now() - 2 * 60 * 1000).toISOString(),
     };
-    const svc = new HumanEscalationHoldingReplyService({ add: sendBubbleAdd } as never, runtime as never);
+    const svc = new HumanEscalationHoldingReplyService(
+      { add: sendBubbleAdd } as never,
+      runtime as never,
+      handoverReply as never,
+    );
     await svc.tryEnqueueHoldingReply({
       tenantId: 't1',
       conversationId: 'c1',

@@ -8,6 +8,7 @@ import { HumanEscalationSettingsService } from './human-escalation-settings.serv
 import { HumanEscalationSettingsController } from './human-escalation-settings.controller';
 import { HumanEscalationNotifyService } from './human-escalation-notify.service';
 import { HumanEscalationRuntimeService } from './human-escalation-runtime.service';
+import { HumanEscalationHandoverReplyService } from './human-escalation-handover-reply.service';
 
 @Module({
   imports: [
@@ -22,7 +23,13 @@ import { HumanEscalationRuntimeService } from './human-escalation-runtime.servic
     HumanEscalationSettingsService,
     HumanEscalationNotifyService,
     HumanEscalationRuntimeService,
+    HumanEscalationHandoverReplyService,
   ],
-  exports: [HumanEscalationSettingsService, HumanEscalationNotifyService, HumanEscalationRuntimeService],
+  exports: [
+    HumanEscalationSettingsService,
+    HumanEscalationNotifyService,
+    HumanEscalationRuntimeService,
+    HumanEscalationHandoverReplyService,
+  ],
 })
 export class HumanEscalationModule {}

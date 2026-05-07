@@ -181,6 +181,61 @@ export class HumanEscalationRuntimeService {
     return { alreadyInHandover };
   }
 
+  /**
+   * Optional staff reminder while handover is already active (customer continues messaging).
+   * Throttling is handled by the caller; this method is best-effort and should not throw.
+   */
+  async sendInternalUpdateDuringActiveHandover(params: {
+    tenantId: string;
+    conversationId: string;
+    contactId?: string | null;
+    latestInboundMessage: string;
+    contactPhone?: string | null;
+    contactDisplayName?: string | null;
+  }): Promise<'sent' | 'skipped_disabled' | 'skipped_no_number' | 'failed' | 'suppressed'> {
+    const { tenantId, conversationId, contactId, latestInboundMessage, contactPhone, contactDisplayName } = params;
+
+    const settings = await this.escalationSettings.getSettings(tenantId);
+    if (!settings.enabled) return 'skipped_disabled';
+    if (!settings.teamNotificationNumber?.trim()) return 'skipped_no_number';
+
+    try {
+      const crm = await this.resolveCrmContactForAlert(tenantId, contactId, contactDisplayName, contactPhone);
+      const customerName = crm.displayName?.trim() || 'Unknown customer';
+      const phoneLine = crm.phone?.trim() || contactPhone?.trim() || 'Unknown phone';
+
+      const messageBody =
+        `Human escalation update\n\n` +
+        `Customer: ${customerName}\n` +
+        `Phone: ${phoneLine}\n\n` +
+        `Latest message:\n"${latestInboundMessage.trim().slice(0, 2000)}"\n\n` +
+        `Customer is still waiting for human assistance.`;
+
+      const outcome = await this.notify.sendInternalAlert({
+        tenantId,
+        enabled: true,
+        teamNotificationNumber: settings.teamNotificationNumber,
+        optionalMessagePrefix: settings.optionalMessagePrefix,
+        messageBody,
+        customerPhoneForDuplicateCheck: contactPhone ?? crm.phone ?? null,
+      });
+
+      if (outcome === 'sent') {
+        await this.persistHumanEscalationInternalUpdateSentAt(conversationId);
+        return 'sent';
+      }
+      return outcome === 'skipped_disabled' ? 'skipped_disabled' : outcome === 'skipped_no_number' ? 'skipped_no_number' : 'failed';
+    } catch (e) {
+      this.logger.warn(
+        `humanEscalationInternalUpdateFailed ${JSON.stringify({
+          conversationId,
+          message: e instanceof Error ? e.message : String(e),
+        })}`,
+      );
+      return 'failed';
+    }
+  }
+
   private async applyAiNeedsHumanReviewTag(tenantId: string, contactId: string | null | undefined): Promise<void> {
     const cid = contactId?.trim();
     if (!cid) {
@@ -320,6 +375,31 @@ export class HumanEscalationRuntimeService {
     const merged = {
       ...prev,
       humanEscalationInternalAlertSentAt: new Date().toISOString(),
+    };
+    const { error: upErr } = await this.supabase
+      .from('conversations')
+      .update({ metadata: merged, updated_at: new Date().toISOString() })
+      .eq('id', conversationId);
+    if (upErr) {
+      this.logger.warn(
+        `humanEscalationMetadataPersistFailed ${JSON.stringify({
+          conversationId,
+          message: formatPostgrestError(upErr),
+        })}`,
+      );
+    }
+  }
+
+  private async persistHumanEscalationInternalUpdateSentAt(conversationId: string): Promise<void> {
+    const { data, error } = await this.supabase.from('conversations').select('metadata').eq('id', conversationId).maybeSingle();
+    if (error || !data) return;
+    const prev =
+      data.metadata && typeof data.metadata === 'object' && !Array.isArray(data.metadata)
+        ? (data.metadata as Record<string, unknown>)
+        : {};
+    const merged = {
+      ...prev,
+      humanEscalationLastInternalUpdateSentAt: new Date().toISOString(),
     };
     const { error: upErr } = await this.supabase
       .from('conversations')

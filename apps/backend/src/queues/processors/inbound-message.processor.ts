@@ -1046,6 +1046,9 @@ export class InboundMessageProcessor extends WorkerHost {
         conversationId,
         locationId,
         ghlContactId,
+        latestInboundText,
+        contactDisplayName: contactDisplayName?.trim() || null,
+        contactPhone: contactPhone?.trim() || null,
         botMode: tenantContext?.botMode ?? null,
         pipelineWallStartMs: pipelineWallStartMs ?? null,
       });

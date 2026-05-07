@@ -528,6 +528,7 @@ describe('InboundMessageProcessor', () => {
         conversationId: CONV_ID,
         locationId: 'loc_1',
         ghlContactId: 'ct_1',
+        latestInboundText: 'Hello?',
       }),
     );
     expect(mockSendBubbleQueueAdd).not.toHaveBeenCalled();

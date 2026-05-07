@@ -22,6 +22,7 @@ import { TranscriptionModule } from '../modules/transcription/transcription.modu
 import { FollowUpEngineModule } from '../modules/follow-up-engine/follow-up-engine.module';
 import { FollowUpQueueModule } from './follow-up-queue.module';
 import { HumanEscalationHoldingReplyService } from '../modules/human-escalation/human-escalation-holding-reply.service';
+import { HumanEscalationModule } from '../modules/human-escalation/human-escalation.module';
 
 @Module({
   imports: [
@@ -43,6 +44,7 @@ import { HumanEscalationHoldingReplyService } from '../modules/human-escalation/
     IntentTagsModule,
     TranscriptionModule,
     FollowUpEngineModule,
+    HumanEscalationModule,
   ],
   providers: [
     HumanEscalationHoldingReplyService,

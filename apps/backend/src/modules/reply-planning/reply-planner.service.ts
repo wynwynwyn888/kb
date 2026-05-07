@@ -26,6 +26,7 @@ import { applyMenuKbGroundingGuard } from '../../lib/menu-kb-grounding-guard';
 import { sanitizeOutboundInternalKbLeak } from '../../lib/outbound-internal-kb-sanitizer';
 import { applyOutboundPolicyGuard } from '../../lib/outbound-policy-guard';
 import { detectMenuIntentInMessage } from '../../lib/kb-relevance';
+import { rewriteUnsupportedBusinessClaimsWhenNoKb } from '../../lib/outbound-safety-governor';
 import type { ConversationIntent } from '../conversation-policy/conversation-intent';
 import type { SelectionResolution } from '../conversation-policy/option-resolver';
 import { GenerationService } from '../generation/generation.service';
@@ -232,7 +233,12 @@ export class ReplyPlannerService {
       policyContext?.latestIntent ?? 'UNKNOWN',
       kbChunks,
     );
-    const bubbles = this.formatIntoBubbles(afterKbLeak);
+    const noKbClaimGuard = rewriteUnsupportedBusinessClaimsWhenNoKb({
+      replyText: afterKbLeak,
+      kbChunksReturned: kbChunks.length,
+    });
+    const finalDraft = noKbClaimGuard.rewritten ? noKbClaimGuard.text : afterKbLeak;
+    const bubbles = this.formatIntoBubbles(finalDraft);
     this.logLiveWhitespaceDebug({
       rawDraft: afterKbLeak,
       bubbles,
@@ -249,7 +255,9 @@ export class ReplyPlannerService {
       responseMode: routing.responseMode,
       handoverRecommended: routing.handoverRecommended,
       confidence: routing.confidence,
-      rationale: routing.reasoning,
+      rationale: noKbClaimGuard.rewritten
+        ? `${routing.reasoning}; outboundSafetyRewrite=${noKbClaimGuard.reason}`
+        : routing.reasoning,
       bubbles,
       suggestedActions,
       draftProvenance: draft.provenance,

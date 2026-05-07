@@ -285,6 +285,33 @@ describe('ReplyPlannerService', () => {
       expect(result.draftFallbackReason).toBeUndefined();
     });
 
+    it('rewrites risky no-KB business claims to uncertainty response', async () => {
+      mockGen.generateDraft.mockResolvedValueOnce({
+        content: 'Absolutely! We welcome all breeds, including Chihuahuas.',
+      });
+      const result = await service.planReply({
+        tenantId: 't1',
+        conversationId: 'c1',
+        routing: {
+          recommendedModel: 'gpt-4o',
+          responseMode: 'standard',
+          handoverRecommended: false,
+          confidence: 0.8,
+          reasoning: 'test',
+          draftReply: null,
+          tagsSuggested: [],
+          bookingIntentDetected: false,
+        },
+        kbChunks: [],
+        memory: [],
+        systemPrompt: 'You are a helpful assistant.',
+        channel: 'WHATSAPP',
+      });
+      const joined = result.bubbles.map(b => b.text).join('\n\n').toLowerCase();
+      expect(joined).not.toContain('welcome all breeds');
+      expect(joined).toContain("don’t have");
+    });
+
     it('H: policy forced no-KB menu clarification stays one bubble and skips generation', async () => {
       const result = await service.planReply({
         tenantId: 't1',

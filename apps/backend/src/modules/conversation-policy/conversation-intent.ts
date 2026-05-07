@@ -17,7 +17,20 @@ export type ConversationIntent =
   | 'REJECTION'
   | 'UNKNOWN';
 
-const RE_HUMAN = /\b(human|agent|staff|manager|supervisor|real\s*person|call\s*me|phone\s*me|speak\s*to\s*someone)\b/i;
+// HUMAN_HANDOVER should require both:
+// - a "person/staff/team" concept AND
+// - a "contact/connect/speak/help" request pattern
+// to avoid false positives like "facial for human" or "safe for humans".
+const RE_HANDOVER_NOUN =
+  /\b(human|humans|person|people|real\s*person|agent|staff|team|representative|rep|manager|owner|someone)\b/i;
+const RE_HANDOVER_VERB =
+  /\b(speak|talk|call|phone|contact|connect|transfer|escalat(e|ion)|handover|get|reach|help|assist)\b/i;
+const RE_HANDOVER_REQUEST =
+  /\b(can\s+i|could\s+you|please|i\s+want|i\s+need|let\s+me|connect\s+me|put\s+me)\b/i;
+const RE_HANDOVER_DIRECT_REQUEST =
+  /\b(human\s+agent\s+please|manager\s+please|real\s*person\s+please|someone\s+please)\b/i;
+const RE_HUMAN_ONLY_SERVICE_CONTEXT =
+  /\b(for\s+human|for\s+humans|human\s+(facial|shampoo|skin|food)|treat\s+humans|safe\s+for\s+humans)\b/i;
 const RE_COMPLAINT = /\b(complaint|complain|terrible|awful|horrible|angry|furious|disgusting|worst|sue|refund\s*now)\b/i;
 const RE_GREETING = /^(hi|hello|hey|hiya|yo|good\s*(morning|afternoon|evening)|howdy)\b[!?.\s]*$/i;
 const RE_GREETING_LOOSE = /^(hi|hello|hey)\b/i;
@@ -42,7 +55,16 @@ export function classifyConversationIntent(message: string): ConversationIntent 
   const t = message.trim();
   if (!t) return 'UNKNOWN';
 
-  if (RE_HUMAN.test(t)) return 'HUMAN_HANDOVER';
+  if (!RE_HUMAN_ONLY_SERVICE_CONTEXT.test(t)) {
+    if (RE_HANDOVER_DIRECT_REQUEST.test(t)) return 'HUMAN_HANDOVER';
+    if (
+      RE_HANDOVER_NOUN.test(t) &&
+      (RE_HANDOVER_VERB.test(t) || /\bagent\b/i.test(t)) &&
+      (RE_HANDOVER_REQUEST.test(t) || /\?$/.test(t) || /\bplease\b/i.test(t))
+    ) {
+      return 'HUMAN_HANDOVER';
+    }
+  }
   if (RE_COMPLAINT.test(t)) return 'COMPLAINT';
 
   if (RE_SHORT_LETTER.test(t) || RE_SHORT_DIGIT.test(t) || RE_OPTION_WORD.test(t) || RE_FIRST_LAST.test(t)) {

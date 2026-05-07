@@ -6,6 +6,7 @@ import {
   shouldRewriteUnrequestedMenuRepetition,
   textClaimsBookingConfirmed,
   userAskedForColourAlternatives,
+  rewriteUnsupportedBusinessClaimsWhenNoKb,
 } from './outbound-safety-governor';
 import { classifyConversationIntent } from '../modules/conversation-policy/conversation-intent';
 
@@ -123,6 +124,35 @@ describe('outbound-safety-governor', () => {
 
     it('rejects unrelated sources', () => {
       expect(isTrustedExecutedBookSlotSource('OTHER:ap1')).toBe(false);
+    });
+  });
+
+  describe('rewriteUnsupportedBusinessClaimsWhenNoKb', () => {
+    it('rewrites breed acceptance claims when KB is empty', () => {
+      const r = rewriteUnsupportedBusinessClaimsWhenNoKb({
+        kbChunksReturned: 0,
+        replyText: 'Absolutely! We welcome all breeds, including Chihuahuas.',
+      });
+      expect(r.rewritten).toBe(true);
+      expect(r.text.toLowerCase()).toContain('don');
+      expect(r.text.toLowerCase()).toContain('connect');
+      expect(r.text.toLowerCase()).not.toContain('welcome all breeds');
+    });
+
+    it('rewrites no-KB opening hours / availability claims', () => {
+      const r = rewriteUnsupportedBusinessClaimsWhenNoKb({
+        kbChunksReturned: 0,
+        replyText: "Yes, we are open from 9am to 6pm and we have availability today.",
+      });
+      expect(r.rewritten).toBe(true);
+    });
+
+    it('does not rewrite when KB has support', () => {
+      const r = rewriteUnsupportedBusinessClaimsWhenNoKb({
+        kbChunksReturned: 2,
+        replyText: 'Absolutely! We welcome all breeds, including Chihuahuas.',
+      });
+      expect(r.rewritten).toBe(false);
     });
   });
 });

@@ -172,6 +172,48 @@ export const UNREQUESTED_MENU_FALLBACK_REPLY =
   'Thanks for the detail — for oily roots with dry ends, we usually focus on balancing/cleansing at the scalp while adding moisture and repair from mid-lengths through ends (without weighing hair down). ' +
   'If you can share how quickly your roots get oily after washing and whether your ends feel brittle or mainly dry, I can narrow the best next step.';
 
+/**
+ * No-KB business-claim guard:
+ * When KB retrieval is empty/weak, block hallucinated business-specific claims (breeds accepted,
+ * services offered, prices, opening hours, availability, policies, medical/suitability advice).
+ * Returns a safe uncertainty reply when a risky claim is detected.
+ */
+export const SAFE_UNSUPPORTED_BUSINESS_CLAIM_REPLY =
+  "I don’t have that specific detail confirmed here. If you’d like, I can connect you with the team to check.";
+
+const BUSINESS_ASSERTION = /\b(we|our\s+(team|clinic|shop|salon)|yes,?\s+we)\b/i;
+const CLAIM_BREED_SPECIES =
+  /\b(breed|breeds|chihuahua|pomeranian|bulldog|cat|cats|dog|dogs|puppy|puppies|pet|pets|all\s+breeds|any\s+breed)\b/i;
+const CLAIM_ACCEPT_OFFER =
+  /\b(accept|welcome|allow|can\s+take|we\s+do|we\s+offer|provide|available|availability)\b/i;
+const CLAIM_PRICING = /\b(price|pricing|cost|fee|charge|\$|usd|sgd|rm|eur|gbp)\b/i;
+const CLAIM_HOURS = /\b(open|opening|close|closing|hours?|am|pm)\b/i;
+const CLAIM_POLICY = /\b(policy|refund|cancellation|cancel|reschedule)\b/i;
+const CLAIM_MEDICAL = /\b(doctor|vet|medical|diagnos(e|is)|treat(ment)?|medication|prescribe)\b/i;
+
+export function rewriteUnsupportedBusinessClaimsWhenNoKb(params: {
+  replyText: string;
+  kbChunksReturned: number;
+}): { rewritten: boolean; text: string; reason?: string } {
+  const t = params.replyText.trim();
+  if (!t) return { rewritten: false, text: params.replyText };
+  if (params.kbChunksReturned > 0) return { rewritten: false, text: params.replyText };
+
+  const risky =
+    BUSINESS_ASSERTION.test(t) &&
+    ( // business-specific claim categories
+      (CLAIM_BREED_SPECIES.test(t) && CLAIM_ACCEPT_OFFER.test(t)) ||
+      (CLAIM_PRICING.test(t) && CLAIM_ACCEPT_OFFER.test(t)) ||
+      (CLAIM_HOURS.test(t) && (/\bwe\s*(are|'re)\s*open\b/i.test(t) || /\bopen\s+(from|until|at)\b/i.test(t))) ||
+      (CLAIM_POLICY.test(t) && CLAIM_ACCEPT_OFFER.test(t)) ||
+      CLAIM_MEDICAL.test(t)
+    );
+
+  if (!risky) return { rewritten: false, text: params.replyText };
+
+  return { rewritten: true, text: SAFE_UNSUPPORTED_BUSINESS_CLAIM_REPLY, reason: 'no_kb_unsupported_business_claim' };
+}
+
 export const COMPLAINT_ESCALATION_REPLY =
   "Thanks for telling us — I'm sorry you're dealing with that.\n\n" +
   'To help the team review this properly, please share:\n' +

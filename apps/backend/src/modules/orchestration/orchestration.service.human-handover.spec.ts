@@ -43,7 +43,7 @@ describe('ConversationOrchestrationService — HUMAN_HANDOVER short circuit', ()
     };
   }
 
-  it('returns HANDOVER plan with no bubbles and invokes human escalation runtime', async () => {
+  it('returns PLANNED handover acknowledgement (no full AI) and invokes human escalation runtime', async () => {
     const guards = {
       runGuards: jestGlobal.fn(async () => ({ final: 'PROCEED' as const, guards: [] })),
     };
@@ -120,8 +120,9 @@ describe('ConversationOrchestrationService — HUMAN_HANDOVER short circuit', ()
 
     expect(humanEscalationRuntime.onHumanHandoverIntent).toHaveBeenCalled();
     expect(res.success).toBe(true);
-    expect(res.replyPlan?.planStatus).toBe('HANDOVER');
-    expect(res.replyPlan?.bubbles ?? []).toHaveLength(0);
+    expect(res.replyPlan?.planStatus).toBe('PLANNED');
+    expect(res.replyPlan?.bubbles ?? []).toHaveLength(1);
+    expect(res.replyPlan?.bubbles?.[0]?.text).toContain('team member');
     expect(aiRouter.route).not.toHaveBeenCalled();
     expect(replyPlanner.planReply).not.toHaveBeenCalled();
 

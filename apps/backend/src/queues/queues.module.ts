@@ -21,6 +21,7 @@ import { IntentTagsModule } from '../modules/intent-tags/intent-tags.module';
 import { TranscriptionModule } from '../modules/transcription/transcription.module';
 import { FollowUpEngineModule } from '../modules/follow-up-engine/follow-up-engine.module';
 import { FollowUpQueueModule } from './follow-up-queue.module';
+import { HumanEscalationHoldingReplyService } from '../modules/human-escalation/human-escalation-holding-reply.service';
 
 @Module({
   imports: [
@@ -44,6 +45,7 @@ import { FollowUpQueueModule } from './follow-up-queue.module';
     FollowUpEngineModule,
   ],
   providers: [
+    HumanEscalationHoldingReplyService,
     InboundMessageProcessor,
     SendBubbleProcessor,
     KbIngestProcessor,

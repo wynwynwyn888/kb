@@ -32,6 +32,7 @@ import { GhlVoiceMessageDiscoveryService } from '../../modules/transcription/ghl
 import { GhlVoiceConversationDiscoveryService } from '../../modules/transcription/ghl-voice-conversation-discovery.service';
 import { classifyGhlAudioPlaceholderBody } from '../../modules/webhooks/ghl-inbound-audio-media';
 import { FollowUpEngineService } from '../../modules/follow-up-engine/follow-up-engine.service';
+import { HumanEscalationHoldingReplyService } from '../../modules/human-escalation/human-escalation-holding-reply.service';
 
 export interface InboundMessageJobData {
   locationId: string;
@@ -98,6 +99,7 @@ export class InboundMessageProcessor extends WorkerHost {
     private readonly ghlVoiceMessageDiscovery: GhlVoiceMessageDiscoveryService,
     private readonly ghlVoiceConversationDiscovery: GhlVoiceConversationDiscoveryService,
     private readonly followUpEngine: FollowUpEngineService,
+    private readonly humanEscalationHolding: HumanEscalationHoldingReplyService,
     @InjectQueue(QUEUES.SEND_BUBBLE) private readonly sendBubbleQueue: Queue,
     @InjectQueue(QUEUES.INBOUND_MESSAGE_PROCESSOR) private readonly inboundQueue: Queue,
   ) {
@@ -1038,7 +1040,16 @@ export class InboundMessageProcessor extends WorkerHost {
 
     const result = await this.orchestrationService.orchestrate(orchestrationInput);
 
-    if (result.outcome === 'PROCEED' && result.replyPlan && result.replyPlan.bubbles.length > 0) {
+    if (result.outcome === 'SKIP_HANDOVER_ACTIVE') {
+      await this.humanEscalationHolding.tryEnqueueHoldingReply({
+        tenantId,
+        conversationId,
+        locationId,
+        ghlContactId,
+        botMode: tenantContext?.botMode ?? null,
+        pipelineWallStartMs: pipelineWallStartMs ?? null,
+      });
+    } else if (result.outcome === 'PROCEED' && result.replyPlan && result.replyPlan.bubbles.length > 0) {
       const mode = tenantContext?.botMode ?? 'autopilot';
       if (mode === 'suggestive') {
         this.logger.log(

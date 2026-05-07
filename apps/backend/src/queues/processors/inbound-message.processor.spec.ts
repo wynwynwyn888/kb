@@ -94,6 +94,10 @@ const mockFollowUpEngine = {
   noteInboundFromContact: jestGlobal.fn(async () => {}),
 };
 
+const mockHumanEscalationHolding = {
+  tryEnqueueHoldingReply: jestGlobal.fn(async () => {}),
+};
+
 const mockAudioTranscription = {
   transcribeRemoteMedia: jestGlobal.fn(async () => ({
     ok: true as const,
@@ -208,6 +212,7 @@ describe('InboundMessageProcessor', () => {
       mockGhlVoiceMessageDiscovery as never,
       mockGhlVoiceConversationDiscovery as never,
       mockFollowUpEngine as never,
+      mockHumanEscalationHolding as never,
       { add: mockSendBubbleQueueAdd } as never,
       { add: mockInboundQueueAdd } as never,
     );
@@ -460,6 +465,72 @@ describe('InboundMessageProcessor', () => {
       ghlLocationId: 'loc_1',
       messageText: 'Menu?\n\nActually mains',
     });
+  });
+
+  it('orchestrate: SKIP_HANDOVER_ACTIVE triggers holding reply service (no normal send plan)', async () => {
+    orchestrate.mockResolvedValueOnce({
+      success: false,
+      outcome: 'SKIP_HANDOVER_ACTIVE',
+      conversationId: CONV_ID,
+      guards: { final: 'SKIP_HANDOVER_ACTIVE', guards: [] },
+    } as never);
+    mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'conversations') {
+        return {
+          select: () => ({
+            eq: () => ({
+              single: async () => ({
+                data: { metadata: { inboundDebounce: { pendingVersion: 4 } } },
+                error: null,
+              }),
+            }),
+          }),
+        };
+      }
+      if (table === 'messages') {
+        return {
+          select: () =>
+            resolvedQuery({
+              data: [{ content: 'Hello?', created_at: '2026-01-01T00:00:01.000Z' }],
+              error: null,
+            }),
+        };
+      }
+      if (table === 'tenants') {
+        return {
+          select: () => ({
+            eq: () => ({
+              single: async () => ({
+                data: { id: 'tenant-1', bot_mode: 'autopilot' },
+                error: null,
+              }),
+            }),
+          }),
+        };
+      }
+      return {} as never;
+    });
+
+    await processor.process(
+      makeJob('orchestrate', {
+        tenantId: 'tenant-1',
+        conversationId: CONV_ID,
+        locationId: 'loc_1',
+        ghlContactId: 'ct_1',
+        ghlConversationId: 'ghl_conv_1',
+        debounceVersion: 4,
+      }),
+    );
+
+    expect(mockHumanEscalationHolding.tryEnqueueHoldingReply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tenantId: 'tenant-1',
+        conversationId: CONV_ID,
+        locationId: 'loc_1',
+        ghlContactId: 'ct_1',
+      }),
+    );
+    expect(mockSendBubbleQueueAdd).not.toHaveBeenCalled();
   });
 
   it('orchestrate: exact /new triggers reset service and skips AI orchestration', async () => {

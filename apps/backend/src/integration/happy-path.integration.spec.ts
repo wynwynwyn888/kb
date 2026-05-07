@@ -165,6 +165,9 @@ describe('InboundMessageProcessor (happy path)', () => {
     const mockFollowUpEngine = {
       noteInboundFromContact: jestGlobal.fn(async () => {}),
     };
+    const mockHumanEscalationHolding = {
+      tryEnqueueHoldingReply: jestGlobal.fn(async () => {}),
+    };
     processor = new InboundMessageProcessor(
       new OrchestrationService(),
       mockReset as never,
@@ -174,6 +177,7 @@ describe('InboundMessageProcessor (happy path)', () => {
       mockGhlVoiceDiscovery as never,
       mockGhlConversationDiscovery as never,
       mockFollowUpEngine as never,
+      mockHumanEscalationHolding as never,
       { add: mockQueueAdd } as never,
       { add: mockQueueAdd } as never,
     );

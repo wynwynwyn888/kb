@@ -346,16 +346,26 @@ export class ConversationOrchestrationService {
           policyOutcomeHuman.nextPolicyState,
         );
 
+        const humanHandoverAck =
+          "Of course. I'll arrange for a team member to assist you shortly.";
+
         const humanReplyPlan: ReplyDecision = {
-          planStatus: 'HANDOVER',
+          planStatus: 'PLANNED',
           responseMode: 'handover',
           handoverRecommended: true,
           confidence: 0.95,
           rationale: 'human_request:HUMAN_HANDOVER',
-          bubbles: [],
+          bubbles: [{ index: 0, text: humanHandoverAck }],
           suggestedActions: [],
           draftProvenance: 'human_escalation',
         };
+
+        this.logger.log(
+          `humanEscalationCustomerAckSent ${JSON.stringify({
+            conversationId,
+            tenantId: input.tenantId,
+          })}`,
+        );
 
         const routingHuman: RoutingResponse = {
           recommendedModel: 'n/a',

@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { AuthModule } from '../auth/auth.module';
 import { GhlModule } from '../ghl/ghl.module';
 import { ConversationsModule } from '../conversations/conversations.module';
 import { FollowUpEngineModule } from '../follow-up-engine/follow-up-engine.module';
@@ -8,7 +9,7 @@ import { HumanEscalationNotifyService } from './human-escalation-notify.service'
 import { HumanEscalationRuntimeService } from './human-escalation-runtime.service';
 
 @Module({
-  imports: [GhlModule, ConversationsModule, FollowUpEngineModule],
+  imports: [AuthModule, GhlModule, ConversationsModule, FollowUpEngineModule],
   controllers: [HumanEscalationSettingsController],
   providers: [
     HumanEscalationSettingsService,

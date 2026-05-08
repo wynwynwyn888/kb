@@ -33,20 +33,20 @@ export function TenantWorkspaceGate({ tenantId, children }: { tenantId: string; 
   if (!isAgencyStaff && !isCorrectTenant) {
     return (
       <div>
-        <PageHeader title="Subaccount access" eyebrow="Access" />
-        <ErrorBanner message="You can’t open this subaccount. It doesn’t match your assignment." />
+        <PageHeader title="Workspace access" eyebrow="Access" />
+        <ErrorBanner message="You can’t open this workspace. It doesn’t match your assignment." />
         <EmptyState
           title="Access restricted"
-          detail="Use a link that includes your assigned subaccount id, or open a subaccount from the agency list."
+          detail="Use a link that includes your assigned workspace, or open a workspace from the agency list."
         />
         <p style={{ marginTop: '1rem', fontSize: '0.9rem' }}>
           {user?.tenantId ? (
             <Link href={`/app/tenant/${user.tenantId}/assistant`} style={{ color: '#0070f3', fontWeight: 600 }}>
-              Open your subaccount workspace →
+              Open your workspace →
             </Link>
           ) : user?.agencyRole ? (
             <Link href="/app/agency/tenants" style={{ color: '#0070f3', fontWeight: 600 }}>
-              Subaccounts →
+              Workspaces →
             </Link>
           ) : (
             <Link href="/app" style={{ color: '#0070f3', fontWeight: 600 }}>

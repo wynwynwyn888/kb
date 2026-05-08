@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
+import { AgencyOnlyGate } from '@/components/app/AgencyOnlyGate';
+import { PageHeader, SectionCard } from '@/components/app/mvp-ui';
 
 interface ActionIntent {
   id: string;
@@ -17,6 +19,7 @@ interface ActionIntent {
 }
 
 export default function ActionIntentsPage() {
+  // Internal/debug route. Keep for compatibility, but never show to client users.
   const { token, loading: authLoading } = useAuth();
 
   const [tenantId, setTenantId] = useState<string>('');
@@ -90,18 +93,30 @@ export default function ActionIntentsPage() {
     );
   };
 
-  if (authLoading) return <div style={{ padding: '2rem' }}>Loading...</div>;
+  if (authLoading) {
+    return (
+      <AgencyOnlyGate>
+        <div style={{ maxWidth: 760 }}>
+          <PageHeader title="Logs" eyebrow="Agency" />
+          <SectionCard title="Loading…" subtitle="Opening logs…">
+            <div />
+          </SectionCard>
+        </div>
+      </AgencyOnlyGate>
+    );
+  }
 
   const totalPages = Math.ceil(total / pageSize);
 
   return (
-    <main style={{ padding: '2rem' }}>
+    <AgencyOnlyGate>
+      <main style={{ padding: '2rem' }}>
       <h1 style={{ marginBottom: '1.5rem' }}>Action Intents</h1>
 
       <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginBottom: '1.5rem', flexWrap: 'wrap' }}>
         <input
           type="text"
-          placeholder="Subaccount ID"
+          placeholder="Workspace ID"
           value={tenantId}
           onChange={e => setTenantId(e.target.value)}
           style={{ padding: '0.5rem', fontSize: '0.875rem', width: '240px' }}
@@ -198,6 +213,7 @@ export default function ActionIntentsPage() {
           )}
         </>
       )}
-    </main>
+      </main>
+    </AgencyOnlyGate>
   );
 }

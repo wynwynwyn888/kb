@@ -30,103 +30,160 @@ export default function LoginPage() {
   };
 
   return (
-    <div style={{ maxWidth: '400px', margin: '100px auto', padding: '2rem' }}>
-      <div style={{ marginBottom: '1.25rem', display: 'flex', justifyContent: 'center' }}>
-        <BrandLogo height={40} maxWidth={220} />
-      </div>
-      <h1 style={{ marginBottom: '0.35rem' }}>Sign in</h1>
-      <p style={{ color: '#666', marginBottom: '1rem', fontSize: '0.95rem' }}>
-        Sign in with the email and password your administrator invited you to use.
-      </p>
-
-      <Suspense fallback={null}>
-        <LoginSessionAlert />
-      </Suspense>
-
-      <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '1rem' }}>
-        <div>
-          <label htmlFor="email" style={{ display: 'block', marginBottom: '0.5rem' }}>
-            Email
-          </label>
-          <input
-            id="email"
-            type="email"
-            value={email}
-            onChange={e => setEmail(e.target.value)}
-            required
-            autoComplete="username"
-            disabled={loading}
-            style={{ width: '100%', padding: '0.75rem', fontSize: '1rem', boxSizing: 'border-box' }}
-          />
-        </div>
-
-        <div>
-          <label htmlFor="password" style={{ display: 'block', marginBottom: '0.5rem' }}>
-            Password
-          </label>
-          <input
-            id="password"
-            type="password"
-            value={password}
-            onChange={e => setPassword(e.target.value)}
-            required
-            autoComplete="current-password"
-            disabled={loading}
-            style={{ width: '100%', padding: '0.75rem', fontSize: '1rem', boxSizing: 'border-box' }}
-          />
-        </div>
-
-        {error && (
-          <div
-            role="alert"
-            style={{ color: '#8b1d1d', padding: '0.75rem', backgroundColor: '#fde8e8', borderRadius: '6px', border: '1px solid #f5c2c7' }}
-          >
-            {error}
+    <div
+      style={{
+        minHeight: '100vh',
+        background:
+          'radial-gradient(1200px 600px at 15% 10%, rgba(15, 98, 254, 0.12), transparent 55%), radial-gradient(900px 520px at 80% 20%, rgba(34, 197, 94, 0.10), transparent 55%), var(--aisbp-bg, #f8fafc)',
+        display: 'flex',
+        alignItems: 'stretch',
+      }}
+    >
+      <div
+        style={{
+          width: 'min(1100px, 100%)',
+          margin: '0 auto',
+          padding: 'clamp(1.25rem, 3vw, 2.25rem)',
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
+          gap: 'clamp(1.25rem, 3vw, 2.25rem)',
+          alignItems: 'center',
+        }}
+      >
+        <div style={{ padding: '0.5rem 0' }}>
+          <div style={{ marginBottom: '1rem' }}>
+            <BrandLogo height={40} maxWidth={220} />
           </div>
-        )}
+          <h1
+            style={{
+              margin: '0 0 0.65rem',
+              fontSize: 'clamp(1.75rem, 2.5vw, 2.25rem)',
+              letterSpacing: '-0.02em',
+              color: 'var(--aisbp-text-heading, #0f172a)',
+            }}
+          >
+            Sign in to AISalesBot Pro
+          </h1>
+          <p style={{ margin: 0, fontSize: '1rem', lineHeight: 1.6, color: 'var(--aisbp-muted, #475569)', maxWidth: 520 }}>
+            Manage your Assistant, Automation, Knowledge Vaults, and Credits from one clean workspace connected to your CRM.
+          </p>
+        </div>
 
-        <button
-          type="submit"
-          disabled={loading}
+        <div
           style={{
-            padding: '0.75rem',
-            fontSize: '1rem',
-            backgroundColor: loading ? '#ccc' : '#0070f3',
-            color: 'white',
-            border: 'none',
-            cursor: loading ? 'not-allowed' : 'pointer',
-            borderRadius: '6px',
+            border: '1px solid rgba(226, 232, 240, 0.9)',
+            background: 'rgba(255, 255, 255, 0.75)',
+            backdropFilter: 'blur(18px)',
+            WebkitBackdropFilter: 'blur(18px)',
+            borderRadius: 18,
+            boxShadow: '0 18px 50px rgba(15, 23, 42, 0.10)',
+            padding: '1.35rem 1.35rem 1.15rem',
+            maxWidth: 480,
+            justifySelf: 'end',
+            width: '100%',
           }}
         >
-          {loading ? 'Signing in…' : 'Sign in'}
-        </button>
-      </form>
+          <p style={{ margin: 0, fontSize: '0.9rem', color: 'var(--aisbp-muted, #64748b)', lineHeight: 1.5 }}>
+            Use the email and password your admin invited you with.
+          </p>
 
-      <p style={{ fontSize: '0.8rem', color: '#666', marginTop: '1.25rem', lineHeight: 1.45 }}>
-        Having trouble? Check your internet connection. If your organization just set this up, confirm you were invited
-        with the correct email.
-      </p>
+          <div style={{ marginTop: '0.85rem' }}>
+            <Suspense fallback={null}>
+              <LoginSessionAlert />
+            </Suspense>
+          </div>
 
-      <div style={{ marginTop: '1rem', padding: '1rem', backgroundColor: '#f5f5f5', fontSize: '0.875rem', borderRadius: '8px' }}>
-        <strong>Optional demo sign-in (local evaluation only)</strong>
-        <ul style={{ margin: '0.5rem 0', paddingLeft: '1.5rem' }}>
-          <li>agency-admin@demo.aisbp.com / Demo123!</li>
-          <li>tenant-a-admin@demo.aisbp.com / Demo123!</li>
-        </ul>
-        <p style={{ margin: '0.75rem 0 0', fontSize: '0.78rem', color: '#555', lineHeight: 1.45 }}>
-          These only work after an administrator has created them in your environment. If you see “invalid
-          credentials,” ask your administrator to provision demo users or send you an invite.
-        </p>
-        {process.env.NODE_ENV === 'development' ? (
-          <details style={{ marginTop: '0.65rem' }}>
-            <summary style={{ cursor: 'pointer', fontSize: '0.78rem', color: '#444' }}>Administrator: seed demo data</summary>
-            <p style={{ margin: '0.45rem 0 0', fontSize: '0.72rem', color: '#555', lineHeight: 1.5 }}>
-              From the repository root, with database and Supabase service credentials configured for this project, run
-              the backend seed command your team documents (for example <code>pnpm --filter @aisbp/backend run db:seed</code>
-              ). Use the same Supabase project as this app&apos;s environment file.
-            </p>
-          </details>
-        ) : null}
+          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '0.9rem', marginTop: '0.9rem' }}>
+            <div>
+              <label htmlFor="email" style={{ display: 'block', marginBottom: '0.35rem', fontSize: '0.85rem', fontWeight: 650, color: '#0f172a' }}>
+                Email
+              </label>
+              <input
+                id="email"
+                type="email"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                required
+                autoComplete="username"
+                disabled={loading}
+                style={{
+                  width: '100%',
+                  padding: '0.75rem 0.8rem',
+                  fontSize: '1rem',
+                  boxSizing: 'border-box',
+                  borderRadius: 10,
+                  border: '1px solid rgba(203, 213, 225, 0.9)',
+                  background: '#fff',
+                  outline: 'none',
+                }}
+              />
+            </div>
+
+            <div>
+              <label htmlFor="password" style={{ display: 'block', marginBottom: '0.35rem', fontSize: '0.85rem', fontWeight: 650, color: '#0f172a' }}>
+                Password
+              </label>
+              <input
+                id="password"
+                type="password"
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                required
+                autoComplete="current-password"
+                disabled={loading}
+                style={{
+                  width: '100%',
+                  padding: '0.75rem 0.8rem',
+                  fontSize: '1rem',
+                  boxSizing: 'border-box',
+                  borderRadius: 10,
+                  border: '1px solid rgba(203, 213, 225, 0.9)',
+                  background: '#fff',
+                  outline: 'none',
+                }}
+              />
+            </div>
+
+            {error && (
+              <div
+                role="alert"
+                style={{
+                  color: '#8b1d1d',
+                  padding: '0.75rem',
+                  backgroundColor: '#fde8e8',
+                  borderRadius: '10px',
+                  border: '1px solid #f5c2c7',
+                  fontSize: '0.9rem',
+                  lineHeight: 1.45,
+                }}
+              >
+                {error}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={loading}
+              style={{
+                padding: '0.8rem 0.95rem',
+                fontSize: '1rem',
+                fontWeight: 700,
+                backgroundColor: loading ? 'rgba(15, 98, 254, 0.55)' : '#0F62FE',
+                color: 'white',
+                border: '1px solid rgba(15, 98, 254, 0.25)',
+                cursor: loading ? 'not-allowed' : 'pointer',
+                borderRadius: 12,
+                boxShadow: loading ? 'none' : '0 10px 26px rgba(15, 98, 254, 0.22)',
+              }}
+            >
+              {loading ? 'Signing in…' : 'Sign in'}
+            </button>
+          </form>
+
+          <p style={{ fontSize: '0.85rem', color: 'var(--aisbp-muted, #64748b)', margin: '1.1rem 0 0', lineHeight: 1.55 }}>
+            Need access? Contact your workspace admin.
+          </p>
+        </div>
       </div>
     </div>
   );

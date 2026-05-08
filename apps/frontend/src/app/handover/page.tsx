@@ -90,7 +90,7 @@ export default function HandoverQueuePage() {
       <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginBottom: '1.5rem' }}>
         <input
           type="text"
-          placeholder="Subaccount ID"
+          placeholder="Workspace ID"
           value={tenantId}
           onChange={e => setTenantId(e.target.value)}
           style={{ padding: '0.5rem', fontSize: '0.875rem', width: '240px' }}
@@ -123,7 +123,7 @@ export default function HandoverQueuePage() {
 
       {handovers.length === 0 && !tenantId && (
         <div style={{ padding: '2rem', textAlign: 'center', color: '#666' }}>
-          Enter a subaccount ID to view handover queue
+          Enter a workspace ID to view handover queue
         </div>
       )}
 

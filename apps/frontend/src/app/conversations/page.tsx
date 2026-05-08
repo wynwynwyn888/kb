@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
+import { AgencyOnlyGate } from '@/components/app/AgencyOnlyGate';
+import { PageHeader, SectionCard } from '@/components/app/mvp-ui';
 
 interface Conversation {
   id: string;
@@ -25,6 +27,8 @@ interface Message {
 }
 
 export default function ConversationLogsPage() {
+  // Internal/debug route. Keep for compatibility, but never show to client users.
+  // For client workspaces, logs live under `/app/tenant/:tenantId/log`.
   const { token, loading: authLoading } = useAuth();
 
   const [tenantId, setTenantId] = useState<string>('');
@@ -119,16 +123,28 @@ export default function ConversationLogsPage() {
     );
   };
 
-  if (authLoading) return <div style={{ padding: '2rem' }}>Loading...</div>;
+  if (authLoading) {
+    return (
+      <AgencyOnlyGate>
+        <div style={{ maxWidth: 760 }}>
+          <PageHeader title="Logs" eyebrow="Agency" />
+          <SectionCard title="Loading…" subtitle="Opening logs…">
+            <div />
+          </SectionCard>
+        </div>
+      </AgencyOnlyGate>
+    );
+  }
 
   return (
-    <main style={{ padding: '2rem' }}>
+    <AgencyOnlyGate>
+      <main style={{ padding: '2rem' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
         <h1 style={{ margin: 0 }}>Conversations</h1>
         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
           <input
             type="text"
-            placeholder="Subaccount ID"
+            placeholder="Workspace ID"
             value={tenantId}
             onChange={e => setTenantId(e.target.value)}
             style={{ padding: '0.5rem', fontSize: '0.875rem', width: '240px' }}
@@ -237,6 +253,7 @@ export default function ConversationLogsPage() {
           </div>
         )}
       </div>
-    </main>
+      </main>
+    </AgencyOnlyGate>
   );
 }

@@ -1,27 +1,27 @@
-// Prompt editor placeholder
-// Edit system prompts and prompt variables for tenant
+/**
+ * Internal route. Do not expose to client users.
+ * Keeping the route for backwards compatibility; agency staff only.
+ */
+
+'use client';
+
+import { AgencyOnlyGate } from '@/components/app/AgencyOnlyGate';
+import { PageHeader, SectionCard } from '@/components/app/mvp-ui';
 
 export default function PromptEditorPage() {
   return (
-    <main style={{ padding: '2rem' }}>
-      <h1>Prompt Editor</h1>
-      <div>
-        <h2>System Prompt</h2>
-        <textarea
-          rows={10}
-          style={{ width: '100%' }}
-          placeholder="Enter system prompt..."
-        />
+    <AgencyOnlyGate>
+      <div style={{ maxWidth: 760 }}>
+        <PageHeader title="Assistant Instructions" eyebrow="Agency" />
+        <SectionCard
+          title="This tool is agency-only"
+          subtitle="This page is not intended for client workspaces. Use Assistant → Instructions inside a workspace instead."
+        >
+          <p style={{ margin: 0, fontSize: '0.88rem', color: 'var(--aisbp-muted, #64748b)', lineHeight: 1.5 }}>
+            If you reached this page from an old link, open the workspace area to manage instructions safely.
+          </p>
+        </SectionCard>
       </div>
-      <div>
-        <h2>Prompt Variables</h2>
-        <p>TODO: Key-value editor for prompt variables</p>
-      </div>
-      <div>
-        <h2>Model Settings</h2>
-        <p>TODO: Temperature, max tokens, model override</p>
-      </div>
-      <button>Save Changes</button>
-    </main>
+    </AgencyOnlyGate>
   );
 }

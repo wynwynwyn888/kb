@@ -1,29 +1,27 @@
-// Bot tester placeholder
-// Test AI responses with sample conversations
+/**
+ * Internal route. Do not expose to client users.
+ * Keeping the route for backwards compatibility; agency staff only.
+ */
+
+'use client';
+
+import { AgencyOnlyGate } from '@/components/app/AgencyOnlyGate';
+import { PageHeader, SectionCard } from '@/components/app/mvp-ui';
 
 export default function BotTesterPage() {
   return (
-    <main style={{ padding: '2rem' }}>
-      <h1>Bot Tester</h1>
-      <div>
-        <h2>Test Conversation</h2>
-        <div style={{ border: '1px solid #ccc', padding: '1rem', minHeight: '200px' }}>
-          {/* TODO: Chat-like interface */}
-          <p>Conversation will appear here...</p>
-        </div>
+    <AgencyOnlyGate>
+      <div style={{ maxWidth: 760 }}>
+        <PageHeader title="Assistant Preview" eyebrow="Agency" />
+        <SectionCard
+          title="This tool is agency-only"
+          subtitle="This page is not intended for client workspaces. Use the in-workspace Assistant → Preview screen instead."
+        >
+          <p style={{ margin: 0, fontSize: '0.88rem', color: 'var(--aisbp-muted, #64748b)', lineHeight: 1.5 }}>
+            If you reached this page from an old link, you can return to the app entry route and choose the right workspace.
+          </p>
+        </SectionCard>
       </div>
-      <div>
-        <input
-          type="text"
-          placeholder="Type a test message..."
-          style={{ width: '80%' }}
-        />
-        <button>Send</button>
-      </div>
-      <div>
-        <h3>Debug Info</h3>
-        <p>TODO: Show KB retrieved, prompt used, model response</p>
-      </div>
-    </main>
+    </AgencyOnlyGate>
   );
 }

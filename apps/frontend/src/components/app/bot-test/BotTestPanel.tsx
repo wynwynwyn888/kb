@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useRef, useState } from 'react';
 import { stripModelThinking } from '@aisbp/formatter';
 import { postSubaccountBotTest, isApiHttpError, getApiBaseUrl } from '@/lib/api';
+import { useAuth } from '@/contexts/AuthContext';
 
 const PRIMARY = '#0F62FE';
 const SURFACE_CHAT = 'rgba(248, 250, 252, 0.65)';
@@ -113,10 +114,20 @@ export function BotTestPanel(props: {
   variant?: 'default' | 'embedded';
 }) {
   const { token, subaccountId, variant = 'default' } = props;
+  const { user } = useAuth();
+  const showSupport = Boolean(user?.agencyRole);
   const embedded = variant === 'embedded';
   const [input, setInput] = useState('');
   const [msgs, setMsgs] = useState<
-    { role: 'user' | 'assistant'; content: string; meta?: string; error?: boolean; rawDetail?: string }[]
+    {
+      role: 'user' | 'assistant';
+      content: string;
+      meta?: string;
+      error?: boolean;
+      rawDetail?: string;
+      supportMeta?: string;
+      supportDetail?: string;
+    }[]
   >([]);
   const [sending, setSending] = useState(false);
   /** Friendly-only banner (no raw HTTP/provider text). */
@@ -150,26 +161,37 @@ export function BotTestPanel(props: {
         message: userLine,
         history: prior,
       });
-      const meta = formatMetaLine(r);
+      const meta = showSupport ? formatMetaLine(r) : undefined;
+      const supportMeta = formatMetaLine(r);
 
       setMsgs(m => {
         const reply = stripModelThinking(r.reply?.trim() ?? '');
         if (reply) {
           setPanelBanner(null);
-          return [...m, { role: 'assistant' as const, content: reply, meta }];
+          return [
+            ...m,
+            {
+              role: 'assistant' as const,
+              content: reply,
+              meta,
+              supportMeta: showSupport ? supportMeta : undefined,
+              supportDetail: showSupport ? r.supportDetail?.trim() : undefined,
+            },
+          ];
         }
         const skip = r.skipReason;
-        const headline =
-          skip === 'no_provider' || skip === 'no_agency'
+        const headline = showSupport
+          ? skip === 'no_provider' || skip === 'no_agency'
             ? 'Set up your AI provider and API key first.'
             : skip === 'generation_failed'
               ? 'The model did not return a reply. Check your API key and model, then try again.'
-              : 'We could not generate a test reply. Check AI settings, then try again.';
+              : 'We could not generate a test reply. Check AI settings, then try again.'
+          : 'We could not generate a preview reply. Please contact your workspace admin.';
         setPanelBanner(headline);
         const support = r.supportDetail?.trim();
         const rawDetail = [
           skip ? `skip: ${skip}` : null,
-          meta || null,
+          supportMeta || null,
           support ? `Support: ${support}` : null,
         ]
           .filter(Boolean)
@@ -180,7 +202,9 @@ export function BotTestPanel(props: {
             role: 'assistant' as const,
             content: headline,
             error: true,
-            rawDetail: rawDetail || `skip: ${String(skip)}`,
+            rawDetail: showSupport ? (rawDetail || `skip: ${String(skip)}`) : undefined,
+            supportMeta: showSupport ? supportMeta : undefined,
+            supportDetail: showSupport ? (rawDetail || `skip: ${String(skip)}`) : undefined,
           },
         ];
       });
@@ -188,7 +212,7 @@ export function BotTestPanel(props: {
       const isApi = isApiHttpError(er);
       const errMsg = isApi ? er.message : String(er);
       const { headline, detail } = formatBotTestFailure(errMsg, isApi ? er.status : undefined);
-      setPanelBanner(headline);
+      setPanelBanner(showSupport ? headline : 'We could not run a preview reply. Please try again or contact your workspace admin.');
       const rawForDetails = detail
         ? detail
         : isApi
@@ -198,9 +222,10 @@ export function BotTestPanel(props: {
         ...m,
         {
           role: 'assistant',
-          content: headline,
+          content: showSupport ? headline : 'We could not run a preview reply. Please try again or contact your workspace admin.',
           error: true,
-          rawDetail: rawForDetails.slice(0, 1200),
+          rawDetail: showSupport ? rawForDetails.slice(0, 1200) : undefined,
+          supportDetail: showSupport ? rawForDetails.slice(0, 1200) : undefined,
         },
       ]);
     } finally {
@@ -223,13 +248,14 @@ export function BotTestPanel(props: {
         alignItems: 'center',
         justifyContent: 'center',
         flexShrink: 0,
-        fontSize: '1rem',
+        fontSize: '0.9rem',
+        fontWeight: 800,
         lineHeight: 1,
         boxShadow: '0 1px 3px rgba(15, 23, 42, 0.12)',
       }}
       aria-hidden
     >
-      🤖
+      AI
     </div>
   );
 
@@ -335,6 +361,24 @@ export function BotTestPanel(props: {
                 >
                   {m.meta}
                 </div>
+              ) : null}
+              {showSupport && (m.supportMeta || m.supportDetail) ? (
+                <details style={{ marginTop: '0.4rem', maxWidth: '100%', alignSelf: 'flex-start' }}>
+                  <summary style={{ fontSize: '0.6875rem', color: '#94a3b8', cursor: 'pointer', fontWeight: 600 }}>
+                    Support details
+                  </summary>
+                  <pre
+                    style={{
+                      fontSize: '0.625rem',
+                      color: '#64748b',
+                      margin: '0.35rem 0 0',
+                      whiteSpace: 'pre-wrap' as const,
+                      maxWidth: '100%',
+                    }}
+                  >
+                    {[m.supportMeta, m.supportDetail].filter(Boolean).join('\n\n')}
+                  </pre>
+                </details>
               ) : null}
               {m.error && m.rawDetail ? (
                 <details style={{ marginTop: '0.4rem', maxWidth: '100%', alignSelf: 'flex-start' }}>

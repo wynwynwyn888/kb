@@ -1,39 +1,24 @@
-// Credits page placeholder
-// View credits usage and transaction history
+/**
+ * Legacy/internal route kept for backwards compatibility.
+ * Client workspaces should use `/app/tenant/:tenantId/usage` and agencies should use `/app/agency/settings/quotas`.
+ */
+
+'use client';
+
+import { AgencyOnlyGate } from '@/components/app/AgencyOnlyGate';
+import { PageHeader, SectionCard } from '@/components/app/mvp-ui';
 
 export default function CreditsPage() {
   return (
-    <main style={{ padding: '2rem' }}>
-      <h1>Credits</h1>
-      <div>
-        <h2>Current Period</h2>
-        <p>Period: April 1 - April 30, 2026</p>
-        <div>
-          <p>Total credits: <strong>10,000</strong></p>
-          <p>Used: <strong>2,450</strong></p>
-          <p>Remaining: <strong>7,550</strong></p>
-        </div>
+    <AgencyOnlyGate>
+      <div style={{ maxWidth: 760 }}>
+        <PageHeader title="Credits" eyebrow="Agency" />
+        <SectionCard title="This page has moved" subtitle="Use the Credits pages inside the app.">
+          <p style={{ margin: 0, fontSize: '0.88rem', color: 'var(--aisbp-muted, #64748b)', lineHeight: 1.5 }}>
+            For agencies: open <strong>Agency → Credits</strong>. For workspaces: open <strong>Usage</strong> in the sidebar.
+          </p>
+        </SectionCard>
       </div>
-      <div>
-        <h2>Ledger</h2>
-        <table>
-          <thead>
-            <tr>
-              <th>Date</th>
-              <th>Amount</th>
-              <th>Description</th>
-            </tr>
-          </thead>
-          <tbody>
-            {/* TODO: Populate from API */}
-            <tr>
-              <td>2026-04-15</td>
-              <td>-15</td>
-              <td>Outbound message</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </main>
+    </AgencyOnlyGate>
   );
 }

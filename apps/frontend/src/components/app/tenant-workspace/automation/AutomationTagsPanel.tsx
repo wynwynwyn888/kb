@@ -742,7 +742,7 @@ export function AutomationTagsPanel() {
       {isAgencyStaff ? (
         <SectionCard
           title="Agency smoke test"
-          subtitle="Agency-only tool. This applies the selected tag directly in GHL."
+          subtitle="Agency-only tool. This applies the selected tag directly in the CRM."
           accent="muted"
         >
           <p style={{ margin: '0 0 0.65rem', fontSize: '0.85rem', color: 'var(--aisbp-muted)', lineHeight: 1.45 }}>

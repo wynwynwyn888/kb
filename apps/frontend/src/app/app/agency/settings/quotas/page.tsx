@@ -524,7 +524,7 @@ export default function AgencyQuotasPage() {
                       fontSize: '0.7rem',
                     }}
                   >
-                    Subaccount
+                    Workspace
                   </th>
                   <th
                     style={{

@@ -173,20 +173,20 @@ export function WorkspaceSwitcher() {
   const triggerLabel = useMemo(() => {
     if (user?.agencyRole) {
       if (isSubaccountRoute) {
-        return subTitleName ?? 'Subaccount';
+        return subTitleName ?? 'Workspace';
       }
       if (isGhlSettings && ghlSubParam) {
-        return selectedGhlName ? `GHL · ${selectedGhlName}` : 'GHL · subaccount';
+        return selectedGhlName ? `CRM · ${selectedGhlName}` : 'CRM · workspace';
       }
       if (isAgencyRoute) {
         return agencyName ?? 'Agency account';
       }
     }
     if (isSubaccountRoute) {
-      return subTitleName ?? 'Subaccount';
+      return subTitleName ?? 'Workspace';
     }
     if (isGhlSettings && ghlSubParam) {
-      return selectedGhlName ? `GHL · ${selectedGhlName}` : 'GHL';
+      return selectedGhlName ? `CRM · ${selectedGhlName}` : 'CRM';
     }
     return 'Workspace';
   }, [

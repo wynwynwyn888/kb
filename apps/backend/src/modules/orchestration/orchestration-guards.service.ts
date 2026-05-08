@@ -169,7 +169,7 @@ export class OrchestrationGuards {
   private async checkQuotaAvailable(input: OrchestrationInput): Promise<GuardResult> {
     const { data: wallet } = await this.supabase
       .from('quota_wallets')
-      .select('total_quota, used_quota')
+      .select('total_quota, used_quota, allow_negative_credits, negative_credit_limit')
       .eq('tenant_id', input.tenantId)
       .single();
 
@@ -178,13 +178,31 @@ export class OrchestrationGuards {
       return { decision: 'PROCEED', guardName: 'quota_available' };
     }
 
-    const remaining = wallet.total_quota - wallet.used_quota;
-    if (remaining <= 0) {
-      this.logger.debug(`Guard SKIP_QUOTA_EXHAUSTED for tenant=${input.tenantId}`);
+    const balance = wallet.total_quota - wallet.used_quota;
+    const allowNegativeCredits = Boolean(wallet.allow_negative_credits);
+    const negativeCreditLimit =
+      typeof wallet.negative_credit_limit === 'number' ? wallet.negative_credit_limit : 0;
+
+    const blocked = allowNegativeCredits
+      ? balance <= negativeCreditLimit
+      : balance <= 0;
+
+    if (blocked) {
+      this.logger.warn(
+        `creditBlocked ${JSON.stringify({
+          tenantId: input.tenantId,
+          conversationId: input.conversationId ?? null,
+          balance,
+          allowNegativeCredits,
+          negativeCreditLimit,
+        })}`,
+      );
       return {
         decision: 'SKIP_QUOTA_EXHAUSTED',
         guardName: 'quota_available',
-        reason: `No remaining quota (used=${wallet.used_quota}, total=${wallet.total_quota})`,
+        reason: allowNegativeCredits
+          ? `Over negative credit limit (balance=${balance}, limit=${negativeCreditLimit})`
+          : `No remaining credits (balance=${balance})`,
       };
     }
     return { decision: 'PROCEED', guardName: 'quota_available' };

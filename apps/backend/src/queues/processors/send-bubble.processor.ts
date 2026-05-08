@@ -73,6 +73,7 @@ export class SendBubbleProcessor extends WorkerHost {
       contactId,
       replyPlan,
       ghlLocationId,
+      sendBubbleJobId: String(job.id ?? ''),
     });
     const outbound_send_ms = Date.now() - sendStarted;
 

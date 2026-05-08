@@ -681,6 +681,12 @@ model QuotaWallet {
   tenantId    String   @unique @map("tenant_id")
   totalQuota  Int      @default(0) @map("total_quota")
   usedQuota   Int      @default(0) @map("used_quota")
+  /// Allow balance to go below zero (credits model).
+  allowNegativeCredits Boolean @default(false) @map("allow_negative_credits")
+  /// Minimum allowed balance (negative). Block when balance <= limit.
+  negativeCreditLimit  Int     @default(0) @map("negative_credit_limit")
+  /// When balance <= threshold, surface warning in UI.
+  lowCreditThreshold   Int     @default(0) @map("low_credit_threshold")
   periodStart DateTime @map("period_start")
   periodEnd   DateTime @map("period_end")
   createdAt   DateTime @default(now()) @map("created_at")
@@ -703,8 +709,16 @@ model QuotaLedger {
   walletId      String              @map("wallet_id")
   amount        Int
   type          QuotaTransactionType
+  /// Higher-level movement category for Credits UI + reporting.
+  movementType  String?             @map("movement_type")
+  /// Wallet balance after this movement (optional for legacy rows).
+  balanceAfter  Int?                @map("balance_after")
+  /// Idempotency key to prevent double-debits on retries.
+  idempotencyKey String?            @map("idempotency_key")
   description   String
   conversationId String?            @map("conversation_id")
+  metadata      Json?               @map("metadata")
+  createdByUserId String?           @map("created_by_user_id")
   createdAt     DateTime            @default(now()) @map("created_at")
 
   // Relations

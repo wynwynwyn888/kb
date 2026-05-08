@@ -32,7 +32,7 @@ export interface SendSummary {
   succeeded: number;
   failed: number;
   bubbleResults: BubbleSendResult[];
-  quotaDebited: number; // bubbles debited on success
+  quotaDebited: number; // logical replies debited on success (MVP: 1 or 0)
 }
 
 /**
@@ -62,8 +62,10 @@ export class OutboundSendService {
     contactId: string;
     replyPlan: ReplyDecision;
     ghlLocationId: string;
+    /** Stable worker job id for idempotent credit debits. */
+    sendBubbleJobId?: string;
   }): Promise<SendSummary> {
-    const { tenantId, conversationId, contactId, replyPlan, ghlLocationId } = params;
+    const { tenantId, conversationId, contactId, replyPlan, ghlLocationId, sendBubbleJobId } = params;
 
     // Skip if no bubbles or handover mode
     if (replyPlan.bubbles.length === 0 || replyPlan.planStatus === 'HANDOVER') {
@@ -101,8 +103,8 @@ export class OutboundSendService {
       };
     }
 
-    // Pre-check quota before starting
-    const quotaOk = await this.checkQuotaAvailable(tenantId, replyPlan.bubbles.length);
+    // Pre-check quota before starting (logical reply = 1 credit)
+    const quotaOk = await this.checkQuotaAvailable(tenantId, 1);
     if (!quotaOk) {
       this.logger.warn(`Outbound send blocked: quota exhausted for tenant=${tenantId}`);
       return {
@@ -167,9 +169,6 @@ export class OutboundSendService {
           contentType: 'TEXT',
           ghlMessageId: result.ghlMessageId,
         });
-        if (!coalesced) {
-          await this.debitQuota(tenantId, 1, conversationId);
-        }
       } else {
         failed++;
         this.logger.warn(
@@ -179,13 +178,33 @@ export class OutboundSendService {
     }
 
     let quotaDebited = 0;
-    if (coalesced) {
-      if (succeeded === physicalBubbles.length && physicalBubbles.length > 0) {
-        await this.debitQuota(tenantId, logicalBubbleCount, conversationId);
-        quotaDebited = logicalBubbleCount;
-      }
-    } else {
-      quotaDebited = succeeded;
+    const physicalSendCount = physicalBubbles.length;
+    const allSucceeded = physicalSendCount > 0 && succeeded === physicalSendCount && failed === 0;
+    if (allSucceeded) {
+      const idempotencyKey = this.buildReplyDebitIdempotencyKey({
+        tenantId,
+        conversationId,
+        sendBubbleJobId: sendBubbleJobId ?? '',
+      });
+      const debit = await this.debitQuotaForLogicalReply({
+        tenantId,
+        conversationId,
+        idempotencyKey,
+        movementType: 'reply_debit',
+        description: `Assistant reply debit (conversation ${conversationId})`,
+      });
+      quotaDebited = debit.debited ? 1 : 0;
+    } else if (failed > 0 && physicalSendCount > 1) {
+      this.logger.warn(
+        `quotaDebitSkipped ${JSON.stringify({
+          tenantId,
+          conversationId,
+          reason: 'partial_send_failure',
+          physicalSendCount,
+          succeeded,
+          failed,
+        })}`,
+      );
     }
 
     this.logger.log(
@@ -265,41 +284,101 @@ export class OutboundSendService {
   private async checkQuotaAvailable(tenantId: string, needed: number): Promise<boolean> {
     const { data: wallet } = await this.supabase
       .from('quota_wallets')
-      .select('total_quota, used_quota')
+      .select('total_quota, used_quota, allow_negative_credits, negative_credit_limit')
       .eq('tenant_id', tenantId)
       .single();
 
     if (!wallet) return true; // No wallet = no quota tracking
-    return wallet.total_quota - wallet.used_quota >= needed;
+    const balance = wallet.total_quota - wallet.used_quota;
+    const allowNeg = Boolean(wallet.allow_negative_credits);
+    const negLimit = typeof wallet.negative_credit_limit === 'number' ? wallet.negative_credit_limit : 0;
+    if (!allowNeg) return balance > 0 && balance >= needed;
+    // Allow until balance <= negativeCreditLimit (inclusive).
+    return balance > negLimit && balance - needed > negLimit;
   }
 
-  private async debitQuota(
-    tenantId: string,
-    amount: number,
-    conversationId: string,
-  ): Promise<void> {
-    // Debit from wallet
+  private buildReplyDebitIdempotencyKey(params: {
+    tenantId: string;
+    conversationId: string;
+    sendBubbleJobId: string;
+  }): string {
+    const { tenantId, conversationId, sendBubbleJobId } = params;
+    const job = sendBubbleJobId.trim() || 'unknown_job';
+    return `reply_debit:${tenantId}:${conversationId}:${job}`;
+  }
+
+  private async debitQuotaForLogicalReply(params: {
+    tenantId: string;
+    conversationId: string;
+    idempotencyKey: string;
+    movementType: 'reply_debit';
+    description: string;
+  }): Promise<{ debited: boolean }> {
+    const { tenantId, conversationId, idempotencyKey, movementType, description } = params;
+    if (!idempotencyKey.trim()) return { debited: false };
+
+    // Idempotency: check ledger first (best-effort; DB unique index is primary protection in prod).
+    const { data: existing } = await this.supabase
+      .from('quota_ledgers')
+      .select('id')
+      .eq('idempotency_key', idempotencyKey)
+      .maybeSingle();
+    if (existing?.id) {
+      this.logger.log(
+        `quotaDebitSkipped ${JSON.stringify({
+          tenantId,
+          conversationId,
+          reason: 'duplicate_idempotency_key',
+        })}`,
+      );
+      return { debited: false };
+    }
+
     const { data: wallet } = await this.supabase
       .from('quota_wallets')
-      .select('id, used_quota')
+      .select('id, total_quota, used_quota')
       .eq('tenant_id', tenantId)
       .single();
 
-    if (!wallet) return;
+    if (!wallet) return { debited: false };
+
+    const nextUsed = wallet.used_quota + 1;
+    const balanceAfter = wallet.total_quota - nextUsed;
 
     await this.supabase
       .from('quota_wallets')
-      .update({ used_quota: wallet.used_quota + amount })
-      .eq('tenant_id', tenantId);
+      .update({ used_quota: nextUsed, updated_at: new Date().toISOString() })
+      .eq('id', wallet.id);
 
-    // Record ledger entry
-    await this.supabase.from('quota_ledgers').insert({
+    const { error: ledErr } = await this.supabase.from('quota_ledgers').insert({
+      id: randomUUID(),
       wallet_id: wallet.id,
-      amount,
+      amount: 1,
       type: 'DEBIT',
-      description: `Outbound send for conversation ${conversationId}`,
+      movement_type: movementType,
+      balance_after: balanceAfter,
+      idempotency_key: idempotencyKey,
+      description,
       conversation_id: conversationId,
+      metadata: { logicalReply: true },
+      created_by_user_id: null,
     });
+    if (ledErr) {
+      // If this is a unique conflict, treat as idempotent skip.
+      const msg = formatPostgrestError(ledErr);
+      if (/idempotency_key/i.test(msg) || /duplicate/i.test(msg) || /unique/i.test(msg)) {
+        this.logger.log(
+          `quotaDebitSkipped ${JSON.stringify({
+            tenantId,
+            conversationId,
+            reason: 'duplicate_idempotency_key',
+          })}`,
+        );
+        return { debited: false };
+      }
+      throw new Error(`Failed to insert quota ledger: ${msg}`);
+    }
+    return { debited: true };
   }
 
   private async persistOutboundMessage(params: {

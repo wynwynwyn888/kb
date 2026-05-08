@@ -51,6 +51,7 @@ function makeParams(overrides: {
     contactId: overrides.contactId ?? 'contact_1',
     ghlLocationId: overrides.ghlLocationId ?? 'loc_1',
     replyPlan: overrides.replyPlan ?? makeReplyPlan(),
+    sendBubbleJobId: 'job_1',
   };
 }
 
@@ -132,7 +133,7 @@ describe('OutboundSendService', () => {
           if (table === 'quota_wallets') {
             return {
               select: () => ({
-                eq: () => ({ single: async () => ({ data: { id: 'w1', total_quota: 100, used_quota: 50 }, error: null }) }),
+                eq: () => ({ single: async () => ({ data: { id: 'w1', total_quota: 100, used_quota: 50, allow_negative_credits: false, negative_credit_limit: 0 }, error: null }) }),
               }),
               update: jestGlobal.fn(() => ({
                 eq: jestGlobal.fn(async () => ({ data: null, error: null })),
@@ -140,7 +141,12 @@ describe('OutboundSendService', () => {
             } as never;
           }
           if (table === 'quota_ledgers') {
-            return { insert: jestGlobal.fn(async () => ({ data: null, error: null })) } as never;
+            return {
+              select: () => ({
+                eq: () => ({ maybeSingle: async () => ({ data: null, error: { code: 'PGRST116' } }) }),
+              }),
+              insert: jestGlobal.fn(async () => ({ data: null, error: null })),
+            } as never;
           }
           return {} as never;
         });
@@ -160,6 +166,151 @@ describe('OutboundSendService', () => {
             contactId: 'ghl_conversation_contact_aaa',
           }),
         );
+      } finally {
+        decryptSpy.mockRestore();
+      }
+    });
+
+    it('debits 1 credit for a logical reply even when 3 physical bubbles succeed', async () => {
+      const decryptSpy = jestGlobal.spyOn(encryption, 'decrypt').mockReturnValue('plain_token');
+      try {
+        (mockSupabase.from as jest.Mock).mockImplementation((table: string) => {
+          if (table === 'tenant_ghl_connections') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    eq: () => ({
+                      single: async () => ({ data: { private_token_encrypted: 'cipher_blob' }, error: null }),
+                    }),
+                  }),
+                }),
+              }),
+            } as never;
+          }
+          if (table === 'messages') {
+            return { insert: jestGlobal.fn(async () => ({ data: null, error: null })) } as never;
+          }
+          if (table === 'conversations') {
+            return {
+              update: jestGlobal.fn(() => ({
+                eq: jestGlobal.fn(async () => ({ data: null, error: null })),
+              })),
+            } as never;
+          }
+          if (table === 'quota_wallets') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  single: async () => ({
+                    data: { id: 'w1', total_quota: 100, used_quota: 1, allow_negative_credits: false, negative_credit_limit: 0 },
+                    error: null,
+                  }),
+                }),
+              }),
+              update: jestGlobal.fn(() => ({
+                eq: jestGlobal.fn(async () => ({ data: null, error: null })),
+              })),
+            } as never;
+          }
+          if (table === 'quota_ledgers') {
+            return {
+              select: () => ({
+                eq: () => ({ maybeSingle: async () => ({ data: null, error: { code: 'PGRST116' } }) }),
+              }),
+              insert: jestGlobal.fn(async () => ({ data: null, error: null })),
+            } as never;
+          }
+          return {} as never;
+        });
+
+        const r = await service.sendReply(
+          makeParams({
+            replyPlan: makeReplyPlan({
+              bubbles: [
+                { index: 0, text: 'A' },
+                { index: 1, text: 'B' },
+                { index: 2, text: 'C' },
+              ],
+            }),
+          }),
+        );
+        expect(r.succeeded).toBeGreaterThan(0);
+        expect(r.failed).toBe(0);
+        expect(r.quotaDebited).toBe(1);
+      } finally {
+        decryptSpy.mockRestore();
+      }
+    });
+
+    it('does not double debit on retry with same idempotency key', async () => {
+      const decryptSpy = jestGlobal.spyOn(encryption, 'decrypt').mockReturnValue('plain_token');
+      try {
+        let ledgerSeen = false;
+        (mockSupabase.from as jest.Mock).mockImplementation((table: string) => {
+          if (table === 'tenant_ghl_connections') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    eq: () => ({
+                      single: async () => ({ data: { private_token_encrypted: 'cipher_blob' }, error: null }),
+                    }),
+                  }),
+                }),
+              }),
+            } as never;
+          }
+          if (table === 'messages') {
+            return { insert: jestGlobal.fn(async () => ({ data: null, error: null })) } as never;
+          }
+          if (table === 'conversations') {
+            return {
+              update: jestGlobal.fn(() => ({
+                eq: jestGlobal.fn(async () => ({ data: null, error: null })),
+              })),
+            } as never;
+          }
+          if (table === 'quota_wallets') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  single: async () => ({
+                    data: { id: 'w1', total_quota: 100, used_quota: 1, allow_negative_credits: false, negative_credit_limit: 0 },
+                    error: null,
+                  }),
+                }),
+              }),
+              update: jestGlobal.fn(() => ({
+                eq: jestGlobal.fn(async () => ({ data: null, error: null })),
+              })),
+            } as never;
+          }
+          if (table === 'quota_ledgers') {
+            return {
+              select: () => ({
+                eq: () => ({
+                  maybeSingle: async () => {
+                    if (ledgerSeen) return { data: { id: 'led1' }, error: null };
+                    ledgerSeen = true;
+                    return { data: null, error: { code: 'PGRST116' } };
+                  },
+                }),
+              }),
+              insert: jestGlobal.fn(async () => ({ data: null, error: null })),
+            } as never;
+          }
+          return {} as never;
+        });
+
+        const params = makeParams({
+          replyPlan: makeReplyPlan({ bubbles: [{ index: 0, text: 'A' }] }),
+        });
+
+        const a = await service.sendReply(params);
+        const b = await service.sendReply(params);
+        expect(a.quotaDebited).toBe(1);
+        expect(b.quotaDebited).toBe(0);
       } finally {
         decryptSpy.mockRestore();
       }
@@ -187,7 +338,7 @@ describe('OutboundSendService', () => {
         if (table === 'quota_wallets') {
           return {
             select: () => ({
-              eq: () => ({ single: async () => ({ data: { total_quota: 100, used_quota: 50 }, error: null }) }),
+              eq: () => ({ single: async () => ({ data: { total_quota: 100, used_quota: 50, allow_negative_credits: false, negative_credit_limit: 0 }, error: null }) }),
             }),
           } as never;
         }
@@ -202,7 +353,7 @@ describe('OutboundSendService', () => {
         if (table === 'quota_wallets') {
           return {
             select: () => ({
-              eq: () => ({ single: async () => ({ data: { total_quota: 5, used_quota: 5 }, error: null }) }),
+              eq: () => ({ single: async () => ({ data: { total_quota: 5, used_quota: 5, allow_negative_credits: false, negative_credit_limit: 0 }, error: null }) }),
             }),
           } as never;
         }
@@ -214,12 +365,12 @@ describe('OutboundSendService', () => {
   });
 
   describe('debitQuota', () => {
-    it('creates ledger entry with DEBIT type', async () => {
+    it('creates ledger entry with DEBIT type (reply_debit) and idempotency key', async () => {
       (mockSupabase.from as jest.Mock).mockImplementation((table: string) => {
         if (table === 'quota_wallets') {
           return {
             select: () => ({
-              eq: () => ({ single: async () => ({ data: { id: 'w1', used_quota: 10 }, error: null }) }),
+              eq: () => ({ single: async () => ({ data: { id: 'w1', total_quota: 100, used_quota: 10 }, error: null }) }),
             }),
             update: jestGlobal.fn(() => ({
               eq: jestGlobal.fn(async () => ({ data: null, error: null })),
@@ -227,12 +378,23 @@ describe('OutboundSendService', () => {
           } as never;
         }
         if (table === 'quota_ledgers') {
-          return { insert: jestGlobal.fn(async () => ({ data: null, error: null })) } as never;
+          return {
+            select: () => ({
+              eq: () => ({ maybeSingle: async () => ({ data: null, error: { code: 'PGRST116' } }) }),
+            }),
+            insert: jestGlobal.fn(async () => ({ data: null, error: null })),
+          } as never;
         }
         return {} as never;
       });
 
-      await (service as never)['debitQuota']('tenant_1', 1, 'conv_1');
+      await (service as never)['debitQuotaForLogicalReply']({
+        tenantId: 'tenant_1',
+        conversationId: 'conv_1',
+        idempotencyKey: 'reply_debit:tenant_1:conv_1:job_1',
+        movementType: 'reply_debit',
+        description: 'test',
+      });
 
       // Verify insert was called with DEBIT type
       const insertMock = (mockSupabase.from as jest.Mock).mock.results

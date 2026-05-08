@@ -37,6 +37,7 @@ function makeParams(bubbles: Array<{ index: number; text: string }>) {
     contactId: 'contact_1',
     ghlLocationId: 'loc_1',
     replyPlan: makeReplyPlan(bubbles),
+    sendBubbleJobId: 'job_1',
   };
 }
 
@@ -81,12 +82,17 @@ describe('Quota Debit Integration (OutboundSendService)', () => {
         };
       }
       if (table === 'quota_ledgers') {
-        return { insert: jestGlobal.fn(() => ({ select: jestGlobal.fn(async () => ({ data: null, error: null })) })) };
+        return {
+          select: () => ({
+            eq: () => ({ maybeSingle: async () => ({ data: null, error: { code: 'PGRST116' } }) }),
+          }),
+          insert: jestGlobal.fn(async () => ({ data: null, error: null })),
+        };
       }
       if (table === 'quota_wallets') {
         return {
           select: () => ({
-            eq: () => ({ single: async () => ({ data: { id: 'w1', total_quota: 100, used_quota: 50 }, error: null }) }),
+            eq: () => ({ single: async () => ({ data: { id: 'w1', total_quota: 100, used_quota: 50, allow_negative_credits: false, negative_credit_limit: 0 }, error: null }) }),
           }),
           update: jestGlobal.fn(() => ({
             eq: jestGlobal.fn(async () => ({ data: null, error: null })),
@@ -97,7 +103,7 @@ describe('Quota Debit Integration (OutboundSendService)', () => {
     });
   });
 
-  it('debits quota for each successful bubble', async () => {
+  it('debits 1 credit for a logical reply even with 3 physical sends', async () => {
     mockSendMessage.mockResolvedValue({ success: true, messageId: 'ghl_1' });
 
     const result: SendSummary = await service.sendReply(makeParams([
@@ -107,7 +113,7 @@ describe('Quota Debit Integration (OutboundSendService)', () => {
     ]));
 
     expect(result.succeeded).toBe(3);
-    expect(result.quotaDebited).toBe(3);
+    expect(result.quotaDebited).toBe(1);
   });
 
   it('debits zero when all bubble sends fail', async () => {
@@ -123,7 +129,7 @@ describe('Quota Debit Integration (OutboundSendService)', () => {
     expect(result.quotaDebited).toBe(0);
   });
 
-  it('debits only succeeded bubbles on partial failure', async () => {
+  it('does not debit on partial failure (MVP)', async () => {
     mockSendMessage
       .mockResolvedValueOnce({ success: true, messageId: 'ghl_1' })
       .mockResolvedValueOnce({ success: false, error: 'Rate limited' });
@@ -135,6 +141,71 @@ describe('Quota Debit Integration (OutboundSendService)', () => {
 
     expect(result.succeeded).toBe(1);
     expect(result.failed).toBe(1);
-    expect(result.quotaDebited).toBe(1);
+    expect(result.quotaDebited).toBe(0);
+  });
+
+  it('retry does not double debit (idempotency key)', async () => {
+    mockSendMessage.mockResolvedValue({ success: true, messageId: 'ghl_1' });
+
+    let ledgerSeen = false;
+    (mockSupabase.from as jest.Mock).mockImplementation((table: string): any => {
+      if (table === 'tenant_ghl_connections') {
+        return {
+          select: () => ({
+            eq: () => ({
+              eq: () => ({
+                eq: () => ({
+                  single: async () => ({
+                    data: { private_token_encrypted: encrypt('ghl-test-token') },
+                    error: null,
+                  }),
+                }),
+              }),
+            }),
+          }),
+        };
+      }
+      if (table === 'messages') {
+        return { insert: jestGlobal.fn(async () => ({ data: null, error: null })) };
+      }
+      if (table === 'conversations') {
+        return {
+          update: jestGlobal.fn(() => ({
+            eq: jestGlobal.fn(async () => ({ data: null, error: null })),
+          })),
+        };
+      }
+      if (table === 'quota_ledgers') {
+        return {
+          select: () => ({
+            eq: () => ({
+              maybeSingle: async () => {
+                if (ledgerSeen) return { data: { id: 'led1' }, error: null };
+                ledgerSeen = true;
+                return { data: null, error: { code: 'PGRST116' } };
+              },
+            }),
+          }),
+          insert: jestGlobal.fn(async () => ({ data: null, error: null })),
+        };
+      }
+      if (table === 'quota_wallets') {
+        return {
+          select: () => ({
+            eq: () => ({ single: async () => ({ data: { id: 'w1', total_quota: 100, used_quota: 50, allow_negative_credits: false, negative_credit_limit: 0 }, error: null }) }),
+          }),
+          update: jestGlobal.fn(() => ({
+            eq: jestGlobal.fn(async () => ({ data: null, error: null })),
+          })),
+        };
+      }
+      return {};
+    });
+
+    const p = makeParams([{ index: 0, text: 'Bubble 1' }]);
+    const a = await service.sendReply(p);
+    const b = await service.sendReply(p);
+    expect(a.quotaDebited).toBe(1);
+    expect(b.quotaDebited).toBe(0);
   });
 });

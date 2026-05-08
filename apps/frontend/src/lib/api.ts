@@ -42,6 +42,16 @@ interface ApiOptions extends RequestInit {
   timeoutMs?: number;
 }
 
+export async function safeParseJsonFromResponse<T>(response: Response): Promise<T | null> {
+  const text = await response.text().catch(() => '');
+  if (!text) return null;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new ApiHttpError(500, 'Usage data is temporarily unavailable. Please try again.');
+  }
+}
+
 /** Combine optional caller `signal` with a timeout so `fetch` always settles. */
 function abortSignalForTimeout(timeoutMs: number, existing?: AbortSignal): { signal: AbortSignal; cancel: () => void } {
   const c = new AbortController();
@@ -105,7 +115,16 @@ async function apiRequest<T>(endpoint: string, options: ApiOptions = {}): Promis
       window.dispatchEvent(new CustomEvent(API_UNAUTHORIZED_EVENT));
     }
 
-    const errorJson = await response.json().catch(() => ({ message: 'Request failed' }));
+    const errorText = await response.text().catch(() => '');
+    const errorJson = errorText
+      ? (() => {
+          try {
+            return JSON.parse(errorText);
+          } catch {
+            return { message: errorText };
+          }
+        })()
+      : ({ message: 'Request failed' } as const);
     let msg = 'Request failed';
     if (typeof errorJson === 'object' && errorJson !== null && 'message' in errorJson) {
       const m = (errorJson as { message?: unknown }).message;
@@ -122,7 +141,7 @@ async function apiRequest<T>(endpoint: string, options: ApiOptions = {}): Promis
     throw new ApiHttpError(status, msg, errorJson);
   }
 
-  return response.json() as Promise<T>;
+  return (await safeParseJsonFromResponse<T>(response)) as T;
 }
 
 /** DELETE / 204 No Content — no response body. */
@@ -143,7 +162,16 @@ async function apiRequestNoContent(endpoint: string, options: ApiOptions = {}): 
     if (status === 401 && typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent(API_UNAUTHORIZED_EVENT));
     }
-    const errorJson = await response.json().catch(() => ({ message: 'Request failed' }));
+    const errorText = await response.text().catch(() => '');
+    const errorJson = errorText
+      ? (() => {
+          try {
+            return JSON.parse(errorText);
+          } catch {
+            return { message: errorText };
+          }
+        })()
+      : ({ message: 'Request failed' } as const);
     let msg = 'Request failed';
     if (typeof errorJson === 'object' && errorJson !== null && 'message' in errorJson) {
       const m = (errorJson as { message?: unknown }).message;

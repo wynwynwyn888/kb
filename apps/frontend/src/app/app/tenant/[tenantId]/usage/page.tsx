@@ -47,12 +47,12 @@ export default function TenantUsagePage() {
           getTenantCreditsLedger(token, tenantId, 20),
         ]);
         if (cancelled) return;
-        setUsage(u);
-        setLedger(l);
+        setUsage(u ?? null);
+        setLedger(Array.isArray(l) ? l : []);
       } catch (e) {
-        if (!cancelled) setErr(e instanceof Error ? e.message : 'Failed to load usage');
+        if (!cancelled) setErr('Usage data is temporarily unavailable. Please try again.');
         if (!cancelled) setUsage(null);
-        if (!cancelled) setLedger(null);
+        if (!cancelled) setLedger([]);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -62,19 +62,29 @@ export default function TenantUsagePage() {
     };
   }, [token, tenantId, loadAttempt]);
 
-  const pct =
-    usage && usage.totalQuota > 0
-      ? Math.min(100, Math.round((usage.usedQuota / usage.totalQuota) * 100))
-      : null;
+  const usageSummary = usage ?? null;
+  const ledgerItems = Array.isArray(ledger) ? ledger : [];
+  const dailyUsage = Array.isArray((usageSummary as unknown as { dailyUsage?: unknown })?.dailyUsage)
+    ? ((usageSummary as unknown as { dailyUsage: unknown[] }).dailyUsage as unknown[])
+    : [];
 
-  const avgDaily = usage ? Math.max(0, usage.usedThisMonth / Math.max(1, new Date().getDate())) : null;
+  const totalQuota = usageSummary?.totalQuota ?? 0;
+  const usedQuota = usageSummary?.usedQuota ?? 0;
+  const balance = usageSummary?.balance ?? 0;
+  const usedToday = usageSummary?.usedToday ?? 0;
+  const usedThisMonth = usageSummary?.usedThisMonth ?? 0;
+  const status = usageSummary?.status ?? 'ACTIVE';
+
+  const pct = totalQuota > 0 ? Math.min(100, Math.round((usedQuota / totalQuota) * 100)) : null;
+
+  const avgDaily = usageSummary ? Math.max(0, usedThisMonth / Math.max(1, new Date().getDate())) : null;
   const projectedDays =
-    usage && avgDaily != null && avgDaily > 0
-      ? Math.floor(Math.max(0, usage.balance) / avgDaily)
+    usageSummary && avgDaily != null && avgDaily > 0
+      ? Math.floor(Math.max(0, balance) / avgDaily)
       : null;
 
-  const showLow = usage?.status === 'LOW_CREDIT';
-  const showPaused = usage?.status === 'PAUSED_NO_CREDITS' || usage?.status === 'OVER_NEGATIVE_LIMIT';
+  const showLow = status === 'LOW_CREDIT';
+  const showPaused = status === 'PAUSED_NO_CREDITS' || status === 'OVER_NEGATIVE_LIMIT';
 
   return (
     <div>
@@ -116,7 +126,7 @@ export default function TenantUsagePage() {
 
       {!loading && !err ? (
         <>
-          {usage ? (
+          {usageSummary ? (
             <div
               style={{
                 border: '1px solid #dbeafe',
@@ -153,16 +163,16 @@ export default function TenantUsagePage() {
                     Credits remaining
                   </p>
                   <p style={{ margin: '0.15rem 0 0', fontSize: '2.1rem', fontWeight: 800, color: '#0f172a', lineHeight: 1.1 }}>
-                    {usage.balance.toLocaleString()}
+                    {balance.toLocaleString()}
                   </p>
                   <p style={{ margin: '0.35rem 0 0', fontSize: '0.88rem', color: '#64748b' }}>
-                    of {usage.totalQuota.toLocaleString()} total
+                    of {totalQuota.toLocaleString()} total
                   </p>
                 </div>
                 <div style={{ textAlign: 'right', minWidth: '140px' }}>
                   <p style={{ margin: 0, fontSize: '0.8rem', color: '#64748b' }}>Credits used today</p>
                   <p style={{ margin: '0.1rem 0 0', fontSize: '1.35rem', fontWeight: 700, color: '#334155' }}>
-                    {usage.usedToday.toLocaleString()}
+                    {usedToday.toLocaleString()}
                   </p>
                   {pct != null ? (
                     <p style={{ margin: '0.35rem 0 0', fontSize: '0.78rem', color: '#94a3b8' }}>{pct}% of pool</p>
@@ -174,13 +184,13 @@ export default function TenantUsagePage() {
                 <div>
                   <p style={{ margin: 0, fontSize: '0.8rem', color: '#64748b' }}>Credits used this month</p>
                   <p style={{ margin: '0.15rem 0 0', fontSize: '1.05rem', fontWeight: 750, color: '#0f172a' }}>
-                    {usage.usedThisMonth.toLocaleString()}
+                    {usedThisMonth.toLocaleString()}
                   </p>
                 </div>
                 <div>
                   <p style={{ margin: 0, fontSize: '0.8rem', color: '#64748b' }}>Average daily usage</p>
                   <p style={{ margin: '0.15rem 0 0', fontSize: '1.05rem', fontWeight: 750, color: '#0f172a' }}>
-                    {avgDaily != null ? avgDaily.toFixed(1) : '—'}
+                    {avgDaily != null && Number.isFinite(avgDaily) ? avgDaily.toFixed(1) : '—'}
                   </p>
                 </div>
                 <div>
@@ -192,7 +202,7 @@ export default function TenantUsagePage() {
                 <div>
                   <p style={{ margin: 0, fontSize: '0.8rem', color: '#64748b' }}>Status</p>
                   <p style={{ margin: '0.15rem 0 0', fontSize: '1.05rem', fontWeight: 750, color: '#0f172a' }}>
-                    {creditStatusLabel(usage.status)}
+                    {creditStatusLabel(status)}
                   </p>
                 </div>
               </div>
@@ -220,13 +230,13 @@ export default function TenantUsagePage() {
             <SectionCard title="Credits" subtitle="No usage has been recorded for this workspace yet.">
               <EmptyState
                 title="No usage recorded yet"
-                detail="Usage will appear here after the bot starts replying to customers."
+                detail="Usage will appear here after the assistant starts replying to customers."
               />
             </SectionCard>
           )}
 
           <SectionCard title="Recent credits activity" subtitle="Latest movements in your credit ledger.">
-            {!ledger || ledger.length === 0 ? (
+            {ledgerItems.length === 0 ? (
               <p style={{ fontSize: '0.85rem', color: '#64748b', margin: 0 }}>No ledger entries yet.</p>
             ) : (
               <div style={{ overflowX: 'auto' }}>
@@ -241,7 +251,7 @@ export default function TenantUsagePage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {ledger.map(r => (
+                    {ledgerItems.map(r => (
                       <tr key={r.id}>
                         <td style={{ padding: '0.45rem', borderBottom: '1px solid #f1f5f9' }}>
                           {r.created_at ? formatDateTime(String(r.created_at)) : '—'}

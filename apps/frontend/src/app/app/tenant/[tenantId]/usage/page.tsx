@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { getTenantCreditsLedger, getTenantCreditsUsage } from '@/lib/api';
 import {
@@ -13,16 +13,31 @@ import {
   SectionCard,
   formatDateTime,
 } from '@/components/app/mvp-ui';
-import { creditStatusLabel } from '@/lib/credits-ui';
+import { creditStatusLabel, type CreditStatus } from '@/lib/credits-ui';
 
 type UsageSnap = NonNullable<Awaited<ReturnType<typeof getTenantCreditsUsage>>>;
 
+function resolveTenantIdFromParams(raw: Record<string, string | string[] | undefined> | null | undefined): string | null {
+  const v = raw?.['tenantId'];
+  if (typeof v === 'string' && v.trim()) return v.trim();
+  if (Array.isArray(v) && typeof v[0] === 'string' && v[0].trim()) return v[0].trim();
+  return null;
+}
+
+function safeFiniteNumber(value: unknown, fallback = 0): number {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
 export default function TenantUsagePage() {
   const params = useParams();
-  const tenantId = params['tenantId'] as string;
-  const { token, user } = useAuth();
+  const tenantParam = useMemo(
+    () => resolveTenantIdFromParams(params as Record<string, string | string[] | undefined>),
+    [params],
+  );
+  const { token, user, loading: authLoading } = useAuth();
   const [loadAttempt, setLoadAttempt] = useState(0);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [err, setErr] = useState('');
   const [usage, setUsage] = useState<UsageSnap | null>(null);
   const [ledger, setLedger] = useState<Array<{
@@ -35,24 +50,47 @@ export default function TenantUsagePage() {
     created_at: string;
   }> | null>(null);
 
+  /* Auth still resolving on direct load — do not fetch usage yet */
   useEffect(() => {
-    if (!token || !tenantId) return;
-    let cancelled = false;
-    (async () => {
+    if (authLoading) {
       setLoading(true);
+      return;
+    }
+
+    if (!user || !token) {
+      setLoading(false);
+      setUsage(null);
+      setLedger(null);
       setErr('');
+      return;
+    }
+
+    if (!tenantParam) {
+      setLoading(false);
+      setUsage(null);
+      setLedger(null);
+      setErr('');
+      return;
+    }
+
+    let cancelled = false;
+    setLoading(true);
+    setErr('');
+    void (async () => {
       try {
         const [u, l] = await Promise.all([
-          getTenantCreditsUsage(token, tenantId),
-          getTenantCreditsLedger(token, tenantId, 20),
+          getTenantCreditsUsage(token, tenantParam),
+          getTenantCreditsLedger(token, tenantParam, 20),
         ]);
         if (cancelled) return;
         setUsage(u ?? null);
         setLedger(Array.isArray(l) ? l : []);
-      } catch (e) {
-        if (!cancelled) setErr('Usage data is temporarily unavailable. Please try again.');
-        if (!cancelled) setUsage(null);
-        if (!cancelled) setLedger([]);
+      } catch {
+        if (!cancelled) {
+          setErr('Usage data is temporarily unavailable. Please try again.');
+          setUsage(null);
+          setLedger([]);
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -60,31 +98,58 @@ export default function TenantUsagePage() {
     return () => {
       cancelled = true;
     };
-  }, [token, tenantId, loadAttempt]);
+  }, [authLoading, user, token, tenantParam, loadAttempt]);
 
   const usageSummary = usage ?? null;
   const ledgerItems = Array.isArray(ledger) ? ledger : [];
-  const dailyUsage = Array.isArray((usageSummary as unknown as { dailyUsage?: unknown })?.dailyUsage)
-    ? ((usageSummary as unknown as { dailyUsage: unknown[] }).dailyUsage as unknown[])
-    : [];
 
-  const totalQuota = usageSummary?.totalQuota ?? 0;
-  const usedQuota = usageSummary?.usedQuota ?? 0;
-  const balance = usageSummary?.balance ?? 0;
-  const usedToday = usageSummary?.usedToday ?? 0;
-  const usedThisMonth = usageSummary?.usedThisMonth ?? 0;
-  const status = usageSummary?.status ?? 'ACTIVE';
+  const totalQuota = safeFiniteNumber(usageSummary?.totalQuota, 0);
+  const usedQuota = safeFiniteNumber(usageSummary?.usedQuota, 0);
+  const balance = safeFiniteNumber(usageSummary?.balance, 0);
+  const usedToday = safeFiniteNumber(usageSummary?.usedToday, 0);
+  const usedThisMonth = safeFiniteNumber(usageSummary?.usedThisMonth, 0);
+  const status = (usageSummary?.status != null ? String(usageSummary.status) : 'ACTIVE') as Parameters<
+    typeof creditStatusLabel
+  >[0];
 
   const pct = totalQuota > 0 ? Math.min(100, Math.round((usedQuota / totalQuota) * 100)) : null;
 
-  const avgDaily = usageSummary ? Math.max(0, usedThisMonth / Math.max(1, new Date().getDate())) : null;
+  const avgDaily =
+    usageSummary != null ? Math.max(0, usedThisMonth / Math.max(1, new Date().getDate())) : null;
   const projectedDays =
-    usageSummary && avgDaily != null && avgDaily > 0
-      ? Math.floor(Math.max(0, balance) / avgDaily)
-      : null;
+    usageSummary && avgDaily != null && avgDaily > 0 ? Math.floor(Math.max(0, balance) / avgDaily) : null;
 
   const showLow = status === 'LOW_CREDIT';
   const showPaused = status === 'PAUSED_NO_CREDITS' || status === 'OVER_NEGATIVE_LIMIT';
+
+  const blockingMessage = tenantParam ? '' : !authLoading ? 'Workspace context is unavailable from this URL.' : '';
+
+  if (authLoading) {
+    return (
+      <div>
+        <PageHeader title="Usage" eyebrow="Client workspace" />
+        <LoadingBlock message="Checking your workspace access…" />
+      </div>
+    );
+  }
+
+  if (!user || !token) {
+    return (
+      <div>
+        <PageHeader title="Usage" eyebrow="Client workspace" />
+        <LoadingBlock message="Signing you in…" />
+      </div>
+    );
+  }
+
+  if (!tenantParam) {
+    return (
+      <div>
+        <PageHeader title="Usage" eyebrow="Client workspace" />
+        <ErrorBanner message="Workspace context is unavailable from this URL. Open Usage from your workspace sidebar." />
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -122,7 +187,7 @@ export default function TenantUsagePage() {
         </div>
       )}
 
-      {loading && !err ? <LoadingBlock message="Loading…" /> : null}
+      {loading && !err ? <LoadingBlock message="Loading usage…" /> : null}
 
       {!loading && !err ? (
         <>
@@ -251,22 +316,27 @@ export default function TenantUsagePage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {ledgerItems.map(r => (
-                      <tr key={r.id}>
+                    {ledgerItems.map((r, idx) => (
+                      <tr key={typeof r?.id === 'string' && r.id.trim().length > 0 ? r.id : `ledger-row-${idx}`}>
                         <td style={{ padding: '0.45rem', borderBottom: '1px solid #f1f5f9' }}>
-                          {r.created_at ? formatDateTime(String(r.created_at)) : '—'}
+                          {r?.created_at ? formatDateTime(String(r.created_at)) : '—'}
                         </td>
                         <td style={{ padding: '0.45rem', borderBottom: '1px solid #f1f5f9' }}>
-                          {(r.movement_type ?? r.type ?? '').replace(/_/g, ' ') || '—'}
+                          {(r?.movement_type != null ? String(r.movement_type) : r?.type != null ? String(r.type) : '').replace(/_/g, ' ') ||
+                            '—'}
                         </td>
                         <td style={{ padding: '0.45rem', borderBottom: '1px solid #f1f5f9', fontWeight: 750 }}>
-                          {String(r.type).toUpperCase() === 'DEBIT' ? '-' : '+'}
-                          {Math.abs(r.amount ?? 0).toLocaleString()}
+                          {String(r?.type ?? '').toUpperCase() === 'DEBIT' ? '-' : '+'}
+                          {Math.abs(safeFiniteNumber(r?.amount)).toLocaleString()}
                         </td>
                         <td style={{ padding: '0.45rem', borderBottom: '1px solid #f1f5f9' }}>
-                          {r.balance_after != null ? Number(r.balance_after).toLocaleString() : '—'}
+                          {r?.balance_after != null && Number.isFinite(Number(r.balance_after))
+                            ? Number(r.balance_after).toLocaleString()
+                            : '—'}
                         </td>
-                        <td style={{ padding: '0.45rem', borderBottom: '1px solid #f1f5f9' }}>{r.description || '—'}</td>
+                        <td style={{ padding: '0.45rem', borderBottom: '1px solid #f1f5f9' }}>
+                          {(r?.description != null ? String(r.description) : '').trim() || '—'}
+                        </td>
                       </tr>
                     ))}
                   </tbody>

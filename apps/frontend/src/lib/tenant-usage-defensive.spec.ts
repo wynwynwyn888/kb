@@ -9,7 +9,7 @@ function read(rel: string): string {
 describe('Tenant usage defensive defaults', () => {
   it('uses safe defaults and friendly error copy', () => {
     const s = read('src/app/app/tenant/[tenantId]/usage/page.tsx');
-    expect(s).toContain("const ledgerItems = Array.isArray(ledger) ? ledger : []");
+    expect(s).toContain('const ledgerItems = Array.isArray(ledger) ? ledger : []');
     expect(s).toContain('Usage data is temporarily unavailable. Please try again.');
     expect(s).toContain('Usage will appear here after the assistant starts replying to customers.');
   });

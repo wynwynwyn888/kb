@@ -35,9 +35,12 @@ function advSubStyle(active: boolean): CSSProperties {
 
 export function TenantWorkspaceChrome({ tenantId, children }: { tenantId: string; children: ReactNode }) {
   const pathname = usePathname() ?? '';
-  const base = tenantBasePath(tenantId);
+  const safeId = typeof tenantId === 'string' && tenantId.trim().length > 0 ? tenantId.trim() : '';
+  const base = safeId ? tenantBasePath(safeId) : '';
   const { user } = useAuth();
-  const showAdvancedChrome = Boolean(user?.agencyRole) && isAdvancedPath(pathname, tenantId);
+  const showAdvancedChrome = Boolean(user?.agencyRole && safeId) && isAdvancedPath(pathname, safeId);
+
+  if (!safeId) return <>{children}</>;
 
   return (
     <div>

@@ -264,7 +264,11 @@ export function WorkspaceSwitcher() {
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
     if (!s) return subaccounts;
-    return subaccounts.filter(t => t.name.toLowerCase().includes(s) || t.id.toLowerCase().includes(s));
+    return subaccounts.filter(t => {
+      const name = (t?.name ?? '').toLowerCase();
+      const id = String(t?.id ?? '').toLowerCase();
+      return name.includes(s) || id.includes(s);
+    });
   }, [subaccounts, q]);
 
   if (!user) return null;
@@ -342,7 +346,7 @@ export function WorkspaceSwitcher() {
                     marginBottom: 2,
                   }}
                 >
-                  {s.name}
+                  {s.name?.trim() ? s.name : s.id ?? 'Workspace'}
                 </button>
               </li>
             );

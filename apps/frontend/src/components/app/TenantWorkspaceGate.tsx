@@ -16,19 +16,30 @@ export function TenantWorkspaceGate({ tenantId, children }: { tenantId: string; 
   const pathname = usePathname() ?? '';
   const router = useRouter();
 
+  const safeTenantId = typeof tenantId === 'string' && tenantId.trim().length > 0 ? tenantId.trim() : '';
+
+  if (!loading && !safeTenantId) {
+    return (
+      <div>
+        <PageHeader title="Workspace URL" eyebrow="Access" />
+        <ErrorBanner message="This workspace URL is incomplete. Use a valid workspace link." />
+      </div>
+    );
+  }
+
   const isAgencyStaff = Boolean(user?.agencyRole);
-  const tenantAdvancedBlocked = !isAgencyStaff && isAgencyOnlyAdvancedRoute(pathname, tenantId);
+  const tenantAdvancedBlocked = !isAgencyStaff && isAgencyOnlyAdvancedRoute(pathname, safeTenantId);
 
   useEffect(() => {
     if (loading || !tenantAdvancedBlocked) return;
-    router.replace(`${tenantBasePath(tenantId)}/assistant`);
-  }, [loading, tenantAdvancedBlocked, router, tenantId]);
+    router.replace(`${tenantBasePath(safeTenantId)}/assistant`);
+  }, [loading, tenantAdvancedBlocked, router, safeTenantId]);
 
   if (loading) {
     return <LoadingBlock message="Checking access…" />;
   }
 
-  const isCorrectTenant = user?.tenantId != null && user.tenantId === tenantId;
+  const isCorrectTenant = user?.tenantId != null && user.tenantId === safeTenantId;
 
   if (!isAgencyStaff && !isCorrectTenant) {
     return (
@@ -64,3 +75,4 @@ export function TenantWorkspaceGate({ tenantId, children }: { tenantId: string; 
 
   return <>{children}</>;
 }
+

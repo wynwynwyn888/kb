@@ -8,9 +8,11 @@ export default function TenantSegmentLayout({
   children: React.ReactNode;
   params: { tenantId: string };
 }) {
+  const tenantId =
+    typeof params?.tenantId === 'string' && params.tenantId.trim().length > 0 ? params.tenantId.trim() : '';
   return (
-    <TenantWorkspaceGate tenantId={params.tenantId}>
-      <TenantWorkspaceChrome tenantId={params.tenantId}>{children}</TenantWorkspaceChrome>
+    <TenantWorkspaceGate tenantId={tenantId}>
+      <TenantWorkspaceChrome tenantId={tenantId}>{children}</TenantWorkspaceChrome>
     </TenantWorkspaceGate>
   );
 }

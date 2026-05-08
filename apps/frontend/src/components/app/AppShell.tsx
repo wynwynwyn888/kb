@@ -160,7 +160,11 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   const isAgencyPath = pathname.startsWith('/app/agency');
   const tenantMatch = pathname.match(/^\/app\/tenant\/([^/]+)/);
-  const tenantIdFromPath = tenantMatch?.[1] ?? null;
+  const tenantIdFromPathRaw = tenantMatch?.[1];
+  const tenantIdFromPath =
+    typeof tenantIdFromPathRaw === 'string' && tenantIdFromPathRaw.trim().length > 0
+      ? tenantIdFromPathRaw.trim()
+      : null;
   const isTenantPath = Boolean(tenantIdFromPath);
   const hasAgencyMembership = Boolean(user.agencyRole);
   const showAgencyNav = isAgencyPath && hasAgencyMembership;

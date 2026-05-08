@@ -163,7 +163,7 @@ export class HumanEscalationRuntimeService {
         : `\n`) +
       `Summary:\n${summary}\n\n` +
       `Latest message:\n"${latestInboundMessage.trim().slice(0, 2000)}"\n\n` +
-      `Please review and reply manually in GHL.`;
+      `Please review and reply manually in CRM.`;
 
     const outcome = await this.notify.sendInternalAlert({
       tenantId,

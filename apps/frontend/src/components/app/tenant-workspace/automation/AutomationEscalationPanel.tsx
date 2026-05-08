@@ -90,7 +90,7 @@ export function AutomationEscalationPanel() {
         </p>
       </SectionCard>
 
-      <SectionCard title="Human escalation" subtitle="Team notification via GHL" accent="default">
+      <SectionCard title="Human escalation" subtitle="Team notification via CRM" accent="default">
         <p style={{ fontSize: '0.9rem', color: 'var(--aisbp-text-secondary)', lineHeight: 1.55, margin: '0 0 1rem' }}>
           Human escalation stops the assistant for that conversation and notifies your team when the customer asks for a
           person or needs manual help.
@@ -122,7 +122,7 @@ export function AutomationEscalationPanel() {
               disabled={dim}
             />
             <p style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted)', margin: '0 0 0.75rem' }}>
-              Internal SMS is sent through GHL to this number (same pattern as booking alerts).
+              Internal notification is sent through your CRM connection to this number (same pattern as booking alerts).
             </p>
 
             <label style={{ ...mvpLabelStyle, display: 'block' }}>Optional message prefix</label>

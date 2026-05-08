@@ -16,7 +16,7 @@ export default function AgencyLogPage() {
           maxWidth: '40rem',
         }}
       >
-        Quota and workspace setup changes for your agency.
+        Credits and workspace setup changes for your agency.
       </p>
       <SectionCard title="Recent activity" subtitle="Latest events from the audit trail (newest first).">
         <AgencyRecentActivity />

@@ -10,7 +10,7 @@ export function NavBar() {
       <a href="/prompts">Prompts</a>
       <a href="/app">Workspace</a>
       <a href="/conversations">Conversations</a>
-      <a href="/quotas">Quotas</a>
+      <a href="/quotas">Credits</a>
       <a href="/tester">Tester</a>
     </nav>
   );

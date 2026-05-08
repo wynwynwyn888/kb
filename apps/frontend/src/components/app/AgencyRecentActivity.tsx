@@ -25,9 +25,9 @@ function oneLine(
   }
   if (action === 'agency.reply_policy') return 'Workspace reply limits updated';
   if (action === 'agency.default_quota') {
-    return `Default quota: ${previous ?? '—'} → ${newTotal ?? '—'}`;
+    return `Default credits: ${previous ?? '—'} → ${newTotal ?? '—'}`;
   }
-  if (action === 'subaccount.topup') return 'Quota top-up';
+  if (action === 'subaccount.topup') return 'Credits top-up';
   return 'Activity recorded';
 }
 
@@ -79,7 +79,7 @@ export function AgencyRecentActivity() {
   if (rows.length === 0) {
     return (
       <p style={{ fontSize: '0.875rem', color: 'var(--aisbp-muted, #94a3b8)', lineHeight: 1.45, margin: 0 }}>
-        No events yet. Setup and quota changes will appear here.
+        No events yet. Setup and credits changes will appear here.
       </p>
     );
   }

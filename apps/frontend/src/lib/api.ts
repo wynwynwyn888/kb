@@ -1138,6 +1138,46 @@ export async function topupSubaccountQuota(
   }>('/quotas/agency/topup', { token, method: 'POST', body: JSON.stringify(body) });
 }
 
+export async function listAgencyCreditWallets(token: string) {
+  return apiRequest<Array<{
+    tenantId: string;
+    workspaceName: string;
+    totalQuota: number;
+    usedQuota: number;
+    balance: number;
+    usedToday: number;
+    usedThisMonth: number;
+    allowNegativeCredits: boolean;
+    negativeCreditLimit: number;
+    lowCreditThreshold: number;
+    status: string;
+  }>>('/quotas/agency/wallets', { token });
+}
+
+export async function adjustSubaccountCredits(
+  token: string,
+  body: { tenantId: string; delta: number; reason: string },
+) {
+  return apiRequest<{
+    tenantId: string;
+    previousTotal: number;
+    newTotal: number;
+    delta: number;
+    balanceAfter: number;
+  }>('/quotas/agency/adjust', { token, method: 'POST', body: JSON.stringify(body) });
+}
+
+export async function updateSubaccountCreditPolicy(
+  token: string,
+  body: { tenantId: string; allowNegativeCredits: boolean; negativeCreditLimit: number; lowCreditThreshold: number },
+) {
+  return apiRequest<{ tenantId: string }>('/quotas/agency/wallet-policy', {
+    token,
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
 export type QuotaAuditLogRow = {
   id: string;
   agency_id: string;
@@ -1159,6 +1199,35 @@ export async function getQuotaAuditLog(token: string, opts?: { tenantId?: string
   if (opts?.limit) p.set('limit', String(opts.limit));
   const q = p.toString();
   return apiRequest<QuotaAuditLogRow[]>(`/quotas/agency/audit${q ? `?${q}` : ''}`, { token });
+}
+
+export async function getTenantCreditsUsage(token: string, tenantId: string) {
+  return apiRequest<{
+    tenantId: string;
+    totalQuota: number;
+    usedQuota: number;
+    balance: number;
+    allowNegativeCredits: boolean;
+    negativeCreditLimit: number;
+    lowCreditThreshold: number;
+    usedToday: number;
+    usedThisMonth: number;
+    status: 'ACTIVE' | 'LOW_CREDIT' | 'PAUSED_NO_CREDITS' | 'OVER_NEGATIVE_LIMIT';
+  } | null>(`/quotas/tenant/usage/${encodeURIComponent(tenantId)}`, { token });
+}
+
+export async function getTenantCreditsLedger(token: string, tenantId: string, limit = 20) {
+  return apiRequest<Array<{
+    id: string;
+    amount: number;
+    type: string;
+    movement_type: string | null;
+    balance_after: number | null;
+    description: string;
+    conversation_id: string | null;
+    created_at: string;
+    metadata?: unknown;
+  }>>(`/quotas/tenant/ledger/${encodeURIComponent(tenantId)}?limit=${encodeURIComponent(String(limit))}`, { token });
 }
 
 // Prompts — tenant configs & agency policies

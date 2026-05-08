@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { getTenantById } from '@/lib/api';
+import { getTenantCreditsLedger, getTenantCreditsUsage } from '@/lib/api';
 import {
   EmptyState,
   ErrorBanner,
@@ -13,14 +13,9 @@ import {
   SectionCard,
   formatDateTime,
 } from '@/components/app/mvp-ui';
+import { creditStatusLabel } from '@/lib/credits-ui';
 
-type QuotaSnap = {
-  totalQuota: number;
-  usedQuota: number;
-  remainingQuota: number;
-  periodStart: string;
-  periodEnd: string;
-};
+type UsageSnap = NonNullable<Awaited<ReturnType<typeof getTenantCreditsUsage>>>;
 
 export default function TenantUsagePage() {
   const params = useParams();
@@ -29,7 +24,16 @@ export default function TenantUsagePage() {
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
-  const [quota, setQuota] = useState<QuotaSnap | null>(null);
+  const [usage, setUsage] = useState<UsageSnap | null>(null);
+  const [ledger, setLedger] = useState<Array<{
+    id: string;
+    amount: number;
+    type: string;
+    movement_type: string | null;
+    balance_after: number | null;
+    description: string;
+    created_at: string;
+  }> | null>(null);
 
   useEffect(() => {
     if (!token || !tenantId) return;
@@ -38,12 +42,17 @@ export default function TenantUsagePage() {
       setLoading(true);
       setErr('');
       try {
-        const t = await getTenantById(token, tenantId);
+        const [u, l] = await Promise.all([
+          getTenantCreditsUsage(token, tenantId),
+          getTenantCreditsLedger(token, tenantId, 20),
+        ]);
         if (cancelled) return;
-        setQuota(t?.quota ?? null);
+        setUsage(u);
+        setLedger(l);
       } catch (e) {
         if (!cancelled) setErr(e instanceof Error ? e.message : 'Failed to load usage');
-        if (!cancelled) setQuota(null);
+        if (!cancelled) setUsage(null);
+        if (!cancelled) setLedger(null);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -54,9 +63,18 @@ export default function TenantUsagePage() {
   }, [token, tenantId, loadAttempt]);
 
   const pct =
-    quota && quota.totalQuota > 0
-      ? Math.min(100, Math.round((quota.usedQuota / quota.totalQuota) * 100))
+    usage && usage.totalQuota > 0
+      ? Math.min(100, Math.round((usage.usedQuota / usage.totalQuota) * 100))
       : null;
+
+  const avgDaily = usage ? Math.max(0, usage.usedThisMonth / Math.max(1, new Date().getDate())) : null;
+  const projectedDays =
+    usage && avgDaily != null && avgDaily > 0
+      ? Math.floor(Math.max(0, usage.balance) / avgDaily)
+      : null;
+
+  const showLow = usage?.status === 'LOW_CREDIT';
+  const showPaused = usage?.status === 'PAUSED_NO_CREDITS' || usage?.status === 'OVER_NEGATIVE_LIMIT';
 
   return (
     <div>
@@ -67,7 +85,7 @@ export default function TenantUsagePage() {
       )}
       <PageHeader title="Usage" eyebrow="Client workspace" />
       <p style={{ fontSize: '0.88rem', color: '#64748b', margin: '0 0 1rem', lineHeight: 1.5, maxWidth: '560px' }}>
-        Track credits, message usage, and activity for this workspace.
+        Track credits and usage for this workspace.
       </p>
 
       {err && (
@@ -98,7 +116,7 @@ export default function TenantUsagePage() {
 
       {!loading && !err ? (
         <>
-          {quota ? (
+          {usage ? (
             <div
               style={{
                 border: '1px solid #dbeafe',
@@ -108,26 +126,74 @@ export default function TenantUsagePage() {
                 marginBottom: '1rem',
               }}
             >
+              {showPaused ? (
+                <div style={{ marginBottom: '0.75rem' }}>
+                  <ErrorBanner message="Automatic replies are paused because this workspace has no credits remaining." />
+                </div>
+              ) : showLow ? (
+                <div style={{ marginBottom: '0.75rem' }}>
+                  <div
+                    style={{
+                      border: '1px solid #fde68a',
+                      background: '#fffbeb',
+                      borderRadius: '10px',
+                      padding: '0.75rem 0.9rem',
+                      color: '#92400e',
+                      fontSize: '0.86rem',
+                    }}
+                  >
+                    This workspace is running low on credits.
+                  </div>
+                </div>
+              ) : null}
+
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem' }}>
                 <div>
                   <p style={{ margin: 0, fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.06em', color: '#64748b', fontWeight: 600 }}>
-                    Credits left
+                    Credits remaining
                   </p>
                   <p style={{ margin: '0.15rem 0 0', fontSize: '2.1rem', fontWeight: 800, color: '#0f172a', lineHeight: 1.1 }}>
-                    {quota.remainingQuota.toLocaleString()}
+                    {usage.balance.toLocaleString()}
                   </p>
                   <p style={{ margin: '0.35rem 0 0', fontSize: '0.88rem', color: '#64748b' }}>
-                    of {quota.totalQuota.toLocaleString()} in this period
+                    of {usage.totalQuota.toLocaleString()} total
                   </p>
                 </div>
                 <div style={{ textAlign: 'right', minWidth: '140px' }}>
-                  <p style={{ margin: 0, fontSize: '0.8rem', color: '#64748b' }}>Used</p>
+                  <p style={{ margin: 0, fontSize: '0.8rem', color: '#64748b' }}>Credits used today</p>
                   <p style={{ margin: '0.1rem 0 0', fontSize: '1.35rem', fontWeight: 700, color: '#334155' }}>
-                    {quota.usedQuota.toLocaleString()}
+                    {usage.usedToday.toLocaleString()}
                   </p>
                   {pct != null ? (
                     <p style={{ margin: '0.35rem 0 0', fontSize: '0.78rem', color: '#94a3b8' }}>{pct}% of pool</p>
                   ) : null}
+                </div>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.6rem', marginTop: '0.9rem' }}>
+                <div>
+                  <p style={{ margin: 0, fontSize: '0.8rem', color: '#64748b' }}>Credits used this month</p>
+                  <p style={{ margin: '0.15rem 0 0', fontSize: '1.05rem', fontWeight: 750, color: '#0f172a' }}>
+                    {usage.usedThisMonth.toLocaleString()}
+                  </p>
+                </div>
+                <div>
+                  <p style={{ margin: 0, fontSize: '0.8rem', color: '#64748b' }}>Average daily usage</p>
+                  <p style={{ margin: '0.15rem 0 0', fontSize: '1.05rem', fontWeight: 750, color: '#0f172a' }}>
+                    {avgDaily != null ? avgDaily.toFixed(1) : '—'}
+                  </p>
+                </div>
+                <div>
+                  <p style={{ margin: 0, fontSize: '0.8rem', color: '#64748b' }}>Projected days remaining</p>
+                  <p style={{ margin: '0.15rem 0 0', fontSize: '1.05rem', fontWeight: 750, color: '#0f172a' }}>
+                    {projectedDays != null ? projectedDays.toLocaleString() : '—'}
+                  </p>
+                </div>
+                <div>
+                  <p style={{ margin: 0, fontSize: '0.8rem', color: '#64748b' }}>Status</p>
+                  <p style={{ margin: '0.15rem 0 0', fontSize: '1.05rem', fontWeight: 750, color: '#0f172a' }}>
+                    {creditStatusLabel(usage.status)}
+                  </p>
                 </div>
               </div>
               <div
@@ -149,9 +215,6 @@ export default function TenantUsagePage() {
                   }}
                 />
               </div>
-              <p style={{ margin: '0.65rem 0 0', fontSize: '0.78rem', color: '#94a3b8' }}>
-                Period {formatDateTime(String(quota.periodStart))} — {formatDateTime(String(quota.periodEnd))}
-              </p>
             </div>
           ) : (
             <SectionCard title="Credits" subtitle="No usage has been recorded for this workspace yet.">
@@ -162,19 +225,45 @@ export default function TenantUsagePage() {
             </SectionCard>
           )}
 
-          <div
-            style={{
-              border: '1px solid #eef0f4',
-              borderRadius: '8px',
-              padding: '0.75rem 1rem',
-              background: '#fafbfc',
-              fontSize: '0.82rem',
-              color: '#64748b',
-              lineHeight: 1.45,
-            }}
-          >
-            <strong style={{ color: '#475569' }}>Trends &amp; analytics</strong> — Coming soon.
-          </div>
+          <SectionCard title="Recent credits activity" subtitle="Latest movements in your credit ledger.">
+            {!ledger || ledger.length === 0 ? (
+              <p style={{ fontSize: '0.85rem', color: '#64748b', margin: 0 }}>No ledger entries yet.</p>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
+                  <thead>
+                    <tr>
+                      {['Time', 'Type', 'Amount', 'Balance after', 'Reason'].map(h => (
+                        <th key={h} style={{ textAlign: 'left', padding: '0.45rem', borderBottom: '1px solid #e2e8f0', color: '#64748b', fontSize: '0.7rem' }}>
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {ledger.map(r => (
+                      <tr key={r.id}>
+                        <td style={{ padding: '0.45rem', borderBottom: '1px solid #f1f5f9' }}>
+                          {r.created_at ? formatDateTime(String(r.created_at)) : '—'}
+                        </td>
+                        <td style={{ padding: '0.45rem', borderBottom: '1px solid #f1f5f9' }}>
+                          {(r.movement_type ?? r.type ?? '').replace(/_/g, ' ') || '—'}
+                        </td>
+                        <td style={{ padding: '0.45rem', borderBottom: '1px solid #f1f5f9', fontWeight: 750 }}>
+                          {String(r.type).toUpperCase() === 'DEBIT' ? '-' : '+'}
+                          {Math.abs(r.amount ?? 0).toLocaleString()}
+                        </td>
+                        <td style={{ padding: '0.45rem', borderBottom: '1px solid #f1f5f9' }}>
+                          {r.balance_after != null ? Number(r.balance_after).toLocaleString() : '—'}
+                        </td>
+                        <td style={{ padding: '0.45rem', borderBottom: '1px solid #f1f5f9' }}>{r.description || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </SectionCard>
         </>
       ) : null}
     </div>

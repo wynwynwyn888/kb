@@ -1,21 +1,21 @@
-// Quota page placeholder
-// View quota usage and transaction history
+// Credits page placeholder
+// View credits usage and transaction history
 
-export default function QuotaPage() {
+export default function CreditsPage() {
   return (
     <main style={{ padding: '2rem' }}>
-      <h1>Quota Management</h1>
+      <h1>Credits</h1>
       <div>
         <h2>Current Period</h2>
         <p>Period: April 1 - April 30, 2026</p>
         <div>
-          <p>Total Quota: <strong>10,000</strong></p>
+          <p>Total credits: <strong>10,000</strong></p>
           <p>Used: <strong>2,450</strong></p>
           <p>Remaining: <strong>7,550</strong></p>
         </div>
       </div>
       <div>
-        <h2>Transaction History</h2>
+        <h2>Ledger</h2>
         <table>
           <thead>
             <tr>

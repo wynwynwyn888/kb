@@ -41,14 +41,12 @@ describe('buildOptionSelectionCustomerReply', () => {
     expect(msg).toMatch(/^Sure — Daycare is supervised care in a safe environment\.\n\n/);
     expect(msg).not.toMatch(/\.\./);
     expect(msg.toLowerCase()).not.toContain("don't have");
-    expect(msg).toContain('check availability');
+    expect(msg).toMatch(/check availability|share more details about this service/i);
   });
 
   it('uses title-only template when description missing', () => {
     const msg = buildOptionSelectionCustomerReply(parseSelectedOptionTitleDescription('Haircut'));
-    expect(msg).toBe(
-      'Sure — you selected Haircut.\n\nWould you like me to share more details or connect you with the team?',
-    );
+    expect(msg).toBe('Sure — you selected Haircut.\n\nWould you like me to share more details?');
   });
 });
 

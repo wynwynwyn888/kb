@@ -178,6 +178,7 @@ describe('HumanEscalationRuntimeService', () => {
     expect(String(arg.messageBody)).not.toMatch(/conversation\s+c1/i);
     expect(String(arg.messageBody)).not.toContain('contact ct1');
     expect(String(arg.messageBody)).toMatch(/Summary:\s*\nThe customer asked to speak with a human/i);
+    expect(String(arg.messageBody)).toMatch(/\b(team|human)\b/i);
   });
 
   it('when AI summary fails, uses readable fallback and still sends alert', async () => {

@@ -11,8 +11,7 @@ export const SELECTION_UNCLEAR_REPLY =
 
 /** Used only when option memory is missing AND no KB sections are available. */
 export const MENU_PROMPT_NO_KB =
-  "Happy to help. Could you tell me a bit more about what you're looking for? " +
-  "If you'd like, I can connect you to the team for the full details.";
+  "Happy to help. Could you tell me a bit more about what you're looking for?";
 
 const LETTER_LABELS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'] as const;
 
@@ -87,5 +86,5 @@ export function buildOptionsFromKbSectionTitles(
  */
 export function selectedCategoryNoKbReply(label: string): string {
   const cat = (label.trim() || 'that').replace(/\s+/g, ' ');
-  return `Sure — ${cat}.\n\nI don't have the full ${cat} details handy. Would you like me to share more or connect you with the team?`;
+  return `Sure — ${cat}.\n\nI don't have the full ${cat} details handy. Would you like me to share more about it?`;
 }

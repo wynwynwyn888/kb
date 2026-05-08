@@ -180,25 +180,24 @@ export const UNREQUESTED_MENU_FALLBACK_REPLY =
  * Returns a safe uncertainty reply when a risky claim is detected.
  */
 export const SAFE_UNSUPPORTED_BUSINESS_CLAIM_REPLY =
-  "I don’t have that specific detail confirmed here. If you’d like, I can connect you with the team to check.";
+  "I don’t have that specific detail confirmed here. Could you share a little more so I can guide you safely?";
 
 export const NO_KB_FALLBACK_MENU_SERVICE_LIST =
-  "I don’t have the full service list confirmed here. If you’d like, I can connect you with the team to check the available services.";
+  "I don’t have the full service list confirmed here. Could you share what you’re looking for so I can guide you better?";
 
 export const NO_KB_FALLBACK_BROAD_SERVICE =
-  "I don’t have the full service list confirmed here, but I can help connect you with the team to check the right service for your furkid.";
+  "I don’t have the full service list confirmed here. Could you share what you’re looking for so I can guide you better?";
 
 export const NO_KB_FALLBACK_BREED_OR_SPECIES_SERVICE =
-  "I can help with grooming enquiries, but I don’t have breed-specific details confirmed here. If you’d like, I can connect you with the team to check the most suitable option.";
+  "I can help with grooming enquiries, but I don’t have breed-specific details confirmed here. Could you share a bit more about what you need?";
 
 export const NO_KB_FALLBACK_PRICE =
-  "I don’t have confirmed pricing here. If you’d like, I can connect you with the team to check the latest price.";
+  "I don’t have confirmed pricing here. Could you let me know which service you’re asking about?";
 
-export const NO_KB_FALLBACK_HOURS =
-  "I don’t have the confirmed opening hours here. If you’d like, I can connect you with the team to check.";
+export const NO_KB_FALLBACK_HOURS = "I don’t have the confirmed opening hours here.";
 
 export const NO_KB_FALLBACK_AVAILABILITY =
-  "I don’t have live availability here. If you’d like, I can connect you with the team to check the next available slot.";
+  "I don’t have live availability here. Could you share your preferred date and time?";
 
 const BUSINESS_ASSERTION = /\b(we|our\s+(team|clinic|shop|salon)|yes,?\s+we)\b/i;
 /** Welcomes / acceptance claims that do not literally include "we …" but are still unsafe without KB. */

@@ -1,5 +1,6 @@
 import {
   COMPLAINT_ESCALATION_REPLY,
+  SAFE_UNSUPPORTED_BUSINESS_CLAIM_REPLY,
   detectComplaintServiceIssue,
   isTrustedExecutedBookSlotSource,
   isUnsupportedSalonScopeQuery,
@@ -12,6 +13,7 @@ import {
   NO_KB_FALLBACK_MENU_SERVICE_LIST,
   NO_KB_FALLBACK_BROAD_SERVICE,
   NO_KB_FALLBACK_PRICE,
+  NO_KB_FALLBACK_AVAILABILITY,
 } from './outbound-safety-governor';
 import { classifyConversationIntent } from '../modules/conversation-policy/conversation-intent';
 
@@ -106,6 +108,37 @@ describe('outbound-safety-governor', () => {
   describe('COMPLAINT_ESCALATION_REPLY', () => {
     it('does not promise arranged callbacks', () => {
       expect(COMPLAINT_ESCALATION_REPLY.toLowerCase()).not.toMatch(/\b(i'?ve\s+arranged|scheduled\s+a\s+call)\b/);
+    });
+
+    it('still mentions the team for internal escalation instructions', () => {
+      expect(COMPLAINT_ESCALATION_REPLY.toLowerCase()).toContain('team');
+    });
+  });
+
+  describe('customer-facing no-KB fallbacks avoid proactive team-connect CTAs', () => {
+    const noConnect = (s: string) => expect(s.toLowerCase()).not.toMatch(/connect you (with|to) the team/);
+
+    it('SAFE_UNSUPPORTED_BUSINESS_CLAIM_REPLY', () => {
+      noConnect(SAFE_UNSUPPORTED_BUSINESS_CLAIM_REPLY);
+    });
+
+    it('NO_KB_FALLBACK_BROAD_SERVICE', () => {
+      noConnect(NO_KB_FALLBACK_BROAD_SERVICE);
+    });
+
+    it('NO_KB_FALLBACK_PRICE asks which service instead of offering team connect', () => {
+      noConnect(NO_KB_FALLBACK_PRICE);
+      expect(NO_KB_FALLBACK_PRICE.toLowerCase()).toContain('service');
+    });
+
+    it('NO_KB_FALLBACK_HOURS is a plain uncertainty line', () => {
+      noConnect(NO_KB_FALLBACK_HOURS);
+      expect(NO_KB_FALLBACK_HOURS.toLowerCase()).not.toContain('team');
+    });
+
+    it('NO_KB_FALLBACK_AVAILABILITY prompts for scheduling preference', () => {
+      noConnect(NO_KB_FALLBACK_AVAILABILITY);
+      expect(NO_KB_FALLBACK_AVAILABILITY.toLowerCase()).toMatch(/date|time/);
     });
   });
 

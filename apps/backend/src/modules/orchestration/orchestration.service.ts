@@ -593,6 +593,7 @@ export class ConversationOrchestrationService {
         const templateBody = buildOptionSelectionCustomerReply(parsedDeterministicOptionLine);
         const planPerf0 = performance.now();
         replyPlan = this.replyPlanner.buildOptionSelectionTemplateReply({
+          tenantId: input.tenantId,
           conversationId,
           routing,
           templateBody,

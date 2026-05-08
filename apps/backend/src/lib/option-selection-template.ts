@@ -56,8 +56,8 @@ export function descriptionForMidSentence(description: string): string {
 }
 
 const CTA_WITH_DETAILS =
-  'Would you like me to help check availability or connect you with the team?';
-const CTA_TITLE_ONLY = 'Would you like me to share more details or connect you with the team?';
+  'Would you like me to help check availability, or share more details about this service?';
+const CTA_TITLE_ONLY = 'Would you like me to share more details?';
 
 export function buildOptionSelectionCustomerReply(parsed: ParsedOptionLine): string {
   const title = (parsed.title || 'that').trim();

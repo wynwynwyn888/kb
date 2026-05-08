@@ -27,6 +27,7 @@ import { sanitizeOutboundInternalKbLeak } from '../../lib/outbound-internal-kb-s
 import { applyOutboundPolicyGuard } from '../../lib/outbound-policy-guard';
 import { detectMenuIntentInMessage } from '../../lib/kb-relevance';
 import { rewriteUnsupportedBusinessClaimsWhenNoKb } from '../../lib/outbound-safety-governor';
+import { stripProactiveHandoverCtaIfNeeded } from '../../lib/proactive-handover-cta-guard';
 import type { ConversationIntent } from '../conversation-policy/conversation-intent';
 import type { SelectionResolution } from '../conversation-policy/option-resolver';
 import { GenerationService } from '../generation/generation.service';
@@ -84,6 +85,7 @@ export class ReplyPlannerService {
    * Pure option-letter reply: no LLM, no menu grounding rewrite (we already trust the option line).
    */
   buildOptionSelectionTemplateReply(params: {
+    tenantId: string;
     conversationId: string;
     routing: RoutingResponse;
     templateBody: string;
@@ -91,8 +93,15 @@ export class ReplyPlannerService {
     latestUserMessage: string;
     menuSelectionActive: boolean;
   }): ReplyDecision {
-    const { conversationId, routing, templateBody, latestIntent, latestUserMessage, menuSelectionActive } =
-      params;
+    const {
+      tenantId,
+      conversationId,
+      routing,
+      templateBody,
+      latestIntent,
+      latestUserMessage,
+      menuSelectionActive,
+    } = params;
 
     const guarded = applyOutboundPolicyGuard({
       latestIntent,
@@ -106,9 +115,24 @@ export class ReplyPlannerService {
       draftText: guarded,
     });
     const afterKbLeak = sanitizeOutboundInternalKbLeak(afterHours, latestIntent, []);
-    const bubbles = this.formatIntoBubbles(afterKbLeak);
+    const proactive = stripProactiveHandoverCtaIfNeeded({
+      replyText: afterKbLeak,
+      latestIntent,
+      latestUserMessage,
+    });
+    if (proactive.removed) {
+      this.logger.log(
+        `proactiveHandoverCtaRemoved ${JSON.stringify({
+          tenantId,
+          conversationId,
+          latestIntent,
+          reason: proactive.reason ?? 'proactive_handover_cta',
+        })}`,
+      );
+    }
+    const bubbles = this.formatIntoBubbles(proactive.text);
     this.logLiveWhitespaceDebug({
-      rawDraft: afterKbLeak,
+      rawDraft: proactive.text,
       bubbles,
       latestUserMessage,
       inboundBatchCount: 1,
@@ -178,9 +202,25 @@ export class ReplyPlannerService {
         draftText: afterMenu,
       });
       const afterKbLeak = sanitizeOutboundInternalKbLeak(afterHours, policyContext!.latestIntent, kbChunks);
-      const bubbles = this.formatIntoBubbles(afterKbLeak);
+      const proactiveForced = stripProactiveHandoverCtaIfNeeded({
+        replyText: afterKbLeak,
+        latestIntent: policyContext!.latestIntent,
+        latestUserMessage: policyContext?.latestUserMessage,
+        combinedHumanMessagesText: policyContext?.combinedHumanMessagesText,
+      });
+      if (proactiveForced.removed) {
+        this.logger.log(
+          `proactiveHandoverCtaRemoved ${JSON.stringify({
+            tenantId,
+            conversationId,
+            latestIntent: policyContext!.latestIntent,
+            reason: proactiveForced.reason ?? 'proactive_handover_cta',
+          })}`,
+        );
+      }
+      const bubbles = this.formatIntoBubbles(proactiveForced.text);
       this.logLiveWhitespaceDebug({
-        rawDraft: afterKbLeak,
+        rawDraft: proactiveForced.text,
         bubbles,
         latestUserMessage: policyContext?.latestUserMessage,
         combinedHumanMessagesText: policyContext?.combinedHumanMessagesText,
@@ -256,9 +296,25 @@ export class ReplyPlannerService {
         })}`,
       );
     }
-    const bubbles = this.formatIntoBubbles(finalDraft);
+    const proactiveLive = stripProactiveHandoverCtaIfNeeded({
+      replyText: finalDraft,
+      latestIntent: policyContext?.latestIntent ?? 'UNKNOWN',
+      latestUserMessage: policyContext?.latestUserMessage,
+      combinedHumanMessagesText: policyContext?.combinedHumanMessagesText,
+    });
+    if (proactiveLive.removed) {
+      this.logger.log(
+        `proactiveHandoverCtaRemoved ${JSON.stringify({
+          tenantId,
+          conversationId,
+          latestIntent: policyContext?.latestIntent ?? 'UNKNOWN',
+          reason: proactiveLive.reason ?? 'proactive_handover_cta',
+        })}`,
+      );
+    }
+    const bubbles = this.formatIntoBubbles(proactiveLive.text);
     this.logLiveWhitespaceDebug({
-      rawDraft: afterKbLeak,
+      rawDraft: proactiveLive.text,
       bubbles,
       latestUserMessage: policyContext?.latestUserMessage,
       combinedHumanMessagesText: policyContext?.combinedHumanMessagesText,
@@ -486,7 +542,7 @@ export class ReplyPlannerService {
 
     if (detectMenuIntentInMessage(lastMsg)) {
       // Generic, business-agnostic — never invent categories.
-      return "Happy to help — what would you like to know about our offerings? If you'd like, I can connect you with the team for the full details.";
+      return 'Happy to help — what would you like to know about our offerings?';
     }
 
     if (lastMsg.length > 0) {

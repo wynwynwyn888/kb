@@ -104,6 +104,7 @@ describe('ConversationPolicyEngineService (universal — no hardcoded categories
       kbChunksRanked: [],
     });
     expect(out.policyForcedReply).toBe(MENU_PROMPT_NO_KB);
+    expect(out.policyForcedReply!.toLowerCase()).not.toMatch(/connect you (with|to) the team/);
     expect(out.policyForcedReply).not.toMatch(/Starters|Mains|Desserts|Vegan/);
     expect(out.policyReplyKind).toBe('menu_no_kb_clarification');
   });

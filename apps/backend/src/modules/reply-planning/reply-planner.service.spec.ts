@@ -342,7 +342,10 @@ describe('ReplyPlannerService', () => {
       expect(mockGen.generateDraft).not.toHaveBeenCalled();
       expect(result.draftProvenance).toBe('policy_reply');
       expect(result.bubbles).toHaveLength(1);
-      expect(result.bubbles[0]!.text).toMatch(/Happy to help|connect you/i);
+      expect(result.bubbles[0]!.text).toMatch(/Happy to help/i);
+      expect(result.bubbles[0]!.text.toLowerCase()).not.toMatch(
+        /connect you (with|to) the team|speak with the team/,
+      );
       expect(result.bubbles[0]!.text).not.toMatch(/Starters|Mains|Desserts|Vegan/);
     });
   });
@@ -361,8 +364,9 @@ describe('ReplyPlannerService', () => {
 
     it('uses option_selection_template provenance and never calls generation', () => {
       const template =
-        'Sure — Daycare is supervised care in a safe environment.\n\nWould you like me to help check availability or connect you with the team?';
+        'Sure — Daycare is supervised care in a safe environment.\n\nWould you like me to help check availability, or share more details about this service?';
       const plan = service.buildOptionSelectionTemplateReply({
+        tenantId: 't1',
         conversationId: 'c1',
         routing: deterministicRouting,
         templateBody: template,
@@ -376,6 +380,7 @@ describe('ReplyPlannerService', () => {
       expect(joined.toLowerCase()).not.toContain("don't have");
       expect(joined).not.toMatch(/\.\./);
       expect(joined).toContain('Daycare');
+      expect(joined.toLowerCase()).not.toMatch(/connect you (with|to) the team/);
     });
   });
 

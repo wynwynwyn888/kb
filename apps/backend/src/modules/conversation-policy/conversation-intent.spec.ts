@@ -37,6 +37,7 @@ describe('classifyConversationIntent', () => {
   it('classifies HUMAN_HANDOVER for direct talk/speak/connect phrasing', () => {
     expect(classifyConversationIntent('talk to human')).toBe('HUMAN_HANDOVER');
     expect(classifyConversationIntent('speak to staff')).toBe('HUMAN_HANDOVER');
+    expect(classifyConversationIntent('can I talk to human')).toBe('HUMAN_HANDOVER');
     expect(classifyConversationIntent('can i talk to human pls')).toBe('HUMAN_HANDOVER');
     expect(classifyConversationIntent('connect me to team')).toBe('HUMAN_HANDOVER');
     expect(classifyConversationIntent('get someone to contact me')).toBe('HUMAN_HANDOVER');

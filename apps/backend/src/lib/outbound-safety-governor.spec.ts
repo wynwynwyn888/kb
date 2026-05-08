@@ -12,7 +12,6 @@ import {
   NO_KB_FALLBACK_MENU_SERVICE_LIST,
   NO_KB_FALLBACK_BROAD_SERVICE,
   NO_KB_FALLBACK_PRICE,
-  NO_KB_FALLBACK_AVAILABILITY,
 } from './outbound-safety-governor';
 import { classifyConversationIntent } from '../modules/conversation-policy/conversation-intent';
 
@@ -195,15 +194,65 @@ describe('outbound-safety-governor', () => {
       expect(r.text).toBe(NO_KB_FALLBACK_BREED_OR_SPECIES_SERVICE);
     });
 
-    it('uses price-specific fallback for risky pricing claims', () => {
+    it('rewrites ungrounded grooming price list when KB empty and corpus has no matching facts', () => {
       const r = rewriteUnsupportedBusinessClaimsWhenNoKb({
         kbChunksReturned: 0,
         latestIntent: 'PRICE',
         latestUserMessage: 'how much grooming',
         replyText: 'Yes, we offer grooming from $80.',
+        tenantPricingCorpus: '',
+        tenantId: 't1',
+        conversationId: 'c1',
       });
       expect(r.rewritten).toBe(true);
       expect(r.text).toBe(NO_KB_FALLBACK_PRICE);
+    });
+
+    it('does not allow PRICE intent alone without tenant-grounded dollar amounts', () => {
+      const r = rewriteUnsupportedBusinessClaimsWhenNoKb({
+        kbChunksReturned: 0,
+        replyText: 'Keratin Smoothing — from $999',
+        tenantPricingCorpus:
+          'Keratin Smoothing Treatment - from $250\nDeep Conditioning Treatment - from $60',
+        latestIntent: 'PRICE',
+        latestUserMessage: 'how much isit',
+        tenantId: 't1',
+        conversationId: 'c1',
+      });
+      expect(r.rewritten).toBe(true);
+      expect(r.text).toBe(NO_KB_FALLBACK_PRICE);
+      expect(r.supportCheckLog?.supportSource).toBe('unsupported');
+    });
+
+    it('allows explicit prices when KB empty but tenant corpus lists matching amounts and anchors', () => {
+      const corpus =
+        'Deep Conditioning Treatment - from $60\nScalp Detox Treatment - from $70\nKeratin Smoothing Treatment - from $250';
+      const reply =
+        'Deep Conditioning Treatment - from $60\nScalp Detox Treatment - from $70\nKeratin Smoothing Treatment - from $250';
+      const r = rewriteUnsupportedBusinessClaimsWhenNoKb({
+        kbChunksReturned: 0,
+        replyText: reply,
+        tenantPricingCorpus: corpus,
+        tenantId: 't1',
+        conversationId: 'c1',
+        latestIntent: 'PRICE',
+        latestUserMessage: 'how much isit',
+      });
+      expect(r.rewritten).toBe(false);
+      expect(r.supportCheckLog?.supportSource).toBe('business_notes');
+    });
+
+    it('logs KB support source when chunks present even if tenant corpus empty', () => {
+      const r = rewriteUnsupportedBusinessClaimsWhenNoKb({
+        kbChunksReturned: 2,
+        replyText: 'Keratin — from $250',
+        tenantPricingCorpus: '',
+        latestIntent: 'MENU',
+        tenantId: 't1',
+        conversationId: 'c1',
+      });
+      expect(r.rewritten).toBe(false);
+      expect(r.supportCheckLog?.supportSource).toBe('kb');
     });
   });
 });

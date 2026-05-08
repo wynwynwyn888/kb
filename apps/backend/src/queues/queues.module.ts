@@ -23,6 +23,7 @@ import { FollowUpEngineModule } from '../modules/follow-up-engine/follow-up-engi
 import { FollowUpQueueModule } from './follow-up-queue.module';
 import { HumanEscalationHoldingReplyService } from '../modules/human-escalation/human-escalation-holding-reply.service';
 import { HumanEscalationModule } from '../modules/human-escalation/human-escalation.module';
+import { ConversationMemoryModule } from '../modules/orchestration/conversation-memory.module';
 
 @Module({
   imports: [
@@ -45,6 +46,7 @@ import { HumanEscalationModule } from '../modules/human-escalation/human-escalat
     TranscriptionModule,
     FollowUpEngineModule,
     HumanEscalationModule,
+    ConversationMemoryModule,
   ],
   providers: [
     HumanEscalationHoldingReplyService,

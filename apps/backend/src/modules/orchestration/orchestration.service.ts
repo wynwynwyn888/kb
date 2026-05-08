@@ -654,6 +654,12 @@ export class ConversationOrchestrationService {
               ? 'tag_and_notify'
               : 'collect_details_only',
             ...(optionMenuSourceExcerpt ? { optionMenuSourceExcerpt } : {}),
+            tenantPricingCorpus: [
+              input.promptConfig?.businessNotes?.trim(),
+              input.promptConfig?.systemPrompt?.trim(),
+            ]
+              .filter(Boolean)
+              .join('\n\n'),
           },
         });
         plan_reply_ms = Math.round(performance.now() - planPerf0);

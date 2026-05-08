@@ -92,6 +92,7 @@ describe('BotProfilesService', () => {
     expect(out?.systemPrompt).toContain('Friendly expert');
     expect(out?.systemPrompt).toContain('Professional');
     expect(out?.systemPrompt).toContain('Knowledge access: All knowledge vaults');
+    expect(out?.businessNotes).toBe('We ship fast');
   });
 
   it('cannot delete the active profile', async () => {

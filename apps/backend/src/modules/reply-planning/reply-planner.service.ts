@@ -62,6 +62,8 @@ export interface ReplyPlanPolicyContext {
   handoverCapability?: string;
   /** Prior assistant menu excerpt for deterministic letter picks (no KB). */
   optionMenuSourceExcerpt?: string;
+  /** Business notes + tenant prompt body — ground-truth for explicit pricing when KB is empty. */
+  tenantPricingCorpus?: string;
 }
 
 @Injectable()
@@ -238,8 +240,14 @@ export class ReplyPlannerService {
       kbChunksReturned: kbChunks.length,
       latestIntent: policyContext?.latestIntent ?? 'UNKNOWN',
       latestUserMessage: policyContext?.latestUserMessage ?? '',
+      tenantId,
+      conversationId,
+      tenantPricingCorpus: policyContext?.tenantPricingCorpus ?? '',
     });
     const finalDraft = noKbClaimGuard.rewritten ? noKbClaimGuard.text : afterKbLeak;
+    if (noKbClaimGuard.supportCheckLog) {
+      this.logger.log(`unsupportedClaimSupportCheck ${JSON.stringify(noKbClaimGuard.supportCheckLog)}`);
+    }
     if (noKbClaimGuard.rewritten && noKbClaimGuard.log) {
       this.logger.log(
         `unsupportedClaimRewriteApplied ${JSON.stringify({

@@ -4,7 +4,6 @@
 import { Module } from '@nestjs/common';
 import { ConversationOrchestrationService } from './orchestration.service';
 import { OrchestrationGuards } from './orchestration-guards.service';
-import { ConversationMemoryLoader } from './conversation-memory-loader';
 import { AiRouterModule } from '../ai-router/ai-router.module';
 import { KbModule } from '../kb/kb.module';
 import { ReplyPlanningModule } from '../reply-planning/reply-planning.module';
@@ -15,9 +14,11 @@ import { BookingSettingsModule } from '../booking-settings/booking-settings.modu
 
 import { PromptsModule } from '../prompts/prompts.module';
 import { HumanEscalationModule } from '../human-escalation/human-escalation.module';
+import { ConversationMemoryModule } from './conversation-memory.module';
 
 @Module({
   imports: [
+    ConversationMemoryModule,
     AiRouterModule,
     KbModule,
     ReplyPlanningModule,
@@ -28,11 +29,7 @@ import { HumanEscalationModule } from '../human-escalation/human-escalation.modu
     PromptsModule,
     HumanEscalationModule,
   ],
-  providers: [
-    ConversationOrchestrationService,
-    OrchestrationGuards,
-    ConversationMemoryLoader,
-  ],
+  providers: [ConversationOrchestrationService, OrchestrationGuards],
   exports: [ConversationOrchestrationService],
 })
 export class OrchestrationModule {}

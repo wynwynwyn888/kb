@@ -8,9 +8,12 @@ import type { ReplyDecision } from '../reply-planning/dto';
 import { HumanEscalationRuntimeService } from './human-escalation-runtime.service';
 import {
   HumanEscalationHandoverReplyService,
+  buildRecentConversationContextForHandover,
   type HandoverActiveReplyType,
   isNearDuplicate,
 } from './human-escalation-handover-reply.service';
+import { ConversationMemoryLoader } from '../orchestration/conversation-memory-loader';
+import { parseAisbpPolicyState } from '../conversation-policy/conversation-policy-state';
 
 /** Base cooldown: do not send more than one holding reply within 2 minutes. */
 const HOLDING_REPLY_BASE_COOLDOWN_MS = 2 * 60 * 1000;
@@ -31,6 +34,7 @@ export class HumanEscalationHoldingReplyService {
     @InjectQueue(QUEUES.SEND_BUBBLE) private readonly sendBubbleQueue: Queue,
     private readonly humanEscalationRuntime: HumanEscalationRuntimeService,
     private readonly handoverReply: HumanEscalationHandoverReplyService,
+    private readonly memoryLoader: ConversationMemoryLoader,
   ) {}
 
   /**
@@ -88,10 +92,33 @@ export class HumanEscalationHoldingReplyService {
     const lastSentAtMs = lastSentAtIso ? Date.parse(lastSentAtIso) : Number.NaN;
     const elapsed = Number.isNaN(lastSentAtMs) ? null : Math.max(0, now - lastSentAtMs);
 
+    let recentConversationContext = '';
+    try {
+      const { data: convMeta } = await this.supabase
+        .from('conversations')
+        .select('metadata')
+        .eq('id', conversationId)
+        .maybeSingle();
+      const policy = parseAisbpPolicyState(convMeta?.metadata as Record<string, unknown> | undefined);
+      const memory = await this.memoryLoader.loadMemory(conversationId, {
+        memoryResetAfterIso: policy.memoryResetAt ?? null,
+      });
+      recentConversationContext = buildRecentConversationContextForHandover(memory.entries, latestInboundText);
+    } catch (e) {
+      this.logger.warn(
+        `humanEscalationHandoverRecentContextFailed ${JSON.stringify({
+          conversationId,
+          tenantId,
+          message: e instanceof Error ? e.message.slice(0, 160) : String(e),
+        })}`,
+      );
+    }
+
     const ai = await this.handoverReply.classifyAndCompose({
       tenantId,
       conversationId,
       latestInboundText,
+      recentConversationContext,
     });
 
     const selected = ai.selectedType;

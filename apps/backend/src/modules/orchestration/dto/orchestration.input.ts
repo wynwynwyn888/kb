@@ -24,6 +24,8 @@ export interface OrchestrationInput {
   promptConfig?: {
     id: string;
     systemPrompt: string;
+    /** Assistant profile business notes (additional section); empty when legacy blob only. */
+    businessNotes?: string;
     temperature: number;
     modelOverride?: string;
     maxTokens: number | null;

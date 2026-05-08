@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import type { MemoryEntry } from '../orchestration/dto/memory-entry';
 import { GenerationService } from '../generation/generation.service';
 
 export type HandoverActiveReplyType = 'waiting_time' | 'extra_context' | 'frustration' | 'default';
@@ -12,9 +13,9 @@ export type HandoverActiveAiResult = {
 
 const FALLBACKS: Record<HandoverActiveReplyType, string> = {
   waiting_time:
-    "I’m sorry for the wait. Your request has already been sent to the team, and they’ll attend to you as soon as they’re available.",
+    "I’m sorry for the wait. Your request has already been sent to the team. I don’t have their exact response time here, but they’ll attend to you as soon as they’re available.",
   extra_context:
-    "Thank you for sharing that. I’ll pass this to the team so they have the full context when they take over.",
+    "Thank you. I’ll pass this to the team so they have the full context when they take over.",
   frustration:
     "I understand this is frustrating. I’ve already flagged this for the team, and they’ll attend to you as soon as they’re available.",
   default: "Your request has already been sent to the team. They’ll attend to you as soon as they’re available.",
@@ -50,7 +51,7 @@ const RE_FORBIDDEN = [
 ];
 
 const RE_TEAM_MENTION = /\b(team|someone)\b/i;
-const RE_SENT_OR_FLAGGED = /\b(sent|passed|flagged|notified)\b/i;
+const RE_SENT_OR_FLAGGED = /\b(sent|passed|pass\s+this|flagged|notified)\b/i;
 const RE_NO_EXACT_TIME = /\b(\d+\s*(minute|minutes|min|hour|hours|hr|hrs)|within|immediately|right now)\b/i;
 
 function safeTrim(s: unknown): string {
@@ -86,6 +87,32 @@ export function isNearDuplicate(a: string, b: string): boolean {
   const union = aSet.size + bSet.size - inter;
   const j = union ? inter / union : 0;
   return j >= 0.92;
+}
+
+/** Strip latest duplicate customer line so RECENT_CONTEXT excludes LATEST_CUSTOMER_MESSAGE. */
+export function buildRecentConversationContextForHandover(
+  entries: MemoryEntry[],
+  latestInboundText: string,
+  maxChars = 4500,
+): string {
+  const norm = (s: string) => s.trim().replace(/\s+/g, ' ').toLowerCase();
+  const target = norm(latestInboundText);
+  const copy = [...entries];
+  if (target.length > 0 && copy.length > 0) {
+    const last = copy[copy.length - 1]!;
+    if (last.role === 'user' && norm(last.content) === target) {
+      copy.pop();
+    }
+  }
+  const lines: string[] = [];
+  for (const e of copy) {
+    const raw = (e.content ?? '').trim();
+    if (!raw) continue;
+    lines.push(`${e.role === 'user' ? 'Customer' : 'Assistant'}: ${raw}`);
+  }
+  let out = lines.join('\n');
+  if (out.length > maxChars) out = out.slice(-maxChars);
+  return out;
 }
 
 function parseAiJson(raw: string): HandoverActiveAiResult | null {
@@ -153,6 +180,8 @@ export class HumanEscalationHandoverReplyService {
     tenantId: string;
     conversationId: string;
     latestInboundText: string;
+    /** Prior transcript only — latest customer message must be separate for NLU. */
+    recentConversationContext?: string;
   }): Promise<{
     selectedType: HandoverActiveReplyType;
     replyText: string;
@@ -161,7 +190,7 @@ export class HumanEscalationHandoverReplyService {
     usedFallback: boolean;
     fallbackReason?: string;
   }> {
-    const { tenantId, conversationId, latestInboundText } = params;
+    const { tenantId, conversationId, latestInboundText, recentConversationContext } = params;
     this.logger.log(
       `humanEscalationHandoverReplyStarted ${JSON.stringify({
         tenantId,
@@ -174,6 +203,9 @@ export class HumanEscalationHandoverReplyService {
       'You must NOT answer the customer’s problem or give advice, pricing, booking, or exact timing. ' +
       'Return JSON only. No markdown.';
 
+    const recentTrimmed = (recentConversationContext ?? '').trim().slice(0, 4500);
+    const latestTrimmed = latestInboundText.trim().slice(0, 800);
+
     const incomingMessage = [
       'Return JSON only with keys: type, reply, confidence, reason.',
       'type must be one of: waiting_time, extra_context, frustration, default.',
@@ -181,7 +213,18 @@ export class HumanEscalationHandoverReplyService {
       'reply MUST NOT: give advice, diagnose, recommend services/treatments, discuss pricing/refunds/policy, ask many questions, promise exact timing.',
       'reply MUST NOT mention AI, automation, tags, GHL, internal systems.',
       '',
-      `Latest customer message:\n${latestInboundText.slice(0, 500)}`,
+      'CLASSIFICATION RULES (critical):',
+      '- Choose type based primarily on LATEST_CUSTOMER_MESSAGE below — not on older human-request lines inside RECENT_CONTEXT.',
+      '- RECENT_CONTEXT is background only and may include a prior “talk to human” request; ignore it when deciding type.',
+      '- If LATEST_CUSTOMER_MESSAGE adds product/service/problem/symptom/preference/detail while waiting → extra_context.',
+      '- If LATEST_CUSTOMER_MESSAGE asks how long / ETA / when someone responds / waiting → waiting_time.',
+      '- Simple greetings or check-ins while waiting (e.g. “hello?”, “anyone there?”) → waiting_time.',
+      '- Anger/frustration/rude complaints → frustration.',
+      '- Use default only when LATEST_CUSTOMER_MESSAGE is vague or not materially useful (e.g. “ok”, “thanks”).',
+      '',
+      `LATEST_CUSTOMER_MESSAGE:\n${latestTrimmed || '(empty)'}`,
+      '',
+      `RECENT_CONTEXT:\n${recentTrimmed || '(none)'}`,
     ].join('\n');
 
     let raw: string | null = null;

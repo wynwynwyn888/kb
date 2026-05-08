@@ -894,6 +894,7 @@ export class BotProfilesService {
   async getActivePromptForOrchestration(tenantId: string): Promise<{
     id: string;
     systemPrompt: string;
+    businessNotes: string;
     temperature: number;
     modelOverride?: string;
     maxTokens: number | null;
@@ -922,6 +923,7 @@ export class BotProfilesService {
       return {
         id: (pr?.['id'] as string) ?? (prof['id'] as string),
         systemPrompt,
+        businessNotes: promptFields.businessNotes.trim(),
         temperature: (pr?.['temperature'] as number) ?? 0.7,
         modelOverride: (pr?.['model_override'] as string | undefined) || undefined,
         maxTokens: (pr?.['max_tokens'] as number | null) ?? null,
@@ -940,9 +942,12 @@ export class BotProfilesService {
       .maybeSingle();
 
     if (!legacy) return null;
+    const legacyPrompt = legacy['system_prompt'] as string;
+    const parsedLegacy = parsePromptSections(legacyPrompt);
     return {
       id: legacy['id'] as string,
-      systemPrompt: legacy['system_prompt'] as string,
+      systemPrompt: legacyPrompt,
+      businessNotes: parsedLegacy.additional.trim(),
       temperature: legacy['temperature'] as number,
       modelOverride: (legacy['model_override'] as string | undefined) || undefined,
       maxTokens: (legacy['max_tokens'] as number | null) ?? null,

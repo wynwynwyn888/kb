@@ -25,6 +25,15 @@ describe('HumanEscalationHoldingReplyService', () => {
     })),
   };
 
+  const memoryLoader = {
+    loadMemory: jestGlobal.fn(async () => ({
+      conversationId: 'c1',
+      entries: [],
+      turnCount: 0,
+      sessionStartedAt: null,
+    })),
+  };
+
   let metadata: Record<string, unknown> = {};
 
   beforeEach(() => {
@@ -58,6 +67,7 @@ describe('HumanEscalationHoldingReplyService', () => {
       { add: sendBubbleAdd } as never,
       runtime as never,
       handoverReply as never,
+      memoryLoader as never,
     );
     await svc.tryEnqueueHoldingReply({
       tenantId: 't1',
@@ -93,6 +103,7 @@ describe('HumanEscalationHoldingReplyService', () => {
       { add: sendBubbleAdd } as never,
       runtime as never,
       handoverReply as never,
+      memoryLoader as never,
     );
     await svc.tryEnqueueHoldingReply({
       tenantId: 't1',
@@ -125,6 +136,7 @@ describe('HumanEscalationHoldingReplyService', () => {
       { add: sendBubbleAdd } as never,
       runtime as never,
       handoverReply as never,
+      memoryLoader as never,
     );
     await svc.tryEnqueueHoldingReply({
       tenantId: 't1',
@@ -157,6 +169,7 @@ describe('HumanEscalationHoldingReplyService', () => {
       { add: sendBubbleAdd } as never,
       runtime as never,
       handoverReply as never,
+      memoryLoader as never,
     );
     await svc.tryEnqueueHoldingReply({
       tenantId: 't1',
@@ -186,6 +199,7 @@ describe('HumanEscalationHoldingReplyService', () => {
       { add: sendBubbleAdd } as never,
       runtime as never,
       handoverReply as never,
+      memoryLoader as never,
     );
     await svc.tryEnqueueHoldingReply({
       tenantId: 't1',
@@ -218,6 +232,7 @@ describe('HumanEscalationHoldingReplyService', () => {
       { add: sendBubbleAdd } as never,
       runtime as never,
       handoverReply as never,
+      memoryLoader as never,
     );
     await svc.tryEnqueueHoldingReply({
       tenantId: 't1',
@@ -255,6 +270,7 @@ describe('HumanEscalationHoldingReplyService', () => {
       { add: sendBubbleAdd } as never,
       runtime as never,
       handoverReply as never,
+      memoryLoader as never,
     );
     await svc.tryEnqueueHoldingReply({
       tenantId: 't1',
@@ -292,6 +308,7 @@ describe('HumanEscalationHoldingReplyService', () => {
       { add: sendBubbleAdd } as never,
       runtime as never,
       handoverReply as never,
+      memoryLoader as never,
     );
     await svc.tryEnqueueHoldingReply({
       tenantId: 't1',
@@ -329,6 +346,7 @@ describe('HumanEscalationHoldingReplyService', () => {
       { add: sendBubbleAdd } as never,
       runtime as never,
       handoverReply as never,
+      memoryLoader as never,
     );
     await svc.tryEnqueueHoldingReply({
       tenantId: 't1',
@@ -361,6 +379,7 @@ describe('HumanEscalationHoldingReplyService', () => {
       { add: sendBubbleAdd } as never,
       runtime as never,
       handoverReply as never,
+      memoryLoader as never,
     );
     await svc.tryEnqueueHoldingReply({
       tenantId: 't1',
@@ -393,6 +412,7 @@ describe('HumanEscalationHoldingReplyService', () => {
       { add: sendBubbleAdd } as never,
       runtime as never,
       handoverReply as never,
+      memoryLoader as never,
     );
     await svc.tryEnqueueHoldingReply({
       tenantId: 't1',
@@ -427,6 +447,7 @@ describe('HumanEscalationHoldingReplyService', () => {
       { add: sendBubbleAdd } as never,
       runtime as never,
       handoverReply as never,
+      memoryLoader as never,
     );
     await svc.tryEnqueueHoldingReply({
       tenantId: 't1',
@@ -446,6 +467,7 @@ describe('HumanEscalationHoldingReplyService', () => {
       { add: sendBubbleAdd } as never,
       runtime as never,
       handoverReply as never,
+      memoryLoader as never,
     );
     await svc.tryEnqueueHoldingReply({
       tenantId: 't1',
@@ -467,6 +489,7 @@ describe('HumanEscalationHoldingReplyService', () => {
       { add: sendBubbleAdd } as never,
       runtime as never,
       handoverReply as never,
+      memoryLoader as never,
     );
     await svc.tryEnqueueHoldingReply({
       tenantId: 't1',

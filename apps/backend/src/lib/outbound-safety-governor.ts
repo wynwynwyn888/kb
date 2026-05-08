@@ -220,6 +220,89 @@ export type UnsupportedClaimRewriteLog = {
   patternGroup?: string;
 };
 
+export type UnsupportedClaimSupportCheckLog = {
+  tenantId: string;
+  conversationId: string;
+  claimType: 'price';
+  supportSource: 'kb' | 'business_notes' | 'unsupported';
+  kbChunksLength: number;
+  latestIntent: ConversationIntent;
+};
+
+/** Tokens too generic to alone anchor a priced line against tenant corpus. */
+const PRICE_GROUNDING_GENERIC_WORDS = new Set([
+  'treatment',
+  'treatments',
+  'service',
+  'services',
+  'offer',
+  'offers',
+  'offered',
+  'starting',
+  'starts',
+  'start',
+  'package',
+  'packages',
+  'session',
+  'sessions',
+  'book',
+  'booking',
+]);
+
+export function replyContainsCustomerFacingPriceClaims(text: string): boolean {
+  const t = text.trim();
+  if (!t) return false;
+  return /\$\s*\d+(?:\.\d{1,2})?/i.test(t) || /\bfrom\s+\$\s*\d+/i.test(t);
+}
+
+export function priceClaimsGroundedInTenantSources(replyText: string, corpusRaw: string): boolean {
+  const corpus = corpusRaw.trim().toLowerCase().replace(/\s+/g, ' ');
+  if (!corpus) return false;
+  if (!replyContainsCustomerFacingPriceClaims(replyText)) return false;
+
+  const segments = replyText.split(/\n+/).map(s => s.trim()).filter(Boolean);
+  const pricedSegments = segments.filter(seg => /\$\s*\d+/i.test(seg));
+  if (pricedSegments.length === 0) return false;
+
+  for (const seg of pricedSegments) {
+    const amounts = [...seg.matchAll(/\$\s*(\d+(?:\.\d{1,2})?)/gi)].map(m => m[1]!);
+    if (amounts.length === 0) continue;
+
+    for (const amt of amounts) {
+      const dollarish =
+        corpus.includes(`$${amt}`) ||
+        corpus.includes(`$ ${amt}`) ||
+        corpus.includes(`from $${amt}`) ||
+        corpus.includes(`from $ ${amt}`) ||
+        new RegExp(`\\$\\s*${amt}\\b`).test(corpus);
+      if (!dollarish) return false;
+    }
+
+    const words = seg.toLowerCase().match(/[a-z]{4,}/g) ?? [];
+    const anchors = words.filter(w => !PRICE_GROUNDING_GENERIC_WORDS.has(w));
+    const anchored = anchors.some(w => corpus.includes(w));
+    const loosely = words.some(w => corpus.includes(w));
+    if (!anchored && !loosely) return false;
+  }
+
+  return true;
+}
+
+function supportCheckPriceBase(params: {
+  tenantId?: string;
+  conversationId?: string;
+  kbChunksLength: number;
+  latestIntent: ConversationIntent;
+}): Omit<UnsupportedClaimSupportCheckLog, 'supportSource'> {
+  return {
+    tenantId: params.tenantId?.trim() || 'n/a',
+    conversationId: params.conversationId?.trim() || 'n/a',
+    claimType: 'price',
+    kbChunksLength: params.kbChunksLength,
+    latestIntent: params.latestIntent,
+  };
+}
+
 export function userMessageSuggestsBreedOrSpeciesServiceQuery(message: string): boolean {
   const raw = message.trim();
   if (!raw) return false;
@@ -338,13 +421,22 @@ export function rewriteUnsupportedBusinessClaimsWhenNoKb(params: {
   kbChunksReturned: number;
   latestIntent?: ConversationIntent;
   latestUserMessage?: string;
-}): { rewritten: boolean; text: string; reason?: string; log?: UnsupportedClaimRewriteLog } {
+  tenantId?: string;
+  conversationId?: string;
+  /** Business notes + tenant system prompt text used to ground explicit $ prices when KB is empty. */
+  tenantPricingCorpus?: string;
+}): {
+  rewritten: boolean;
+  text: string;
+  reason?: string;
+  log?: UnsupportedClaimRewriteLog;
+  supportCheckLog?: UnsupportedClaimSupportCheckLog;
+} {
   const t = params.replyText.trim();
   const intent = params.latestIntent ?? 'UNKNOWN';
   const userMsg = params.latestUserMessage?.trim() ?? '';
 
   if (!t) return { rewritten: false, text: params.replyText };
-  if (params.kbChunksReturned > 0) return { rewritten: false, text: params.replyText };
 
   if (
     userMsg &&
@@ -362,6 +454,49 @@ export function rewriteUnsupportedBusinessClaimsWhenNoKb(params: {
         patternGroup: 'breed_service_recommendation',
       },
     };
+  }
+
+  if (replyContainsCustomerFacingPriceClaims(t)) {
+    const base = supportCheckPriceBase({
+      tenantId: params.tenantId,
+      conversationId: params.conversationId,
+      kbChunksLength: params.kbChunksReturned,
+      latestIntent: intent,
+    });
+
+    if (params.kbChunksReturned > 0) {
+      return {
+        rewritten: false,
+        text: params.replyText,
+        supportCheckLog: { ...base, supportSource: 'kb' },
+      };
+    }
+
+    const corpus = (params.tenantPricingCorpus ?? '').trim();
+    if (priceClaimsGroundedInTenantSources(t, corpus)) {
+      return {
+        rewritten: false,
+        text: params.replyText,
+        supportCheckLog: { ...base, supportSource: 'business_notes' },
+      };
+    }
+
+    return {
+      rewritten: true,
+      text: NO_KB_FALLBACK_PRICE,
+      reason: 'no_kb_price_ungrounded',
+      log: {
+        reason: 'no_kb_price_ungrounded',
+        latestIntent: intent,
+        kbChunksLength: 0,
+        patternGroup: 'pricing_ungrounded',
+      },
+      supportCheckLog: { ...base, supportSource: 'unsupported' },
+    };
+  }
+
+  if (params.kbChunksReturned > 0) {
+    return { rewritten: false, text: params.replyText };
   }
 
   const riskySurface =

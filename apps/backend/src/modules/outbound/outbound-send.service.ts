@@ -14,6 +14,7 @@ import { sanitizeOutboundCustomerText } from '../../lib/outbound-customer-text';
 import { maybeCoalesceOutboundBubbles } from '../../lib/outbound-coalesce';
 import { newlineDebugMetrics, previewWithVisibleNewlines } from '../../lib/customer-facing-live-format';
 import { decrypt } from '../../lib/encryption';
+import { isProductionEnv, safeTextPreviewForLog } from '../../lib/safe-text-preview-for-log';
 import type { ReplyDecision, ReplyBubbleDraft } from '../reply-planning/dto';
 
 export interface BubbleSendResult {
@@ -130,10 +131,13 @@ export class OutboundSendService {
 
     const payloadJoined = physicalBubbles.map(b => b.text).join('\n\n');
     const payM = newlineDebugMetrics(payloadJoined);
+    const safePayload = safeTextPreviewForLog(payloadJoined, { hashSalt: 'outboundPayload' });
+    const preview = previewWithVisibleNewlines(payloadJoined, 500);
     this.logger.log(
       `liveOutboundWhitespace: logicalBubbleCount=${logicalBubbleCount} physicalOutboundBubbleCount=${physicalBubbles.length} ` +
         `outboundCoalesced=${coalesced} outboundPayloadNewlines=${payM.newlineCount} outboundPayloadDoubleNl=${payM.doubleNewlineSeqCount} ` +
-        `finalOutboundPreview=${JSON.stringify(previewWithVisibleNewlines(payloadJoined, 500))} ` +
+        `finalOutboundPreview=${JSON.stringify(safePayload)}` +
+        (isProductionEnv() ? '' : ` finalOutboundWhitespacePreview=${JSON.stringify(preview)}`) +
         `conversationId=${conversationId}`,
     );
 

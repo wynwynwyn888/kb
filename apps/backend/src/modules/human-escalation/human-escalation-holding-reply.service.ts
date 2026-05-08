@@ -25,6 +25,43 @@ const METADATA_LAST_HOLDING_SENT_AT = 'humanEscalationLastHoldingReplySentAt';
 const METADATA_LAST_HOLDING_TYPE = 'humanEscalationLastHoldingReplyType';
 const METADATA_LAST_HOLDING_TEXT = 'humanEscalationLastHoldingReplyText';
 
+function normalizeAckOnlyText(raw: string): string {
+  return raw
+    .trim()
+    .toLowerCase()
+    .replace(/[\u2019’]/g, "'")
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function isAcknowledgementOnly(raw: string): boolean {
+  const t0 = raw.trim();
+  if (!t0) return true;
+  // If there is a question or any substantive punctuation, do not suppress.
+  if (/[?]/.test(t0)) return false;
+
+  const t = normalizeAckOnlyText(t0);
+  if (!t) return true;
+
+  const ack = new Set([
+    'ok',
+    'okay',
+    'sure',
+    'thanks',
+    'thank you',
+    'noted',
+    'alright',
+    'got it',
+    'tq',
+    'thx',
+    'ok thanks',
+    'okay thanks',
+    'sure thanks',
+  ]);
+  return ack.has(t);
+}
+
 @Injectable()
 export class HumanEscalationHoldingReplyService {
   private readonly logger = new Logger(HumanEscalationHoldingReplyService.name);
@@ -66,14 +103,33 @@ export class HumanEscalationHoldingReplyService {
       pipelineWallStartMs,
     } = params;
 
+    if (isAcknowledgementOnly(latestInboundText)) {
+      this.logger.log(
+        `humanEscalationHoldingReplySuppressed ${JSON.stringify({
+          conversationId,
+          tenantId,
+          reason: 'acknowledgement_only',
+        })}`,
+      );
+      return;
+    }
+
     // Internal update (staff) — throttled and independent of customer cooldown.
-    await this.trySendInternalUpdateIfEligible({
+    void this.trySendInternalUpdateIfEligible({
       tenantId,
       conversationId,
       contactId: ghlContactId,
       latestInboundText,
       contactDisplayName,
       contactPhone,
+    }).catch((e: unknown) => {
+      this.logger.warn(
+        `humanEscalationInternalUpdateFailed ${JSON.stringify({
+          conversationId,
+          tenantId,
+          message: e instanceof Error ? e.message.slice(0, 200) : String(e).slice(0, 200),
+        })}`,
+      );
     });
 
     if ((botMode ?? 'autopilot') === 'suggestive') {
@@ -259,6 +315,7 @@ export class HumanEscalationHoldingReplyService {
     contactPhone?: string | null;
   }): Promise<void> {
     const { tenantId, conversationId, contactId, latestInboundText, contactDisplayName, contactPhone } = params;
+    try {
 
     // Read metadata timestamps directly to avoid coupling on other services’ private state.
     const { data, error } = await this.supabase
@@ -316,6 +373,16 @@ export class HumanEscalationHoldingReplyService {
           conversationId,
           tenantId,
           reason: 'runtime_suppressed',
+        })}`,
+      );
+    }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      this.logger.warn(
+        `humanEscalationInternalUpdateFailed ${JSON.stringify({
+          conversationId,
+          tenantId,
+          message: msg.slice(0, 220),
         })}`,
       );
     }

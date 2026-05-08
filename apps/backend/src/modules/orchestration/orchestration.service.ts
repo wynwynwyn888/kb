@@ -62,6 +62,7 @@ import { ConversationBookingFlowService } from '../booking-flow/conversation-boo
 import { BookingSettingsService } from '../booking-settings/booking-settings.service';
 import { HumanEscalationRuntimeService } from '../human-escalation/human-escalation-runtime.service';
 import { BotProfilesService } from '../prompts/bot-profiles.service';
+import { safeTextPreviewForLog } from '../../lib/safe-text-preview-for-log';
 import {
   compactPersonaPolicyForGeneration,
   estimateApproxTokens,
@@ -210,7 +211,11 @@ export class ConversationOrchestrationService {
         `Inbound batch summary: inboundBatchCount=${batch.length} uniqueProviderMessageCount=${new Set(batch).size} ` +
           `combinedIntentCount=${batchSummary.combinedIntentCount} primaryIntent=${batchSummary.primaryIntent} ` +
           `secondaryIntents=${JSON.stringify(batchSummary.secondaryIntents)} ` +
-          `batchOrderedMessages=${JSON.stringify(batchSummary.orderedMessages.map(s => s.slice(0, 120)))} ` +
+          `batchOrderedMessages=${JSON.stringify(
+            batchSummary.orderedMessages.map(s =>
+              safeTextPreviewForLog(s, { hashSalt: 'batchOrderedMessage' }),
+            ),
+          )} ` +
           `intentsPerMessage=${JSON.stringify(batchSummary.intentsPerMessage)} ` +
           `conflictingIntents=${batchSummary.conflictingIntents} ` +
           `repeatedHumanTextDetected=${repeatMeta.repeatedHumanTextDetected} ` +
@@ -981,7 +986,9 @@ export class ConversationOrchestrationService {
       this.logger.debug(
         `kbRetrieveIntentHint tenant=${input.tenantId} conversation=${conversationId} ` +
           `classifiedIntent=${latestIntent} intentHint=${kbIntentHint ?? 'none'} ` +
-          `retrieveQueryPreview=${JSON.stringify(retrieveQuery.slice(0, 120))}`,
+          `retrieveQueryPreview=${JSON.stringify(
+            safeTextPreviewForLog(retrieveQuery, { hashSalt: 'retrieveQueryPreview' }),
+          )}`,
       );
 
       const result = await this.kbService.retrieve({
@@ -1027,7 +1034,9 @@ export class ConversationOrchestrationService {
       };
 
       this.logger.log(
-        `KB context retrieved: kbQuery=${JSON.stringify(retrieveQuery.slice(0, 240))} selectedContextCount=${filteredChunks.length} retrievedChunkCount=${filteredChunks.length} ` +
+        `KB context retrieved: kbQuery=${JSON.stringify(
+          safeTextPreviewForLog(retrieveQuery, { hashSalt: 'kbQuery' }),
+        )} selectedContextCount=${filteredChunks.length} retrievedChunkCount=${filteredChunks.length} ` +
           `retrievedSectionTitles=${JSON.stringify(retrievedSectionTitles)} topScores=${JSON.stringify(topScores)} ` +
           `retrievedDocumentIds=${JSON.stringify(documentIds)}`,
       );

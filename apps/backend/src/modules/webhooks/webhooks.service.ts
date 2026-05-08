@@ -28,6 +28,7 @@ import {
   ghlInboundShouldTranscribeVoice,
   VOICE_INBOUND_PLACEHOLDER_NO_MEDIA_USER_MESSAGE,
 } from './ghl-inbound-audio-media';
+import { safeTextPreviewForLog } from '../../lib/safe-text-preview-for-log';
 
 @Injectable()
 export class WebhooksService {
@@ -245,7 +246,11 @@ export class WebhooksService {
       this.logGhlInboundNormalizeDiagnostics(payload, data, envelope, workflowFlatRaw, {
         rawMessageType: rawMessageType ?? null,
         mappedMessageType: messageType,
-        messageBodyPreview: this.redactInboundUrlsForLog(rawMessageBody, 240),
+        messageBodyPreview: JSON.stringify(
+          safeTextPreviewForLog(this.redactInboundUrlsForLog(rawMessageBody, 240), {
+            hashSalt: 'ghlMessageBody',
+          }),
+        ),
         audioMediaUrlForShape: audioMediaUrl,
         voiceInboundNeedsTranscribe,
         voiceInboundAudioPlaceholderWithoutMediaUrl,

@@ -28,6 +28,8 @@ import { applyOutboundPolicyGuard } from '../../lib/outbound-policy-guard';
 import { detectMenuIntentInMessage } from '../../lib/kb-relevance';
 import { rewriteUnsupportedBusinessClaimsWhenNoKb } from '../../lib/outbound-safety-governor';
 import { stripProactiveHandoverCtaIfNeeded } from '../../lib/proactive-handover-cta-guard';
+import { safeTextPreviewForLog } from '../../lib/safe-text-preview-for-log';
+import { isProductionEnv } from '../../lib/safe-text-preview-for-log';
 import type { ConversationIntent } from '../conversation-policy/conversation-intent';
 import type { SelectionResolution } from '../conversation-policy/option-resolver';
 import { GenerationService } from '../generation/generation.service';
@@ -584,13 +586,18 @@ export class ReplyPlannerService {
     const probeText = `${opts.combinedHumanMessagesText ?? ''}\n${opts.latestUserMessage ?? ''}`;
     const menuish = /\bmenu\b/i.test(probeText);
     const preview = previewWithVisibleNewlines(phyJoined, 420);
+    const safePreview = safeTextPreviewForLog(phyJoined, { hashSalt: 'finalOutboundPreview' });
+    const previewClause = isProductionEnv()
+      ? ''
+      : ` finalOutboundWhitespacePreview=${JSON.stringify(preview)}`;
     const line =
       `liveOutboundWhitespace: rawDraftNewlines=${rawM.newlineCount} rawDraftDoubleNl=${rawM.doubleNewlineSeqCount} ` +
       `plannedBubbleNewlines=${planM.newlineCount} plannedBubbleDoubleNl=${planM.doubleNewlineSeqCount} ` +
       `plannedPhysicalOutboundNewlines=${phyM.newlineCount} plannedPhysicalOutboundDoubleNl=${phyM.doubleNewlineSeqCount} ` +
       `logicalBubbleCount=${opts.bubbles.length} physicalOutboundPlanCount=${physical.length} inboundBatchCount=${opts.inboundBatchCount ?? 1} ` +
       `menuishProbe=${menuish} ` +
-      `finalOutboundPreview=${JSON.stringify(preview)}`;
+      `finalOutboundPreview=${JSON.stringify(safePreview)}` +
+      previewClause;
     const forceLog =
       menuish ||
       opts.bubbles.length > 1 ||

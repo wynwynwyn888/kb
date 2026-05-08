@@ -61,18 +61,24 @@ export class WebhooksController {
 
     // Verify signature (placeholder — always passes until key management exists)
     const verification = await this.webhookVerificationService.verifySignature(
-      payload,
+      body,
       signature,
     );
 
     if (!verification.valid) {
       this.logger.warn(
-        `Webhook signature invalid: ${verification.reason || 'unknown reason'}`,
+        `webhookVerificationFailed ${JSON.stringify({
+          configured: verification.configured,
+          reason: verification.reason || 'unknown_reason',
+          event: payload.event,
+          locationId: payload.locationId,
+        })}`,
       );
-      // Still return 200 to avoid GHL retry storms
+      // Still return 200 to avoid GHL retry storms, but skip processing.
       return {
         success: true,
-        message: 'Webhook received (signature verification deferred)',
+        message: 'Webhook received',
+        skipped: true,
       };
     }
 

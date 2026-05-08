@@ -74,7 +74,7 @@ describe('HumanEscalationHoldingReplyService', () => {
       conversationId: 'c1',
       locationId: 'loc',
       ghlContactId: 'ct1',
-      latestInboundText: 'ok',
+      latestInboundText: 'still waiting',
       botMode: 'autopilot',
     });
     expect(sendBubbleAdd).toHaveBeenCalledWith(
@@ -85,6 +85,46 @@ describe('HumanEscalationHoldingReplyService', () => {
         replyPlanJson: expect.stringContaining('sent to the team'),
       }),
     );
+  });
+
+  it('"sure thanks" suppresses holding reply (acknowledgement_only)', async () => {
+    metadata = {
+      humanEscalationInternalAlertSentAt: new Date(Date.now() - 11 * 60 * 1000).toISOString(),
+    };
+    const svc = new HumanEscalationHoldingReplyService(
+      { add: sendBubbleAdd } as never,
+      runtime as never,
+      handoverReply as never,
+      memoryLoader as never,
+    );
+    await svc.tryEnqueueHoldingReply({
+      tenantId: 't1',
+      conversationId: 'c1',
+      locationId: 'loc',
+      ghlContactId: 'ct1',
+      latestInboundText: 'sure thanks',
+    });
+    expect(sendBubbleAdd).not.toHaveBeenCalled();
+  });
+
+  it('"ok thanks" suppresses holding reply (acknowledgement_only)', async () => {
+    metadata = {
+      humanEscalationInternalAlertSentAt: new Date(Date.now() - 11 * 60 * 1000).toISOString(),
+    };
+    const svc = new HumanEscalationHoldingReplyService(
+      { add: sendBubbleAdd } as never,
+      runtime as never,
+      handoverReply as never,
+      memoryLoader as never,
+    );
+    await svc.tryEnqueueHoldingReply({
+      tenantId: 't1',
+      conversationId: 'c1',
+      locationId: 'loc',
+      ghlContactId: 'ct1',
+      latestInboundText: 'ok thanks',
+    });
+    expect(sendBubbleAdd).not.toHaveBeenCalled();
   });
 
   it('"how long" gets waiting-time reply', async () => {

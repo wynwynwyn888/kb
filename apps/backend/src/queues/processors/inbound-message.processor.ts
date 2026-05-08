@@ -21,6 +21,7 @@ import {
 } from '../../lib/inbound-burst-batch';
 import { excludeChatResetInboundRows, matchChatResetCommand } from '../../lib/chat-reset-command';
 import { computeOrchestrateQueueWaitMs } from '../../lib/orchestrate-queue-timing';
+import { safeTextPreviewForLog } from '../../lib/safe-text-preview-for-log';
 import { ConversationResetService } from '../../modules/conversations/conversation-reset.service';
 import { InboundAutoTaggingService } from '../../modules/intent-tags/inbound-auto-tagging.service';
 import {
@@ -888,7 +889,15 @@ export class InboundMessageProcessor extends WorkerHost {
 
     const latestIntent = latestText ? classifyConversationIntent(latestText) : 'UNKNOWN';
     const combinedText = orchestrationBatch.join('\n\n').trim();
-    const clip = (lines: string[]) => lines.map(t => t.slice(0, 100));
+    const allowHead = Boolean(matchChatResetCommand(latestText.trim()));
+    const clip = (lines: string[]) =>
+      lines.map((t) =>
+        safeTextPreviewForLog(t, {
+          allowHeadInProduction: allowHead,
+          headChars: 12,
+          hashSalt: 'inbound_batch_line',
+        }),
+      );
     this.logger.log(
       `Debounce inbound batches: conversationId=${conversationId} ` +
         `orchestrationInboundCount=${orchestrationBatch.length} ` +

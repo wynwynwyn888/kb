@@ -75,7 +75,7 @@ export function sectionHeadingStrength(sectionTitle: string | null | undefined):
 function looksLikeServiceCatalogSectionTitle(st: string): boolean {
   const s = st.toLowerCase();
   return (
-    /\b(treatment|treatments|services|menu|styling|colour|color|perm|rebond|scalp|price\s*list|catalog|offerings?|products?)\b/.test(
+    /\b(treatment|treatments|services|menu|styling|colour|color|perm|rebond|scalp|price\s*list|catalog|offerings?|products?|grooming|daycare|spa\b|boarding|pet|packages?)\b/.test(
       s,
     ) || /\bservice\s+menu\b/.test(s)
   );
@@ -165,7 +165,8 @@ export function scoreChunkForQuery(
         !sectionTitleLc.includes('service menu') &&
         !/\bprice\s*list\b/i.test(sectionTitleLc)
       ) {
-        score -= 5.5 * (2 - hStrength);
+        /* Softer penalty: generic "Services" headings often hold the full catalog (salon + pet care). */
+        score -= 2.25 * (2 - hStrength);
       }
     } else {
       for (const hint of expanded.sectionTitleHints) {

@@ -6,6 +6,7 @@
  * titles regardless of business vertical. No business-specific topics; only generic intents.
  */
 
+import { type ConversationIntent, classifyConversationIntent } from '../modules/conversation-policy/conversation-intent';
 import { KB_STOPWORDS } from './kb-relevance';
 
 export type KbIntentSynonymGroup =
@@ -104,12 +105,21 @@ const INTENT_GROUPS: ReadonlyArray<{
       'products',
       'offer',
       'offers',
+      'grooming',
+      'groom',
+      'daycare',
+      'spa',
+      'boarding',
+      'kennel',
+      'deshed',
+      'trim',
     ],
     expand: ['menu', 'service', 'services', 'offering', 'pricing', 'catalog', 'product', 'products'],
     titleHints: [
       'menu',
       'service menu',
       'services',
+      'service categories',
       'price list',
       'pricing',
       'catalog',
@@ -117,6 +127,11 @@ const INTENT_GROUPS: ReadonlyArray<{
       'offerings',
       'products',
       'packages',
+      'grooming',
+      'daycare',
+      'spa',
+      'boarding',
+      'pet',
     ],
     menuListingPrimaryHints: [
       'service menu',
@@ -127,6 +142,9 @@ const INTENT_GROUPS: ReadonlyArray<{
       'catalog',
       'offerings',
       'products',
+      'grooming',
+      'daycare',
+      'spa',
     ],
     menuListingSecondaryHints: ['services', 'service', 'pricing', 'packages'],
   },
@@ -364,6 +382,8 @@ const MENU_LISTING_TOKEN_ARRAY: readonly string[] = [
   'hello',
   'hi',
   'hey',
+  'pls',
+  'plz',
 ];
 
 const MENU_LISTING_TOKEN_SET = new Set<string>(MENU_LISTING_TOKEN_ARRAY);
@@ -504,4 +524,29 @@ export function expandKbQueryWithIntent(query: string, intentHint?: string): Exp
     broadMenuListingQuery,
     aftercareIntent,
   };
+}
+
+/**
+ * When orchestration still has UNKNOWN intent, infer a retrieval hint from the query so keyword
+ * scoring + heading boosts align with service/menu/hours/price questions (pet vertical included).
+ */
+export function inferKbRetrievalIntentHint(message: string): ConversationIntent | undefined {
+  const direct = classifyConversationIntent(message);
+  if (direct !== 'UNKNOWN') return direct;
+
+  const lc = message.trim().toLowerCase();
+  if (!lc) return undefined;
+
+  if (
+    /\b(grooming|groom|daycare|spa\b|boarding|kennel|deshed|full\s+groom|dog\s+wash|nail\s+trim|service\s+categories)\b/i.test(
+      lc,
+    )
+  ) {
+    return 'MENU';
+  }
+  if (/\b(how\s+much|price|pricing|cost|fee|charge)\b/i.test(lc)) return 'PRICE';
+  if (/\b(open|opening|close|closing|hours?|what\s*time|when\s+do\s+you)\b/i.test(lc)) return 'BUSINESS_HOURS';
+  if (/\b(book|booking|slot|slots|availability|appointment|reserve)\b/i.test(lc)) return 'BOOKING';
+
+  return undefined;
 }

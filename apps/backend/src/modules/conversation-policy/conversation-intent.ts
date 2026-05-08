@@ -29,6 +29,9 @@ const RE_HANDOVER_REQUEST =
   /\b(can\s+i|could\s+you|please|i\s+want|i\s+need|let\s+me|connect\s+me|put\s+me)\b/i;
 const RE_HANDOVER_DIRECT_REQUEST =
   /\b(human\s+agent\s+please|manager\s+please|real\s*person\s+please|someone\s+please)\b/i;
+/** Deterministic phrases — avoids requiring "please" / "can I" (e.g. "talk to human"). */
+const RE_HANDOVER_PHRASE_PRIORITIZED =
+  /\b(?:(?:talk|speak)\s+to\s+(?:a\s+)?(?:human|staff|person|someone)|can\s+i\s+(?:talk|speak)\s+to\s+(?:a\s+)?(?:human|staff|person)|could\s+i\s+(?:talk|speak)\s+to\s+(?:a\s+)?(?:human|staff|person)|connect\s+me\s+to\s+(?:the\s+)?(?:team|staff|human|someone)|get\s+someone\s+to\s+contact\s+me)\b/i;
 const RE_HUMAN_ONLY_SERVICE_CONTEXT =
   /\b(for\s+human|for\s+humans|human\s+(facial|shampoo|skin|food)|treat\s+humans|safe\s+for\s+humans)\b/i;
 const RE_COMPLAINT = /\b(complaint|complain|terrible|awful|horrible|angry|furious|disgusting|worst|sue|refund\s*now)\b/i;
@@ -37,7 +40,7 @@ const RE_GREETING_LOOSE = /^(hi|hello|hey)\b/i;
 const RE_HOURS =
   /\b(open|opening|close|closing|closed|hour|hours|what\s*time|when\s*(do|are)|weekday|weekend|schedule|today|tomorrow)\b/i;
 const RE_MENU =
-  /\b(menu|menus|food|eat|eating|drink|drinks|starter|starters|main|mains|dessert|desserts|vegan|vegetarian|dish|dishes|kitchen|buffet|course)\b/i;
+  /\b(menu|menus|food|eat|eating|drink|drinks|starter|starters|main|mains|dessert|desserts|vegan|vegetarian|dish|dishes|kitchen|buffet|course|service|services|grooming|groom|daycare|day\s*care|spa\b|boarding|kennel|full\s+groom|dog\s+wash|deshed|de-shed|nail\s+trim|pet\s+spa|service\s+categories|packages?|package\s+list)\b/i;
 const RE_BOOKING =
   /\b(book|booking|reserve|reservation|table\s*for|appointment|schedule\s*(a|an)?\s*(table|visit))\b/i;
 const RE_PRICE = /\b(price|pricing|cost|how\s*much|expensive|cheap|fee|charge)\b/i;
@@ -57,6 +60,7 @@ export function classifyConversationIntent(message: string): ConversationIntent 
 
   if (!RE_HUMAN_ONLY_SERVICE_CONTEXT.test(t)) {
     if (RE_HANDOVER_DIRECT_REQUEST.test(t)) return 'HUMAN_HANDOVER';
+    if (RE_HANDOVER_PHRASE_PRIORITIZED.test(t)) return 'HUMAN_HANDOVER';
     if (
       RE_HANDOVER_NOUN.test(t) &&
       (RE_HANDOVER_VERB.test(t) || /\bagent\b/i.test(t)) &&

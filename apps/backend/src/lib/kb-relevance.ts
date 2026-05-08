@@ -150,13 +150,13 @@ export const KB_STOPWORDS = new Set([
 // We keep food-style keywords *and* generic service/product/category vocabulary so the same regex
 // works across verticals without hardcoding any one domain.
 const MENU_QUERY =
-  /\b(menu|menus|food|foods|eat|eating|drink|drinks|starter|starters|main|mains|dessert|desserts|vegan|vegetarian|dish|dishes|kitchen|lunch|dinner|breakfast|order|ordering|buffet|service|services|product|products|offering|offerings|catalogue|catalog|category|categories|treatment|treatments)\b/i;
+  /\b(menu|menus|food|foods|eat|eating|drink|drinks|starter|starters|main|mains|dessert|desserts|vegan|vegetarian|dish|dishes|kitchen|lunch|dinner|breakfast|order|ordering|buffet|service|services|product|products|offering|offerings|catalogue|catalog|category|categories|treatment|treatments|grooming|groom|daycare|spa\b|boarding|kennel|packages?|pet\s+spa)\b/i;
 const HOURS_QUERY =
   /\b(hour|hours|opening|open|close|closing|closed|time|times|when|weekday|weekdays|weekend|weekends|schedule|today|tomorrow|am|pm)\b/i;
 
 const HOURS_KB = /\b(hour|hours|opening|open|close|closing|weekday|weekends?|weekdays?|am|pm|schedule)\b/i;
 const MENU_KB =
-  /\b(menu|menus|food|drink|starter|starters|main|mains|dessert|desserts|vegan|vegetarian|dish|dishes|kitchen|buffet|course|service|services|product|products|offering|offerings|catalogue|catalog|category|categories|treatment|treatments)\b/i;
+  /\b(menu|menus|food|drink|starter|starters|main|mains|dessert|desserts|vegan|vegetarian|dish|dishes|kitchen|buffet|course|service|services|product|products|offering|offerings|catalogue|catalog|category|categories|treatment|treatments|grooming|groom|daycare|spa\b|boarding|kennel|packages?|pet\s+spa)\b/i;
 
 export function tokenizeMeaningful(text: string): string[] {
   return text

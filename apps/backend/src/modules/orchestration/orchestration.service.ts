@@ -57,6 +57,7 @@ import {
   detectComplaintServiceIssue,
   isUnsupportedSalonScopeQuery,
 } from '../../lib/outbound-safety-governor';
+import { inferKbRetrievalIntentHint } from '../../lib/kb-intent-synonyms';
 import { ConversationBookingFlowService } from '../booking-flow/conversation-booking-flow.service';
 import { BookingSettingsService } from '../booking-settings/booking-settings.service';
 import { HumanEscalationRuntimeService } from '../human-escalation/human-escalation-runtime.service';
@@ -967,12 +968,21 @@ export class ConversationOrchestrationService {
         );
       }
 
+      const kbIntentHint =
+        latestIntent !== 'UNKNOWN' ? latestIntent : inferKbRetrievalIntentHint(retrieveQuery) ?? undefined;
+
+      this.logger.debug(
+        `kbRetrieveIntentHint tenant=${input.tenantId} conversation=${conversationId} ` +
+          `classifiedIntent=${latestIntent} intentHint=${kbIntentHint ?? 'none'} ` +
+          `retrieveQueryPreview=${JSON.stringify(retrieveQuery.slice(0, 120))}`,
+      );
+
       const result = await this.kbService.retrieve({
         tenantId: input.tenantId,
         conversationId,
         query: retrieveQuery,
         topK: 5,
-        intentHint: latestIntent !== 'UNKNOWN' ? latestIntent : undefined,
+        intentHint: kbIntentHint,
         documentIdAllowlist,
       });
 

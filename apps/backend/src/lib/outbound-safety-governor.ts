@@ -4,6 +4,7 @@
  */
 
 import type { ConversationIntent } from '../modules/conversation-policy/conversation-intent';
+import { detectMenuIntentInMessage } from './kb-relevance';
 
 export const SAFE_PENDING_BOOKING_REPLY =
   "I've noted those details. Our team will confirm the appointment availability with you before anything is locked in.";
@@ -181,37 +182,217 @@ export const UNREQUESTED_MENU_FALLBACK_REPLY =
 export const SAFE_UNSUPPORTED_BUSINESS_CLAIM_REPLY =
   "I don’t have that specific detail confirmed here. If you’d like, I can connect you with the team to check.";
 
+export const NO_KB_FALLBACK_MENU_SERVICE_LIST =
+  "I don’t have the full service list confirmed here. If you’d like, I can connect you with the team to check the available services.";
+
+export const NO_KB_FALLBACK_BROAD_SERVICE =
+  "I don’t have the full service list confirmed here, but I can help connect you with the team to check the right service for your furkid.";
+
+export const NO_KB_FALLBACK_BREED_OR_SPECIES_SERVICE =
+  "I can help with grooming enquiries, but I don’t have breed-specific details confirmed here. If you’d like, I can connect you with the team to check the most suitable option.";
+
+export const NO_KB_FALLBACK_PRICE =
+  "I don’t have confirmed pricing here. If you’d like, I can connect you with the team to check the latest price.";
+
+export const NO_KB_FALLBACK_HOURS =
+  "I don’t have the confirmed opening hours here. If you’d like, I can connect you with the team to check.";
+
+export const NO_KB_FALLBACK_AVAILABILITY =
+  "I don’t have live availability here. If you’d like, I can connect you with the team to check the next available slot.";
+
 const BUSINESS_ASSERTION = /\b(we|our\s+(team|clinic|shop|salon)|yes,?\s+we)\b/i;
+/** Welcomes / acceptance claims that do not literally include "we …" but are still unsafe without KB. */
+const STANDALONE_WELCOME_ALL_BREEDS = /\b(all\s+breeds\s+are\s+welcome|welcome\s+all\s+breeds)\b/i;
 const CLAIM_BREED_SPECIES =
-  /\b(breed|breeds|chihuahua|pomeranian|bulldog|cat|cats|dog|dogs|puppy|puppies|pet|pets|all\s+breeds|any\s+breed)\b/i;
+  /\b(breed|breeds|chihuahua|pomeranian|bulldog|labrador|retriever|poodle|cat|cats|dog|dogs|puppy|puppies|pet|pets|all\s+breeds|any\s+breed|furkid|fur\s*kids?)\b/i;
 const CLAIM_ACCEPT_OFFER =
   /\b(accept|welcome|allow|can\s+take|we\s+do|we\s+offer|provide|available|availability)\b/i;
-const CLAIM_PRICING = /\b(price|pricing|cost|fee|charge|\$|usd|sgd|rm|eur|gbp)\b/i;
+const CLAIM_PRICING =
+  /\b(price|pricing|cost|fee|charge|usd|sgd|rm|eur|gbp)\b|\$\s*\d+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?\s*(?:usd|sgd|rm)/i;
 const CLAIM_HOURS = /\b(open|opening|close|closing|hours?|am|pm)\b/i;
 const CLAIM_POLICY = /\b(policy|refund|cancellation|cancel|reschedule)\b/i;
 const CLAIM_MEDICAL = /\b(doctor|vet|medical|diagnos(e|is)|treat(ment)?|medication|prescribe)\b/i;
 
+export type UnsupportedClaimRewriteLog = {
+  reason: string;
+  latestIntent: ConversationIntent;
+  kbChunksLength: number;
+  patternGroup?: string;
+};
+
+export function userMessageSuggestsBreedOrSpeciesServiceQuery(message: string): boolean {
+  const raw = message.trim();
+  if (!raw) return false;
+  const m = raw.toLowerCase();
+  if (/\b(grooming|groom|wash|spa)\s+for\s+/i.test(raw)) return true;
+  if (/\b(can\s+my\s+\w+|bring\s+my|bring\s+(?:a\s+)?(?:chihuahua|dog|puppy))\b/i.test(m)) return true;
+  if (/\bfor\s+my\s+(?:dog|cat|puppy)\b/i.test(m)) return true;
+  if (
+    /\b(chihuahua|labrador|poodle|pug|terrier|shepherd|retriever|bulldog|breed)\b/i.test(m) &&
+    /\b(groom|grooming|service|spa|skin|coat)\b/i.test(m)
+  ) {
+    return true;
+  }
+  if (/\b(skin\s+issue|sensitive\s+skin)\b/i.test(m) && /\b(groom|grooming)\b/i.test(m)) return true;
+  return false;
+}
+
+function replySuggestsUnsupportedBreedOrPackageRecommendation(text: string): boolean {
+  const t = text.trim();
+  if (!t) return false;
+  if (/\b(typically\s+recommend|we\s+typically|recommend\s+our|essential\s+grooming|our\s+essential)\b/i.test(t)) {
+    return true;
+  }
+  if (/\bwe\s+recommend\b/i.test(t) && /\b(grooming|package|service|spa|treatment|essential)\b/i.test(t)) {
+    return true;
+  }
+  if (
+    /\bfor\s+(?:a\s+)?(?:labrador|golden\s+retriever|chihuahua|poodle|your\s+puppy|your\s+dog),\s*(?:we\s+)?(?:usually|typically|recommend)\b/i.test(
+      t,
+    )
+  ) {
+    return true;
+  }
+  return false;
+}
+
+export function userAskedBroadServiceBrowseQuery(message: string, intent: ConversationIntent): boolean {
+  const raw = message.trim();
+  if (!raw) return false;
+  if (/^(grooming|daycare|spa)\??$/i.test(raw)) return true;
+  if (/\b(menu\s+pls|menu\s+plz|what\s+services?\s+do\s+you|what\s+do\s+you\s+offer|service\s+list|list\s+of\s+services)\b/i.test(raw)) {
+    return true;
+  }
+  if (intent === 'MENU' && /\b(what\s+service|your\s+menu)\b/i.test(raw)) return true;
+  return false;
+}
+
+function resolveRiskyPatternGroup(replyText: string): string {
+  if (CLAIM_BREED_SPECIES.test(replyText) && CLAIM_ACCEPT_OFFER.test(replyText)) return 'breed_acceptance';
+  if (CLAIM_PRICING.test(replyText) && CLAIM_ACCEPT_OFFER.test(replyText)) return 'pricing';
+  if (CLAIM_HOURS.test(replyText) && (/\bwe\s*(are|'re)\s*open\b/i.test(replyText) || /\bopen\s+(from|until|at)\b/i.test(replyText))) {
+    return 'hours_availability_claim';
+  }
+  if (CLAIM_POLICY.test(replyText) && CLAIM_ACCEPT_OFFER.test(replyText)) return 'policy';
+  if (CLAIM_MEDICAL.test(replyText)) return 'medical';
+  return 'general';
+}
+
+function pickIntentAwareNoKbFallback(
+  intent: ConversationIntent,
+  userMessage: string,
+  replyText: string,
+): string {
+  const primary = userMessage.trim();
+  const probe = primary || replyText.trim();
+
+  if (
+    !primary &&
+    CLAIM_BREED_SPECIES.test(replyText) &&
+    CLAIM_ACCEPT_OFFER.test(replyText)
+  ) {
+    return NO_KB_FALLBACK_BREED_OR_SPECIES_SERVICE;
+  }
+
+  const ml = probe.toLowerCase();
+
+  if (
+    (CLAIM_BREED_SPECIES.test(userMessage) || userMessageSuggestsBreedOrSpeciesServiceQuery(userMessage)) &&
+    CLAIM_BREED_SPECIES.test(replyText) &&
+    CLAIM_ACCEPT_OFFER.test(replyText)
+  ) {
+    return NO_KB_FALLBACK_BREED_OR_SPECIES_SERVICE;
+  }
+
+  if (userAskedBroadServiceBrowseQuery(probe, intent)) {
+    return NO_KB_FALLBACK_BROAD_SERVICE;
+  }
+
+  if (intent === 'PRICE' || /\b(how\s+much|price|pricing|cost|fee|charge)\b/i.test(ml)) {
+    return NO_KB_FALLBACK_PRICE;
+  }
+
+  if (
+    intent === 'BUSINESS_HOURS' ||
+    (/\b(open|opening|close|closing|hours?)\b/i.test(ml) && !detectMenuIntentInMessage(probe))
+  ) {
+    return NO_KB_FALLBACK_HOURS;
+  }
+
+  if (
+    intent === 'BOOKING' ||
+    /\b(slot|slots|availability|available\s+(?:slot|appointment|time)|next\s+available)\b/i.test(ml)
+  ) {
+    return NO_KB_FALLBACK_AVAILABILITY;
+  }
+
+  if (intent === 'MENU' || detectMenuIntentInMessage(probe)) {
+    return NO_KB_FALLBACK_MENU_SERVICE_LIST;
+  }
+
+  return SAFE_UNSUPPORTED_BUSINESS_CLAIM_REPLY;
+}
+
 export function rewriteUnsupportedBusinessClaimsWhenNoKb(params: {
   replyText: string;
   kbChunksReturned: number;
-}): { rewritten: boolean; text: string; reason?: string } {
+  latestIntent?: ConversationIntent;
+  latestUserMessage?: string;
+}): { rewritten: boolean; text: string; reason?: string; log?: UnsupportedClaimRewriteLog } {
   const t = params.replyText.trim();
+  const intent = params.latestIntent ?? 'UNKNOWN';
+  const userMsg = params.latestUserMessage?.trim() ?? '';
+
   if (!t) return { rewritten: false, text: params.replyText };
   if (params.kbChunksReturned > 0) return { rewritten: false, text: params.replyText };
 
+  if (
+    userMsg &&
+    userMessageSuggestsBreedOrSpeciesServiceQuery(userMsg) &&
+    replySuggestsUnsupportedBreedOrPackageRecommendation(t)
+  ) {
+    return {
+      rewritten: true,
+      text: NO_KB_FALLBACK_BREED_OR_SPECIES_SERVICE,
+      reason: 'no_kb_breed_service_hallucination',
+      log: {
+        reason: 'no_kb_breed_service_hallucination',
+        latestIntent: intent,
+        kbChunksLength: 0,
+        patternGroup: 'breed_service_recommendation',
+      },
+    };
+  }
+
+  const riskySurface =
+    BUSINESS_ASSERTION.test(t) ||
+    STANDALONE_WELCOME_ALL_BREEDS.test(t) ||
+    (/^yes[!.,]?\s+/i.test(t.trim()) && CLAIM_BREED_SPECIES.test(t) && /\b(welcome|welcome\s+here)\b/i.test(t));
+
   const risky =
-    BUSINESS_ASSERTION.test(t) &&
-    ( // business-specific claim categories
-      (CLAIM_BREED_SPECIES.test(t) && CLAIM_ACCEPT_OFFER.test(t)) ||
+    riskySurface &&
+    ((CLAIM_BREED_SPECIES.test(t) && CLAIM_ACCEPT_OFFER.test(t)) ||
       (CLAIM_PRICING.test(t) && CLAIM_ACCEPT_OFFER.test(t)) ||
       (CLAIM_HOURS.test(t) && (/\bwe\s*(are|'re)\s*open\b/i.test(t) || /\bopen\s+(from|until|at)\b/i.test(t))) ||
       (CLAIM_POLICY.test(t) && CLAIM_ACCEPT_OFFER.test(t)) ||
-      CLAIM_MEDICAL.test(t)
-    );
+      CLAIM_MEDICAL.test(t));
 
   if (!risky) return { rewritten: false, text: params.replyText };
 
-  return { rewritten: true, text: SAFE_UNSUPPORTED_BUSINESS_CLAIM_REPLY, reason: 'no_kb_unsupported_business_claim' };
+  const fallback = pickIntentAwareNoKbFallback(intent, userMsg, t);
+  const patternGroup = resolveRiskyPatternGroup(t);
+
+  return {
+    rewritten: true,
+    text: fallback,
+    reason: 'no_kb_unsupported_business_claim',
+    log: {
+      reason: 'no_kb_unsupported_business_claim',
+      latestIntent: intent,
+      kbChunksLength: 0,
+      patternGroup,
+    },
+  };
 }
 
 export const COMPLAINT_ESCALATION_REPLY =

@@ -7,6 +7,12 @@ import {
   textClaimsBookingConfirmed,
   userAskedForColourAlternatives,
   rewriteUnsupportedBusinessClaimsWhenNoKb,
+  NO_KB_FALLBACK_BREED_OR_SPECIES_SERVICE,
+  NO_KB_FALLBACK_HOURS,
+  NO_KB_FALLBACK_MENU_SERVICE_LIST,
+  NO_KB_FALLBACK_BROAD_SERVICE,
+  NO_KB_FALLBACK_PRICE,
+  NO_KB_FALLBACK_AVAILABILITY,
 } from './outbound-safety-governor';
 import { classifyConversationIntent } from '../modules/conversation-policy/conversation-intent';
 
@@ -134,8 +140,7 @@ describe('outbound-safety-governor', () => {
         replyText: 'Absolutely! We welcome all breeds, including Chihuahuas.',
       });
       expect(r.rewritten).toBe(true);
-      expect(r.text.toLowerCase()).toContain('don');
-      expect(r.text.toLowerCase()).toContain('connect');
+      expect(r.text).toBe(NO_KB_FALLBACK_BREED_OR_SPECIES_SERVICE);
       expect(r.text.toLowerCase()).not.toContain('welcome all breeds');
     });
 
@@ -145,6 +150,7 @@ describe('outbound-safety-governor', () => {
         replyText: "Yes, we are open from 9am to 6pm and we have availability today.",
       });
       expect(r.rewritten).toBe(true);
+      expect(r.text).toBe(NO_KB_FALLBACK_HOURS);
     });
 
     it('does not rewrite when KB has support', () => {
@@ -153,6 +159,51 @@ describe('outbound-safety-governor', () => {
         replyText: 'Absolutely! We welcome all breeds, including Chihuahuas.',
       });
       expect(r.rewritten).toBe(false);
+    });
+
+    it('rewrites breed/package recommendation hallucination when user asked breed-specific grooming (no KB)', () => {
+      const r = rewriteUnsupportedBusinessClaimsWhenNoKb({
+        kbChunksReturned: 0,
+        latestIntent: 'MENU',
+        latestUserMessage: 'grooming for labrador',
+        replyText: 'For a Labrador, we typically recommend our Essential Grooming package.',
+      });
+      expect(r.rewritten).toBe(true);
+      expect(r.text).toBe(NO_KB_FALLBACK_BREED_OR_SPECIES_SERVICE);
+      expect(r.text.toLowerCase()).not.toContain('essential grooming');
+      expect(r.text.toLowerCase()).not.toMatch(/\btypically\s+recommend\b/);
+    });
+
+    it('broad menu browse + risky reply uses furkid-safe broad fallback', () => {
+      const r = rewriteUnsupportedBusinessClaimsWhenNoKb({
+        kbChunksReturned: 0,
+        latestIntent: 'MENU',
+        latestUserMessage: 'menu pls',
+        replyText: 'Yes, we welcome all breeds and offer full grooming on site.',
+      });
+      expect(r.rewritten).toBe(true);
+      expect(r.text).toBe(NO_KB_FALLBACK_BROAD_SERVICE);
+    });
+
+    it('does not promise all breeds when user named a breed (no KB)', () => {
+      const r = rewriteUnsupportedBusinessClaimsWhenNoKb({
+        kbChunksReturned: 0,
+        latestUserMessage: 'can i bring chihuahua for service',
+        replyText: 'Yes! All breeds are welcome here.',
+      });
+      expect(r.rewritten).toBe(true);
+      expect(r.text).toBe(NO_KB_FALLBACK_BREED_OR_SPECIES_SERVICE);
+    });
+
+    it('uses price-specific fallback for risky pricing claims', () => {
+      const r = rewriteUnsupportedBusinessClaimsWhenNoKb({
+        kbChunksReturned: 0,
+        latestIntent: 'PRICE',
+        latestUserMessage: 'how much grooming',
+        replyText: 'Yes, we offer grooming from $80.',
+      });
+      expect(r.rewritten).toBe(true);
+      expect(r.text).toBe(NO_KB_FALLBACK_PRICE);
     });
   });
 });

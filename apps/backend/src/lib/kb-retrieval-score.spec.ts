@@ -48,6 +48,14 @@ describe('expandKbQueryWithIntent', () => {
     expect(expandKbQueryWithIntent('keratin').broadMenuListingQuery).toBe(false);
   });
 
+  it('"menu pls" → broad menu listing (chat shorthand)', () => {
+    expect(expandKbQueryWithIntent('menu pls').broadMenuListingQuery).toBe(true);
+  });
+
+  it('"grooming?" maps to INTENT_MENU', () => {
+    expect(expandKbQueryWithIntent('grooming?').intents).toContain('INTENT_MENU');
+  });
+
   it('aftercareIntent for post-care phrasing', () => {
     expect(expandKbQueryWithIntent('after keratin').aftercareIntent).toBe(true);
     expect(expandKbQueryWithIntent('aftercare guide').aftercareIntent).toBe(true);
@@ -251,6 +259,25 @@ describe('computeKbSearchHitPresentation', () => {
     });
     expect(out.relevanceLabel).toBe('BEST_EFFORT');
     expect(out.scorePercent).toBeLessThanOrEqual(28);
+  });
+});
+
+describe('rankChunksForKbSearch (pet services)', () => {
+  const chunks: ScorableChunk[] = [
+    chunk({
+      id: 'groom',
+      content: 'Full Groom includes bath, brush-out, and tidy.',
+      metadata: { sectionTitle: 'GROOMING SERVICES', chunkType: 'section', sectionIndex: 1 },
+    }),
+    chunk({
+      id: 'pol',
+      content: 'We love anxious pets and take introductions slowly.',
+      metadata: { sectionTitle: 'GENERAL POLICIES', chunkType: 'section', sectionIndex: 2 },
+    }),
+  ];
+
+  it('"grooming?" prefers grooming catalog section', () => {
+    expect(rankChunksForKbSearch('grooming?', chunks, { topK: 2 })[0]!.chunk.id).toBe('groom');
   });
 });
 

@@ -236,8 +236,18 @@ export class ReplyPlannerService {
     const noKbClaimGuard = rewriteUnsupportedBusinessClaimsWhenNoKb({
       replyText: afterKbLeak,
       kbChunksReturned: kbChunks.length,
+      latestIntent: policyContext?.latestIntent ?? 'UNKNOWN',
+      latestUserMessage: policyContext?.latestUserMessage ?? '',
     });
     const finalDraft = noKbClaimGuard.rewritten ? noKbClaimGuard.text : afterKbLeak;
+    if (noKbClaimGuard.rewritten && noKbClaimGuard.log) {
+      this.logger.log(
+        `unsupportedClaimRewriteApplied ${JSON.stringify({
+          ...noKbClaimGuard.log,
+          originalReason: noKbClaimGuard.reason,
+        })}`,
+      );
+    }
     const bubbles = this.formatIntoBubbles(finalDraft);
     this.logLiveWhitespaceDebug({
       rawDraft: afterKbLeak,

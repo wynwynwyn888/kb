@@ -1,11 +1,12 @@
 import { redirect } from 'next/navigation';
 
-/** Legacy `/automation/*` → `/assistant/automation/*` */
+/** Legacy `/automation/*` → `/automation/*` (workspace-scoped) */
 export default function LegacyAutomationRedirect({
   params,
 }: {
   params: { tenantId: string; slug?: string[] };
 }) {
-  const tail = params.slug?.length ? params.slug.join('/') : 'tags';
-  redirect(`/app/tenant/${params.tenantId}/assistant/automation/${tail}`);
+  const tailRaw = params.slug?.length ? params.slug.join('/') : 'tagging';
+  const tail = tailRaw === 'tags' ? 'tagging' : tailRaw;
+  redirect(`/app/tenant/${params.tenantId}/automation/${tail}`);
 }

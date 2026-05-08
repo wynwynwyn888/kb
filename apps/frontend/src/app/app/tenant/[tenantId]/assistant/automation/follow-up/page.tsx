@@ -1,5 +1,6 @@
-import { AutomationFollowUpPanel } from '@/components/app/tenant-workspace/automation/AutomationFollowUpPanel';
+import { redirect } from 'next/navigation';
 
-export default function TenantAutomationFollowUpPage() {
-  return <AutomationFollowUpPanel />;
+/** Legacy `/assistant/automation/follow-up` → `/automation/follow-up` */
+export default function LegacyAssistantAutomationFollowUpRedirectPage({ params }: { params: { tenantId: string } }) {
+  redirect(`/app/tenant/${params.tenantId}/automation/follow-up`);
 }

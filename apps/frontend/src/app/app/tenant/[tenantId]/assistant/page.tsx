@@ -1,5 +1,5 @@
-import { TenantAssistantOverview } from '@/components/app/tenant-workspace/TenantAssistantOverview';
+import { redirect } from 'next/navigation';
 
-export default function TenantAssistantOverviewPage() {
-  return <TenantAssistantOverview />;
+export default function TenantAssistantOverviewPage({ params }: { params: { tenantId: string } }) {
+  redirect(`/app/tenant/${params.tenantId}/assistant/profiles`);
 }

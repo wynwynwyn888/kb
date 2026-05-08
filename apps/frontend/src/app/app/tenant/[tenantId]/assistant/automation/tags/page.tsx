@@ -1,5 +1,6 @@
-import { AutomationTagsPanel } from '@/components/app/tenant-workspace/automation/AutomationTagsPanel';
+import { redirect } from 'next/navigation';
 
-export default function TenantAutomationTagsPage() {
-  return <AutomationTagsPanel />;
+/** Legacy `/assistant/automation/tags` → `/automation/tagging` */
+export default function LegacyAssistantAutomationTagsRedirectPage({ params }: { params: { tenantId: string } }) {
+  redirect(`/app/tenant/${params.tenantId}/automation/tagging`);
 }

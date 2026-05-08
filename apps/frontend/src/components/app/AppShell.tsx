@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import type { CSSProperties, ReactNode } from 'react';
-import { Suspense, useEffect } from 'react';
+import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { WorkspaceSwitcher } from '@/components/app/WorkspaceSwitcher';
 import { BrandLogo } from '@/components/app/BrandLogo';
@@ -35,16 +35,42 @@ const linkStyle = (active: boolean): CSSProperties => ({
 
 const tenantNavChildLinkStyle = (active: boolean): CSSProperties => ({
   display: 'block',
-  padding: '0.38rem 0.65rem 0.38rem 2.15rem',
+  padding: '0.38rem 0.65rem 0.38rem 2.85rem',
   borderRadius: '8px',
   textDecoration: 'none',
-  fontSize: '0.8rem',
+  fontSize: '0.78rem',
   fontWeight: active ? 700 : 600,
   color: active ? 'var(--aisbp-tenant-nav-active-text, #0f62fe)' : 'var(--aisbp-nav-text, #64748b)',
   background: active ? 'var(--aisbp-tenant-nav-active-bg, rgba(15, 98, 254, 0.08))' : 'transparent',
   border: '1px solid',
   borderColor: active ? 'rgba(15, 98, 254, 0.18)' : 'transparent',
 });
+
+const tenantNavGroupButtonStyle = (active: boolean): CSSProperties => ({
+  ...tenantNavLinkStyle(active),
+  width: '100%',
+  cursor: 'pointer',
+});
+
+function Chevron({ open }: { open: boolean }) {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 20 20"
+      fill="none"
+      aria-hidden="true"
+      style={{
+        marginLeft: 'auto',
+        opacity: 0.7,
+        transform: open ? 'rotate(90deg)' : 'rotate(0deg)',
+        transition: 'transform 120ms ease',
+      }}
+    >
+      <path d="M7 5l6 5-6 5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
 
 function tenantNavLinkStyle(active: boolean): CSSProperties {
   return {
@@ -163,6 +189,15 @@ export function AppShell({ children }: { children: ReactNode }) {
     ? buildTenantSidebarNav(tenantIdFromPath, { showAdvanced: Boolean(user?.agencyRole) })
     : [];
 
+  const [groupOpen, setGroupOpen] = useState<Record<string, boolean>>({});
+  const groupActiveByLabel = useMemo(() => {
+    const m: Record<string, boolean> = {};
+    for (const n of tenantNavNodes) {
+      if (n.kind === 'group') m[n.label] = n.match(pathname);
+    }
+    return m;
+  }, [tenantNavNodes, pathname]);
+
   return (
     <div style={{ minHeight: '100vh', background: 'var(--aisbp-shell-bg, #f8fafc)' }}>
       <aside style={isTenantPath ? asideTenant : asideAgency}>
@@ -205,33 +240,44 @@ export function AppShell({ children }: { children: ReactNode }) {
                     );
                   }
                   const groupActive = node.match(pathname);
+                  const isOpen = groupOpen[node.label] ?? groupActive;
                   return (
                     <div key={node.label} style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
-                      <Link
-                        href={node.overviewHref}
-                        style={tenantNavLinkStyle(groupActive)}
-                        aria-current={pathname === node.overviewHref || pathname === `${node.overviewHref}/` ? 'page' : undefined}
+                      <button
+                        type="button"
+                        onClick={() => setGroupOpen(s => ({ ...s, [node.label]: !(s[node.label] ?? groupActiveByLabel[node.label] ?? false) }))}
+                        style={tenantNavGroupButtonStyle(groupActive)}
+                        aria-expanded={isOpen}
+                        aria-controls={`tenant-nav-group-${node.label}`}
                       >
                         <span style={{ display: 'flex', color: 'inherit', flexShrink: 0 }}>
                           <TenantNavIcon icon={node.icon} />
                         </span>
                         <span>{node.label}</span>
-                      </Link>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.08rem' }} role="group" aria-label={`${node.label} sections`}>
-                        {node.children.map(child => {
-                          const cActive = child.match(pathname);
-                          return (
-                            <Link
-                              key={child.href}
-                              href={child.href}
-                              style={tenantNavChildLinkStyle(cActive)}
-                              aria-current={cActive ? 'page' : undefined}
-                            >
-                              {child.label}
-                            </Link>
-                          );
-                        })}
-                      </div>
+                        <Chevron open={isOpen} />
+                      </button>
+                      {isOpen ? (
+                        <div
+                          id={`tenant-nav-group-${node.label}`}
+                          style={{ display: 'flex', flexDirection: 'column', gap: '0.08rem' }}
+                          role="group"
+                          aria-label={`${node.label} sections`}
+                        >
+                          {node.children.map(child => {
+                            const cActive = child.match(pathname);
+                            return (
+                              <Link
+                                key={child.href}
+                                href={child.href}
+                                style={tenantNavChildLinkStyle(cActive)}
+                                aria-current={cActive ? 'page' : undefined}
+                              >
+                                {child.label}
+                              </Link>
+                            );
+                          })}
+                        </div>
+                      ) : null}
                     </div>
                   );
                 })}

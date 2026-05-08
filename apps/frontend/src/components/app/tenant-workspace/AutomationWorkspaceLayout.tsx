@@ -21,10 +21,10 @@ const tabStyle = (active: boolean): CSSProperties => ({
 });
 
 const TABS: { suffix: string; label: string }[] = [
-  { suffix: '/assistant/automation/tags', label: 'Tags' },
-  { suffix: '/assistant/automation/booking', label: 'Booking' },
-  { suffix: '/assistant/automation/follow-up', label: 'Follow-up' },
-  { suffix: '/assistant/automation/escalation', label: 'Human Escalation' },
+  { suffix: '/automation/tagging', label: 'Tagging' },
+  { suffix: '/automation/booking', label: 'Booking' },
+  { suffix: '/automation/follow-up', label: 'Follow-up' },
+  { suffix: '/automation/escalation', label: 'Human Escalation' },
 ];
 
 export function AutomationWorkspaceLayout({

@@ -2,13 +2,29 @@ import { describe, expect, it } from 'vitest';
 import { buildTenantSidebarNav } from './tenant-workspace-nav';
 
 describe('tenant sidebar nav', () => {
-  it('shows Preview label under Assistant without changing route', () => {
+  it('shows Assistant children: Profiles, Instructions, Preview only', () => {
     const tid = 't_nav';
     const nodes = buildTenantSidebarNav(tid, { showAdvanced: true });
     const assistant = nodes.find(n => n.kind === 'group' && n.label === 'Assistant');
     if (!assistant || assistant.kind !== 'group') throw new Error('Assistant group missing');
-    const preview = assistant.children.find(c => c.href.endsWith('/assistant/test-bot'));
-    expect(preview?.label).toBe('Preview');
+    expect(assistant.children.map(c => c.label)).toEqual(['Profiles', 'Instructions', 'Preview']);
+    const preview = assistant.children.find(c => c.label === 'Preview');
+    expect(preview?.href).toBe(`/app/tenant/${tid}/assistant/preview`);
+  });
+
+  it('shows Automation as top-level group with Tagging/Booking/Follow-up/Human Escalation', () => {
+    const tid = 't_nav';
+    const nodes = buildTenantSidebarNav(tid, { showAdvanced: true });
+    const automation = nodes.find(n => n.kind === 'group' && n.label === 'Automation');
+    if (!automation || automation.kind !== 'group') throw new Error('Automation group missing');
+    expect(automation.children.map(c => c.label)).toEqual(['Tagging', 'Booking', 'Follow-up', 'Human Escalation']);
+    expect(automation.children[0]?.href).toBe(`/app/tenant/${tid}/automation/tagging`);
+  });
+
+  it('hides Advanced when showAdvanced=false', () => {
+    const tid = 't_nav';
+    const nodes = buildTenantSidebarNav(tid, { showAdvanced: false });
+    expect(nodes.some(n => n.kind === 'leaf' && n.label === 'Advanced')).toBe(false);
   });
 });
 

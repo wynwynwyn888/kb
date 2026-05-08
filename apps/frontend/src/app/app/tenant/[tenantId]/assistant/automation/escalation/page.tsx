@@ -1,5 +1,6 @@
-import { AutomationEscalationPanel } from '@/components/app/tenant-workspace/automation/AutomationEscalationPanel';
+import { redirect } from 'next/navigation';
 
-export default function TenantAutomationEscalationPage() {
-  return <AutomationEscalationPanel />;
+/** Legacy `/assistant/automation/escalation` → `/automation/escalation` */
+export default function LegacyAssistantAutomationEscalationRedirectPage({ params }: { params: { tenantId: string } }) {
+  redirect(`/app/tenant/${params.tenantId}/automation/escalation`);
 }

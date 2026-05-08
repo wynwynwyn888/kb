@@ -74,14 +74,20 @@ function assistantSubtreeMatch(base: string, pathname: string): boolean {
     pathname === `${base}/goals` ||
     pathname === `${base}/bot` ||
     pathname === `${base}/prompt` ||
-    pathname === `${base}/automation` ||
-    pathname.startsWith(`${base}/automation/`)
+    false
   );
+}
+
+function automationSubtreeMatch(base: string, pathname: string): boolean {
+  const a = `${base}/automation`;
+  const legacyA = `${base}/assistant/automation`;
+  return pathname === a || pathname.startsWith(`${a}/`) || pathname === legacyA || pathname.startsWith(`${legacyA}/`);
 }
 
 export function buildTenantSidebarNav(tenantId: string, opts: { showAdvanced: boolean }): TenantNavNode[] {
   const base = tenantBasePath(tenantId);
   const assistantBase = `${base}/assistant`;
+  const automationBase = `${base}/automation`;
 
   const nodes: TenantNavNode[] = [
     {
@@ -117,14 +123,38 @@ export function buildTenantSidebarNav(tenantId: string, opts: { showAdvanced: bo
             p === `${base}/prompt`,
         },
         {
-          href: `${assistantBase}/automation/tags`,
-          label: 'Automation',
-          match: p => p.startsWith(`${assistantBase}/automation`) || p.startsWith(`${base}/automation`),
+          href: `${assistantBase}/preview`,
+          label: 'Preview',
+          match: p => p === `${assistantBase}/preview` || p === `${assistantBase}/test-bot`,
+        },
+      ],
+    },
+    {
+      kind: 'group',
+      label: 'Automation',
+      icon: 'automation',
+      overviewHref: automationBase,
+      match: p => automationSubtreeMatch(base, p),
+      children: [
+        {
+          href: `${automationBase}/tagging`,
+          label: 'Tagging',
+          match: p => p === `${automationBase}/tagging` || p === `${automationBase}/tags`,
         },
         {
-          href: `${assistantBase}/test-bot`,
-          label: 'Preview',
-          match: p => p === `${assistantBase}/test-bot`,
+          href: `${automationBase}/booking`,
+          label: 'Booking',
+          match: p => p === `${automationBase}/booking`,
+        },
+        {
+          href: `${automationBase}/follow-up`,
+          label: 'Follow-up',
+          match: p => p === `${automationBase}/follow-up`,
+        },
+        {
+          href: `${automationBase}/escalation`,
+          label: 'Human Escalation',
+          match: p => p === `${automationBase}/escalation`,
         },
       ],
     },

@@ -1,5 +1,6 @@
-import { AutomationBookingPanel } from '@/components/app/tenant-workspace/automation/AutomationBookingPanel';
+import { redirect } from 'next/navigation';
 
-export default function TenantAutomationBookingPage() {
-  return <AutomationBookingPanel />;
+/** Legacy `/assistant/automation/booking` → `/automation/booking` */
+export default function LegacyAssistantAutomationBookingRedirectPage({ params }: { params: { tenantId: string } }) {
+  redirect(`/app/tenant/${params.tenantId}/automation/booking`);
 }

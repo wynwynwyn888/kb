@@ -11,7 +11,8 @@ describe('Tenant usage defensive defaults', () => {
     const s = read('src/app/app/tenant/[tenantId]/usage/page.tsx');
     expect(s).toContain('const ledgerItems = Array.isArray(ledger) ? ledger : []');
     expect(s).toContain('Usage data is temporarily unavailable. Please try again.');
-    expect(s).toContain('Usage will appear here after the assistant starts replying to customers.');
+    expect(s).toContain('No credits on file yet.');
+    expect(s).toContain('No automated reply debits this month yet.');
   });
 });
 

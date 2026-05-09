@@ -1163,6 +1163,9 @@ export async function topupSubaccountQuota(
     previousTotal: number;
     newTotal: number;
     delta: number;
+    totalQuota: number;
+    usedQuota: number;
+    balance: number;
   }>('/quotas/agency/topup', { token, method: 'POST', body: JSON.stringify(body) });
 }
 
@@ -1241,7 +1244,7 @@ export async function getTenantCreditsUsage(token: string, tenantId: string) {
     usedToday: number;
     usedThisMonth: number;
     status: 'ACTIVE' | 'LOW_CREDIT' | 'PAUSED_NO_CREDITS' | 'OVER_NEGATIVE_LIMIT';
-  } | null>(`/quotas/tenant/usage/${encodeURIComponent(tenantId)}`, { token });
+  }>(`/quotas/tenant/usage/${encodeURIComponent(tenantId)}`, { token });
 }
 
 export async function getTenantCreditsLedger(token: string, tenantId: string, limit = 20) {

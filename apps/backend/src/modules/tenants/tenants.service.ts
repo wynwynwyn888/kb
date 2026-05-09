@@ -331,14 +331,19 @@ export class TenantsService {
     const periodStart = new Date(now.getFullYear(), now.getMonth(), 1);
     const periodEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
 
-    await supabase.from('quota_wallets').insert({
+    const walletNow = new Date().toISOString();
+    const { error: walletErr } = await supabase.from('quota_wallets').insert({
       id: randomUUID(),
       tenant_id: id,
       total_quota: defaultQuota,
       used_quota: 0,
       period_start: periodStart.toISOString(),
       period_end: periodEnd.toISOString(),
+      updated_at: walletNow,
     });
+    if (walletErr) {
+      throw new BadRequestException(walletErr.message ?? 'Failed to create quota wallet for new workspace');
+    }
 
     await supabase.from('quota_audit_logs').insert({
       id: randomUUID(),

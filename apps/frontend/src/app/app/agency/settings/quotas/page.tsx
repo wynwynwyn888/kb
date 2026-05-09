@@ -132,7 +132,9 @@ export default function AgencyQuotasPage() {
         amount: amt,
         note: topupNote.trim() || undefined,
       });
-      setOk(`Top up applied: +${r.delta} credits.`);
+      setOk(
+        `Top up applied: +${r.delta} credits. New balance: ${typeof r.balance === 'number' ? r.balance.toLocaleString() : '—'} (pool ${typeof r.totalQuota === 'number' ? r.totalQuota.toLocaleString() : '—'}).`,
+      );
       setTopupAmount('');
       setTopupNote('');
       setWallets(await listAgencyCreditWallets(token));

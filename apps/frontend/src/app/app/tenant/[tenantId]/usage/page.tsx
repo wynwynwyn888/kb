@@ -5,14 +5,7 @@ import { useParams } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { getTenantCreditsLedger, getTenantCreditsUsage } from '@/lib/api';
-import {
-  EmptyState,
-  ErrorBanner,
-  LoadingBlock,
-  PageHeader,
-  SectionCard,
-  formatDateTime,
-} from '@/components/app/mvp-ui';
+import { ErrorBanner, LoadingBlock, PageHeader, SectionCard, formatDateTime } from '@/components/app/mvp-ui';
 import { creditStatusLabel, type CreditStatus } from '@/lib/credits-ui';
 
 type UsageSnap = NonNullable<Awaited<ReturnType<typeof getTenantCreditsUsage>>>;
@@ -108,9 +101,7 @@ export default function TenantUsagePage() {
   const balance = safeFiniteNumber(usageSummary?.balance, 0);
   const usedToday = safeFiniteNumber(usageSummary?.usedToday, 0);
   const usedThisMonth = safeFiniteNumber(usageSummary?.usedThisMonth, 0);
-  const status = (usageSummary?.status != null ? String(usageSummary.status) : 'ACTIVE') as Parameters<
-    typeof creditStatusLabel
-  >[0];
+  const status = (usageSummary?.status != null ? String(usageSummary.status) : 'ACTIVE') as CreditStatus;
 
   const pct = totalQuota > 0 ? Math.min(100, Math.round((usedQuota / totalQuota) * 100)) : null;
 
@@ -121,8 +112,6 @@ export default function TenantUsagePage() {
 
   const showLow = status === 'LOW_CREDIT';
   const showPaused = status === 'PAUSED_NO_CREDITS' || status === 'OVER_NEGATIVE_LIMIT';
-
-  const blockingMessage = tenantParam ? '' : !authLoading ? 'Workspace context is unavailable from this URL.' : '';
 
   if (authLoading) {
     return (
@@ -191,16 +180,25 @@ export default function TenantUsagePage() {
 
       {!loading && !err ? (
         <>
-          {usageSummary ? (
-            <div
-              style={{
-                border: '1px solid #dbeafe',
-                borderRadius: '12px',
-                padding: '1.25rem 1.35rem',
-                background: 'linear-gradient(135deg, #f0f7ff 0%, #fff 42%)',
-                marginBottom: '1rem',
-              }}
-            >
+          <div
+            style={{
+              border: '1px solid #dbeafe',
+              borderRadius: '12px',
+              padding: '1.25rem 1.35rem',
+              background: 'linear-gradient(135deg, #f0f7ff 0%, #fff 42%)',
+              marginBottom: '1rem',
+            }}
+          >
+            {totalQuota === 0 && balance === 0 ? (
+              <p style={{ fontSize: '0.85rem', color: '#64748b', margin: '0 0 0.75rem', lineHeight: 1.45 }}>
+                No credits on file yet. Your agency can top up this workspace from Agency → Credits.
+              </p>
+            ) : null}
+            {usedThisMonth === 0 && balance > 0 ? (
+              <p style={{ fontSize: '0.82rem', color: '#64748b', margin: '0 0 0.75rem', lineHeight: 1.45 }}>
+                No automated reply debits this month yet. Credits below include your workspace pool.
+              </p>
+            ) : null}
               {showPaused ? (
                 <div style={{ marginBottom: '0.75rem' }}>
                   <ErrorBanner message="Automatic replies are paused because this workspace has no credits remaining." />
@@ -291,16 +289,11 @@ export default function TenantUsagePage() {
                 />
               </div>
             </div>
-          ) : (
-            <SectionCard title="Credits" subtitle="No usage has been recorded for this workspace yet.">
-              <EmptyState
-                title="No usage recorded yet"
-                detail="Usage will appear here after the assistant starts replying to customers."
-              />
-            </SectionCard>
-          )}
 
-          <SectionCard title="Recent credits activity" subtitle="Latest movements in your credit ledger.">
+          <SectionCard
+            title="Recent credits activity"
+            subtitle="Top-ups, manual adjustments, and reply debits appear here."
+          >
             {ledgerItems.length === 0 ? (
               <p style={{ fontSize: '0.85rem', color: '#64748b', margin: 0 }}>No ledger entries yet.</p>
             ) : (

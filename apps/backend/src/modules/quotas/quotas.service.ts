@@ -69,64 +69,86 @@ export class QuotasService {
       throw new ForbiddenException('Top-up amount must be positive');
     }
 
-    const { data: t } = await this.supabase.from('tenants').select('id, agency_id').eq('id', tenantId).single();
-    if (!t || t.agency_id !== agencyId) {
+    const { data: t, error: tenantErr } = await this.supabase
+      .from('tenants')
+      .select('id, agency_id')
+      .eq('id', tenantId)
+      .single();
+    if (tenantErr || !t || t.agency_id !== agencyId) {
       throw new NotFoundException('Subaccount not in this agency');
     }
 
-    const { data: wallet } = await this.supabase
+    const { data: wallet, error: walletReadErr } = await this.supabase
       .from('quota_wallets')
       .select('id, total_quota, used_quota')
       .eq('tenant_id', tenantId)
       .maybeSingle();
+    if (walletReadErr) {
+      this.logger.error(`quota wallet read failed tenant=${tenantId} ${walletReadErr.message}`);
+      throw new Error(walletReadErr.message);
+    }
 
     const add = Math.floor(amount);
     const prevTotal = wallet?.total_quota ?? 0;
     const newTotal = prevTotal + add;
+    const usedBefore = wallet?.used_quota ?? 0;
+    const nowIso = new Date().toISOString();
 
-    if (wallet) {
-      await this.supabase
+    let walletId: string;
+    if (wallet?.id) {
+      walletId = wallet.id;
+      const { data: updated, error: upErr } = await this.supabase
         .from('quota_wallets')
-        .update({ total_quota: newTotal, updated_at: new Date().toISOString() })
-        .eq('id', wallet.id);
-      await this.supabase.from('quota_ledgers').insert({
-        id: randomUUID(),
-        wallet_id: wallet.id,
-        amount: add,
-        type: 'CREDIT',
-        movement_type: 'top_up',
-        balance_after: newTotal - (wallet.used_quota ?? 0),
-        metadata: { note: note ?? null },
-        created_by_user_id: profileId,
-        description: note?.trim() || 'Manual top-up',
-      });
+        .update({ total_quota: newTotal, updated_at: nowIso })
+        .eq('id', walletId)
+        .select('id, total_quota, used_quota')
+        .maybeSingle();
+      if (upErr) {
+        this.logger.error(`quota wallet top-up update failed tenant=${tenantId} ${upErr.message}`);
+        throw new Error(upErr.message);
+      }
+      if (!updated || updated.total_quota !== newTotal) {
+        this.logger.error(`quota wallet top-up update no row or wrong total tenant=${tenantId} expected=${newTotal}`);
+        throw new Error('Top-up did not persist to quota_wallets');
+      }
     } else {
       const now = new Date();
       const periodStart = new Date(now.getFullYear(), now.getMonth(), 1);
       const periodEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
-      const wid = randomUUID();
-      await this.supabase.from('quota_wallets').insert({
-        id: wid,
+      walletId = randomUUID();
+      const { error: insErr } = await this.supabase.from('quota_wallets').insert({
+        id: walletId,
         tenant_id: tenantId,
         total_quota: newTotal,
         used_quota: 0,
         period_start: periodStart.toISOString(),
         period_end: periodEnd.toISOString(),
+        updated_at: nowIso,
       });
-      await this.supabase.from('quota_ledgers').insert({
-        id: randomUUID(),
-        wallet_id: wid,
-        amount: add,
-        type: 'CREDIT',
-        movement_type: 'top_up',
-        balance_after: newTotal,
-        metadata: { note: note ?? null, walletCreated: true },
-        created_by_user_id: profileId,
-        description: note?.trim() || 'Manual top-up (wallet created)',
-      });
+      if (insErr) {
+        this.logger.error(`quota wallet create on top-up failed tenant=${tenantId} ${insErr.message}`);
+        throw new Error(insErr.message);
+      }
     }
 
-    await this.supabase.from('quota_audit_logs').insert({
+    const balanceAfterMovement = newTotal - usedBefore;
+    const { error: ledErr } = await this.supabase.from('quota_ledgers').insert({
+      id: randomUUID(),
+      wallet_id: walletId,
+      amount: add,
+      type: 'CREDIT',
+      movement_type: 'top_up',
+      balance_after: balanceAfterMovement,
+      metadata: { note: note ?? null, walletCreated: !wallet?.id },
+      created_by_user_id: profileId,
+      description: note?.trim() || (wallet?.id ? 'Manual top-up' : 'Manual top-up (wallet created)'),
+    });
+    if (ledErr) {
+      this.logger.error(`quota ledger top-up insert failed tenant=${tenantId} ${ledErr.message}`);
+      throw new Error(ledErr.message);
+    }
+
+    const { error: auditErr } = await this.supabase.from('quota_audit_logs').insert({
       id: randomUUID(),
       agency_id: agencyId,
       profile_id: profileId,
@@ -137,8 +159,31 @@ export class QuotasService {
       new_total: newTotal,
       metadata: { note: note ?? null },
     });
+    if (auditErr) {
+      this.logger.warn(`quota audit log insert failed after successful top-up tenant=${tenantId} ${auditErr.message}`);
+    }
 
-    return { tenantId, previousTotal: prevTotal, newTotal, delta: add };
+    const { data: verified, error: verErr } = await this.supabase
+      .from('quota_wallets')
+      .select('total_quota, used_quota')
+      .eq('tenant_id', tenantId)
+      .single();
+    if (verErr || !verified) {
+      throw new Error('Could not verify wallet after top-up');
+    }
+    const vTotal = verified.total_quota ?? 0;
+    const vUsed = verified.used_quota ?? 0;
+    const balance = vTotal - vUsed;
+
+    return {
+      tenantId,
+      previousTotal: prevTotal,
+      newTotal: vTotal,
+      delta: add,
+      totalQuota: vTotal,
+      usedQuota: vUsed,
+      balance,
+    };
   }
 
   async adjustSubaccountCredits(
@@ -167,13 +212,23 @@ export class QuotasService {
     const d = Math.trunc(delta);
     const prevTotal = wallet.total_quota ?? 0;
     const nextTotal = prevTotal + d;
-    await this.supabase
+    const nowIso = new Date().toISOString();
+    const { data: updated, error: upErr } = await this.supabase
       .from('quota_wallets')
-      .update({ total_quota: nextTotal, updated_at: new Date().toISOString() })
-      .eq('id', wallet.id);
+      .update({ total_quota: nextTotal, updated_at: nowIso })
+      .eq('id', wallet.id)
+      .select('id, total_quota, used_quota')
+      .maybeSingle();
+    if (upErr) {
+      this.logger.error(`quota wallet adjust update failed tenant=${tenantId} ${upErr.message}`);
+      throw new Error(upErr.message);
+    }
+    if (!updated || updated.total_quota !== nextTotal) {
+      throw new Error('Manual adjustment did not persist to quota_wallets');
+    }
 
     const balanceAfter = nextTotal - (wallet.used_quota ?? 0);
-    await this.supabase.from('quota_ledgers').insert({
+    const { error: ledErr } = await this.supabase.from('quota_ledgers').insert({
       id: randomUUID(),
       wallet_id: wallet.id,
       amount: Math.abs(d),
@@ -184,8 +239,12 @@ export class QuotasService {
       created_by_user_id: profileId,
       description: reason?.trim() || 'Manual adjustment',
     });
+    if (ledErr) {
+      this.logger.error(`quota ledger manual_adjustment failed tenant=${tenantId} ${ledErr.message}`);
+      throw new Error(ledErr.message);
+    }
 
-    await this.supabase.from('quota_audit_logs').insert({
+    const { error: auditErr } = await this.supabase.from('quota_audit_logs').insert({
       id: randomUUID(),
       agency_id: agencyId,
       profile_id: profileId,
@@ -196,6 +255,9 @@ export class QuotasService {
       new_total: nextTotal,
       metadata: { reason: reason ?? null },
     });
+    if (auditErr) {
+      this.logger.warn(`quota audit log insert failed after adjustment tenant=${tenantId} ${auditErr.message}`);
+    }
 
     return { tenantId, previousTotal: prevTotal, newTotal: nextTotal, delta: d, balanceAfter };
   }
@@ -292,13 +354,31 @@ export class QuotasService {
     usedToday: number;
     usedThisMonth: number;
     status: 'ACTIVE' | 'LOW_CREDIT' | 'PAUSED_NO_CREDITS' | 'OVER_NEGATIVE_LIMIT';
-  } | null> {
-    const { data: wallet } = await this.supabase
+  }> {
+    const { data: wallet, error: wErr } = await this.supabase
       .from('quota_wallets')
       .select('id, tenant_id, total_quota, used_quota, allow_negative_credits, negative_credit_limit, low_credit_threshold')
       .eq('tenant_id', tenantId)
       .maybeSingle();
-    if (!wallet) return null;
+    if (wErr) {
+      this.logger.warn(`getTenantUsageSummary wallet read tenant=${tenantId} ${wErr.message}`);
+    }
+
+    if (!wallet) {
+      /* No quota_wallets row yet — treat as zero credits but not "paused product" (wallet is created on first top-up / tenant create). */
+      return {
+        tenantId,
+        totalQuota: 0,
+        usedQuota: 0,
+        balance: 0,
+        allowNegativeCredits: false,
+        negativeCreditLimit: 0,
+        lowCreditThreshold: 0,
+        usedToday: 0,
+        usedThisMonth: 0,
+        status: 'ACTIVE',
+      };
+    }
 
     const totalQuota = wallet.total_quota ?? 0;
     const usedQuota = wallet.used_quota ?? 0;

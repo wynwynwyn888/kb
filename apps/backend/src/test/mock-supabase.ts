@@ -15,7 +15,9 @@ function makeQueryResult(data: unknown, error: unknown = null) {
     in: jest.fn(() => makeQueryResult(data, error)),
     order: jest.fn(() => makeQueryResult(data, error)),
     limit: jest.fn(() => makeQueryResult(data, error)),
+    gte: jest.fn(() => makeQueryResult(data, error)),
     single: jest.fn(async () => result),
+    maybeSingle: jest.fn(async () => result),
   };
 }
 
@@ -35,6 +37,7 @@ function makeUpdateResult(data: unknown, error: unknown = null) {
     eq: jest.fn(() => makeUpdateResult(data, error)),
     select: jest.fn(() => makeQueryResult(data, error)),
     single: jest.fn(async () => result),
+    maybeSingle: jest.fn(async () => result),
   };
 }
 

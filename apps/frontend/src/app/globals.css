@@ -50,6 +50,28 @@ details > summary::-webkit-details-marker {
   --aisbp-page-bg: #f8fafc;
   --aisbp-warn-bg: #fff8f0;
   --aisbp-stat-tile-bg: #f8fafc;
+  /* Status pills + alerts (light) */
+  --aisbp-pill-ok-bg: #ecfdf5;
+  --aisbp-pill-ok-fg: #047857;
+  --aisbp-pill-ok-border: #bbf7d0;
+  --aisbp-pill-warn-bg: #fffbeb;
+  --aisbp-pill-warn-fg: #b45309;
+  --aisbp-pill-warn-border: #fde68a;
+  --aisbp-pill-bad-bg: #fef2f2;
+  --aisbp-pill-bad-fg: #b91c1c;
+  --aisbp-pill-bad-border: #fecaca;
+  --aisbp-pill-neutral-bg: var(--aisbp-nav-active-bg, #f8fafc);
+  --aisbp-pill-neutral-fg: var(--aisbp-nav-text, #475569);
+  --aisbp-pill-neutral-border: var(--aisbp-border, #e2e8f0);
+  --aisbp-alert-error-bg: #fde8e8;
+  --aisbp-alert-error-fg: #8b1d1d;
+  --aisbp-alert-error-border: #f5c2c7;
+  --aisbp-alert-success-bg: #e6f7ed;
+  --aisbp-alert-success-fg: #0d5c2e;
+  --aisbp-alert-success-border: #b7e0c8;
+  --aisbp-table-row-bg: #ffffff;
+  --aisbp-table-row-hover: #f8fafc;
+  --aisbp-progress-track: #e8edf3;
 }
 
 html.dark {
@@ -62,7 +84,7 @@ html.dark {
   --aisbp-text: #f1f5f9;
   --aisbp-text-heading: #f8fafc;
   --aisbp-text-secondary: #e2e8f0;
-  --aisbp-muted: #94a3b8;
+  --aisbp-muted: #a8b8cf;
   --aisbp-border: #334155;
   --aisbp-border-strong: #475569;
   --aisbp-input-bg: #0f172a;
@@ -87,9 +109,36 @@ html.dark {
   --aisbp-page-bg: #0b1220;
   --aisbp-warn-bg: #2a1810;
   --aisbp-stat-tile-bg: #1e293b;
+  --aisbp-pill-ok-bg: rgba(16, 185, 129, 0.14);
+  --aisbp-pill-ok-fg: #6ee7b7;
+  --aisbp-pill-ok-border: rgba(52, 211, 153, 0.35);
+  --aisbp-pill-warn-bg: rgba(251, 191, 36, 0.12);
+  --aisbp-pill-warn-fg: #fcd34d;
+  --aisbp-pill-warn-border: rgba(251, 191, 36, 0.35);
+  --aisbp-pill-bad-bg: rgba(248, 113, 113, 0.12);
+  --aisbp-pill-bad-fg: #fca5a5;
+  --aisbp-pill-bad-border: rgba(248, 113, 113, 0.35);
+  --aisbp-pill-neutral-bg: rgba(30, 41, 59, 0.85);
+  --aisbp-pill-neutral-fg: #cbd5e1;
+  --aisbp-pill-neutral-border: rgba(71, 85, 105, 0.65);
+  --aisbp-alert-error-bg: rgba(127, 29, 29, 0.35);
+  --aisbp-alert-error-fg: #fecaca;
+  --aisbp-alert-error-border: rgba(248, 113, 113, 0.45);
+  --aisbp-alert-success-bg: rgba(6, 78, 59, 0.45);
+  --aisbp-alert-success-fg: #bbf7d0;
+  --aisbp-alert-success-border: rgba(52, 211, 153, 0.4);
+  --aisbp-table-row-bg: #111827;
+  --aisbp-table-row-hover: #1e293b;
+  --aisbp-progress-track: rgba(51, 65, 85, 0.65);
 }
 
 html.dark body {
   background-color: var(--aisbp-bg);
+  color: var(--aisbp-text);
+}
+
+/* Native `<select>` dropdown options inherit OS styling; align with app dark theme. */
+html.dark select option {
+  background-color: var(--aisbp-surface);
   color: var(--aisbp-text);
 }

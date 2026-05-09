@@ -166,7 +166,7 @@ function AgencyGhlConnectionsInner() {
         ghlLocationId: loc.trim(),
         privateIntegrationToken: pit.trim(),
       });
-      setMsg('CRM connection saved.');
+      setMsg('CRM Connection saved.');
       setPit('');
       await refreshConn();
     } catch (er) {
@@ -236,7 +236,7 @@ function AgencyGhlConnectionsInner() {
 
   return (
     <div>
-      <PageHeader title="CRM connection" eyebrow="Agency account" />
+      <PageHeader title="CRM Connection" eyebrow="Agency account" />
       <p style={{ fontSize: '0.8rem', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 1rem', maxWidth: '32rem' }}>
         Connect one client workspace to CRM so AISalesBot Pro can read and send conversation data.
       </p>
@@ -432,7 +432,7 @@ export default function AgencyGhlConnectionsPage() {
     <Suspense
       fallback={
         <div>
-          <PageHeader title="CRM connection" eyebrow="Agency account" />
+          <PageHeader title="CRM Connection" eyebrow="Agency account" />
           <LoadingBlock message="Loading page…" />
         </div>
       }

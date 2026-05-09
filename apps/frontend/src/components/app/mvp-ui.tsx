@@ -1,7 +1,7 @@
 'use client';
 
 import type { CSSProperties, ReactNode } from 'react';
-import { DEFAULT_DISPLAY_TIMEZONE } from '@/lib/datetime-display';
+import { formatDisplayDateTime } from '@/lib/datetime-display';
 
 const cardStyle: CSSProperties = {
   border: '1px solid var(--aisbp-border, #e2e8f0)',
@@ -90,14 +90,26 @@ export function StatusPill({
   tone: 'ok' | 'neutral' | 'warn' | 'bad';
 }) {
   const colors = {
-    ok: { bg: '#ecfdf5', fg: '#047857', border: '#bbf7d0' },
-    neutral: {
-      bg: 'var(--aisbp-nav-active-bg, #f8fafc)',
-      fg: 'var(--aisbp-nav-text, #475569)',
-      border: 'var(--aisbp-border, #e2e8f0)',
+    ok: {
+      bg: 'var(--aisbp-pill-ok-bg, #ecfdf5)',
+      fg: 'var(--aisbp-pill-ok-fg, #047857)',
+      border: 'var(--aisbp-pill-ok-border, #bbf7d0)',
     },
-    warn: { bg: '#fffbeb', fg: '#b45309', border: '#fde68a' },
-    bad: { bg: '#fef2f2', fg: '#b91c1c', border: '#fecaca' },
+    neutral: {
+      bg: 'var(--aisbp-pill-neutral-bg, #f8fafc)',
+      fg: 'var(--aisbp-pill-neutral-fg, #475569)',
+      border: 'var(--aisbp-pill-neutral-border, #e2e8f0)',
+    },
+    warn: {
+      bg: 'var(--aisbp-pill-warn-bg, #fffbeb)',
+      fg: 'var(--aisbp-pill-warn-fg, #b45309)',
+      border: 'var(--aisbp-pill-warn-border, #fde68a)',
+    },
+    bad: {
+      bg: 'var(--aisbp-pill-bad-bg, #fef2f2)',
+      fg: 'var(--aisbp-pill-bad-fg, #b91c1c)',
+      border: 'var(--aisbp-pill-bad-border, #fecaca)',
+    },
   }[tone];
   return (
     <span
@@ -130,11 +142,11 @@ export function ErrorBanner({ message }: { message: string }) {
       style={{
         padding: '0.65rem 0.85rem',
         borderRadius: '6px',
-        background: '#fde8e8',
-        color: '#8b1d1d',
+        background: 'var(--aisbp-alert-error-bg, #fde8e8)',
+        color: 'var(--aisbp-alert-error-fg, #8b1d1d)',
         fontSize: '0.88rem',
         marginBottom: '1rem',
-        border: '1px solid #f5c2c7',
+        border: '1px solid var(--aisbp-alert-error-border, #f5c2c7)',
       }}
     >
       {message}
@@ -149,11 +161,11 @@ export function SuccessBanner({ message }: { message: string }) {
       style={{
         padding: '0.65rem 0.85rem',
         borderRadius: '6px',
-        background: '#e6f7ed',
-        color: '#0d5c2e',
+        background: 'var(--aisbp-alert-success-bg, #e6f7ed)',
+        color: 'var(--aisbp-alert-success-fg, #0d5c2e)',
         fontSize: '0.88rem',
         marginBottom: '1rem',
-        border: '1px solid #b7e0c8',
+        border: '1px solid var(--aisbp-alert-success-border, #b7e0c8)',
       }}
     >
       {message}
@@ -323,16 +335,5 @@ export function PageHeader({
 }
 
 export function formatDateTime(iso: string | null | undefined): string {
-  if (!iso) return '—';
-  try {
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return String(iso);
-    return d.toLocaleString('en-SG', {
-      timeZone: DEFAULT_DISPLAY_TIMEZONE,
-      dateStyle: 'medium',
-      timeStyle: 'short',
-    });
-  } catch {
-    return String(iso);
-  }
+  return formatDisplayDateTime(iso);
 }

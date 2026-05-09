@@ -77,7 +77,7 @@ export default function TenantGhlStatusPage() {
 
   return (
     <div>
-      <PageHeader title="CRM connection" eyebrow="Advanced" />
+      <PageHeader title="CRM Connection" eyebrow="Advanced" />
       <p style={{ fontSize: '0.88rem', color: '#64748b', margin: '0 0 0.85rem', lineHeight: 1.5, maxWidth: '560px' }}>
         Read-only status for this workspace. To change credentials, ask an agency admin to open{' '}
         <Link href={`/app/agency/settings/ghl?subaccount=${tenantId}`} style={{ color: '#2563eb', fontWeight: 600 }}>

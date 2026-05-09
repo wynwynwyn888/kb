@@ -67,7 +67,7 @@ export function TenantSettingsGeneralContent() {
           : 'warn'
       : 'neutral';
 
-  const crmCardTitle = ghl && !ghlLoadErr && ghl.status === 'CONNECTED' ? 'Connected CRM' : 'CRM connection';
+  const crmCardTitle = ghl && !ghlLoadErr && ghl.status === 'CONNECTED' ? 'Connected CRM' : 'CRM Connection';
 
   return (
     <>

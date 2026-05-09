@@ -36,7 +36,45 @@ export function quotaAuditActionLabel(action: string): string {
     'agency.reply_policy': 'Reply policy updated',
     'agency.active_provider': 'AI provider switched',
   };
-  return map[action] ?? action.replace(/\./g, ' ');
+  return map[action] ?? 'Account update';
+}
+
+/** For client-side filters on the Activity log (matches `quotaAuditActionLabel` groupings). */
+export type QuotaAuditLogFilter = 'all' | 'workspace' | 'credits' | 'ai';
+
+export function quotaAuditLogFilterKind(action: string): 'workspace' | 'credits' | 'ai' | 'other' {
+  if (
+    action === 'subaccount.create' ||
+    action === 'subaccount.renamed' ||
+    action === 'subaccount.deleted'
+  ) {
+    return 'workspace';
+  }
+  if (
+    action === 'subaccount.topup' ||
+    action === 'subaccount.manual_adjustment' ||
+    action === 'agency.default_quota' ||
+    action === 'subaccount.wallet_policy'
+  ) {
+    return 'credits';
+  }
+  if (
+    action === 'agency.ai_settings' ||
+    action === 'agency.active_provider' ||
+    action === 'agency.reply_policy' ||
+    action === 'subaccount.bot_mode'
+  ) {
+    return 'ai';
+  }
+  return 'other';
+}
+
+export function quotaAuditChangedByLabel(row: { actorName?: string | null; actorEmail?: string | null }): string {
+  const n = typeof row.actorName === 'string' ? row.actorName.trim() : '';
+  if (n) return n;
+  const e = typeof row.actorEmail === 'string' ? row.actorEmail.trim() : '';
+  if (e) return e;
+  return '—';
 }
 
 export function quotaAuditWorkspaceLabel(

@@ -17,34 +17,24 @@ import { MINIMAX_DEFAULT_API_BASE, OPENAI_DEFAULT_API_BASE } from '@aisbp/types'
 import { hasLiveGeneration, snapshotFor } from '@/lib/ai-provider-options';
 import {
   ErrorBanner,
+  formatDateTime,
+  KeyValueRows,
   LoadingBlock,
   PageHeader,
   SectionCard,
+  StatusPill,
   SuccessBanner,
+  mvpButtonStyle,
   mvpFieldHint,
   mvpInputStyle,
   mvpLabelStyle,
   mvpPrimaryButtonStyle,
+  mvpSecondaryButtonStyle,
   mvpSelectStyle,
 } from '@/components/app/mvp-ui';
 
 /** Stored on the provider row for stack fallback. */
 const PROVIDER_STACK_DEFAULTS = { temperature: 0.7, maxTokens: 800 };
-
-const strip: React.CSSProperties = {
-  display: 'flex',
-  flexWrap: 'wrap',
-  columnGap: '1.1rem',
-  rowGap: '0.4rem',
-  alignItems: 'center',
-  fontSize: '0.78rem',
-  color: '#334155',
-  background: '#f8fafc',
-  border: '1px solid #e2e8f0',
-  borderRadius: '8px',
-  padding: '0.5rem 0.7rem',
-  marginBottom: '0.85rem',
-};
 
 const defaultBehavior = (): SubaccountBehaviorPolicy => ({
   temperatureMin: 0,
@@ -281,16 +271,17 @@ export default function AgencyAiSettingsPage() {
   const activeNeedsKey = ['OPENAI', 'MINIMAX'].includes((activeProvider || '').toUpperCase());
   const activeKeyOk = !activeNeedsKey || activeHasKey;
 
-  const healthLabel = !healthForForm
-    ? 'Not tested'
-    : healthSnap?.lastHealthStatus === 'PASS'
-      ? 'Passing'
-      : 'Failing';
+  const summaryHealth = (() => {
+    if (!healthSnap) return { label: 'Not tested yet', tone: 'neutral' as const };
+    if (!healthForForm) return { label: 'Run check for current fields', tone: 'warn' as const };
+    if (healthSnap.lastHealthStatus === 'PASS') return { label: 'Healthy', tone: 'ok' as const };
+    return { label: 'Needs attention', tone: 'bad' as const };
+  })();
 
   return (
     <div>
       <PageHeader title="AI Provider" eyebrow="Agency account" />
-      <p style={{ fontSize: '0.84rem', color: '#64748b', margin: '0 0 0.9rem', lineHeight: 1.45, maxWidth: '40rem' }}>
+      <p style={{ fontSize: '0.84rem', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 0.9rem', lineHeight: 1.45, maxWidth: '40rem' }}>
         Choose the AI provider and default model used across your agency. Workspace-specific bot instructions stay in each
         client workspace.
       </p>
@@ -306,55 +297,59 @@ export default function AgencyAiSettingsPage() {
               setBootstrapErr('');
               setLoadKey(k => k + 1);
             }}
-            style={{
-              marginTop: '0.5rem',
-              padding: '0.4rem 0.75rem',
-              borderRadius: '6px',
-              border: '1px solid #ccc',
-              background: '#fff',
-              cursor: 'pointer',
-              fontSize: '0.85rem',
-            }}
+            style={{ ...mvpButtonStyle, marginTop: '0.5rem' }}
           >
             Retry
           </button>
         </div>
       ) : (
         <>
-          <div style={strip}>
-            <span>
-              <span style={{ color: '#94a3b8', fontWeight: 600 }}>Primary (live)</span> {activeProvider}
-            </span>
-            <span>
-              <span style={{ color: '#94a3b8', fontWeight: 600 }}>Default model</span> <span>{activeModel}</span>
-            </span>
-            <span style={{ color: !activeKeyOk ? '#b91c1c' : undefined }}>
-              <span style={{ color: '#94a3b8', fontWeight: 600 }}>API key</span>{' '}
-              {activeKeyOk ? 'on file' : 'missing'}
-            </span>
-            <span>
-              <span style={{ color: '#94a3b8', fontWeight: 600 }}>Editing</span> {selectedProvider}
-              {setAsActive && !hasLiveGeneration(selectedProvider) ? (
-                <span style={{ color: '#94a3b8' }}> — save for later use</span>
-              ) : null}
-            </span>
-          </div>
+          <SectionCard title="Current setup" subtitle="What live assistant replies use for your agency today.">
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center', marginBottom: '0.85rem' }}>
+              <StatusPill label={summaryHealth.label} tone={summaryHealth.tone} />
+            </div>
+            <KeyValueRows
+              rows={[
+                { label: 'Provider', value: PROVIDER_LABEL[activeProvider] ?? activeProvider },
+                { label: 'Default model', value: activeModel },
+                {
+                  label: 'API key',
+                  value: activeKeyOk ? 'Saved securely' : 'Add a key in Provider setup to enable live replies',
+                },
+                {
+                  label: 'Last health check',
+                  value: healthSnap?.lastHealthCheckedAt ? formatDateTime(healthSnap.lastHealthCheckedAt) : '—',
+                },
+              ]}
+            />
+          </SectionCard>
 
-          <p
-            style={{
-              fontSize: '0.78rem',
-              color: 'var(--aisbp-muted, #64748b)',
-              margin: '0 0 0.85rem',
-              lineHeight: 1.45,
-              maxWidth: '40rem',
-            }}
-          >
-            <strong style={{ color: 'var(--aisbp-text-secondary, #475569)' }}>Primary vs fallback:</strong> check
-            &quot;Primary&quot; below for the provider that handles live generation. If that provider is not OpenAI and a reply
-            fails, AISalesBot Pro retries once with OpenAI when a valid OpenAI API key is saved.
-          </p>
+          <details style={{ marginBottom: '1rem' }}>
+            <summary
+              style={{
+                cursor: 'pointer',
+                fontSize: '0.82rem',
+                fontWeight: 650,
+                color: 'var(--aisbp-muted, #64748b)',
+              }}
+            >
+              How primary and backup models work
+            </summary>
+            <p
+              style={{
+                fontSize: '0.78rem',
+                color: 'var(--aisbp-text-secondary, #475569)',
+                margin: '0.5rem 0 0',
+                lineHeight: 1.45,
+                maxWidth: '40rem',
+              }}
+            >
+              Pick which provider is primary for live generation. If a reply fails with a non-OpenAI primary, AISalesBot Pro
+              can retry once with OpenAI when a valid OpenAI API key is on file.
+            </p>
+          </details>
 
-          <SectionCard title="AI provider" subtitle="Credentials, default model, and API health for the live stack.">
+          <SectionCard title="Provider setup" subtitle="Credentials and default model for the provider you are editing below.">
             {err ? <ErrorBanner message={err} /> : null}
             {ok ? <SuccessBanner message={ok} /> : null}
             <form
@@ -407,7 +402,7 @@ export default function AgencyAiSettingsPage() {
                 />
                 Use as primary for live replies after saving
                 {!hasLiveGeneration(selectedProvider) ? (
-                  <span style={{ color: '#94a3b8', fontSize: '0.75rem' }}>— not available</span>
+                  <span style={{ color: 'var(--aisbp-muted, #94a3b8)', fontSize: '0.75rem' }}>— not available</span>
                 ) : null}
               </label>
 
@@ -458,8 +453,9 @@ export default function AgencyAiSettingsPage() {
                 onClick={() => setAdvancedOpen(a => !a)}
                 style={{
                   alignSelf: 'flex-start',
-                  fontSize: '0.8rem',
-                  color: '#475569',
+                  fontSize: '0.82rem',
+                  fontWeight: 650,
+                  color: 'var(--aisbp-muted, #64748b)',
                   background: 'none',
                   border: 'none',
                   cursor: 'pointer',
@@ -467,7 +463,7 @@ export default function AgencyAiSettingsPage() {
                   padding: 0,
                 }}
               >
-                {advancedOpen ? 'Hide advanced' : 'Advanced — API base URL'}
+                {advancedOpen ? 'Hide support settings' : 'Support settings — API base URL (optional)'}
               </button>
               {advancedOpen ? (
                 <label style={mvpLabelStyle}>
@@ -479,10 +475,9 @@ export default function AgencyAiSettingsPage() {
                     placeholder={defaultEndpointFor(selectedProvider)}
                     autoComplete="off"
                   />
-                  <p style={mvpFieldHint}>
-                    Default: OpenAI <code>{OPENAI_DEFAULT_API_BASE}</code>, MiniMax <code>{MINIMAX_DEFAULT_API_BASE}</code>.
-                    Leave blank or match the default unless your account requires a different host.
-                  </p>
+                  <span style={mvpFieldHint}>
+                    Leave blank to use the provider default. Change only when your account requires a different API host.
+                  </span>
                 </label>
               ) : null}
 
@@ -501,15 +496,9 @@ export default function AgencyAiSettingsPage() {
                   disabled={testing || !hasKeyThis}
                   onClick={onTestModel}
                   style={{
-                    padding: '0.45rem 0.85rem',
-                    borderRadius: '6px',
-                    border: '1px solid #cbd5e1',
-                    background: '#fff',
+                    ...mvpSecondaryButtonStyle,
+                    opacity: testing || !hasKeyThis ? 0.65 : 1,
                     cursor: testing || !hasKeyThis ? 'not-allowed' : 'pointer',
-                    fontSize: '0.85rem',
-                    fontWeight: 600,
-                    color: '#0f172a',
-                    opacity: testing || !hasKeyThis ? 0.7 : 1,
                   }}
                 >
                   {testing ? 'Testing…' : 'Run health check'}
@@ -531,50 +520,65 @@ export default function AgencyAiSettingsPage() {
                 style={{
                   fontSize: '0.82rem',
                   fontWeight: 700,
-                  margin: '0 0 0.35rem',
+                  margin: '0 0 0.5rem',
                   color: 'var(--aisbp-text-heading, #0f172a)',
                 }}
               >
-                Last health check
+                Connection health
               </p>
               {!healthSnap ? (
                 <p style={{ fontSize: '0.85rem', color: 'var(--aisbp-muted, #64748b)', margin: 0 }}>No health check recorded yet.</p>
               ) : (
-                <dl
-                  style={{
-                    margin: 0,
-                    display: 'grid',
-                    gridTemplateColumns: 'auto 1fr',
-                    gap: '0.35rem 1rem',
-                    fontSize: '0.85rem',
-                    color: 'var(--aisbp-text-secondary, #334155)',
-                  }}
-                >
-                  <dt style={{ color: 'var(--aisbp-muted, #94a3b8)', fontWeight: 600 }}>Status</dt>
-                  <dd style={{ margin: 0 }}>{healthLabel}</dd>
-                  <dt style={{ color: 'var(--aisbp-muted, #94a3b8)', fontWeight: 600 }}>Checked</dt>
-                  <dd style={{ margin: 0 }}>{new Date(healthSnap.lastHealthCheckedAt).toLocaleString()}</dd>
-                  <dt style={{ color: 'var(--aisbp-muted, #94a3b8)', fontWeight: 600 }}>Latency</dt>
-                  <dd style={{ margin: 0 }}>
-                    {healthSnap.lastHealthLatencyMs != null ? `${healthSnap.lastHealthLatencyMs} ms` : '—'}
-                  </dd>
-                  <dt style={{ color: 'var(--aisbp-muted, #94a3b8)', fontWeight: 600 }}>Tested provider / model</dt>
-                  <dd style={{ margin: 0 }}>
-                    {healthSnap.lastHealthProvider} / {healthSnap.lastHealthModel}
-                  </dd>
-                  {healthSnap.lastHealthErrorSummary ? (
-                    <>
-                      <dt style={{ color: 'var(--aisbp-muted, #94a3b8)', fontWeight: 600 }}>Error</dt>
-                      <dd style={{ margin: 0, color: '#b91c1c' }}>{healthSnap.lastHealthErrorSummary}</dd>
-                    </>
+                <>
+                  <KeyValueRows
+                    rows={[
+                      {
+                        label: 'Result',
+                        value: (
+                          <StatusPill
+                            label={healthSnap.lastHealthStatus === 'PASS' ? 'Passing' : 'Failing'}
+                            tone={healthSnap.lastHealthStatus === 'PASS' ? 'ok' : 'bad'}
+                          />
+                        ),
+                      },
+                      { label: 'Checked', value: formatDateTime(healthSnap.lastHealthCheckedAt) },
+                      {
+                        label: 'Latency',
+                        value: healthSnap.lastHealthLatencyMs != null ? `${healthSnap.lastHealthLatencyMs} ms` : '—',
+                      },
+                      {
+                        label: 'Tested',
+                        value: `${PROVIDER_LABEL[healthSnap.lastHealthProvider] ?? healthSnap.lastHealthProvider} · ${healthSnap.lastHealthModel}`,
+                      },
+                      ...(healthSnap.lastHealthStatus === 'FAIL' && healthSnap.lastHealthErrorSummary
+                        ? [
+                            {
+                              label: 'Details',
+                              value: (
+                                <span style={{ color: 'var(--aisbp-pill-bad-fg, #b91c1c)' }}>
+                                  {healthSnap.lastHealthErrorSummary}
+                                </span>
+                              ),
+                            },
+                          ]
+                        : []),
+                    ]}
+                  />
+                  {!healthForForm ? (
+                    <p
+                      style={{
+                        fontSize: '0.78rem',
+                        color: 'var(--aisbp-muted, #94a3b8)',
+                        margin: '0.65rem 0 0',
+                        lineHeight: 1.45,
+                      }}
+                    >
+                      This result matches a different provider or model than selected above — run <strong>Run health check</strong>{' '}
+                      to refresh.
+                    </p>
                   ) : null}
-                </dl>
+                </>
               )}
-              {!healthForForm && healthSnap ? (
-                <p style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted, #94a3b8)', margin: '0.65rem 0 0', lineHeight: 1.45 }}>
-                  Stored result is for a different provider or model than selected above — run <strong>Run health check</strong> to refresh.
-                </p>
-              ) : null}
             </div>
           </SectionCard>
 
@@ -601,7 +605,7 @@ export default function AgencyAiSettingsPage() {
                 Allow workspaces to adjust model, reply style, and reply length
               </label>
               <p style={{ ...mvpFieldHint, marginTop: 0 }}>Turn this off to keep all client workspaces on your agency defaults.</p>
-              <p style={{ fontSize: '0.78rem', color: '#64748b', margin: 0 }}>
+              <p style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)', margin: 0 }}>
                 <strong>Reply style range</strong> controls how precise or creative workspace replies are allowed to be.
               </p>
               <div style={{ display: 'grid', gap: '0.65rem', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))' }}>
@@ -672,7 +676,7 @@ export default function AgencyAiSettingsPage() {
                   />
                 </label>
               </div>
-              <p style={{ fontSize: '0.78rem', color: '#94a3b8', margin: '-0.1rem 0 0' }}>
+              <p style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted, #94a3b8)', margin: '-0.1rem 0 0' }}>
                 Workspace reply length and style settings must stay within these limits.
               </p>
               <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', cursor: 'pointer' }}>

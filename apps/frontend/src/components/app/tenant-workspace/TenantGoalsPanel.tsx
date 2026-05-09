@@ -29,6 +29,7 @@ import {
   ErrorBanner,
   LoadingBlock,
   PageHeader,
+  StatusPill,
   SuccessBanner,
   mvpFieldHint,
   mvpInputStyle,
@@ -50,10 +51,10 @@ const textareaStyle = {
   overflowWrap: 'break-word' as const,
 };
 
-const LIVE_DELETE_HINT = 'Set another profile active before deleting this one.';
+const ACTIVE_DELETE_HINT = 'Set another profile as active before deleting this one.';
 
 const sectionCard: CSSProperties = {
-  border: '1px solid rgba(226, 232, 240, 0.9)',
+  border: '1px solid var(--aisbp-border, #e2e8f0)',
   borderRadius: 12,
   padding: '1.05rem 1.15rem',
   marginBottom: '1.15rem',
@@ -129,9 +130,9 @@ const deleteBtnStyle: CSSProperties = {
 const successBtnStyle: CSSProperties = {
   padding: '0.45rem 0.85rem',
   borderRadius: '8px',
-  border: '1px solid rgba(34, 197, 94, 0.35)',
-  background: 'rgba(34, 197, 94, 0.12)',
-  color: 'rgb(21, 128, 61)',
+  border: '1px solid var(--aisbp-pill-ok-border, #bbf7d0)',
+  background: 'var(--aisbp-pill-ok-bg, #ecfdf5)',
+  color: 'var(--aisbp-pill-ok-fg, #047857)',
   fontSize: '0.85rem',
   fontWeight: 800,
   cursor: 'pointer',
@@ -140,7 +141,7 @@ const successBtnStyle: CSSProperties = {
 const dangerTextBtnStyle: CSSProperties = {
   border: 'none',
   background: 'transparent',
-  color: 'rgb(185, 28, 28)',
+  color: 'var(--aisbp-pill-bad-fg, #b91c1c)',
   fontSize: '0.85rem',
   fontWeight: 750,
   cursor: 'pointer',
@@ -178,7 +179,7 @@ const profilesGridLg: CSSProperties = {
 };
 
 const profileBentoCard: CSSProperties = {
-  border: '1px solid rgba(226, 232, 240, 0.95)',
+  border: '1px solid var(--aisbp-border, #e2e8f0)',
   borderRadius: 14,
   padding: '1rem 1.05rem',
   background: 'var(--aisbp-surface, #fff)',
@@ -201,16 +202,16 @@ function profileListCardStyle(selected: boolean): CSSProperties {
   return {
     padding: '0.75rem 0.85rem',
     borderRadius: 12,
-    border: '1px solid rgba(226, 232, 240, 0.92)',
+    border: '1px solid var(--aisbp-border, #e2e8f0)',
     borderLeftWidth: 3,
     borderLeftStyle: 'solid',
-    borderLeftColor: selected ? 'rgba(37, 99, 235, 0.65)' : 'transparent',
-    background: selected ? 'rgba(248, 250, 252, 0.98)' : 'var(--aisbp-surface, #fff)',
+    borderLeftColor: selected ? 'var(--aisbp-tenant-nav-active-text, rgba(37, 99, 235, 0.85))' : 'transparent',
+    background: selected ? 'var(--aisbp-card-subtle, #f8fafc)' : 'var(--aisbp-surface, #fff)',
     boxShadow: selected ? '0 1px 4px rgba(15, 23, 42, 0.05)' : '0 1px 2px rgba(15, 23, 42, 0.03)',
   };
 }
 
-function LiveBadge({ large }: { large?: boolean }) {
+function ActiveBadge({ large }: { large?: boolean }) {
   return (
     <span
       style={{
@@ -220,12 +221,12 @@ function LiveBadge({ large }: { large?: boolean }) {
         fontSize: large ? '0.8rem' : '0.72rem',
         fontWeight: 800,
         letterSpacing: '0.03em',
-        background: 'rgba(34, 197, 94, 0.18)',
-        color: 'rgb(21, 128, 61)',
-        border: '1px solid rgba(34, 197, 94, 0.45)',
+        background: 'var(--aisbp-pill-ok-bg, #ecfdf5)',
+        color: 'var(--aisbp-pill-ok-fg, #047857)',
+        border: '1px solid var(--aisbp-pill-ok-border, #bbf7d0)',
       }}
     >
-      Live
+      Active
     </span>
   );
 }
@@ -701,14 +702,14 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
       if (
         isDirty &&
         !window.confirm(
-          'You have unsaved changes on the profile you are editing. Discard them and switch to this profile before making it live?',
+          'You have unsaved changes on the profile you are editing. Discard them and switch to this profile before making it active?',
         )
       ) {
         return;
       }
     }
     if (
-      !window.confirm('This will make this profile live for customer replies across connected channels.')
+      !window.confirm('This will make this profile the active one for customer replies across connected channels.')
     ) {
       return;
     }
@@ -726,7 +727,7 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
         setSelectedProfileId(profileId);
         applyRowToForm(row);
       }
-      setOk('Live assistant updated.');
+      setOk('Active assistant profile updated.');
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Could not set active profile');
     }
@@ -877,7 +878,7 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
               style={{
                 ...sectionCard,
                 marginBottom: '1rem',
-                borderLeft: '4px solid rgb(34, 197, 94)',
+                borderLeft: '4px solid var(--aisbp-pill-ok-border, #86efac)',
                 paddingLeft: '1.15rem',
                 boxShadow: '0 2px 14px rgba(15, 23, 42, 0.06)',
               }}
@@ -892,7 +893,7 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                   margin: '0 0 0.55rem',
                 }}
               >
-                Active assistant
+                Customer-facing profile
               </p>
               <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.55rem', marginBottom: '0.45rem' }}>
                 <span
@@ -906,7 +907,7 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                 >
                   {activeProfile.name.trim() || 'Untitled assistant'}
                 </span>
-                <LiveBadge large />
+                <ActiveBadge large />
               </div>
               {activeProfile.description?.trim() ? (
                 <p style={{ fontSize: '0.9rem', color: 'var(--aisbp-text-secondary, #334155)', margin: '0 0 0.65rem', lineHeight: 1.45 }}>
@@ -914,7 +915,7 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                 </p>
               ) : null}
               <p style={{ fontSize: '0.88rem', color: 'var(--aisbp-text-secondary, #334155)', margin: '0 0 0.5rem', lineHeight: 1.5 }}>
-                Used for live customer replies across connected channels.
+                Used for customer replies across connected channels.
               </p>
               <p style={{ fontSize: '0.84rem', color: 'var(--aisbp-text-secondary, #475569)', margin: '0 0 0.35rem', fontWeight: 600 }}>
                 Vaults:{' '}
@@ -951,14 +952,14 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                     lineHeight: 1.45,
                   }}
                 >
-                  Add persona and goals so this live assistant is ready for customers.
+                  Add persona and goals so this active assistant is ready for customers.
                 </p>
               ) : null}
             </div>
           ) : (
             <div style={{ ...sectionCard, marginBottom: '0.75rem' }}>
               <p style={{ margin: '0 0 0.35rem', fontWeight: 700, color: 'var(--aisbp-text-heading, #0f172a)' }}>
-                No live assistant
+                No active assistant
               </p>
               <p style={{ fontSize: '0.85rem', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 0.65rem' }}>
                 Set a profile active below, or create a new one.
@@ -989,7 +990,7 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                           <span style={{ fontSize: '1.05rem', fontWeight: 850, color: 'var(--aisbp-text-heading, #0f172a)' }}>
                             {p.name.trim() || 'Untitled'}
                           </span>
-                          {p.isActive ? <LiveBadge /> : <DraftBadge />}
+                          {!p.isActive ? <DraftBadge /> : null}
                         </div>
                         <p style={{ margin: 0, fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)' }}>
                           Vaults:{' '}
@@ -1005,26 +1006,12 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                             type="button"
                             onClick={() => activateProfileById(p.id)}
                             style={successBtnStyle}
-                            data-action="set-live"
+                            data-action="set-active"
                             data-variant="primary"
                           >
-                            Set live
+                            Set active
                           </button>
-                        ) : (
-                          <span
-                            style={{
-                              fontSize: '0.78rem',
-                              fontWeight: 750,
-                              color: 'rgb(21, 128, 61)',
-                              padding: '0.28rem 0.5rem',
-                              borderRadius: 999,
-                              border: '1px solid rgba(34, 197, 94, 0.35)',
-                              background: 'rgba(34, 197, 94, 0.10)',
-                            }}
-                          >
-                            Currently live
-                          </span>
-                        )}
+                        ) : null}
                       </div>
                     </div>
 
@@ -1059,8 +1046,8 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                           cursor: p.isActive || profiles.length <= 1 ? 'not-allowed' : 'pointer',
                         }}
                         disabled={p.isActive || profiles.length <= 1}
-                        title={p.isActive ? 'You cannot delete the live assistant profile. Set another profile live first.' : undefined}
-                        aria-label={p.isActive ? 'Cannot delete live assistant profile' : 'Delete profile'}
+                        title={p.isActive ? 'You cannot delete the active assistant profile. Set another profile active first.' : undefined}
+                        aria-label={p.isActive ? 'Cannot delete active assistant profile' : 'Delete profile'}
                         data-action="delete-profile"
                       >
                         Delete
@@ -1078,7 +1065,7 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                     textAlign: 'left',
                     borderStyle: 'dashed',
                     color: 'var(--aisbp-text-secondary, #334155)',
-                    background: 'var(--aisbp-card-subtle, #fafafa)',
+                    background: 'var(--aisbp-surface-elevated, var(--aisbp-surface, #fff))',
                   }}
                 >
                   <div style={{ fontSize: '0.85rem', fontWeight: 800, marginBottom: '0.35rem' }}>Create new profile</div>
@@ -1106,13 +1093,11 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                     <h3 style={sectionTitleStyle}>Profile details</h3>
                     <div style={{ marginBottom: '0.5rem' }}>
                       {selectedRow?.isActive ? (
-                        <span style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--aisbp-muted, #64748b)' }}>
-                          Live assistant <LiveBadge />
-                        </span>
+                        <StatusPill label="Active" tone="ok" />
                       ) : (
                         <div>
                           <span style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--aisbp-muted, #64748b)' }}>
-                            <DraftBadge /> <span style={{ fontWeight: 600 }}>Not used for live replies</span>
+                            <DraftBadge /> <span style={{ fontWeight: 600 }}>Not used for customer replies</span>
                           </span>
                         </div>
                       )}
@@ -1369,7 +1354,7 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                     </button>
                     {!selectedRow?.isActive ? (
                       <button type="button" onClick={() => selectedProfileId && activateProfileById(selectedProfileId)} style={secondaryBtnStyle} disabled={!selectedProfileId}>
-                        Set live
+                        Set active
                       </button>
                     ) : null}
                     <button type="button" onClick={() => selectedProfileId && duplicateProfileById(selectedProfileId)} style={secondaryBtnStyle} disabled={!selectedProfileId}>
@@ -1384,8 +1369,8 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                         cursor: !selectedProfileId || profiles.length <= 1 || selectedRow?.isActive ? 'not-allowed' : 'pointer',
                       }}
                       disabled={!selectedProfileId || profiles.length <= 1 || Boolean(selectedRow?.isActive)}
-                      title={selectedRow?.isActive ? LIVE_DELETE_HINT : undefined}
-                      aria-label={selectedRow?.isActive ? LIVE_DELETE_HINT : 'Delete profile'}
+                      title={selectedRow?.isActive ? ACTIVE_DELETE_HINT : undefined}
+                      aria-label={selectedRow?.isActive ? ACTIVE_DELETE_HINT : 'Delete profile'}
                     >
                       Delete
                     </button>
@@ -1439,11 +1424,11 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                             <span style={{ fontWeight: 700, color: 'var(--aisbp-text-heading, #0f172a)', fontSize: '0.9rem' }}>
                               {p.name.trim() || 'Untitled'}
                             </span>
-                            {p.isActive ? <LiveBadge /> : <DraftBadge />}
+                            {!p.isActive ? <DraftBadge /> : null}
                           </div>
                           {!p.isActive ? (
                             <p style={{ fontSize: '0.72rem', color: 'var(--aisbp-muted, #94a3b8)', margin: '0 0 0.35rem' }}>
-                              Not used for live replies
+                              Not used for customer replies
                             </p>
                           ) : null}
                           {p.description?.trim() ? (
@@ -1476,20 +1461,9 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                               onClick={() => activateProfileById(p.id)}
                               style={{ ...secondaryBtnStyle, padding: '0.28rem 0.55rem', fontSize: '0.76rem' }}
                             >
-                              Set live
+                              Set active
                             </button>
-                          ) : (
-                            <span
-                              style={{
-                                fontSize: '0.76rem',
-                                color: 'var(--aisbp-muted, #64748b)',
-                                fontWeight: 600,
-                                padding: '0.28rem 0.35rem',
-                              }}
-                            >
-                              Currently live
-                            </span>
-                          )}
+                          ) : null}
                           <button
                             type="button"
                             onClick={() => duplicateProfileById(p.id)}
@@ -1500,8 +1474,8 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                           <button
                             type="button"
                             disabled={profiles.length <= 1 || p.isActive}
-                            title={p.isActive ? LIVE_DELETE_HINT : undefined}
-                            aria-label={p.isActive ? LIVE_DELETE_HINT : 'Delete profile'}
+                            title={p.isActive ? ACTIVE_DELETE_HINT : undefined}
+                            aria-label={p.isActive ? ACTIVE_DELETE_HINT : 'Delete profile'}
                             onClick={() => onDeleteProfile(p.id)}
                             style={{
                               ...deleteBtnStyle,
@@ -1519,7 +1493,14 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                   })}
                 </div>
                 {isDirty ? (
-                  <p style={{ fontSize: '0.75rem', color: 'rgb(180, 83, 9)', margin: '0.6rem 0 0', fontWeight: 600 }}>
+                  <p
+                    style={{
+                      fontSize: '0.75rem',
+                      color: 'var(--aisbp-pill-warn-fg, #b45309)',
+                      margin: '0.6rem 0 0',
+                      fontWeight: 600,
+                    }}
+                  >
                     Unsaved changes
                   </p>
                 ) : null}
@@ -1536,14 +1517,12 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                     <h3 style={sectionTitleStyle}>Profile details</h3>
                     <div style={{ marginBottom: '0.5rem' }}>
                       {selectedRow?.isActive ? (
-                        <span style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--aisbp-muted, #64748b)' }}>
-                          Live assistant <LiveBadge />
-                        </span>
+                        <StatusPill label="Active" tone="ok" />
                       ) : (
                         <div>
                           <span style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--aisbp-muted, #64748b)' }}>
                             <DraftBadge />{' '}
-                            <span style={{ fontWeight: 600 }}>Not used for live replies</span>
+                            <span style={{ fontWeight: 600 }}>Not used for customer replies</span>
                           </span>
                         </div>
                       )}
@@ -1957,7 +1936,7 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                         style={secondaryBtnStyle}
                         disabled={!selectedProfileId}
                       >
-                        Set live
+                        Set active
                       </button>
                     ) : null}
                     <button
@@ -1980,8 +1959,8 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                             : 'pointer',
                       }}
                       disabled={!selectedProfileId || profiles.length <= 1 || Boolean(selectedRow?.isActive)}
-                      title={selectedRow?.isActive ? LIVE_DELETE_HINT : undefined}
-                      aria-label={selectedRow?.isActive ? LIVE_DELETE_HINT : 'Delete profile'}
+                      title={selectedRow?.isActive ? ACTIVE_DELETE_HINT : undefined}
+                      aria-label={selectedRow?.isActive ? ACTIVE_DELETE_HINT : 'Delete profile'}
                     >
                       Delete
                     </button>
@@ -2114,7 +2093,7 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                   value={createName}
                   onChange={e => setCreateName(e.target.value)}
                   style={mvpInputStyle}
-                  placeholder="e.g. DapperDog (live)"
+                  placeholder="e.g. DapperDog (active)"
                   autoComplete="off"
                   aria-label="New profile name"
                 />
@@ -2172,8 +2151,8 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                 Delete assistant profile?
               </h2>
               {deleteModalProfile.isActive ? (
-                <p style={{ margin: '0.45rem 0 0', fontSize: '0.85rem', color: 'rgb(154, 52, 18)', lineHeight: 1.45 }}>
-                  You cannot delete the live assistant profile. Set another profile live first.
+                <p style={{ margin: '0.45rem 0 0', fontSize: '0.85rem', color: 'var(--aisbp-pill-bad-fg, #b91c1c)', lineHeight: 1.45 }}>
+                  You cannot delete the active assistant profile. Set another profile active first.
                 </p>
               ) : (
                 <p style={{ margin: '0.45rem 0 0', fontSize: '0.85rem', color: 'var(--aisbp-muted, #64748b)', lineHeight: 1.45 }}>

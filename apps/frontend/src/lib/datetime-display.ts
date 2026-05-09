@@ -6,6 +6,32 @@
 export const DEFAULT_DISPLAY_TIMEZONE =
   (typeof process !== 'undefined' && process.env['NEXT_PUBLIC_APP_TIMEZONE']?.trim()) || 'Asia/Singapore';
 
+/**
+ * Human-readable wall time in the app display timezone (GMT+8 by default: Singapore / Malaysia).
+ * Example: "9 May 2026, 11:06 pm" — avoids raw ISO and browser-local ambiguity.
+ */
+export function formatDisplayDateTime(iso: string | null | undefined, timeZone: string = DEFAULT_DISPLAY_TIMEZONE): string {
+  if (iso == null || typeof iso !== 'string') return '—';
+  const t = parseApiInstantMs(iso);
+  if (t == null) return '—';
+  try {
+    const d = new Date(t);
+    if (Number.isNaN(d.getTime())) return '—';
+    const s = new Intl.DateTimeFormat('en-SG', {
+      timeZone,
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    }).format(d);
+    return s.replace(/\b(AM|PM)\b/g, m => m.toLowerCase());
+  } catch {
+    return '—';
+  }
+}
+
 export function parseApiInstantMs(iso: string | null | undefined): number | null {
   if (iso == null || typeof iso !== 'string') return null;
   const s = iso.trim();

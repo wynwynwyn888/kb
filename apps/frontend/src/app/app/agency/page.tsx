@@ -1,10 +1,11 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   type ActiveAiHealthBadge,
+  type GhlConnectionStatus,
   getAgencyAiConfig,
   getAgencyById,
   getCurrentUser,
@@ -14,12 +15,11 @@ import {
 } from '@/lib/api';
 import {
   ErrorBanner,
-  KeyValueRows,
   LoadingBlock,
-  PageHeader,
   SectionCard,
   StatusPill,
   appFloatingSecondaryButtonStyle,
+  formatDateTime,
 } from '@/components/app/mvp-ui';
 
 function fmtCompact(n: number) {
@@ -34,11 +34,60 @@ type GhlBreakdown = {
   fetchFailed: number;
 };
 
+type WorkspaceDetailRow = {
+  id: string;
+  name: string;
+  ghlLocationId?: string | null;
+  ghl: GhlConnectionStatus | null;
+  quota: {
+    totalQuota: number;
+    usedQuota: number;
+    remainingQuota: number;
+  } | null;
+};
+
+const kpiCardShell: CSSProperties = {
+  border: '1px solid var(--aisbp-border, #e2e8f0)',
+  borderRadius: '14px',
+  padding: '1.25rem 1.35rem',
+  background: 'var(--aisbp-surface, #ffffff)',
+  boxShadow: '0 1px 2px rgba(15, 23, 42, 0.04)',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '0.5rem',
+  minHeight: '168px',
+};
+
+const kpiTitle: CSSProperties = {
+  fontSize: '0.7rem',
+  fontWeight: 700,
+  letterSpacing: '0.1em',
+  textTransform: 'uppercase',
+  color: 'var(--aisbp-muted, #94a3b8)',
+  margin: 0,
+};
+
+const kpiFigure: CSSProperties = {
+  fontSize: '2.15rem',
+  fontWeight: 800,
+  letterSpacing: '-0.03em',
+  lineHeight: 1.05,
+  color: 'var(--aisbp-text-heading, #0f172a)',
+  margin: '0.15rem 0 0',
+};
+
+const kpiMuted: CSSProperties = {
+  fontSize: '0.82rem',
+  color: 'var(--aisbp-muted, #64748b)',
+  lineHeight: 1.45,
+  margin: 0,
+};
+
 export default function AgencyHomePage() {
   const { token, user } = useAuth();
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [agencyName, setAgencyName] = useState<string | null>(null);
-  const [role, setRole] = useState<string | null>(null);
+  const [, setRole] = useState<string | null>(null);
   const [tenantCount, setTenantCount] = useState<number | null>(null);
   const [withGhlLocationId, setWithGhlLocationId] = useState<number | null>(null);
   const [ghlBreakdown, setGhlBreakdown] = useState<GhlBreakdown | null>(null);
@@ -58,10 +107,10 @@ export default function AgencyHomePage() {
     totalSum: number;
     periodNote: string | null;
   } | null>(null);
-  const [firstTenantId, setFirstTenantId] = useState<string | null>(null);
+  const [workspaceDetails, setWorkspaceDetails] = useState<WorkspaceDetailRow[]>([]);
   const [snapshotLoading, setSnapshotLoading] = useState(false);
   const [err, setErr] = useState('');
-  const [lowQuota, setLowQuota] = useState<Array<{ id: string; name: string; remaining: number; total: number }>>([]);
+
   useEffect(() => {
     const agencyId = user?.agencyId;
     if (!token || !agencyId) return;
@@ -82,7 +131,6 @@ export default function AgencyHomePage() {
         const tlist = Array.isArray(tenants) ? tenants : [];
         setTenantCount(tlist.length);
         setWithGhlLocationId(tlist.filter(t => t.ghlLocationId && String(t.ghlLocationId).trim() !== '').length);
-        setFirstTenantId(tlist[0]?.id ?? null);
         if (ai) {
           const ap = ai.activeProvider ?? ai.provider;
           const hasKey = Boolean((ap && ai.keysPresent?.[ap]) ?? ai.hasApiKey);
@@ -109,7 +157,7 @@ export default function AgencyHomePage() {
           setGhlBreakdown({ connected: 0, invalid: 0, error: 0, disconnected: 0, fetchFailed: 0 });
           setGhlConnectedCount(0);
           setUsageAgg({ subaccountsWithQuota: 0, usedSum: 0, totalSum: 0, periodNote: null });
-          setLowQuota([]);
+          setWorkspaceDetails([]);
         } else {
           const [qRows, ghlRows] = await Promise.all([
             Promise.all(tlist.map(t => getTenantQuota(token, t.id).catch(() => null as null))),
@@ -142,24 +190,20 @@ export default function AgencyHomePage() {
             totalSum,
             periodNote:
               periods.size > 1
-                ? 'Billing windows differ by workspace; treat this total as a guide.'
+                ? 'Billing periods differ by workspace; combined totals are approximate.'
                 : ok.length
                   ? null
                   : 'No credit records were found for these workspaces.',
           });
-          const low: Array<{ id: string; name: string; remaining: number; total: number }> = [];
-          tlist.forEach((row, i) => {
-            const q = qRows[i];
-            if (q && q.totalQuota > 0 && q.remainingQuota / q.totalQuota < 0.15) {
-              low.push({
-                id: row.id,
-                name: row.name,
-                remaining: q.remainingQuota,
-                total: q.totalQuota,
-              });
-            }
-          });
-          setLowQuota(low);
+          setWorkspaceDetails(
+            tlist.map((t, i) => ({
+              id: t.id,
+              name: t.name,
+              ghlLocationId: t.ghlLocationId,
+              ghl: ghlRows[i] ?? null,
+              quota: qRows[i] ?? null,
+            })),
+          );
         }
       } catch (e) {
         if (!cancelled) setErr(e instanceof Error ? e.message : 'Failed to load agency snapshot');
@@ -177,66 +221,150 @@ export default function AgencyHomePage() {
       ? Math.min(100, Math.round((usageAgg.usedSum / usageAgg.totalSum) * 100))
       : null;
 
-  const withoutLocationId =
-    tenantCount != null && withGhlLocationId != null ? Math.max(0, tenantCount - withGhlLocationId) : null;
-
-  const operationalFlags = useMemo(() => {
-    const flags: { text: string; tone: 'warn' | 'ok' }[] = [];
-    if (aiSnap && !aiSnap.hasKey)
-      flags.push({ text: 'AI provider needs setup before live replies can be generated.', tone: 'warn' });
-    if (aiSnap?.hasKey && aiSnap.healthBadge === 'FAIL') {
-      flags.push({
-        text: 'AI model failing. Replies may use fallback or placeholder.',
-        tone: 'warn',
-      });
-    }
-    if (lowQuota.length > 0)
-      flags.push({
-        text: `${lowQuota.length} workspace(s) are below 15% remaining credits: ${lowQuota
-          .slice(0, 3)
-          .map(l => l.name)
-          .join(', ')}${lowQuota.length > 3 ? '…' : ''}.`,
-        tone: 'warn',
-      });
-    if (ghlBreakdown) {
-      if (ghlBreakdown.invalid > 0)
-        flags.push({ text: `${ghlBreakdown.invalid} CRM connection(s) need a new token or location check.`, tone: 'warn' });
-      if (ghlBreakdown.error > 0) flags.push({ text: `${ghlBreakdown.error} CRM connection(s) need review.`, tone: 'warn' });
-      if (ghlBreakdown.fetchFailed > 0)
-        flags.push({ text: `${ghlBreakdown.fetchFailed} CRM status check(s) could not be loaded.`, tone: 'warn' });
-    }
-    if (withoutLocationId != null && withoutLocationId > 0)
-      flags.push({
-        text: `${withoutLocationId} workspace(s) need a CRM location ID before routing can work.`,
-        tone: 'warn',
-      });
-    if (flags.length === 0 && !snapshotLoading && !err) {
-      return [{ text: 'Everything important looks ready from the latest snapshot.', tone: 'ok' as const }];
-    }
-    return flags;
-  }, [aiSnap, ghlBreakdown, withoutLocationId, snapshotLoading, err, lowQuota]);
-
   const aiHealthPill = (b: ActiveAiHealthBadge) => {
     if (b === 'PASS') return <StatusPill label="Working" tone="ok" />;
-    if (b === 'FAIL') return <StatusPill label="Failing" tone="bad" />;
+    if (b === 'FAIL') return <StatusPill label="Needs attention" tone="bad" />;
     return <StatusPill label="Not tested" tone="neutral" />;
   };
 
-  const ghlDrift = ghlBreakdown
-    ? ghlBreakdown.connected < (tenantCount ?? 0)
-    : false;
+  const readinessRows = useMemo(() => {
+    const aiBlocking =
+      aiSnap != null && (!aiSnap.hasKey || aiSnap.healthBadge === 'FAIL');
+
+    return workspaceDetails
+      .map(row => {
+        const hasLoc = Boolean(row.ghlLocationId && String(row.ghlLocationId).trim());
+        const g = row.ghl;
+        const crmConnected = Boolean(g?.connected && g.status === 'CONNECTED');
+        const crmBad = !hasLoc || !crmConnected;
+        const q = row.quota;
+        const creditLow = Boolean(q && q.totalQuota > 0 && q.remainingQuota / q.totalQuota < 0.15);
+        const needsAttention = crmBad || creditLow || aiBlocking;
+        if (!needsAttention) return null;
+
+        let crmPill: React.ReactNode;
+        if (!hasLoc) {
+          crmPill = <StatusPill label="Not linked" tone="warn" />;
+        } else if (!g) {
+          crmPill = <StatusPill label="Status unavailable" tone="warn" />;
+        } else if (crmConnected) {
+          crmPill = <StatusPill label="Connected" tone="ok" />;
+        } else if (g.status === 'DISCONNECTED') {
+          crmPill = <StatusPill label="Needs setup" tone="warn" />;
+        } else if (g.status === 'INVALID') {
+          crmPill = <StatusPill label="Reconnect CRM" tone="warn" />;
+        } else {
+          crmPill = <StatusPill label="Needs review" tone="bad" />;
+        }
+
+        let aiPill: JSX.Element;
+        if (!aiSnap) {
+          aiPill = <StatusPill label="—" tone="neutral" />;
+        } else if (!aiSnap.hasKey) {
+          aiPill = <StatusPill label="Not connected" tone="warn" />;
+        } else if (aiSnap.healthBadge === 'FAIL') {
+          aiPill = <StatusPill label="Needs attention" tone="bad" />;
+        } else {
+          aiPill = <StatusPill label="Ready" tone="ok" />;
+        }
+
+        const creditsCell =
+          q && q.totalQuota > 0 ? (
+            <span style={{ fontSize: '0.84rem', color: 'var(--aisbp-text-secondary, #334155)' }}>
+              {fmtCompact(q.usedQuota)} / {fmtCompact(q.totalQuota)}
+              {creditLow ? (
+                <span style={{ display: 'block', marginTop: '0.25rem' }}>
+                  <StatusPill label="Running low" tone="warn" />
+                </span>
+              ) : null}
+            </span>
+          ) : (
+            <span style={{ fontSize: '0.84rem', color: 'var(--aisbp-muted, #94a3b8)' }}>—</span>
+          );
+
+        const statusParts: string[] = [];
+        if (crmBad) statusParts.push('CRM Connection');
+        if (creditLow) statusParts.push('Credits');
+        if (aiBlocking) statusParts.push('AI');
+        const statusSummary = statusParts.join(' · ');
+
+        return (
+          <tr
+            key={row.id}
+            style={{
+              borderBottom: '1px solid var(--aisbp-border, #e2e8f0)',
+              verticalAlign: 'middle',
+              background: 'var(--aisbp-table-row-bg, #fff)',
+            }}
+          >
+            <td style={{ padding: '0.85rem 0.65rem', fontWeight: 700, color: 'var(--aisbp-text-heading, #0f172a)' }}>
+              {row.name}
+            </td>
+            <td style={{ padding: '0.85rem 0.65rem' }}>{crmPill}</td>
+            <td style={{ padding: '0.85rem 0.65rem' }}>{aiPill}</td>
+            <td style={{ padding: '0.85rem 0.65rem' }}>{creditsCell}</td>
+            <td style={{ padding: '0.85rem 0.65rem', fontSize: '0.82rem', color: 'var(--aisbp-text-secondary, #475569)' }}>
+              {statusSummary}
+            </td>
+            <td style={{ padding: '0.85rem 0.65rem' }}>
+              <Link href={`/app/tenant/${row.id}`} style={appFloatingSecondaryButtonStyle}>
+                Open workspace
+              </Link>
+            </td>
+          </tr>
+        );
+      })
+      .filter((row): row is JSX.Element => row !== null);
+  }, [workspaceDetails, aiSnap]);
+
+  const ghlDrift = ghlBreakdown ? ghlBreakdown.connected < (tenantCount ?? 0) : false;
 
   return (
     <div>
-      <PageHeader title="Control Center" eyebrow="Agency account" />
-      {agencyName ? (
-        <p style={{ fontSize: '0.9rem', fontWeight: 700, color: 'var(--aisbp-text-heading, #0f172a)', margin: '0 0 0.6rem' }}>
-          {agencyName}
+      <header style={{ marginBottom: '1.75rem' }}>
+        <p
+          style={{
+            fontSize: '0.7rem',
+            textTransform: 'uppercase',
+            letterSpacing: '0.12em',
+            color: 'var(--aisbp-muted, #94a3b8)',
+            margin: '0 0 0.5rem',
+            fontWeight: 700,
+          }}
+        >
+          Agency account
         </p>
-      ) : null}
-      <p style={{ fontSize: '0.9rem', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 1.1rem', lineHeight: 1.5, maxWidth: '42rem' }}>
-        Monitor client workspaces, CRM connections, AI provider status, credits, and the agency log.
-      </p>
+        <h1
+          style={{
+            fontSize: '1.85rem',
+            fontWeight: 800,
+            margin: '0 0 0.5rem',
+            lineHeight: 1.15,
+            color: 'var(--aisbp-text-heading, #0f172a)',
+            letterSpacing: '-0.03em',
+          }}
+        >
+          Dashboard
+        </h1>
+        <p
+          style={{
+            fontSize: '0.95rem',
+            color: 'var(--aisbp-muted, #64748b)',
+            margin: 0,
+            lineHeight: 1.55,
+            maxWidth: '40rem',
+          }}
+        >
+          Monitor workspace health, CRM connections, AI readiness, and credit usage across your agency.
+        </p>
+        {agencyName ? (
+          <p style={{ fontSize: '0.84rem', color: 'var(--aisbp-text-secondary, #475569)', margin: '0.65rem 0 0', fontWeight: 600 }}>
+            {agencyName}
+            <span style={{ fontWeight: 500, color: 'var(--aisbp-muted, #94a3b8)' }}> · Signed in as {user?.email ?? '—'}</span>
+          </p>
+        ) : null}
+      </header>
+
       {err && (
         <div style={{ marginBottom: '1rem' }}>
           <ErrorBanner message={err} />
@@ -250,8 +378,9 @@ export default function AgencyHomePage() {
               marginTop: '0.5rem',
               padding: '0.4rem 0.75rem',
               borderRadius: '6px',
-              border: '1px solid #ccc',
-              background: '#fff',
+              border: '1px solid var(--aisbp-border-strong, #cbd5e1)',
+              background: 'var(--aisbp-surface, #fff)',
+              color: 'var(--aisbp-text-secondary, #334155)',
               cursor: 'pointer',
               fontSize: '0.85rem',
             }}
@@ -264,222 +393,227 @@ export default function AgencyHomePage() {
       <div
         style={{
           display: 'grid',
-          gap: '1rem',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
-          marginBottom: '1.15rem',
+          gap: '1.1rem',
+          gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
+          marginBottom: '1.5rem',
         }}
       >
-        <SectionCard title="Workspaces" subtitle="Client workspaces connected to this agency.">
+        <section style={kpiCardShell}>
+          <p style={kpiTitle}>Workspaces</p>
           {snapshotLoading && tenantCount === null ? (
             <LoadingBlock message="Loading…" />
           ) : (
-            <KeyValueRows
-              rows={[
-                { label: 'Total workspaces', value: String(tenantCount ?? '—') },
-                { label: 'CRM location IDs saved', value: `${withGhlLocationId ?? '—'} / ${tenantCount ?? '—'}` },
-                {
-                  label: 'Needs setup',
-                  value:
-                    withoutLocationId != null && withoutLocationId > 0 ? (
-                      <StatusPill label={`${withoutLocationId} workspace(s)`} tone="warn" />
-                    ) : (
-                      <StatusPill label="None" tone="ok" />
-                    ),
-                },
-              ]}
-            />
+            <>
+              <p style={kpiFigure}>{tenantCount ?? '—'}</p>
+              <p style={kpiMuted}>Client workspaces on this agency account.</p>
+              <p style={{ ...kpiMuted, marginTop: 'auto', paddingTop: '0.35rem' }}>
+                <span style={{ fontWeight: 600, color: 'var(--aisbp-text-secondary, #475569)' }}>
+                  {withGhlLocationId ?? '—'} with CRM location saved
+                </span>
+              </p>
+            </>
           )}
-        </SectionCard>
+        </section>
 
-        <SectionCard title="CRM connections" subtitle="Connection health across client workspaces.">
+        <section style={kpiCardShell}>
+          <p style={kpiTitle}>CRM Connections</p>
           {snapshotLoading && ghlBreakdown === null ? (
-            <LoadingBlock message="Loading CRM…" />
+            <LoadingBlock message="Loading…" />
           ) : ghlBreakdown && tenantCount != null && tenantCount > 0 ? (
-            <KeyValueRows
-              rows={[
-                { label: 'Connected', value: <StatusPill label={String(ghlBreakdown.connected)} tone="ok" /> },
-                { label: 'Needs token check', value: <StatusPill label={String(ghlBreakdown.invalid)} tone={ghlBreakdown.invalid ? 'warn' : 'ok'} /> },
-                { label: 'Needs review', value: <StatusPill label={String(ghlBreakdown.error)} tone={ghlBreakdown.error ? 'warn' : 'ok'} /> },
-                { label: 'Needs setup', value: String(ghlBreakdown.disconnected) },
-                { label: 'Status unavailable', value: <StatusPill label={String(ghlBreakdown.fetchFailed)} tone={ghlBreakdown.fetchFailed ? 'warn' : 'ok'} /> },
-                {
-                  label: 'Coverage',
-                  value: ghlDrift ? (
-                    <StatusPill label="Some workspaces need setup" tone="warn" />
-                  ) : (
-                    <StatusPill label="All set" tone="ok" />
-                  ),
-                },
-              ]}
-            />
+            <>
+              <p style={kpiFigure}>
+                {ghlConnectedCount ?? 0}
+                <span style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--aisbp-muted, #94a3b8)', marginLeft: '0.15rem' }}> / {tenantCount}</span>
+              </p>
+              <p style={kpiMuted}>Workspaces with a healthy CRM link.</p>
+              <div style={{ marginTop: 'auto', paddingTop: '0.35rem' }}>
+                {ghlDrift ? (
+                  <StatusPill label="Some workspaces need attention" tone="warn" />
+                ) : (
+                  <StatusPill label="All connected workspaces look healthy" tone="ok" />
+                )}
+              </div>
+            </>
           ) : (
-            <p style={{ fontSize: '0.85rem', color: '#64748b', margin: 0 }}>No workspaces to evaluate yet.</p>
+            <>
+              <p style={kpiFigure}>0</p>
+              <p style={kpiMuted}>Add a workspace to start connecting CRM.</p>
+            </>
           )}
-        </SectionCard>
+        </section>
 
-        <SectionCard title="Live AI" subtitle="Provider and model used for generated replies.">
+        <section style={kpiCardShell}>
+          <p style={kpiTitle}>Live AI</p>
           {snapshotLoading && aiSnap === null && !err ? (
             <LoadingBlock message="Loading…" />
           ) : aiSnap ? (
             <>
-              <KeyValueRows
-                rows={[
-                  {
-                    label: 'Keys',
-                    value: <StatusPill label={aiSnap.hasKey ? 'Saved' : 'Not set'} tone={aiSnap.hasKey ? 'ok' : 'warn'} />,
-                  },
-                  { label: 'Provider', value: aiSnap.provider, mono: true },
-                  {
-                    label: 'Configured model',
-                    value: 'Hidden',
-                  },
-                  {
-                    label: 'Health',
-                    value: aiHealthPill(aiSnap.healthBadge),
-                  },
-                  {
-                    label: 'Last checked',
-                    value:
-                      aiSnap.lastChecked && aiSnap.healthBadge !== 'UNKNOWN'
-                        ? new Date(aiSnap.lastChecked).toLocaleString()
-                        : '—',
-                  },
-                  ...(aiSnap.latencyMs != null && aiSnap.healthBadge !== 'UNKNOWN'
-                    ? [{ label: 'Response time', value: `${aiSnap.latencyMs} ms` }]
-                    : []),
-                ]}
-              />
-              <details style={{ marginTop: '0.65rem' }}>
-                <summary style={{ cursor: 'pointer', fontSize: '0.78rem', fontWeight: 700, color: 'var(--aisbp-muted, #64748b)', listStyle: 'none' }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.45rem', minHeight: '2.6rem' }}>
+                {!aiSnap.hasKey ? (
+                  <StatusPill label="Not connected" tone="warn" />
+                ) : (
+                  <StatusPill label="AI service connected" tone="ok" />
+                )}
+                {aiSnap.hasKey ? aiHealthPill(aiSnap.healthBadge) : null}
+              </div>
+              <p style={{ ...kpiMuted, marginTop: '0.15rem' }}>
+                {!aiSnap.hasKey
+                  ? 'Connect an AI provider to generate replies.'
+                  : aiSnap.healthBadge === 'UNKNOWN'
+                    ? 'Run a quick check from AI settings when you are ready.'
+                    : aiSnap.healthBadge === 'FAIL'
+                      ? 'Recent checks reported an issue. Review settings or try again.'
+                      : 'Latest check completed successfully.'}
+              </p>
+              {aiSnap.hasKey && aiSnap.latencyMs != null && aiSnap.healthBadge !== 'UNKNOWN' ? (
+                <p style={{ fontSize: '0.88rem', fontWeight: 650, color: 'var(--aisbp-text-heading, #0f172a)', margin: 0 }}>
+                  Response time · {aiSnap.latencyMs} ms
+                </p>
+              ) : null}
+              <details style={{ marginTop: '0.35rem' }}>
+                <summary
+                  style={{
+                    cursor: 'pointer',
+                    fontSize: '0.76rem',
+                    fontWeight: 700,
+                    color: 'var(--aisbp-muted, #64748b)',
+                    listStyle: 'none',
+                  }}
+                >
                   Support details
                 </summary>
-                <p style={{ margin: '0.5rem 0 0', fontSize: '0.82rem', color: 'var(--aisbp-text-secondary, #334155)' }}>
-                  <span style={{ fontFamily: 'ui-monospace, monospace' }}>{aiSnap.model}</span>
+                <p style={{ margin: '0.45rem 0 0', fontSize: '0.8rem', color: 'var(--aisbp-text-secondary, #334155)', lineHeight: 1.45 }}>
+                  Provider and model are managed in AI settings.
+                  <span style={{ display: 'block', marginTop: '0.35rem', fontFamily: 'ui-monospace, monospace', fontSize: '0.78rem' }}>
+                    {aiSnap.provider} · {aiSnap.model}
+                  </span>
+                  {aiSnap.lastChecked && aiSnap.healthBadge !== 'UNKNOWN' ? (
+                    <span style={{ display: 'block', marginTop: '0.35rem', color: 'var(--aisbp-muted, #64748b)' }}>
+                      Last checked {formatDateTime(aiSnap.lastChecked)}
+                    </span>
+                  ) : null}
                 </p>
               </details>
               {aiSnap.healthBadge === 'FAIL' && aiSnap.healthError ? (
-                <p style={{ fontSize: '0.78rem', color: '#b45309', margin: '0.65rem 0 0', lineHeight: 1.45 }}>
+                <p style={{ fontSize: '0.78rem', color: 'var(--aisbp-pill-warn-fg, #b45309)', margin: '0.5rem 0 0', lineHeight: 1.45 }}>
                   {aiSnap.healthError}
                 </p>
               ) : null}
+              <div style={{ marginTop: 'auto', paddingTop: '0.65rem' }}>
+                <Link href="/app/agency/settings/ai" style={appFloatingSecondaryButtonStyle}>
+                  Manage AI connection
+                </Link>
+              </div>
             </>
           ) : (
-            <p style={{ fontSize: '0.85rem', color: '#64748b', margin: 0 }}>AI provider summary is not loaded.</p>
+            <>
+              <p style={kpiMuted}>AI summary could not be loaded.</p>
+              <div style={{ marginTop: 'auto' }}>
+                <Link href="/app/agency/settings/ai" style={appFloatingSecondaryButtonStyle}>
+                  Manage AI connection
+                </Link>
+              </div>
+            </>
           )}
-          <div style={{ margin: '0.75rem 0 0' }}>
-            <Link href="/app/agency/settings/ai" style={appFloatingSecondaryButtonStyle}>
-              Manage AI provider
-            </Link>
-          </div>
-        </SectionCard>
+        </section>
 
-        <SectionCard title="Credits" subtitle="Credit usage across client workspaces.">
+        <section style={kpiCardShell}>
+          <p style={kpiTitle}>Credits</p>
           {snapshotLoading && !usageAgg && !err ? (
-            <LoadingBlock message="Loading credits…" />
+            <LoadingBlock message="Loading…" />
           ) : usageAgg ? (
             <>
-              <p style={{ fontSize: '0.8rem', color: '#64748b', margin: 0 }}>Workspaces with credits: {usageAgg.subaccountsWithQuota}</p>
-              <p style={{ fontWeight: 800, fontSize: '1.4rem', margin: '0.4rem 0 0.15rem', color: '#0f172a' }}>
-                {fmtCompact(usageAgg.usedSum)} <span style={{ color: '#94a3b8', fontWeight: 600, fontSize: '1.05rem' }}>/</span>{' '}
+              <p style={{ ...kpiFigure, fontSize: '1.65rem' }}>
+                {fmtCompact(usageAgg.usedSum)}{' '}
+                <span style={{ color: 'var(--aisbp-muted, #94a3b8)', fontWeight: 700, fontSize: '1.15rem' }}>/</span>{' '}
                 {fmtCompact(usageAgg.totalSum)}
               </p>
+              <p style={kpiMuted}>Used and available credits across workspaces that have balances.</p>
               {usagePct != null && usageAgg.totalSum > 0 ? (
-                <div style={{ marginTop: '0.5rem' }}>
+                <div style={{ marginTop: '0.35rem' }}>
                   <div
                     style={{
-                      height: '7px',
-                      borderRadius: '4px',
-                      background: '#e2e8f0',
+                      height: '8px',
+                      borderRadius: '6px',
+                      background: '#e8edf3',
                       overflow: 'hidden',
                     }}
-                    aria-label={`${usagePct}% of combined cap used`}
+                    aria-label={`${usagePct}% used`}
                   >
                     <div
                       style={{
                         width: `${usagePct}%`,
                         height: '100%',
                         background: 'linear-gradient(90deg, #38bdf8, #2563eb)',
+                        borderRadius: '6px',
                       }}
                     />
                   </div>
-                  <p style={{ fontSize: '0.8rem', color: '#475569', margin: '0.3rem 0 0' }}>≈ {usagePct}% used</p>
+                  <p style={{ fontSize: '0.8rem', color: 'var(--aisbp-muted, #64748b)', margin: '0.4rem 0 0' }}>{usagePct}% used</p>
                 </div>
-              ) : null}
+              ) : (
+                <p style={{ ...kpiMuted, marginTop: '0.35rem' }}>No combined balance to display yet.</p>
+              )}
               {usageAgg.periodNote ? (
-                <p style={{ fontSize: '0.75rem', color: '#94a3b8', margin: '0.5rem 0 0' }}>{usageAgg.periodNote}</p>
+                <p style={{ fontSize: '0.76rem', color: 'var(--aisbp-muted, #94a3b8)', margin: '0.45rem 0 0', lineHeight: 1.4 }}>{usageAgg.periodNote}</p>
               ) : null}
+              <div style={{ marginTop: 'auto', paddingTop: '0.65rem' }}>
+                <Link href="/app/agency/settings/quotas" style={appFloatingSecondaryButtonStyle}>
+                  Manage credits
+                </Link>
+              </div>
             </>
           ) : null}
-        </SectionCard>
+        </section>
       </div>
 
-      {lowQuota.length > 0 ? (
-        <SectionCard title="Low credits" subtitle="Workspaces under 15% remaining credits.">
-          <ul style={{ margin: 0, paddingLeft: '1.1rem', fontSize: '0.86rem', lineHeight: 1.6 }}>
-            {lowQuota.map(l => (
-              <li key={l.id} style={{ marginBottom: '0.35rem' }}>
-                <Link href={`/app/tenant/${l.id}/usage`} style={appFloatingSecondaryButtonStyle}>
-                  {l.name}
-                </Link>
-                {` — ${l.remaining.toLocaleString()} / ${l.total.toLocaleString()} left`}
-              </li>
-            ))}
-          </ul>
-        </SectionCard>
-      ) : null}
-
-      <SectionCard title="Needs attention" subtitle="Recommended next steps from the latest snapshot.">
-        <ul style={{ margin: 0, paddingLeft: '1.1rem', fontSize: '0.86rem', lineHeight: 1.6, color: '#334155' }}>
-          {operationalFlags.map((f, i) => (
-            <li key={i} style={{ marginBottom: i < operationalFlags.length - 1 ? '0.45rem' : 0 }}>
-              <span style={{ color: f.tone === 'warn' ? '#b45309' : '#166534' }}>● </span>
-              {f.text}
-            </li>
-          ))}
-        </ul>
-      </SectionCard>
-
-      <div style={{ marginTop: '1.1rem', display: 'grid', gap: '1rem' }}>
-        <SectionCard title="Quick actions" subtitle="Common setup tasks.">
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-            <Link href="/app/agency/tenants" style={appFloatingSecondaryButtonStyle}>
-              Client Workspaces
-            </Link>
-            <Link href="/app/agency/settings/ai" style={appFloatingSecondaryButtonStyle}>
-              AI Provider
-            </Link>
-            <Link href="/app/agency/settings/quotas" style={appFloatingSecondaryButtonStyle}>
-              Credits
-            </Link>
-            <Link href="/app/agency/settings/ghl" style={appFloatingSecondaryButtonStyle}>
-              CRM
-            </Link>
-            <Link href="/app/agency/log" style={appFloatingSecondaryButtonStyle}>
-              Log
-            </Link>
-            <Link href="/app/agency/settings/policies" style={appFloatingSecondaryButtonStyle}>
-              Global Prompt
-            </Link>
-            <Link href="/app/agency/team" style={appFloatingSecondaryButtonStyle}>
-              Team
-            </Link>
-            {firstTenantId ? (
-              <Link href={`/app/tenant/${firstTenantId}/usage`} style={appFloatingSecondaryButtonStyle}>
-                Open workspace usage
-              </Link>
-            ) : null}
+      <SectionCard title="Workspace readiness" subtitle="Workspaces that may need setup or a quick review.">
+        {snapshotLoading && workspaceDetails.length === 0 && tenantCount === null ? (
+          <LoadingBlock message="Loading…" />
+        ) : readinessRows.length === 0 ? (
+          <div
+            style={{
+              padding: '1.35rem 1rem',
+              borderRadius: '12px',
+              background: 'linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%)',
+              border: '1px solid #e2e8f0',
+              textAlign: 'center',
+            }}
+          >
+            <p style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--aisbp-text-heading, #0f172a)', margin: '0 0 0.35rem' }}>
+              All key workspaces look ready.
+            </p>
+            <p style={{ fontSize: '0.84rem', color: 'var(--aisbp-muted, #64748b)', margin: 0, lineHeight: 1.5 }}>
+              CRM links, credits, and AI look fine from the latest snapshot. Check back after onboarding new clients.
+            </p>
           </div>
-        </SectionCard>
-        <SectionCard title="Account" subtitle="Signed-in user.">
-          <KeyValueRows
-            rows={[
-              { label: 'Agency', value: agencyName ?? (snapshotLoading ? '…' : '—') },
-              { label: 'Signed in as', value: user?.email ?? '—' },
-              { label: 'Role', value: <StatusPill label={role ?? '—'} tone="neutral" /> },
-            ]}
-          />
-        </SectionCard>
-      </div>
+        ) : (
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.88rem', minWidth: '720px' }}>
+              <thead>
+                <tr style={{ textAlign: 'left', borderBottom: '1px solid var(--aisbp-border, #e8edf3)' }}>
+                  {['Workspace', 'CRM Connection', 'AI setup', 'Credits', 'Status', 'Action'].map(h => (
+                    <th
+                      key={h}
+                      style={{
+                        padding: '0.55rem 0.65rem',
+                        fontWeight: 700,
+                        fontSize: '0.72rem',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.06em',
+                        color: 'var(--aisbp-muted, #94a3b8)',
+                      }}
+                    >
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>{readinessRows}</tbody>
+            </table>
+          </div>
+        )}
+      </SectionCard>
     </div>
   );
 }

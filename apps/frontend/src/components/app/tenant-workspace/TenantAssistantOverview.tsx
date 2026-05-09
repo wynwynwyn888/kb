@@ -109,7 +109,9 @@ export function TenantAssistantOverview() {
     };
   }, [token, tenantId]);
 
-  const liveStatus = active ? { label: 'Live', tone: 'ok' as const } : { label: 'Draft', tone: 'neutral' as const };
+  const activeProfileStatus = active
+    ? { label: 'Active', tone: 'ok' as const }
+    : { label: 'Draft', tone: 'neutral' as const };
 
   const vaultCount = active?.selectedVaultIds?.length ?? 0;
   const vaultSummary = active ? activeAssistantVaultsSummary(active.knowledgeAccessMode, vaultCount) : '—';
@@ -170,7 +172,7 @@ export function TenantAssistantOverview() {
                   <span style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--aisbp-text-heading, #0f172a)' }}>
                     {active.name.trim() || 'Untitled assistant'}
                   </span>
-                  <StatusPill label={liveStatus.label} tone={liveStatus.tone} />
+                  <StatusPill label={activeProfileStatus.label} tone={activeProfileStatus.tone} />
                 </div>
                 <p style={{ fontSize: '0.82rem', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 0.65rem' }}>
                   <strong style={{ color: 'var(--aisbp-text-secondary, #334155)' }}>Active profile</strong> — instructions and vault selection are profile-scoped.

@@ -41,3 +41,24 @@ export function getHtmlHasDarkClass(): boolean {
   if (typeof document === 'undefined') return false;
   return document.documentElement.classList.contains('dark');
 }
+
+/** Session hint for agency CRM / flows — which workspace the user last picked in the switcher. */
+export const AGENCY_LAST_WORKSPACE_SESSION_KEY = 'aisbp-agency-last-workspace';
+
+export function rememberAgencyWorkspaceSelection(tenantId: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.sessionStorage.setItem(AGENCY_LAST_WORKSPACE_SESSION_KEY, tenantId);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function readAgencyWorkspaceSelection(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    return window.sessionStorage.getItem(AGENCY_LAST_WORKSPACE_SESSION_KEY);
+  } catch {
+    return null;
+  }
+}

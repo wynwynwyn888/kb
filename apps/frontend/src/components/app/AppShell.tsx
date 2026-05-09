@@ -310,7 +310,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               {showAgencyNav && (
                 <nav style={navStyle}>
                   <Link href="/app/agency" style={linkStyle(pathname === '/app/agency')}>
-                    Control Center
+                    Dashboard
                   </Link>
                   <Link
                     href="/app/agency/tenants"
@@ -325,10 +325,10 @@ export function AppShell({ children }: { children: ReactNode }) {
                     Client Workspaces
                   </Link>
                   <Link href="/app/agency/settings/ghl" style={linkStyle(pathname === '/app/agency/settings/ghl')}>
-                    CRM
+                    CRM Connection
                   </Link>
                   <Link href="/app/agency/log" style={linkStyle(pathname.startsWith('/app/agency/log'))}>
-                    Log
+                    Activity log
                   </Link>
                   <Link href="/app/agency/settings/ai" style={linkStyle(pathname === '/app/agency/settings/ai')}>
                     AI Provider

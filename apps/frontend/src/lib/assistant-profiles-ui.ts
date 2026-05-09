@@ -1,3 +1,5 @@
+import { formatDisplayDateTime } from '@/lib/datetime-display';
+
 /** Align with backend `tenant_bot_profiles.knowledge_access_mode`. */
 export const KNOWLEDGE_ACCESS_ALL_VAULTS = 'all_vaults';
 export const KNOWLEDGE_ACCESS_SELECTED_VAULTS = 'selected_vaults';
@@ -35,11 +37,5 @@ export function activeAssistantVaultsSummary(
 }
 
 export function formatProfileUpdatedAt(iso: string): string {
-  try {
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return iso;
-    return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
-  } catch {
-    return iso;
-  }
+  return formatDisplayDateTime(iso);
 }

@@ -103,7 +103,7 @@ export function TenantSettingsShell({ children }: { children: ReactNode }) {
             maxWidth: '40rem',
           }}
         >
-          See how this workspace is set up: CRM connection, assistant, and automatic replies.
+          See how this workspace is set up: CRM Connection, assistant, and automatic replies.
         </p>
       </header>
 
@@ -173,7 +173,7 @@ export function TenantSettingsShell({ children }: { children: ReactNode }) {
                   Knowledge vaults
                 </Link>
                 <Link href={`${base}/ghl-status`} style={{ ...appFloatingSecondaryButtonStyle, background: 'rgba(255,255,255,0.12)', borderColor: 'rgba(255,255,255,0.25)', color: '#f8fafc', boxShadow: 'none', textAlign: 'center' as const }}>
-                  CRM connection
+                  CRM Connection
                 </Link>
                 {canRenameWorkspace ? (
                   <a href="#workspace-details" style={{ ...appFloatingSecondaryButtonStyle, background: 'rgba(255,255,255,0.12)', borderColor: 'rgba(255,255,255,0.25)', color: '#f8fafc', boxShadow: 'none', textAlign: 'center' as const }}>

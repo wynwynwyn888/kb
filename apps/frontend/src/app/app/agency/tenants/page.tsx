@@ -246,7 +246,7 @@ export default function AgencyTenantDirectoryPage() {
         <LoadingBlock message="Loading…" />
       ) : err && list.length === 0 ? null : list.length === 0 ? (
         <SectionCard title="Workspaces" subtitle="Create a client workspace to get started.">
-          <EmptyState title="No workspaces yet" detail="Add a workspace, then connect CRM from the workspace or CRM connection settings." />
+          <EmptyState title="No workspaces yet" detail="Add a workspace, then connect CRM from the workspace or CRM Connection settings." />
           <button type="button" onClick={openCreateModal} style={{ ...mvpPrimaryButtonStyle, marginTop: '0.85rem' }}>
             Create workspace
           </button>
@@ -294,7 +294,7 @@ export default function AgencyTenantDirectoryPage() {
                         color: 'var(--aisbp-text-secondary, #444)',
                       }}
                     >
-                      CRM connection
+                      CRM Connection
                     </th>
                     <th
                       style={{
@@ -404,7 +404,7 @@ export default function AgencyTenantDirectoryPage() {
                   autoComplete="off"
                   aria-label="Optional CRM location ID"
                 />
-                <span style={mvpFieldHint}>You can add or change this later in CRM connection settings.</span>
+                <span style={mvpFieldHint}>You can add or change this later in CRM Connection settings.</span>
               </label>
               {createErr ? <ErrorBanner message={createErr} /> : null}
               <div style={{ display: 'flex', gap: '0.6rem', justifyContent: 'flex-end', flexWrap: 'wrap', marginTop: '0.25rem' }}>

@@ -8,6 +8,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { getAgencyById, getMyTenants, getTenantById, getTenantsByAgency } from '@/lib/api';
 import { getSubaccountSwitchHref } from '@/components/app/tenant-workspace/path';
 import { TENANT_WORKSPACE_META_CHANGED, type TenantWorkspaceMetaDetail } from '@/lib/workspace-events';
+import { rememberAgencyWorkspaceSelection } from '@/lib/theme-preference';
 
 type SubaccountRow = { id: string; name: string; ghlLocationId?: string | null; status?: string };
 
@@ -41,11 +42,12 @@ const panelBoxStyle = (top: number, left: number): CSSProperties => ({
   flexDirection: 'column',
   background: 'var(--aisbp-surface, #fff)',
   border: '1px solid var(--aisbp-border, #e2e8f0)',
-  borderRadius: '10px',
+  borderRadius: '12px',
   boxShadow: '0 12px 32px rgba(15, 23, 42, 0.12), 0 4px 8px rgba(15, 23, 42, 0.06)',
   zIndex: 9999,
   overflow: 'hidden',
   color: 'var(--aisbp-text, #0f172a)',
+  padding: '0.35rem 0 0.45rem',
 });
 
 const agencyViewBtn: CSSProperties = {
@@ -60,20 +62,20 @@ const agencyViewBtn: CSSProperties = {
   borderRadius: '8px',
   cursor: 'pointer',
   textAlign: 'center' as const,
-  margin: '0.4rem 0.5rem 0.5rem',
+  margin: '0.5rem 0.65rem 0.55rem',
 };
 
 const searchInp: CSSProperties = {
   width: '100%',
   boxSizing: 'border-box',
-  padding: '0.4rem 0.55rem',
-  borderRadius: '6px',
+  padding: '0.45rem 0.6rem',
+  borderRadius: '8px',
   border: '1px solid var(--aisbp-border-strong, #d1d5db)',
   background: 'var(--aisbp-input-bg, #fff)',
   color: 'var(--aisbp-text, #0f172a)',
   fontSize: '0.8rem',
-  margin: '0 0.5rem 0.45rem',
-  maxWidth: 'calc(100% - 1rem)',
+  margin: '0 0.65rem 0.55rem',
+  maxWidth: 'calc(100% - 1.3rem)',
   alignSelf: 'center' as const,
 };
 
@@ -213,6 +215,7 @@ export function WorkspaceSwitcher() {
   const showSwitcher = Boolean(user?.agencyRole) || subaccounts.length > 0;
 
   const onPickSub = (id: string) => {
+    rememberAgencyWorkspaceSelection(id);
     const href = getSubaccountSwitchHref(pathname, id);
     router.push(href);
     setOpen(false);
@@ -296,13 +299,13 @@ export function WorkspaceSwitcher() {
             color: 'var(--aisbp-muted, #94a3b8)',
             textTransform: 'uppercase' as const,
             letterSpacing: '0.08em',
-            margin: '0.4rem 0.75rem 0',
+            margin: '0.55rem 0.75rem 0.7rem',
           }}
         >
           Workspaces
         </p>
       ) : null}
-      {listErr ? <p style={{ fontSize: '0.75rem', color: '#b91c1c', margin: '0.35rem 0.75rem' }}>{listErr}</p> : null}
+      {listErr ? <p style={{ fontSize: '0.75rem', color: '#b91c1c', margin: '0.35rem 0.85rem' }}>{listErr}</p> : null}
       <input
         type="search"
         value={q}
@@ -316,34 +319,40 @@ export function WorkspaceSwitcher() {
         style={{
           listStyle: 'none',
           margin: 0,
-          padding: '0.25rem 0.4rem 0.5rem',
+          padding: '0.2rem 0.55rem 0.65rem',
           overflowY: 'auto' as const,
           flex: 1,
         }}
       >
         {filtered.length === 0 ? (
-          <li style={{ fontSize: '0.8rem', color: 'var(--aisbp-muted, #94a3b8)', padding: '0.5rem 0.4rem' }}>No matches</li>
+          <li style={{ fontSize: '0.8rem', color: 'var(--aisbp-muted, #94a3b8)', padding: '0.55rem 0.45rem' }}>No matches</li>
         ) : (
           filtered.map(s => {
             const isSel = listSelectedId === s.id;
             return (
-              <li key={s.id}>
+              <li key={s.id} style={{ marginBottom: '0.2rem' }}>
                 <button
                   type="button"
                   onClick={() => onPickSub(s.id)}
+                  onMouseEnter={e => {
+                    e.currentTarget.style.background = isSel ? 'rgba(15, 98, 254, 0.12)' : 'var(--aisbp-nav-active-bg, #f1f5f9)';
+                  }}
+                  onMouseLeave={e => {
+                    e.currentTarget.style.background = isSel ? 'rgba(15, 98, 254, 0.08)' : 'transparent';
+                  }}
                   style={{
                     width: '100%',
                     textAlign: 'left',
-                    padding: '0.5rem 0.55rem',
+                    padding: '0.55rem 0.6rem',
                     border: '1px solid',
                     borderColor: isSel ? '#0f62fe' : 'transparent',
                     background: isSel ? 'rgba(15, 98, 254, 0.08)' : 'transparent',
                     color: 'var(--aisbp-text-heading, #0f172a)',
-                    borderRadius: '6px',
+                    borderRadius: '8px',
                     fontSize: '0.8rem',
                     fontWeight: isSel ? 700 : 500,
                     cursor: 'pointer',
-                    marginBottom: 2,
+                    transition: 'background 0.12s ease',
                   }}
                 >
                   {s.name?.trim() ? s.name : s.id ?? 'Workspace'}

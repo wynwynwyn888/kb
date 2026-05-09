@@ -18,6 +18,15 @@ export function TenantWorkspaceGate({ tenantId, children }: { tenantId: string; 
 
   const safeTenantId = typeof tenantId === 'string' && tenantId.trim().length > 0 ? tenantId.trim() : '';
 
+  const isAgencyStaff = Boolean(user?.agencyRole);
+  const tenantAdvancedBlocked =
+    Boolean(safeTenantId) && !isAgencyStaff && isAgencyOnlyAdvancedRoute(pathname, safeTenantId);
+
+  useEffect(() => {
+    if (loading || !tenantAdvancedBlocked || !safeTenantId) return;
+    router.replace(`${tenantBasePath(safeTenantId)}/assistant`);
+  }, [loading, tenantAdvancedBlocked, router, safeTenantId]);
+
   if (!loading && !safeTenantId) {
     return (
       <div>
@@ -26,14 +35,6 @@ export function TenantWorkspaceGate({ tenantId, children }: { tenantId: string; 
       </div>
     );
   }
-
-  const isAgencyStaff = Boolean(user?.agencyRole);
-  const tenantAdvancedBlocked = !isAgencyStaff && isAgencyOnlyAdvancedRoute(pathname, safeTenantId);
-
-  useEffect(() => {
-    if (loading || !tenantAdvancedBlocked) return;
-    router.replace(`${tenantBasePath(safeTenantId)}/assistant`);
-  }, [loading, tenantAdvancedBlocked, router, safeTenantId]);
 
   if (loading) {
     return <LoadingBlock message="Checking access…" />;

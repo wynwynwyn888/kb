@@ -144,6 +144,27 @@ export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
 
+  const isAgencyPath = pathname.startsWith('/app/agency');
+  const tenantMatch = pathname.match(/^\/app\/tenant\/([^/]+)/);
+  const tenantIdFromPathRaw = tenantMatch?.[1];
+  const tenantIdFromPath =
+    typeof tenantIdFromPathRaw === 'string' && tenantIdFromPathRaw.trim().length > 0
+      ? tenantIdFromPathRaw.trim()
+      : null;
+  const isTenantPath = Boolean(tenantIdFromPath);
+  const tenantNavNodes: TenantNavNode[] = tenantIdFromPath
+    ? buildTenantSidebarNav(tenantIdFromPath, { showAdvanced: Boolean(user?.agencyRole) })
+    : [];
+
+  const [groupOpen, setGroupOpen] = useState<Record<string, boolean>>({});
+  const groupActiveByLabel = useMemo(() => {
+    const m: Record<string, boolean> = {};
+    for (const n of tenantNavNodes) {
+      if (n.kind === 'group') m[n.label] = n.match(pathname);
+    }
+    return m;
+  }, [tenantNavNodes, pathname]);
+
   useEffect(() => {
     if (!loading && !user) {
       router.replace('/login');
@@ -158,14 +179,6 @@ export function AppShell({ children }: { children: ReactNode }) {
     );
   }
 
-  const isAgencyPath = pathname.startsWith('/app/agency');
-  const tenantMatch = pathname.match(/^\/app\/tenant\/([^/]+)/);
-  const tenantIdFromPathRaw = tenantMatch?.[1];
-  const tenantIdFromPath =
-    typeof tenantIdFromPathRaw === 'string' && tenantIdFromPathRaw.trim().length > 0
-      ? tenantIdFromPathRaw.trim()
-      : null;
-  const isTenantPath = Boolean(tenantIdFromPath);
   const hasAgencyMembership = Boolean(user.agencyRole);
   const showAgencyNav = isAgencyPath && hasAgencyMembership;
   const sidebarWidthPx = isTenantPath ? SIDEBAR_TENANT_PX : SIDEBAR_AGENCY_PX;
@@ -188,19 +201,6 @@ export function AppShell({ children }: { children: ReactNode }) {
     overflowY: 'auto' as const,
     WebkitOverflowScrolling: 'touch' as const,
   };
-
-  const tenantNavNodes: TenantNavNode[] = tenantIdFromPath
-    ? buildTenantSidebarNav(tenantIdFromPath, { showAdvanced: Boolean(user?.agencyRole) })
-    : [];
-
-  const [groupOpen, setGroupOpen] = useState<Record<string, boolean>>({});
-  const groupActiveByLabel = useMemo(() => {
-    const m: Record<string, boolean> = {};
-    for (const n of tenantNavNodes) {
-      if (n.kind === 'group') m[n.label] = n.match(pathname);
-    }
-    return m;
-  }, [tenantNavNodes, pathname]);
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--aisbp-shell-bg, #f8fafc)' }}>

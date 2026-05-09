@@ -2,7 +2,7 @@
 
 import { FormEvent, Suspense, useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   getGhlConnection,
@@ -27,8 +27,9 @@ import {
   mvpInputStyle,
   mvpLabelStyle,
   mvpPrimaryButtonStyle,
-  mvpButtonStyle,
+  mvpDangerButtonStyle,
 } from '@/components/app/mvp-ui';
+import { readAgencyWorkspaceSelection } from '@/lib/theme-preference';
 
 type TenantOpt = { id: string; name: string; status: string; ghlLocationId?: string | null };
 
@@ -39,8 +40,27 @@ function ghlTone(s: GhlConnectionStatus['status']): 'ok' | 'warn' | 'bad' | 'neu
   return 'neutral';
 }
 
+function connectionSummaryPill(
+  conn: GhlConnectionStatus | null,
+  connLoading: boolean,
+  selected: TenantOpt | undefined,
+): { label: string; tone: 'ok' | 'warn' | 'bad' | 'neutral' } | null {
+  const hasLoc = Boolean(selected?.ghlLocationId && String(selected.ghlLocationId).trim());
+  if (connLoading && !conn) return null;
+  if (conn?.connected && conn.status === 'CONNECTED') return { label: 'Connected', tone: 'ok' };
+  if (conn) {
+    if (conn.status === 'INVALID') return { label: 'Reconnect required', tone: 'bad' };
+    if (conn.status === 'ERROR') return { label: 'Needs review', tone: 'bad' };
+    if (conn.status === 'DISCONNECTED') return { label: 'Not connected', tone: 'warn' };
+    return { label: conn.status, tone: ghlTone(conn.status) };
+  }
+  if (hasLoc) return { label: 'Details saved', tone: 'neutral' };
+  return { label: 'Needs CRM details', tone: 'warn' };
+}
+
 function AgencyGhlConnectionsInner() {
   const { token, user } = useAuth();
+  const router = useRouter();
   const searchParams = useSearchParams();
   const preTenant = searchParams.get('subaccount') ?? searchParams.get('tenant');
 
@@ -57,7 +77,6 @@ function AgencyGhlConnectionsInner() {
   const [msg, setMsg] = useState('');
   const [saving, setSaving] = useState(false);
   const [verifying, setVerifying] = useState(false);
-  const [healthRunning, setHealthRunning] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
 
   useEffect(() => {
@@ -93,6 +112,27 @@ function AgencyGhlConnectionsInner() {
     setMsg('');
     setErr('');
   }, [preTenant]);
+
+  useEffect(() => {
+    if (tenantsLoading || tenantsErr) return;
+    if (tenants.length === 0) return;
+    const hasValid = Boolean(tenantId && tenants.some(t => t.id === tenantId));
+    if (hasValid) return;
+    let pick: string | null = null;
+    if (preTenant && tenants.some(t => t.id === preTenant)) {
+      pick = preTenant;
+    } else {
+      const last = readAgencyWorkspaceSelection();
+      if (last && tenants.some(t => t.id === last)) pick = last;
+    }
+    if (!pick) {
+      const withLoc = tenants.find(t => t.ghlLocationId && String(t.ghlLocationId).trim());
+      const fallback = tenants[0]?.id;
+      if (!fallback) return;
+      pick = withLoc?.id ?? fallback;
+    }
+    router.replace(`/app/agency/settings/ghl?subaccount=${encodeURIComponent(pick)}`);
+  }, [tenantsLoading, tenantsErr, tenants, tenantId, preTenant, router]);
 
   const refreshConn = useCallback(async () => {
     if (!token || !tenantId) {
@@ -144,37 +184,33 @@ function AgencyGhlConnectionsInner() {
     try {
       const s = await verifyGhlConnection(token, tenantId);
       await refreshConn();
-      if (s.connected) {
-        setMsg('Connection verified.');
-      } else {
-        setMsg('');
-        setErr(s.lastError?.trim() || 'CRM did not accept the saved token. Paste a new private integration token and save.');
+      try {
+        const h = await checkGhlHealth(token, tenantId);
+        setHealth(h);
+        if (h.healthy && s.connected) {
+          setMsg('Connection verified and looks healthy.');
+          setErr('');
+        } else if (!h.healthy) {
+          setMsg('');
+          setErr(h.message || 'Connection check reported a problem. Try saving a new token or verify again.');
+        } else {
+          setMsg('');
+          setErr(s.lastError?.trim() || 'CRM did not accept the saved token. Paste a new private integration token and save.');
+        }
+      } catch {
+        setHealth(null);
+        if (s.connected) {
+          setMsg('Connection verified.');
+          setErr('');
+        } else {
+          setMsg('');
+          setErr(s.lastError?.trim() || 'CRM did not accept the saved token. Paste a new private integration token and save.');
+        }
       }
     } catch (er) {
       setErr(er instanceof Error ? er.message : 'Verify failed');
     } finally {
       setVerifying(false);
-    }
-  };
-
-  const onHealth = async () => {
-    if (!token || !tenantId) return;
-    setErr('');
-    setHealthRunning(true);
-    try {
-      const h = await checkGhlHealth(token, tenantId);
-      setHealth(h);
-      if (h.healthy) {
-        setMsg('Connection check finished — healthy.');
-      } else {
-        setMsg('');
-        setErr(h.message || 'Health check reported a problem. Try Verify connection or save a new token.');
-      }
-    } catch (er) {
-      setErr(er instanceof Error ? er.message : 'Health failed');
-      setHealth(null);
-    } finally {
-      setHealthRunning(false);
     }
   };
 
@@ -201,7 +237,7 @@ function AgencyGhlConnectionsInner() {
   return (
     <div>
       <PageHeader title="CRM connection" eyebrow="Agency account" />
-      <p style={{ fontSize: '0.8rem', color: '#64748b', margin: '0 0 1rem', maxWidth: '32rem' }}>
+      <p style={{ fontSize: '0.8rem', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 1rem', maxWidth: '32rem' }}>
         Connect one client workspace to CRM so AISalesBot Pro can read and send conversation data.
       </p>
 
@@ -216,11 +252,8 @@ function AgencyGhlConnectionsInner() {
 
       {unknownTenant ? <ErrorBanner message="That workspace is not in this agency. Choose another workspace." /> : null}
 
-      {!tenantsLoading && !tenantId && tenants.length > 0 ? (
-        <EmptyState
-          title="No workspace selected"
-          detail="Choose a workspace from the workspace switcher to connect CRM."
-        />
+      {!tenantsLoading && !tenantsErr && tenants.length > 0 && !selected && !unknownTenant ? (
+        <LoadingBlock message="Selecting workspace…" />
       ) : null}
 
       {selected && !unknownTenant ? (
@@ -229,18 +262,24 @@ function AgencyGhlConnectionsInner() {
             marginBottom: '1rem',
             padding: '0.75rem 1rem',
             borderRadius: '8px',
-            border: '1px solid #e2e8f0',
-            background: '#f8fafc',
+            border: '1px solid var(--aisbp-border, #e2e8f0)',
+            background: 'var(--aisbp-surface-muted, #f8fafc)',
           }}
         >
-          <p style={{ margin: 0, fontSize: '0.82rem', color: '#64748b' }}>Configuring CRM for</p>
-          <p style={{ margin: '0.2rem 0 0', fontSize: '1.05rem', fontWeight: 800, color: '#0f172a' }}>{selected.name}</p>
+          <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--aisbp-muted, #64748b)' }}>Configuring CRM for</p>
+          <p style={{ margin: '0.2rem 0 0', fontSize: '1.05rem', fontWeight: 800, color: 'var(--aisbp-text-heading, #0f172a)' }}>{selected.name}</p>
           <p style={{ margin: '0.4rem 0 0', display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
-            <StatusPill label={selected.status} tone="neutral" />
-            {selected.ghlLocationId ? (
-              <span style={{ fontSize: '0.78rem', color: '#64748b' }}>CRM location saved</span>
-            ) : null}
-            <Link href={`/app/tenant/${selected.id}/assistant`} style={{ fontSize: '0.8rem', fontWeight: 600, color: '#2563eb' }}>
+            {(() => {
+              const summary = connectionSummaryPill(conn, connLoading, selected);
+              if (summary) return <StatusPill label={summary.label} tone={summary.tone} />;
+              if (connLoading)
+                return <span style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)' }}>Loading status…</span>;
+              return null;
+            })()}
+            <Link
+              href={`/app/tenant/${selected.id}/assistant`}
+              style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--aisbp-tenant-nav-active-text, #2563eb)' }}
+            >
               Open workspace →
             </Link>
           </p>
@@ -293,11 +332,16 @@ function AgencyGhlConnectionsInner() {
             ) : conn ? (
               <>
                 <p style={{ margin: '0 0 0.75rem', display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
-                  <StatusPill
-                    label={conn.connected ? 'Connected' : 'Not connected'}
-                    tone={conn.connected ? 'ok' : 'neutral'}
-                  />
-                  <StatusPill label={conn.status} tone={ghlTone(conn.status)} />
+                  {(() => {
+                    if (conn.connected && conn.status === 'CONNECTED') {
+                      return <StatusPill label="Connected" tone="ok" />;
+                    }
+                    if (conn.status === 'INVALID') return <StatusPill label="Reconnect required" tone="bad" />;
+                    if (conn.status === 'ERROR') return <StatusPill label="Needs review" tone="bad" />;
+                    if (conn.status === 'DISCONNECTED')
+                      return <StatusPill label="Not connected" tone="warn" />;
+                    return <StatusPill label={conn.status} tone={ghlTone(conn.status)} />;
+                  })()}
                 </p>
                 <KeyValueRows
                   rows={[
@@ -308,7 +352,7 @@ function AgencyGhlConnectionsInner() {
                     {
                       label: 'Last error',
                       value: conn.lastError ? (
-                        <span style={{ color: '#b71c1c' }}>{conn.lastError}</span>
+                        <span style={{ color: 'var(--aisbp-pill-bad-fg, #b91c1c)' }}>{conn.lastError}</span>
                       ) : (
                         '—'
                       ),
@@ -317,15 +361,16 @@ function AgencyGhlConnectionsInner() {
                 />
                 {conn.metadata && Object.keys(conn.metadata).length > 0 ? (
                   <details style={{ marginTop: '0.75rem', fontSize: '0.82rem' }}>
-                    <summary style={{ cursor: 'pointer', color: '#444' }}>Support details</summary>
+                    <summary style={{ cursor: 'pointer', color: 'var(--aisbp-text-secondary, #444)' }}>Support details</summary>
                     <pre
                       style={{
                         margin: '0.5rem 0 0',
                         padding: '0.5rem',
-                        background: '#f6f6f6',
+                        background: 'var(--aisbp-card-subtle, #f6f6f6)',
                         borderRadius: '4px',
                         overflow: 'auto',
                         maxHeight: '180px',
+                        color: 'var(--aisbp-text-secondary, #334155)',
                       }}
                     >
                       {JSON.stringify(conn.metadata, null, 2)}
@@ -340,37 +385,17 @@ function AgencyGhlConnectionsInner() {
             <div style={{ marginTop: '1rem', display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
               <button
                 type="button"
-                onClick={onVerify}
+                onClick={() => void onVerify()}
                 disabled={verifying}
                 style={{ ...mvpPrimaryButtonStyle, opacity: verifying ? 0.75 : 1 }}
               >
                 {verifying ? 'Verifying…' : 'Verify connection'}
               </button>
-              <button type="button" onClick={onHealth} disabled={healthRunning} style={mvpButtonStyle}>
-                {healthRunning ? 'Checking…' : 'Run connection check'}
-              </button>
               <button
                 type="button"
-                onClick={() => void refreshConn()}
-                disabled={connLoading}
-                style={mvpButtonStyle}
-              >
-                {connLoading ? 'Refreshing…' : 'Refresh status'}
-              </button>
-              <button
-                type="button"
-                onClick={onDisconnect}
+                onClick={() => void onDisconnect()}
                 disabled={disconnecting}
-                style={{
-                  padding: '0.45rem 0.85rem',
-                  borderRadius: '6px',
-                  border: '1px solid #f5c2c7',
-                  background: '#fde8e8',
-                  color: '#8b1d1d',
-                  cursor: 'pointer',
-                  fontSize: '0.88rem',
-                  opacity: disconnecting ? 0.75 : 1,
-                }}
+                style={{ ...mvpDangerButtonStyle, opacity: disconnecting ? 0.75 : 1 }}
               >
                 {disconnecting ? 'Disconnecting…' : 'Disconnect'}
               </button>
@@ -407,7 +432,7 @@ export default function AgencyGhlConnectionsPage() {
     <Suspense
       fallback={
         <div>
-          <PageHeader title="Integrations" eyebrow="CRM" />
+          <PageHeader title="CRM connection" eyebrow="Agency account" />
           <LoadingBlock message="Loading page…" />
         </div>
       }

@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   createSubaccount,
@@ -16,7 +16,10 @@ import {
   PageHeader,
   SectionCard,
   StatusPill,
+  mvpButtonStyle,
+  mvpFieldHint,
   mvpInputStyle,
+  mvpLabelStyle,
   mvpPrimaryButtonStyle,
 } from '@/components/app/mvp-ui';
 
@@ -38,8 +41,12 @@ export default function AgencyTenantDirectoryPage() {
   const [newGhlLocationId, setNewGhlLocationId] = useState('');
   const [createOk, setCreateOk] = useState('');
   const [creating, setCreating] = useState(false);
+  const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [createErr, setCreateErr] = useState('');
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<TenantRow | null>(null);
+  const [deleteClientAcknowledged, setDeleteClientAcknowledged] = useState(false);
+  const [deletePhraseInput, setDeletePhraseInput] = useState('');
   const [deleteOk, setDeleteOk] = useState('');
   const [ghlById, setGhlById] = useState<
     Record<string, { status: string; connected: boolean; maskToken?: string } | null>
@@ -82,10 +89,20 @@ export default function AgencyTenantDirectoryPage() {
     return list.filter(t => t.name.toLowerCase().includes(s));
   }, [list, q]);
 
-  const onCreate = async () => {
+  const openCreateModal = () => {
+    setErr('');
+    setCreateErr('');
+    setCreateOk('');
+    setNewName('');
+    setNewGhlLocationId('');
+    setCreateModalOpen(true);
+  };
+
+  const onCreate = async (e?: FormEvent) => {
+    e?.preventDefault();
     if (!token || !user?.agencyId || !newName.trim()) return;
     setCreating(true);
-    setErr('');
+    setCreateErr('');
     setCreateOk('');
     try {
       const g = newGhlLocationId.trim();
@@ -94,9 +111,10 @@ export default function AgencyTenantDirectoryPage() {
         name: newName.trim(),
         ...(g ? { ghlLocationId: g } : {}),
       });
+      setCreateOk(`Workspace created: ${created.name}`);
+      setCreateModalOpen(false);
       setNewName('');
       setNewGhlLocationId('');
-      setCreateOk(`Created workspace “${created.name}”.`);
       setLoadAttempt(a => a + 1);
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Create failed');
@@ -108,11 +126,15 @@ export default function AgencyTenantDirectoryPage() {
   const openDeleteModal = (row: TenantRow) => {
     setErr('');
     setDeleteOk('');
+    setDeleteClientAcknowledged(false);
+    setDeletePhraseInput('');
     setDeleteConfirm(row);
   };
 
+  const deleteFormValid = deleteClientAcknowledged && deletePhraseInput === 'delete';
+
   const onConfirmDelete = async () => {
-    if (!token || !deleteConfirm) return;
+    if (!token || !deleteConfirm || !deleteFormValid) return;
     const removedId = deleteConfirm.id;
     setDeletingId(removedId);
     setErr('');
@@ -126,6 +148,8 @@ export default function AgencyTenantDirectoryPage() {
         return n;
       });
       setDeleteConfirm(null);
+      setDeleteClientAcknowledged(false);
+      setDeletePhraseInput('');
       setDeleteOk('Workspace removed.');
       setLoadAttempt(a => a + 1);
     } catch (e) {
@@ -135,63 +159,69 @@ export default function AgencyTenantDirectoryPage() {
     }
   };
 
+  const workspaceToolbar = (
+    <div
+      style={{
+        display: 'flex',
+        flexWrap: 'wrap',
+        gap: '0.65rem',
+        alignItems: 'center',
+        marginBottom: '1rem',
+      }}
+    >
+      <input
+        type="search"
+        placeholder="Search by name"
+        value={q}
+        onChange={e => setQ(e.target.value)}
+        aria-label="Search workspaces"
+        style={{ ...mvpInputStyle, flex: '1 1 220px', minWidth: '200px', marginTop: 0 }}
+      />
+      <button type="button" onClick={openCreateModal} style={mvpPrimaryButtonStyle}>
+        Create workspace
+      </button>
+    </div>
+  );
+
   return (
     <div>
       <PageHeader title="Client Workspaces" eyebrow="Agency account" />
       {deleteOk ? (
-        <p style={{ fontSize: '0.86rem', color: '#166534', margin: '0 0 0.75rem', fontWeight: 600 }}>{deleteOk}</p>
+        <p
+          style={{
+            fontSize: '0.86rem',
+            color: 'var(--aisbp-alert-success-fg, #166534)',
+            margin: '0 0 0.75rem',
+            fontWeight: 600,
+          }}
+        >
+          {deleteOk}
+        </p>
       ) : null}
-      <p style={{ fontSize: '0.83rem', color: '#64748b', margin: '0 0 0.75rem', lineHeight: 1.45, maxWidth: '40rem' }}>
+      <p
+        style={{
+          fontSize: '0.83rem',
+          color: 'var(--aisbp-muted, #64748b)',
+          margin: '0 0 0.75rem',
+          lineHeight: 1.45,
+          maxWidth: '40rem',
+        }}
+      >
         Create and manage the client workspaces connected to CRM.
       </p>
 
-      <SectionCard
-        title="Create workspace"
-        subtitle="Start with a workspace name. You can connect CRM now or later."
-      >
-        {createOk ? (
-          <p style={{ fontSize: '0.86rem', color: '#166534', margin: '0 0 0.75rem', fontWeight: 600 }}>{createOk}</p>
-        ) : null}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem', maxWidth: '480px' }}>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
-            <input
-              value={newName}
-              onChange={e => {
-                setNewName(e.target.value);
-                setCreateOk('');
-                setDeleteOk('');
-              }}
-              placeholder="Workspace name"
-              style={{ ...mvpInputStyle, flex: '1 1 200px', minWidth: '200px' }}
-              aria-label="New workspace name"
-            />
-            <button
-              type="button"
-              disabled={creating || !newName.trim()}
-              onClick={() => void onCreate()}
-              style={{ ...mvpPrimaryButtonStyle, opacity: creating || !newName.trim() ? 0.6 : 1 }}
-            >
-              {creating ? 'Creating…' : 'Create workspace'}
-            </button>
-          </div>
-          <div>
-            <label style={{ fontSize: '0.75rem', color: '#64748b', display: 'block', marginBottom: '0.25rem' }}>
-              CRM location ID (optional)
-            </label>
-            <input
-              value={newGhlLocationId}
-              onChange={e => {
-                setNewGhlLocationId(e.target.value);
-                setCreateOk('');
-              }}
-              placeholder="Location ID from CRM"
-              style={{ ...mvpInputStyle, maxWidth: '100%' }}
-              autoComplete="off"
-              aria-label="Optional CRM location ID for new workspace"
-            />
-          </div>
-        </div>
-      </SectionCard>
+      {createOk ? (
+        <p
+          style={{
+            fontSize: '0.86rem',
+            color: 'var(--aisbp-alert-success-fg, #166534)',
+            margin: '0 0 0.75rem',
+            fontWeight: 600,
+          }}
+        >
+          {createOk}
+        </p>
+      ) : null}
 
       {err ? (
         <div style={{ marginBottom: '1rem' }}>
@@ -204,57 +234,91 @@ export default function AgencyTenantDirectoryPage() {
             }}
             style={{
               marginTop: '0.5rem',
-              padding: '0.4rem 0.75rem',
-              borderRadius: '6px',
-              border: '1px solid #ccc',
-              background: '#fff',
-              cursor: 'pointer',
-              fontSize: '0.85rem',
+              ...mvpButtonStyle,
             }}
           >
             Retry
           </button>
         </div>
       ) : null}
-      <SectionCard title="Search" subtitle="Filter by name.">
-        <input
-          type="search"
-          placeholder="Search by name"
-          value={q}
-          onChange={e => setQ(e.target.value)}
-          aria-label="Search workspaces"
-          style={{ ...mvpInputStyle, maxWidth: '400px' }}
-        />
-      </SectionCard>
 
       {loading ? (
         <LoadingBlock message="Loading…" />
       ) : err && list.length === 0 ? null : list.length === 0 ? (
-        <EmptyState title="No workspaces yet" detail="Create the first client workspace above." />
+        <SectionCard title="Workspaces" subtitle="Create a client workspace to get started.">
+          <EmptyState title="No workspaces yet" detail="Add a workspace, then connect CRM from the workspace or CRM connection settings." />
+          <button type="button" onClick={openCreateModal} style={{ ...mvpPrimaryButtonStyle, marginTop: '0.85rem' }}>
+            Create workspace
+          </button>
+        </SectionCard>
       ) : (
-        <SectionCard title={`Workspaces (${filtered.length}${filtered.length !== list.length ? ` of ${list.length}` : ''})`}>
+        <SectionCard
+          title={`Workspaces (${filtered.length}${filtered.length !== list.length ? ` of ${list.length}` : ''})`}
+          subtitle="Search by name, then open or configure a workspace."
+        >
+          {workspaceToolbar}
           {filtered.length === 0 ? (
             <EmptyState title="No matches" detail="Try a different search term." />
           ) : (
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem', minWidth: '920px' }}>
                 <thead>
-                  <tr style={{ textAlign: 'left', borderBottom: '1px solid #e5e5e5' }}>
-                    <th style={{ padding: '0.6rem 0.5rem', fontWeight: 600, color: '#444' }}>Workspace</th>
-                    <th style={{ padding: '0.6rem 0.5rem', fontWeight: 600, color: '#444' }}>Status</th>
-                    <th style={{ padding: '0.6rem 0.5rem', fontWeight: 600, color: '#444' }}>CRM</th>
-                    <th style={{ padding: '0.6rem 0.5rem', fontWeight: 600, color: '#444' }}>AI setup</th>
-                    <th style={{ padding: '0.6rem 0.5rem', fontWeight: 600, color: '#444' }}>Actions</th>
+                  <tr
+                    style={{
+                      textAlign: 'left',
+                      borderBottom: '1px solid var(--aisbp-border, #e5e5e5)',
+                    }}
+                  >
+                    <th
+                      style={{
+                        padding: '0.6rem 0.5rem',
+                        fontWeight: 600,
+                        color: 'var(--aisbp-text-secondary, #444)',
+                      }}
+                    >
+                      Workspace
+                    </th>
+                    <th
+                      style={{
+                        padding: '0.6rem 0.5rem',
+                        fontWeight: 600,
+                        color: 'var(--aisbp-text-secondary, #444)',
+                      }}
+                    >
+                      Status
+                    </th>
+                    <th
+                      style={{
+                        padding: '0.6rem 0.5rem',
+                        fontWeight: 600,
+                        color: 'var(--aisbp-text-secondary, #444)',
+                      }}
+                    >
+                      CRM connection
+                    </th>
+                    <th
+                      style={{
+                        padding: '0.6rem 0.5rem',
+                        fontWeight: 600,
+                        color: 'var(--aisbp-text-secondary, #444)',
+                      }}
+                    >
+                      AI setup
+                    </th>
+                    <th
+                      style={{
+                        padding: '0.6rem 0.5rem',
+                        fontWeight: 600,
+                        color: 'var(--aisbp-text-secondary, #444)',
+                      }}
+                    >
+                      Actions
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
                   {filtered.map(t => (
-                    <TenantNameRow
-                      key={t.id}
-                      t={t}
-                      ghl={ghlById[t.id] ?? null}
-                      onRequestDelete={openDeleteModal}
-                    />
+                    <TenantNameRow key={t.id} t={t} ghl={ghlById[t.id] ?? null} onRequestDelete={openDeleteModal} />
                   ))}
                 </tbody>
               </table>
@@ -262,12 +326,120 @@ export default function AgencyTenantDirectoryPage() {
           )}
         </SectionCard>
       )}
+
+      {createModalOpen ? (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'var(--aisbp-overlay, rgba(15, 23, 42, 0.45))',
+            zIndex: 50,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '1rem',
+          }}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="create-workspace-title"
+        >
+          <div
+            style={{
+              background: 'var(--aisbp-modal-bg, #fff)',
+              border: '1px solid var(--aisbp-modal-border, #e2e8f0)',
+              borderRadius: '10px',
+              padding: '1.25rem 1.35rem',
+              maxWidth: '440px',
+              width: '100%',
+              boxShadow: '0 12px 40px rgba(0,0,0,0.12)',
+            }}
+          >
+            <h2
+              id="create-workspace-title"
+              style={{
+                fontSize: '1.05rem',
+                fontWeight: 800,
+                margin: '0 0 0.5rem',
+                color: 'var(--aisbp-text-heading, #0f172a)',
+              }}
+            >
+              Create workspace
+            </h2>
+            <p
+              style={{
+                fontSize: '0.88rem',
+                color: 'var(--aisbp-muted, #475569)',
+                lineHeight: 1.5,
+                margin: '0 0 1rem',
+              }}
+            >
+              Start with a name. You can connect CRM now or later.
+            </p>
+            <form onSubmit={onCreate} style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+              <label style={mvpLabelStyle}>
+                Workspace name
+                <input
+                  value={newName}
+                  onChange={e => {
+                    setNewName(e.target.value);
+                    setCreateErr('');
+                  }}
+                  placeholder="e.g. Acme Dental"
+                  style={mvpInputStyle}
+                  autoComplete="off"
+                  aria-label="Workspace name"
+                  autoFocus
+                />
+              </label>
+              <label style={mvpLabelStyle}>
+                CRM location ID (optional)
+                <input
+                  value={newGhlLocationId}
+                  onChange={e => {
+                    setNewGhlLocationId(e.target.value);
+                    setCreateErr('');
+                  }}
+                  placeholder="From CRM location settings"
+                  style={mvpInputStyle}
+                  autoComplete="off"
+                  aria-label="Optional CRM location ID"
+                />
+                <span style={mvpFieldHint}>You can add or change this later in CRM connection settings.</span>
+              </label>
+              {createErr ? <ErrorBanner message={createErr} /> : null}
+              <div style={{ display: 'flex', gap: '0.6rem', justifyContent: 'flex-end', flexWrap: 'wrap', marginTop: '0.25rem' }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!creating) {
+                      setCreateModalOpen(false);
+                      setCreateErr('');
+                    }
+                  }}
+                  disabled={creating}
+                  style={mvpButtonStyle}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={creating || !newName.trim()}
+                  style={{ ...mvpPrimaryButtonStyle, opacity: creating || !newName.trim() ? 0.65 : 1 }}
+                >
+                  {creating ? 'Creating…' : 'Create workspace'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
+
       {deleteConfirm ? (
         <div
           style={{
             position: 'fixed',
             inset: 0,
-            background: 'rgba(15, 23, 42, 0.45)',
+            background: 'var(--aisbp-overlay, rgba(15, 23, 42, 0.45))',
             zIndex: 50,
             display: 'flex',
             alignItems: 'center',
@@ -280,56 +452,111 @@ export default function AgencyTenantDirectoryPage() {
         >
           <div
             style={{
-              background: '#fff',
+              background: 'var(--aisbp-modal-bg, #fff)',
+              border: '1px solid var(--aisbp-modal-border, #e2e8f0)',
               borderRadius: '10px',
               padding: '1.25rem 1.35rem',
-              maxWidth: '420px',
+              maxWidth: '440px',
               width: '100%',
               boxShadow: '0 12px 40px rgba(0,0,0,0.12)',
             }}
           >
-            <h2 id="delete-subaccount-title" style={{ fontSize: '1.05rem', fontWeight: 800, margin: '0 0 0.5rem', color: '#0f172a' }}>
+            <h2
+              id="delete-subaccount-title"
+              style={{
+                fontSize: '1.05rem',
+                fontWeight: 800,
+                margin: '0 0 0.5rem',
+                color: 'var(--aisbp-text-heading, #0f172a)',
+              }}
+            >
               Delete workspace?
             </h2>
-            <p style={{ fontSize: '0.88rem', color: '#475569', lineHeight: 1.5, margin: '0 0 1.1rem' }}>
-              This will remove the workspace record. This cannot be undone.
+            <p style={{ fontSize: '0.88rem', color: 'var(--aisbp-muted, #475569)', lineHeight: 1.5, margin: '0 0 1rem' }}>
+              This will remove the workspace record and may stop the client&apos;s AISalesBot Pro service access. Only continue if the client has
+              been informed and agreed to stop the service.
             </p>
-            <div style={{ display: 'flex', gap: '0.6rem', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
-              <button
-                type="button"
-                onClick={() => {
-                  if (!deletingId) setDeleteConfirm(null);
-                }}
-                disabled={deletingId !== null}
+            <form
+              onSubmit={e => {
+                e.preventDefault();
+                if (!deleteFormValid || deletingId) return;
+                void onConfirmDelete();
+              }}
+            >
+              <label
                 style={{
-                  padding: '0.45rem 0.9rem',
+                  display: 'flex',
+                  gap: '0.55rem',
+                  alignItems: 'flex-start',
                   fontSize: '0.86rem',
-                  borderRadius: '6px',
-                  border: '1px solid #cbd5e1',
-                  background: '#f8fafc',
+                  color: 'var(--aisbp-text-secondary, #334155)',
+                  lineHeight: 1.45,
+                  marginBottom: '1rem',
                   cursor: deletingId ? 'not-allowed' : 'pointer',
                 }}
               >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => void onConfirmDelete()}
-                disabled={deletingId !== null}
+                <input
+                  type="checkbox"
+                  checked={deleteClientAcknowledged}
+                  disabled={deletingId !== null}
+                  onChange={e => setDeleteClientAcknowledged(e.target.checked)}
+                  style={{ marginTop: '0.2rem', flexShrink: 0 }}
+                />
+                <span>I confirm this client has been informed and agreed to stop the service.</span>
+              </label>
+              <label
                 style={{
-                  padding: '0.45rem 0.9rem',
-                  fontSize: '0.86rem',
-                  borderRadius: '6px',
-                  border: '1px solid #b91c1c',
-                  background: '#b91c1c',
-                  color: '#fff',
-                  fontWeight: 700,
-                  cursor: deletingId ? 'not-allowed' : 'pointer',
+                  display: 'block',
+                  fontSize: '0.8rem',
+                  fontWeight: 650,
+                  color: 'var(--aisbp-text-secondary, #475569)',
+                  marginBottom: '0.35rem',
                 }}
               >
-                {deletingId ? 'Deleting…' : 'Delete workspace'}
-              </button>
-            </div>
+                Type &quot;delete&quot; to confirm.
+              </label>
+              <input
+                type="text"
+                value={deletePhraseInput}
+                onChange={e => setDeletePhraseInput(e.target.value)}
+                disabled={deletingId !== null}
+                autoComplete="off"
+                aria-label='Type "delete" to confirm'
+                style={{ ...mvpInputStyle, marginBottom: '1.1rem' }}
+              />
+              <div style={{ display: 'flex', gap: '0.6rem', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!deletingId) {
+                      setDeleteConfirm(null);
+                      setDeleteClientAcknowledged(false);
+                      setDeletePhraseInput('');
+                    }
+                  }}
+                  disabled={deletingId !== null}
+                  style={mvpButtonStyle}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={deletingId !== null || !deleteFormValid}
+                  style={{
+                    padding: '0.45rem 0.9rem',
+                    fontSize: '0.86rem',
+                    borderRadius: '6px',
+                    border: '1px solid #b91c1c',
+                    background: deleteFormValid ? '#b91c1c' : 'var(--aisbp-progress-track, #e2e8f0)',
+                    color: deleteFormValid ? '#fff' : 'var(--aisbp-muted, #94a3b8)',
+                    fontWeight: 700,
+                    cursor: deletingId || !deleteFormValid ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  {deletingId ? 'Deleting…' : 'Delete workspace'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       ) : null}
@@ -346,67 +573,44 @@ function TenantNameRow({
   ghl: { status: string; connected: boolean; maskToken?: string } | null;
   onRequestDelete: (row: TenantRow) => void;
 }) {
-  const [advancedOpen, setAdvancedOpen] = useState(false);
-
   return (
-    <tr style={{ borderBottom: '1px solid #f1f5f9', verticalAlign: 'top', background: '#fff' }}>
+    <tr
+      style={{
+        borderBottom: '1px solid var(--aisbp-border, #f1f5f9)',
+        verticalAlign: 'top',
+        background: 'var(--aisbp-table-row-bg, #fff)',
+      }}
+    >
       <td style={{ padding: '0.75rem 0.5rem' }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', alignItems: 'flex-start' }}>
-          <span style={{ fontWeight: 700, color: '#0f172a', fontSize: '0.95rem' }}>{t.name}</span>
+          <span style={{ fontWeight: 700, color: 'var(--aisbp-text-heading, #0f172a)', fontSize: '0.95rem' }}>{t.name}</span>
           <Link
             href={`/app/tenant/${t.id}/control-panel`}
-            style={{ fontSize: '0.78rem', fontWeight: 600, color: '#2563eb', textDecoration: 'none' }}
+            style={{
+              fontSize: '0.78rem',
+              fontWeight: 600,
+              color: 'var(--aisbp-tenant-nav-active-text, #2563eb)',
+              textDecoration: 'none',
+            }}
           >
             Rename in workspace settings →
           </Link>
         </div>
-        <details
-          style={{ marginTop: '0.4rem' }}
-          onToggle={e => {
-            setAdvancedOpen((e.currentTarget as HTMLDetailsElement).open);
-          }}
-        >
-          <summary style={{ fontSize: '0.7rem', color: '#94a3b8', cursor: 'pointer', listStyle: 'none' } as CSSProperties}>
-            Advanced details
-          </summary>
-          {advancedOpen ? (
-            <p
-              style={{
-                fontSize: '0.68rem',
-                color: '#64748b',
-                fontFamily: 'inherit',
-                margin: '0.3rem 0 0',
-                lineHeight: 1.35,
-                wordBreak: 'break-all',
-              } as CSSProperties}
-            >
-              Workspace ID: {t.id}
-            </p>
-          ) : null}
-        </details>
       </td>
       <td style={{ padding: '0.75rem 0.5rem' }}>
         <StatusPill label={t.status === 'ACTIVE' ? 'Active' : t.status} tone="neutral" />
       </td>
       <td style={{ padding: '0.75rem 0.5rem', fontSize: '0.8rem' }}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-          {ghl ? (
-            <StatusPill
-              label={ghl.connected && ghl.status === 'CONNECTED' ? 'Connected' : ghl.status === 'DISCONNECTED' ? 'Needs setup' : 'Needs review'}
-              tone={ghl.connected && ghl.status === 'CONNECTED' ? 'ok' : ghl.status === 'DISCONNECTED' ? 'warn' : 'bad'}
-            />
-          ) : (
-            <StatusPill label="Needs setup" tone="warn" />
-          )}
-          <details>
-            <summary style={{ cursor: 'pointer', fontSize: '0.72rem', color: '#64748b' }}>Support details</summary>
-            <p style={{ margin: '0.35rem 0 0', fontFamily: 'inherit', fontSize: '0.72rem', color: '#64748b', wordBreak: 'break-all' }}>
-              CRM location ID: {t.ghlLocationId && String(t.ghlLocationId).trim() ? t.ghlLocationId : '—'}
-              <br />
-              Token: {ghl?.maskToken ?? '—'}
-            </p>
-          </details>
-        </div>
+        {ghl ? (
+          <StatusPill
+            label={
+              ghl.connected && ghl.status === 'CONNECTED' ? 'Connected' : ghl.status === 'DISCONNECTED' ? 'Needs setup' : 'Needs review'
+            }
+            tone={ghl.connected && ghl.status === 'CONNECTED' ? 'ok' : ghl.status === 'DISCONNECTED' ? 'warn' : 'bad'}
+          />
+        ) : (
+          <StatusPill label="Needs setup" tone="warn" />
+        )}
       </td>
       <td style={{ padding: '0.75rem 0.5rem', fontSize: '0.8rem' }}>
         <StatusPill label="Agency defaults" tone="neutral" />
@@ -419,7 +623,7 @@ function TenantNameRow({
               display: 'inline-block',
               padding: '0.35rem 0.65rem',
               borderRadius: '6px',
-              background: '#0070f3',
+              background: '#2563eb',
               color: '#fff',
               textDecoration: 'none',
               fontSize: '0.82rem',
@@ -434,10 +638,12 @@ function TenantNameRow({
               display: 'inline-block',
               padding: '0.35rem 0.65rem',
               borderRadius: '6px',
-              border: '1px solid #ccc',
-              color: '#1a1a1a',
+              border: '1px solid var(--aisbp-border-strong, #cbd5e1)',
+              color: 'var(--aisbp-text-secondary, #1a1a1a)',
+              background: 'var(--aisbp-surface, #fff)',
               textDecoration: 'none',
               fontSize: '0.82rem',
+              fontWeight: 600,
             }}
           >
             Connect CRM
@@ -447,14 +653,16 @@ function TenantNameRow({
             onClick={() => onRequestDelete(t)}
             style={{
               display: 'inline-block',
-              padding: '0.35rem 0.65rem',
+              padding: '0.3rem 0.5rem',
               borderRadius: '6px',
-              border: '1px solid #fecaca',
-              background: '#fff1f2',
-              color: '#b91c1c',
-              fontSize: '0.82rem',
-              fontWeight: 600,
+              border: 'none',
+              background: 'transparent',
+              color: 'var(--aisbp-pill-bad-fg, #b91c1c)',
+              fontSize: '0.78rem',
+              fontWeight: 500,
               cursor: 'pointer',
+              textDecoration: 'underline',
+              textUnderlineOffset: '2px',
             }}
           >
             Delete

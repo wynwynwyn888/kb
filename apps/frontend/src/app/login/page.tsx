@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '../../contexts/AuthContext';
 import { LoginSessionAlert } from '../../components/app/LoginSessionAlert';
 import { BrandLogo } from '../../components/app/BrandLogo';
+import { ThemeToggle } from '../../components/app/ThemeToggle';
+import { mvpInputStyle, mvpLabelStyle, mvpPrimaryButtonStyle } from '../../components/app/mvp-ui';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -32,6 +34,7 @@ export default function LoginPage() {
   return (
     <div
       style={{
+        position: 'relative',
         minHeight: '100vh',
         background:
           'radial-gradient(1200px 600px at 15% 10%, rgba(15, 98, 254, 0.12), transparent 55%), radial-gradient(900px 520px at 80% 20%, rgba(34, 197, 94, 0.10), transparent 55%), var(--aisbp-bg, #f8fafc)',
@@ -39,6 +42,16 @@ export default function LoginPage() {
         alignItems: 'stretch',
       }}
     >
+      <div
+        style={{
+          position: 'absolute',
+          top: 'clamp(1rem, 3vw, 1.5rem)',
+          right: 'clamp(1rem, 3vw, 1.5rem)',
+          zIndex: 2,
+        }}
+      >
+        <ThemeToggle />
+      </div>
       <div
         style={{
           width: 'min(1100px, 100%)',
@@ -71,8 +84,8 @@ export default function LoginPage() {
 
         <div
           style={{
-            border: '1px solid rgba(226, 232, 240, 0.9)',
-            background: 'rgba(255, 255, 255, 0.75)',
+            border: '1px solid var(--aisbp-glass-border, rgba(226, 232, 240, 0.9))',
+            background: 'var(--aisbp-glass-bg, rgba(255, 255, 255, 0.75))',
             backdropFilter: 'blur(18px)',
             WebkitBackdropFilter: 'blur(18px)',
             borderRadius: 18,
@@ -95,7 +108,7 @@ export default function LoginPage() {
 
           <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '0.9rem', marginTop: '0.9rem' }}>
             <div>
-              <label htmlFor="email" style={{ display: 'block', marginBottom: '0.35rem', fontSize: '0.85rem', fontWeight: 650, color: '#0f172a' }}>
+              <label htmlFor="email" style={{ ...mvpLabelStyle, display: 'block', marginBottom: '0.35rem' }}>
                 Email
               </label>
               <input
@@ -107,20 +120,18 @@ export default function LoginPage() {
                 autoComplete="username"
                 disabled={loading}
                 style={{
+                  ...mvpInputStyle,
                   width: '100%',
                   padding: '0.75rem 0.8rem',
                   fontSize: '1rem',
                   boxSizing: 'border-box',
                   borderRadius: 10,
-                  border: '1px solid rgba(203, 213, 225, 0.9)',
-                  background: '#fff',
-                  outline: 'none',
                 }}
               />
             </div>
 
             <div>
-              <label htmlFor="password" style={{ display: 'block', marginBottom: '0.35rem', fontSize: '0.85rem', fontWeight: 650, color: '#0f172a' }}>
+              <label htmlFor="password" style={{ ...mvpLabelStyle, display: 'block', marginBottom: '0.35rem' }}>
                 Password
               </label>
               <input
@@ -132,14 +143,12 @@ export default function LoginPage() {
                 autoComplete="current-password"
                 disabled={loading}
                 style={{
+                  ...mvpInputStyle,
                   width: '100%',
                   padding: '0.75rem 0.8rem',
                   fontSize: '1rem',
                   boxSizing: 'border-box',
                   borderRadius: 10,
-                  border: '1px solid rgba(203, 213, 225, 0.9)',
-                  background: '#fff',
-                  outline: 'none',
                 }}
               />
             </div>
@@ -148,11 +157,11 @@ export default function LoginPage() {
               <div
                 role="alert"
                 style={{
-                  color: '#8b1d1d',
+                  color: 'var(--aisbp-alert-error-fg, #8b1d1d)',
                   padding: '0.75rem',
-                  backgroundColor: '#fde8e8',
+                  backgroundColor: 'var(--aisbp-alert-error-bg, #fde8e8)',
                   borderRadius: '10px',
-                  border: '1px solid #f5c2c7',
+                  border: '1px solid var(--aisbp-alert-error-border, #f5c2c7)',
                   fontSize: '0.9rem',
                   lineHeight: 1.45,
                 }}
@@ -165,15 +174,14 @@ export default function LoginPage() {
               type="submit"
               disabled={loading}
               style={{
+                ...mvpPrimaryButtonStyle,
                 padding: '0.8rem 0.95rem',
                 fontSize: '1rem',
                 fontWeight: 700,
-                backgroundColor: loading ? 'rgba(15, 98, 254, 0.55)' : '#0F62FE',
-                color: 'white',
-                border: '1px solid rgba(15, 98, 254, 0.25)',
-                cursor: loading ? 'not-allowed' : 'pointer',
                 borderRadius: 12,
                 boxShadow: loading ? 'none' : '0 10px 26px rgba(15, 98, 254, 0.22)',
+                opacity: loading ? 0.85 : 1,
+                cursor: loading ? 'not-allowed' : 'pointer',
               }}
             >
               {loading ? 'Signing in…' : 'Sign in'}

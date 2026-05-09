@@ -313,18 +313,32 @@ export class QuotasService {
     if (error) throw new Error(error.message);
     const rows = data ?? [];
     const pids = [...new Set(rows.map(r => r.profile_id).filter(Boolean))] as string[];
-    if (pids.length === 0) return rows;
-    const { data: profs } = await this.supabase
-      .from('profiles')
-      .select('id, email, full_name')
-      .in('id', pids);
-    const pmap = new Map((profs ?? []).map(p => [p.id as string, p as { email?: string; full_name?: string }]));
+    const tids = [...new Set(rows.map(r => r.tenant_id).filter(Boolean))] as string[];
+    let pmap = new Map<string, { email?: string; full_name?: string }>();
+    if (pids.length > 0) {
+      const { data: profs } = await this.supabase
+        .from('profiles')
+        .select('id, email, full_name')
+        .in('id', pids);
+      pmap = new Map((profs ?? []).map(p => [p.id as string, p as { email?: string; full_name?: string }]));
+    }
+    let tmap = new Map<string, string>();
+    if (tids.length > 0) {
+      const { data: tenants } = await this.supabase
+        .from('tenants')
+        .select('id, name')
+        .eq('agency_id', agencyId)
+        .in('id', tids);
+      tmap = new Map((tenants ?? []).map(t => [t.id as string, String((t as { name?: string }).name ?? '').trim() || 'Workspace']));
+    }
     return rows.map(r => {
       const p = r.profile_id ? pmap.get(r.profile_id) : undefined;
+      const tid = r.tenant_id ? String(r.tenant_id) : null;
       return {
         ...r,
         actorEmail: p?.email ?? null,
         actorName: p?.full_name ?? null,
+        workspaceName: tid ? (tmap.get(tid) ?? null) : null,
       };
     });
   }
@@ -353,6 +367,7 @@ export class QuotasService {
     lowCreditThreshold: number;
     usedToday: number;
     usedThisMonth: number;
+    usedThisYear: number;
     status: 'ACTIVE' | 'LOW_CREDIT' | 'PAUSED_NO_CREDITS' | 'OVER_NEGATIVE_LIMIT';
   }> {
     const { data: wallet, error: wErr } = await this.supabase
@@ -376,6 +391,7 @@ export class QuotasService {
         lowCreditThreshold: 0,
         usedToday: 0,
         usedThisMonth: 0,
+        usedThisYear: 0,
         status: 'ACTIVE',
       };
     }
@@ -390,6 +406,7 @@ export class QuotasService {
     const now = new Date();
     const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const startOfYear = new Date(now.getFullYear(), 0, 1);
 
     const { data: todayRows } = await this.supabase
       .from('quota_ledgers')
@@ -406,6 +423,14 @@ export class QuotasService {
       .eq('movement_type', 'reply_debit')
       .gte('created_at', startOfMonth.toISOString());
     const usedThisMonth = (monthRows ?? []).reduce((s, r) => s + (typeof r.amount === 'number' ? r.amount : 0), 0);
+
+    const { data: yearRows } = await this.supabase
+      .from('quota_ledgers')
+      .select('amount')
+      .eq('wallet_id', wallet.id)
+      .eq('movement_type', 'reply_debit')
+      .gte('created_at', startOfYear.toISOString());
+    const usedThisYear = (yearRows ?? []).reduce((s, r) => s + (typeof r.amount === 'number' ? r.amount : 0), 0);
 
     const blocked = allowNegativeCredits ? balance <= negativeCreditLimit : balance <= 0;
     const status: 'ACTIVE' | 'LOW_CREDIT' | 'PAUSED_NO_CREDITS' | 'OVER_NEGATIVE_LIMIT' = blocked
@@ -426,6 +451,7 @@ export class QuotasService {
       lowCreditThreshold,
       usedToday,
       usedThisMonth,
+      usedThisYear,
       status,
     };
   }
@@ -460,6 +486,7 @@ export class QuotasService {
       balance: number;
       usedToday: number;
       usedThisMonth: number;
+      usedThisYear: number;
       allowNegativeCredits: boolean;
       negativeCreditLimit: number;
       lowCreditThreshold: number;
@@ -488,10 +515,12 @@ export class QuotasService {
     const now = new Date();
     const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
+    const startOfYear = new Date(now.getFullYear(), 0, 1).toISOString();
 
     const walletIds = (wallets ?? []).map(w => w.id as string).filter(Boolean);
     const usedTodayByWallet = new Map<string, number>();
     const usedMonthByWallet = new Map<string, number>();
+    const usedYearByWallet = new Map<string, number>();
     if (walletIds.length > 0) {
       const { data: trows } = await this.supabase
         .from('quota_ledgers')
@@ -514,6 +543,17 @@ export class QuotasService {
         const wid = String(r.wallet_id);
         const amt = typeof r.amount === 'number' ? r.amount : 0;
         usedMonthByWallet.set(wid, (usedMonthByWallet.get(wid) ?? 0) + amt);
+      }
+      const { data: yrows } = await this.supabase
+        .from('quota_ledgers')
+        .select('wallet_id, amount')
+        .in('wallet_id', walletIds)
+        .eq('movement_type', 'reply_debit')
+        .gte('created_at', startOfYear);
+      for (const r of (yrows ?? []) as any[]) {
+        const wid = String(r.wallet_id);
+        const amt = typeof r.amount === 'number' ? r.amount : 0;
+        usedYearByWallet.set(wid, (usedYearByWallet.get(wid) ?? 0) + amt);
       }
     }
 
@@ -544,6 +584,7 @@ export class QuotasService {
         balance,
         usedToday: wid ? (usedTodayByWallet.get(wid) ?? 0) : 0,
         usedThisMonth: wid ? (usedMonthByWallet.get(wid) ?? 0) : 0,
+        usedThisYear: wid ? (usedYearByWallet.get(wid) ?? 0) : 0,
         allowNegativeCredits,
         negativeCreditLimit,
         lowCreditThreshold,

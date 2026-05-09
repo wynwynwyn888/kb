@@ -26,6 +26,7 @@ describe('QuotasService', () => {
       expect(r.balance).toBe(0);
       expect(r.usedToday).toBe(0);
       expect(r.usedThisMonth).toBe(0);
+      expect(r.usedThisYear).toBe(0);
       expect(r.status).toBe('ACTIVE');
     });
 
@@ -45,6 +46,7 @@ describe('QuotasService', () => {
       expect(r.balance).toBe(5000);
       expect(r.totalQuota).toBe(5000);
       expect(r.usedQuota).toBe(0);
+      expect(r.usedThisYear).toBe(0);
     });
   });
 });

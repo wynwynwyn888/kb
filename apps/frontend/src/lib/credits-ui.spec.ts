@@ -5,9 +5,9 @@ describe('credits-ui', () => {
   it('maps status to client-facing labels', () => {
     expect(creditStatusLabel('ACTIVE')).toBe('Active');
     expect(creditStatusLabel('LOW_CREDIT')).toBe('Low credit');
-    expect(creditStatusLabel('PAUSED_NO_CREDITS')).toBe('Paused: no credits');
-    expect(creditStatusLabel('NEGATIVE_ALLOWED')).toBe('Negative allowed');
-    expect(creditStatusLabel('OVER_NEGATIVE_LIMIT')).toBe('Over negative limit');
+    expect(creditStatusLabel('PAUSED_NO_CREDITS')).toBe('Paused');
+    expect(creditStatusLabel('NEGATIVE_ALLOWED')).toBe('Within overage allowance');
+    expect(creditStatusLabel('OVER_NEGATIVE_LIMIT')).toBe('Over limit');
   });
 
   it('formats signed integers with + for positives', () => {

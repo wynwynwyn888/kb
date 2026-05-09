@@ -9,9 +9,9 @@ export type CreditStatus =
 export function creditStatusLabel(status: CreditStatus): string {
   if (status === 'ACTIVE') return 'Active';
   if (status === 'LOW_CREDIT') return 'Low credit';
-  if (status === 'PAUSED_NO_CREDITS') return 'Paused: no credits';
-  if (status === 'NEGATIVE_ALLOWED') return 'Negative allowed';
-  if (status === 'OVER_NEGATIVE_LIMIT') return 'Over negative limit';
+  if (status === 'PAUSED_NO_CREDITS') return 'Paused';
+  if (status === 'NEGATIVE_ALLOWED') return 'Within overage allowance';
+  if (status === 'OVER_NEGATIVE_LIMIT') return 'Over limit';
   return String(status || 'Active');
 }
 

@@ -1178,6 +1178,7 @@ export async function listAgencyCreditWallets(token: string) {
     balance: number;
     usedToday: number;
     usedThisMonth: number;
+    usedThisYear: number;
     allowNegativeCredits: boolean;
     negativeCreditLimit: number;
     lowCreditThreshold: number;
@@ -1222,6 +1223,7 @@ export type QuotaAuditLogRow = {
   created_at: string;
   actorEmail?: string | null;
   actorName?: string | null;
+  workspaceName?: string | null;
 };
 
 export async function getQuotaAuditLog(token: string, opts?: { tenantId?: string; limit?: number }) {
@@ -1243,6 +1245,7 @@ export async function getTenantCreditsUsage(token: string, tenantId: string) {
     lowCreditThreshold: number;
     usedToday: number;
     usedThisMonth: number;
+    usedThisYear: number;
     status: 'ACTIVE' | 'LOW_CREDIT' | 'PAUSED_NO_CREDITS' | 'OVER_NEGATIVE_LIMIT';
   }>(`/quotas/tenant/usage/${encodeURIComponent(tenantId)}`, { token });
 }

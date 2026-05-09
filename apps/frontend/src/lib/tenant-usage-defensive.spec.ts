@@ -12,7 +12,7 @@ describe('Tenant usage defensive defaults', () => {
     expect(s).toContain('const ledgerItems = Array.isArray(ledger) ? ledger : []');
     expect(s).toContain('Usage data is temporarily unavailable. Please try again.');
     expect(s).toContain('No credits on file yet.');
-    expect(s).toContain('No automated reply debits this month yet.');
+    expect(s).toContain('No assistant replies have used credits yet this month.');
   });
 });
 

@@ -7,6 +7,12 @@ import { useAuth } from '@/contexts/AuthContext';
 import { getTenantCreditsLedger, getTenantCreditsUsage } from '@/lib/api';
 import { ErrorBanner, LoadingBlock, PageHeader, SectionCard, formatDateTime } from '@/components/app/mvp-ui';
 import { creditStatusLabel, type CreditStatus } from '@/lib/credits-ui';
+import {
+  LEDGER_REPLY_DEBIT,
+  ledgerMovementCustomerLabel,
+  projectedCreditsRemainingDaysDisplay,
+  softenLedgerCustomerDescription,
+} from '@/lib/credits-billing-copy';
 
 type UsageSnap = NonNullable<Awaited<ReturnType<typeof getTenantCreditsUsage>>>;
 
@@ -40,6 +46,7 @@ export default function TenantUsagePage() {
     movement_type: string | null;
     balance_after: number | null;
     description: string;
+    conversation_id: string | null;
     created_at: string;
   }> | null>(null);
 
@@ -101,14 +108,15 @@ export default function TenantUsagePage() {
   const balance = safeFiniteNumber(usageSummary?.balance, 0);
   const usedToday = safeFiniteNumber(usageSummary?.usedToday, 0);
   const usedThisMonth = safeFiniteNumber(usageSummary?.usedThisMonth, 0);
+  const usedThisYear = safeFiniteNumber(usageSummary?.usedThisYear, 0);
   const status = (usageSummary?.status != null ? String(usageSummary.status) : 'ACTIVE') as CreditStatus;
 
   const pct = totalQuota > 0 ? Math.min(100, Math.round((usedQuota / totalQuota) * 100)) : null;
 
+  const dayOfMonth = new Date().getDate();
   const avgDaily =
-    usageSummary != null ? Math.max(0, usedThisMonth / Math.max(1, new Date().getDate())) : null;
-  const projectedDays =
-    usageSummary && avgDaily != null && avgDaily > 0 ? Math.floor(Math.max(0, balance) / avgDaily) : null;
+    usageSummary != null ? Math.max(0, usedThisMonth / Math.max(1, dayOfMonth)) : null;
+  const projectedOutcome = projectedCreditsRemainingDaysDisplay(balance, avgDaily, dayOfMonth);
 
   const showLow = status === 'LOW_CREDIT';
   const showPaused = status === 'PAUSED_NO_CREDITS' || status === 'OVER_NEGATIVE_LIMIT';
@@ -191,17 +199,18 @@ export default function TenantUsagePage() {
           >
             {totalQuota === 0 && balance === 0 ? (
               <p style={{ fontSize: '0.85rem', color: '#64748b', margin: '0 0 0.75rem', lineHeight: 1.45 }}>
-                No credits on file yet. Your agency can top up this workspace from Agency → Credits.
+                No credits on file yet. Your agency can add credits from Agency → Credits.
               </p>
             ) : null}
             {usedThisMonth === 0 && balance > 0 ? (
               <p style={{ fontSize: '0.82rem', color: '#64748b', margin: '0 0 0.75rem', lineHeight: 1.45 }}>
-                No automated reply debits this month yet. Credits below include your workspace pool.
+                No assistant replies have used credits yet this month. Your annual allowance and remaining balance are shown
+                below.
               </p>
             ) : null}
               {showPaused ? (
                 <div style={{ marginBottom: '0.75rem' }}>
-                  <ErrorBanner message="Automatic replies are paused because this workspace has no credits remaining." />
+                  <ErrorBanner message="Assistant replies are paused because this workspace has no credits remaining." />
                 </div>
               ) : showLow ? (
                 <div style={{ marginBottom: '0.75rem' }}>
@@ -223,13 +232,13 @@ export default function TenantUsagePage() {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem' }}>
                 <div>
                   <p style={{ margin: 0, fontSize: '0.75rem', textTransform: 'uppercase', letterSpacing: '0.06em', color: '#64748b', fontWeight: 600 }}>
-                    Credits remaining
+                    Annual credits remaining
                   </p>
                   <p style={{ margin: '0.15rem 0 0', fontSize: '2.1rem', fontWeight: 800, color: '#0f172a', lineHeight: 1.1 }}>
                     {balance.toLocaleString()}
                   </p>
                   <p style={{ margin: '0.35rem 0 0', fontSize: '0.88rem', color: '#64748b' }}>
-                    of {totalQuota.toLocaleString()} total
+                    of {totalQuota.toLocaleString()} annual allowance
                   </p>
                 </div>
                 <div style={{ textAlign: 'right', minWidth: '140px' }}>
@@ -238,7 +247,7 @@ export default function TenantUsagePage() {
                     {usedToday.toLocaleString()}
                   </p>
                   {pct != null ? (
-                    <p style={{ margin: '0.35rem 0 0', fontSize: '0.78rem', color: '#94a3b8' }}>{pct}% of pool</p>
+                    <p style={{ margin: '0.35rem 0 0', fontSize: '0.78rem', color: '#94a3b8' }}>{pct}% of allowance used</p>
                   ) : null}
                 </div>
               </div>
@@ -251,6 +260,12 @@ export default function TenantUsagePage() {
                   </p>
                 </div>
                 <div>
+                  <p style={{ margin: 0, fontSize: '0.8rem', color: '#64748b' }}>Credits used this year</p>
+                  <p style={{ margin: '0.15rem 0 0', fontSize: '1.05rem', fontWeight: 750, color: '#0f172a' }}>
+                    {usedThisYear.toLocaleString()}
+                  </p>
+                </div>
+                <div>
                   <p style={{ margin: 0, fontSize: '0.8rem', color: '#64748b' }}>Average daily usage</p>
                   <p style={{ margin: '0.15rem 0 0', fontSize: '1.05rem', fontWeight: 750, color: '#0f172a' }}>
                     {avgDaily != null && Number.isFinite(avgDaily) ? avgDaily.toFixed(1) : '—'}
@@ -259,8 +274,13 @@ export default function TenantUsagePage() {
                 <div>
                   <p style={{ margin: 0, fontSize: '0.8rem', color: '#64748b' }}>Projected days remaining</p>
                   <p style={{ margin: '0.15rem 0 0', fontSize: '1.05rem', fontWeight: 750, color: '#0f172a' }}>
-                    {projectedDays != null ? projectedDays.toLocaleString() : '—'}
+                    {projectedOutcome.display}
                   </p>
+                  {!projectedOutcome.showNumber ? (
+                    <p style={{ margin: '0.2rem 0 0', fontSize: '0.72rem', color: '#94a3b8', lineHeight: 1.35 }}>
+                      Based on average daily usage this month once there is enough history.
+                    </p>
+                  ) : null}
                 </div>
                 <div>
                   <p style={{ margin: 0, fontSize: '0.8rem', color: '#64748b' }}>Status</p>
@@ -292,7 +312,7 @@ export default function TenantUsagePage() {
 
           <SectionCard
             title="Recent credits activity"
-            subtitle="Top-ups, manual adjustments, and reply debits appear here."
+            subtitle="Top-ups, adjustments, and assistant reply usage appear here."
           >
             {ledgerItems.length === 0 ? (
               <p style={{ fontSize: '0.85rem', color: '#64748b', margin: 0 }}>No ledger entries yet.</p>
@@ -309,29 +329,40 @@ export default function TenantUsagePage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {ledgerItems.map((r, idx) => (
-                      <tr key={typeof r?.id === 'string' && r.id.trim().length > 0 ? r.id : `ledger-row-${idx}`}>
-                        <td style={{ padding: '0.45rem', borderBottom: '1px solid #f1f5f9' }}>
-                          {r?.created_at ? formatDateTime(String(r.created_at)) : '—'}
-                        </td>
-                        <td style={{ padding: '0.45rem', borderBottom: '1px solid #f1f5f9' }}>
-                          {(r?.movement_type != null ? String(r.movement_type) : r?.type != null ? String(r.type) : '').replace(/_/g, ' ') ||
-                            '—'}
-                        </td>
-                        <td style={{ padding: '0.45rem', borderBottom: '1px solid #f1f5f9', fontWeight: 750 }}>
-                          {String(r?.type ?? '').toUpperCase() === 'DEBIT' ? '-' : '+'}
-                          {Math.abs(safeFiniteNumber(r?.amount)).toLocaleString()}
-                        </td>
-                        <td style={{ padding: '0.45rem', borderBottom: '1px solid #f1f5f9' }}>
-                          {r?.balance_after != null && Number.isFinite(Number(r.balance_after))
-                            ? Number(r.balance_after).toLocaleString()
-                            : '—'}
-                        </td>
-                        <td style={{ padding: '0.45rem', borderBottom: '1px solid #f1f5f9' }}>
-                          {(r?.description != null ? String(r.description) : '').trim() || '—'}
-                        </td>
-                      </tr>
-                    ))}
+                    {ledgerItems.map((r, idx) => {
+                      const mt = r?.movement_type != null ? String(r.movement_type) : '';
+                      const typeLbl = ledgerMovementCustomerLabel(mt, r?.type != null ? String(r.type) : undefined);
+                      const reasonPrimary = softenLedgerCustomerDescription(r?.description, mt);
+                      const cid = typeof r?.conversation_id === 'string' ? r.conversation_id.trim() : '';
+                      return (
+                        <tr key={typeof r?.id === 'string' && r.id.trim().length > 0 ? r.id : `ledger-row-${idx}`}>
+                          <td style={{ padding: '0.45rem', borderBottom: '1px solid #f1f5f9' }}>
+                            {r?.created_at ? formatDateTime(String(r.created_at)) : '—'}
+                          </td>
+                          <td style={{ padding: '0.45rem', borderBottom: '1px solid #f1f5f9' }}>{typeLbl}</td>
+                          <td style={{ padding: '0.45rem', borderBottom: '1px solid #f1f5f9', fontWeight: 750 }}>
+                            {String(r?.type ?? '').toUpperCase() === 'DEBIT' ? '-' : '+'}
+                            {Math.abs(safeFiniteNumber(r?.amount)).toLocaleString()}
+                          </td>
+                          <td style={{ padding: '0.45rem', borderBottom: '1px solid #f1f5f9' }}>
+                            {r?.balance_after != null && Number.isFinite(Number(r.balance_after))
+                              ? Number(r.balance_after).toLocaleString()
+                              : '—'}
+                          </td>
+                          <td style={{ padding: '0.45rem', borderBottom: '1px solid #f1f5f9' }}>
+                            <div>{reasonPrimary}</div>
+                            {mt === LEDGER_REPLY_DEBIT && cid ? (
+                              <details style={{ marginTop: '0.35rem', fontSize: '0.72rem', color: '#64748b' }}>
+                                <summary style={{ cursor: 'pointer', userSelect: 'none' }}>Support details</summary>
+                                <div style={{ marginTop: '0.25rem', fontFamily: 'ui-monospace, monospace', wordBreak: 'break-all' }}>
+                                  {cid}
+                                </div>
+                              </details>
+                            ) : null}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>

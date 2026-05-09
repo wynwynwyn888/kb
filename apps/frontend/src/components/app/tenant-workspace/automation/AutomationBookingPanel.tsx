@@ -357,7 +357,8 @@ function productionEnvFromWinningVariant(v: TenantFreeSlotsProbeVariant): { key:
 export function AutomationBookingPanel() {
   const params = useParams();
   const tenantId = params['tenantId'] as string;
-  const { token } = useAuth();
+  const { token, user } = useAuth();
+  const isAgencyStaff = Boolean(user?.agencyRole);
 
   const [loadErr, setLoadErr] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
@@ -662,6 +663,7 @@ export function AutomationBookingPanel() {
   const modeHint = BOOKING_MODE_OPTIONS.find(m => m.value === booking?.bookingMode)?.hint ?? '';
   const dim = busy !== null;
   const noTestCalendar = !calendarForTest.trim();
+  const showAdvancedDiagnostics = SHOW_BOOKING_DIAGNOSTICS && isAgencyStaff;
 
   const winningProbeVariant = useMemo(
     () => (probeResult?.variants?.length ? pickWinningProbeVariant(probeResult.variants) : null),
@@ -842,7 +844,7 @@ export function AutomationBookingPanel() {
                 </details>
               ) : null}
 
-              {SHOW_BOOKING_DIAGNOSTICS ? (
+              {showAdvancedDiagnostics ? (
                 <details
                   style={{
                     marginTop: '0.65rem',
@@ -1058,7 +1060,7 @@ export function AutomationBookingPanel() {
 
           <SectionCard
             title="Booking settings"
-            subtitle="Configure how AISBP collects booking details — confirmation still depends on your CRM."
+            subtitle="Configure how AISalesBot Pro collects booking details — confirmation still depends on your CRM."
             accent="muted"
           >
             <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.85rem' }}>
@@ -1094,7 +1096,7 @@ export function AutomationBookingPanel() {
               </select>
             </label>
             <p style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted)', marginTop: '0.35rem', lineHeight: 1.45, marginBottom: '0.85rem' }}>
-              AISBP uses this calendar for booking-related workflows.
+              AISalesBot Pro uses this calendar for booking-related workflows.
             </p>
             {syncCalendarsHint ? (
               <p style={{ fontSize: '0.76rem', color: 'var(--aisbp-muted)', marginTop: '-0.5rem', marginBottom: '0.85rem' }}>
@@ -1243,7 +1245,7 @@ export function AutomationBookingPanel() {
               disabled={dim}
             />
             <p style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted)', margin: '0 0 0.75rem' }}>
-              Collected booking details are sent to your team. AISBP will not overwrite the CRM contact name or phone from
+              Collected booking details are sent to your team. AISalesBot Pro will not overwrite the CRM contact name or phone from
               booking answers.
             </p>
             <label style={{ ...mvpLabelStyle, display: 'block' }}>Optional message prefix</label>
@@ -1274,7 +1276,7 @@ export function AutomationBookingPanel() {
               />
             </label>
             <p style={{ fontSize: '0.76rem', color: 'var(--aisbp-muted)', lineHeight: 1.45, marginTop: '0.5rem', marginBottom: '0.85rem' }}>
-              Default is 1. Higher capacity is stored for future CRM-backed counting; AISBP will not invent extra availability.
+              Default is 1. Higher capacity is stored for future CRM-backed counting; AISalesBot Pro will not invent extra availability.
             </p>
 
             <button type="button" disabled={dim} onClick={() => void saveBookingModule()} style={btn('primary', dim)}>

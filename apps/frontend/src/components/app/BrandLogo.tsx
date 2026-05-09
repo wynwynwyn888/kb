@@ -13,7 +13,7 @@ export function BrandLogo({ height = 36, maxWidth = 200 }: { height?: number; ma
   return (
     <img
       src={src}
-      alt="AISBP"
+      alt="AISalesBot Pro"
       height={height}
       style={{
         height,

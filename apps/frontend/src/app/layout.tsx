@@ -14,8 +14,8 @@ const inter = Inter({
 const themeBoot = `(function(){try{var k='aisbp-theme';var v=localStorage.getItem(k);var sys=window.matchMedia('(prefers-color-scheme: dark)').matches;var r=v==='light'||v==='dark'?v:(sys?'dark':'light');document.documentElement.classList.toggle('dark',r==='dark');}catch(e){}})();`;
 
 export const metadata: Metadata = {
-  title: 'AISBP',
-  description: 'Agency and subaccount AI conversation layer for CRM',
+  title: 'AISalesBot Pro',
+  description: 'Agency and workspace AI conversation layer for CRM',
   icons: {
     icon: [{ url: '/favicon.jpg', type: 'image/jpeg' }],
     shortcut: '/favicon.jpg',

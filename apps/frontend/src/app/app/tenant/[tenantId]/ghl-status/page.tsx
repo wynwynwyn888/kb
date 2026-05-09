@@ -19,7 +19,8 @@ import {
 export default function TenantGhlStatusPage() {
   const params = useParams();
   const tenantId = params['tenantId'] as string;
-  const { token } = useAuth();
+  const { token, user } = useAuth();
+  const isAgencyStaff = Boolean(user?.agencyRole);
   const [conn, setConn] = useState<GhlConnectionStatus | null>(null);
   const [connLoading, setConnLoading] = useState(true);
   const [health, setHealth] = useState<{
@@ -87,7 +88,7 @@ export default function TenantGhlStatusPage() {
       {err && <ErrorBanner message={err} />}
 
       <p style={{ fontSize: '0.82rem', color: '#64748b', marginBottom: '0.85rem' }}>
-        Connection check confirms AISBP can reach CRM with the saved token. Refresh loads the latest stored status.
+        Connection check confirms AISalesBot Pro can reach CRM with the saved token. Refresh loads the latest stored status.
       </p>
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '1rem' }}>
@@ -137,7 +138,7 @@ export default function TenantGhlStatusPage() {
                 },
               ]}
             />
-            {conn.metadata && Object.keys(conn.metadata).length > 0 ? (
+            {isAgencyStaff && conn.metadata && Object.keys(conn.metadata).length > 0 ? (
               <details style={{ marginTop: '0.75rem', fontSize: '0.82rem' }}>
                 <summary style={{ cursor: 'pointer', color: '#444' }}>Support details</summary>
                 <pre

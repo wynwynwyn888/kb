@@ -84,7 +84,10 @@ function automationSubtreeMatch(base: string, pathname: string): boolean {
   return pathname === a || pathname.startsWith(`${a}/`) || pathname === legacyA || pathname.startsWith(`${legacyA}/`);
 }
 
-export function buildTenantSidebarNav(tenantId: string, opts: { showAdvanced: boolean }): TenantNavNode[] {
+export function buildTenantSidebarNav(
+  tenantId: string,
+  opts: { showAdvanced: boolean; showLogs: boolean },
+): TenantNavNode[] {
   const base = tenantBasePath(tenantId);
   const assistantBase = `${base}/assistant`;
   const automationBase = `${base}/automation`;
@@ -179,14 +182,17 @@ export function buildTenantSidebarNav(tenantId: string, opts: { showAdvanced: bo
       icon: 'users',
       match: p => p === `${base}/team`,
     },
-    {
+  ];
+
+  if (opts.showLogs) {
+    nodes.push({
       kind: 'leaf',
       href: `${base}/log`,
       label: 'Logs',
       icon: 'scroll',
       match: p => p.startsWith(`${base}/log`),
-    },
-  ];
+    });
+  }
 
   if (opts.showAdvanced) {
     nodes.push({
@@ -203,7 +209,7 @@ export function buildTenantSidebarNav(tenantId: string, opts: { showAdvanced: bo
 
 /** @deprecated */
 export function buildTenantNavItems(tenantId: string): TenantNavItem[] {
-  return buildTenantSidebarNav(tenantId, { showAdvanced: true }).flatMap(node => {
+  return buildTenantSidebarNav(tenantId, { showAdvanced: true, showLogs: true }).flatMap(node => {
     if (node.kind === 'leaf') {
       return [{ href: node.href, label: node.label, icon: node.icon, match: node.match }];
     }

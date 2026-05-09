@@ -6,7 +6,7 @@ import { PageHeader, SectionCard } from '@/components/app/mvp-ui';
 export default function AgencyLogPage() {
   return (
     <div style={{ maxWidth: 720 }}>
-      <PageHeader title="Log" eyebrow="Agency account" />
+      <PageHeader title="Activity log" eyebrow="Agency account" />
       <p
         style={{
           fontSize: '0.88rem',

@@ -42,7 +42,8 @@ function previewDraftReply(value: unknown): string {
 export default function TenantDiagnosticsPage() {
   const params = useParams();
   const tenantId = params['tenantId'] as string;
-  const { token } = useAuth();
+  const { token, user } = useAuth();
+  const isAgencyStaff = Boolean(user?.agencyRole);
   const [handovers, setHandovers] = useState<ActiveHandoverRow[] | null>(null);
   const [hLoading, setHLoading] = useState(true);
   const [hErr, setHErr] = useState('');
@@ -57,14 +58,16 @@ export default function TenantDiagnosticsPage() {
   const [probeResult, setProbeResult] = useState<AiRouterRouteResult | null>(null);
 
   useEffect(() => {
+    if (!isAgencyStaff) return;
     setProbeConversationId(
       typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
         ? crypto.randomUUID()
         : `diag-${Date.now()}`,
     );
-  }, []);
+  }, [isAgencyStaff]);
 
   useEffect(() => {
+    if (!isAgencyStaff) return;
     if (!token || !tenantId) return;
     let cancelled = false;
 
@@ -88,7 +91,7 @@ export default function TenantDiagnosticsPage() {
     return () => {
       cancelled = true;
     };
-  }, [token, tenantId]);
+  }, [token, tenantId, isAgencyStaff]);
 
   async function runRoutingProbe() {
     if (!token) {
@@ -124,6 +127,26 @@ export default function TenantDiagnosticsPage() {
     } finally {
       setProbeLoading(false);
     }
+  }
+
+  if (!isAgencyStaff) {
+    return (
+      <div>
+        <PageHeader title="Diagnostics" eyebrow="Advanced" />
+        <p style={{ fontSize: '0.88rem', color: '#64748b', margin: '0 0 1rem', lineHeight: 1.55, maxWidth: '42rem' }}>
+          Diagnostics are available to support users only.
+        </p>
+        <EmptyState
+          title="Support-only area"
+          detail="If you need help troubleshooting routing or CRM connectivity, contact your support team."
+        />
+        <p style={{ marginTop: '1rem', fontSize: '0.9rem' }}>
+          <Link href={`/app/tenant/${tenantId}/control-panel`} style={{ color: '#0070f3', fontWeight: 600 }}>
+            Open Control Panel →
+          </Link>
+        </p>
+      </div>
+    );
   }
 
   return (

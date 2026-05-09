@@ -222,7 +222,7 @@ export default function AgencyTenantDirectoryPage() {
           placeholder="Search by name"
           value={q}
           onChange={e => setQ(e.target.value)}
-          aria-label="Search subaccounts"
+          aria-label="Search workspaces"
           style={{ ...mvpInputStyle, maxWidth: '400px' }}
         />
       </SectionCard>

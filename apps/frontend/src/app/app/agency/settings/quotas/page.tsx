@@ -13,7 +13,14 @@ import {
   updateSubaccountCreditPolicy,
   type QuotaAuditLogRow,
 } from '@/lib/api';
-import { ErrorBanner, LoadingBlock, PageHeader, SectionCard, SuccessBanner } from '@/components/app/mvp-ui';
+import {
+  ErrorBanner,
+  LoadingBlock,
+  PageHeader,
+  SectionCard,
+  SuccessBanner,
+  mvpPrimaryButtonStyle,
+} from '@/components/app/mvp-ui';
 import { creditStatusLabel, formatSignedInt } from '@/lib/credits-ui';
 import {
   quotaAuditActionLabel,
@@ -243,7 +250,7 @@ export default function AgencyQuotasPage() {
         negativeCreditLimit,
         lowCreditThreshold,
       });
-      setOk('Credit policy saved.');
+      setOk('Credit rules saved.');
       setWallets(await listAgencyCreditWallets(token));
       setAudit(await getQuotaAuditLog(token, { limit: 80 }));
     } catch (e) {
@@ -371,7 +378,11 @@ export default function AgencyQuotasPage() {
               style={{ width: '8rem', padding: '0.45rem 0.5rem', borderRadius: '6px', border: '1px solid #e2e8f0' }}
             />
           </label>
-          <button type="submit" disabled={savingDefault} style={{ padding: '0.45rem 0.9rem' }}>
+          <button
+            type="submit"
+            disabled={savingDefault}
+            style={{ ...mvpPrimaryButtonStyle, width: 'fit-content', opacity: savingDefault ? 0.75 : 1 }}
+          >
             {savingDefault ? 'Saving…' : 'Save allowance'}
           </button>
         </form>
@@ -414,7 +425,11 @@ export default function AgencyQuotasPage() {
               style={{ width: '100%', padding: '0.45rem 0.5rem', borderRadius: '6px', border: '1px solid #e2e8f0' }}
             />
           </label>
-          <button type="submit" disabled={savingTopup} style={{ width: 'fit-content', padding: '0.45rem 0.9rem' }}>
+          <button
+            type="submit"
+            disabled={savingTopup}
+            style={{ ...mvpPrimaryButtonStyle, width: 'fit-content', opacity: savingTopup ? 0.75 : 1 }}
+          >
             {savingTopup ? 'Applying…' : 'Add credits'}
           </button>
         </form>
@@ -459,13 +474,17 @@ export default function AgencyQuotasPage() {
               placeholder="e.g. Billing correction, goodwill credit, plan adjustment"
             />
           </label>
-          <button type="submit" disabled={savingAdjust} style={{ width: 'fit-content', padding: '0.45rem 0.9rem' }}>
+          <button
+            type="submit"
+            disabled={savingAdjust}
+            style={{ ...mvpPrimaryButtonStyle, width: 'fit-content', opacity: savingAdjust ? 0.75 : 1 }}
+          >
             {savingAdjust ? 'Applying…' : 'Apply adjustment'}
           </button>
         </form>
       </SectionCard>
 
-      <SectionCard title="Credit policy" subtitle="Control low-credit warnings and temporary overage.">
+      <SectionCard title="Credit rules" subtitle="Control low-credit warnings and temporary overage.">
         <form onSubmit={onSavePolicy} style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', maxWidth: '28rem' }}>
           <label>
             <span style={{ display: 'block', fontSize: '0.75rem', color: '#64748b' }}>Workspace</span>
@@ -506,13 +525,17 @@ export default function AgencyQuotasPage() {
               style={{ width: '100%', padding: '0.45rem 0.5rem', borderRadius: '6px', border: '1px solid #e2e8f0' }}
             />
           </label>
-          <button type="submit" disabled={savingPolicy} style={{ width: 'fit-content', padding: '0.45rem 0.9rem' }}>
-            {savingPolicy ? 'Saving…' : 'Save policy'}
+          <button
+            type="submit"
+            disabled={savingPolicy}
+            style={{ ...mvpPrimaryButtonStyle, width: 'fit-content', opacity: savingPolicy ? 0.75 : 1 }}
+          >
+            {savingPolicy ? 'Saving…' : 'Save rules'}
           </button>
         </form>
       </SectionCard>
 
-      <SectionCard title="Audit log" subtitle="Allowance changes and credit updates across workspaces.">
+      <SectionCard title="Activity log" subtitle="Allowance changes and credit updates across workspaces.">
         {!audit || audit.length === 0 ? (
           <p style={{ fontSize: '0.85rem', color: '#64748b' }}>No entries yet.</p>
         ) : (

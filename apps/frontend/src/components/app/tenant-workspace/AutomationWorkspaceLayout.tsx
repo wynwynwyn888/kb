@@ -72,7 +72,7 @@ export function AutomationWorkspaceLayout({
             margin: '0 0 0.35rem',
           }}
         >
-          Assistant
+          Automation
         </p>
         <h1
           style={{
@@ -95,7 +95,7 @@ export function AutomationWorkspaceLayout({
           }}
         >
           Automation currently applies across this workspace. All assistant profiles in this workspace use the same tagging,
-          booking, follow-up, and handover rules. Profile-specific automation is planned.
+          booking, follow-up, and handover rules.
         </p>
         <p style={{ fontSize: '0.82rem', color: 'var(--aisbp-muted, #64748b)', margin: '0.5rem 0 0' }}>
           <strong style={{ color: 'var(--aisbp-text-secondary, #334155)' }}>Active assistant:</strong>{' '}

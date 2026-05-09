@@ -177,7 +177,7 @@ export function AutomationFollowUpPanel() {
 
       <SectionCard title="Workspace scope" subtitle="Follow-up settings currently apply across this workspace." accent="muted">
         <p style={{ margin: 0, fontSize: '0.86rem', color: 'var(--aisbp-text-secondary)', lineHeight: 1.55 }}>
-          These settings apply across this workspace. Follow-up automation runs in the backend worker and is gated by conversation state (replies, handover, booking, opt-out) and active hours when enabled.
+          These settings apply across this workspace. Follow-up messages are sent automatically based on conversation activity and your active hours settings.
         </p>
       </SectionCard>
 

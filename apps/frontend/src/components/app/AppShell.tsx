@@ -153,7 +153,10 @@ export function AppShell({ children }: { children: ReactNode }) {
       : null;
   const isTenantPath = Boolean(tenantIdFromPath);
   const tenantNavNodes: TenantNavNode[] = tenantIdFromPath
-    ? buildTenantSidebarNav(tenantIdFromPath, { showAdvanced: Boolean(user?.agencyRole) })
+    ? buildTenantSidebarNav(tenantIdFromPath, {
+        showAdvanced: Boolean(user?.agencyRole),
+        showLogs: Boolean(user?.agencyRole),
+      })
     : [];
 
   const [groupOpen, setGroupOpen] = useState<Record<string, boolean>>({});

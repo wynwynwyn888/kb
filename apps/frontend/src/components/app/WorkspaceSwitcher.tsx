@@ -137,7 +137,7 @@ export function WorkspaceSwitcher() {
       setSubaccounts(Array.isArray(rows) ? rows : []);
     } catch (e) {
       setSubaccounts([]);
-      setListErr(e instanceof Error ? e.message : 'Could not load subaccounts');
+      setListErr(e instanceof Error ? e.message : 'Could not load workspaces');
     }
   }, [token, user?.agencyId, user?.agencyRole]);
 
@@ -299,7 +299,7 @@ export function WorkspaceSwitcher() {
             margin: '0.4rem 0.75rem 0',
           }}
         >
-          Subaccounts
+          Workspaces
         </p>
       ) : null}
       {listErr ? <p style={{ fontSize: '0.75rem', color: '#b91c1c', margin: '0.35rem 0.75rem' }}>{listErr}</p> : null}
@@ -307,9 +307,9 @@ export function WorkspaceSwitcher() {
         type="search"
         value={q}
         onChange={e => setQ(e.target.value)}
-        placeholder="Search subaccounts"
+        placeholder="Search workspaces"
         style={searchInp}
-        aria-label="Filter subaccounts"
+        aria-label="Filter workspaces"
         autoFocus
       />
       <ul

@@ -253,9 +253,9 @@ const TEMP_PRESETS = { precise: 0.35, balanced: 0.7, creative: 1.2 } as const;
 type TempPreset = keyof typeof TEMP_PRESETS;
 
 const LENGTH_PRESETS = [
-  { value: '400', tokens: 400, label: 'Shorter (~400 tokens)' },
-  { value: '800', tokens: 800, label: 'Balanced (~800 tokens)' },
-  { value: '1500', tokens: 1500, label: 'Longer (~1500 tokens)' },
+  { value: '400', tokens: 400, label: 'Short' },
+  { value: '800', tokens: 800, label: 'Standard' },
+  { value: '1500', tokens: 1500, label: 'Detailed' },
   { value: 'custom', tokens: 0, label: 'Custom' },
 ] as const;
 

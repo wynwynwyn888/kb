@@ -202,7 +202,7 @@ function AgencyGhlConnectionsInner() {
     <div>
       <PageHeader title="CRM connection" eyebrow="Agency account" />
       <p style={{ fontSize: '0.8rem', color: '#64748b', margin: '0 0 1rem', maxWidth: '32rem' }}>
-        Connect one client workspace to CRM so AISBP can read and send conversation data.
+        Connect one client workspace to CRM so AISalesBot Pro can read and send conversation data.
       </p>
 
       {err && <ErrorBanner message={err} />}

@@ -351,7 +351,7 @@ export default function AgencyAiSettingsPage() {
           >
             <strong style={{ color: 'var(--aisbp-text-secondary, #475569)' }}>Primary vs fallback:</strong> check
             &quot;Primary&quot; below for the provider that handles live generation. If that provider is not OpenAI and a reply
-            fails, AISBP retries once with OpenAI when a valid OpenAI API key is saved.
+            fails, AISalesBot Pro retries once with OpenAI when a valid OpenAI API key is saved.
           </p>
 
           <SectionCard title="AI provider" subtitle="Credentials, default model, and API health for the live stack.">

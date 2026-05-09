@@ -56,6 +56,11 @@ function confidenceLabelPretty(t: TagConfidenceThreshold): string {
   return CONF_OPTS.find(o => o.value === t)?.label ?? 'Normal';
 }
 
+function confidenceLabelClient(t: TagConfidenceThreshold): string {
+  if (t === 'NORMAL') return 'Automatically detected';
+  return confidenceLabelPretty(t);
+}
+
 function cardShell(): CSSProperties {
   return {
     border: '1px solid var(--aisbp-border)',
@@ -439,7 +444,7 @@ export function AutomationTagsPanel() {
 
       <SectionCard
         title="CRM tags"
-        subtitle="Workspace resource: synced from the connected CRM. Tag rules are saved under Assistant → Automation."
+        subtitle="Workspace resource: synced from the connected CRM."
         accent="muted"
       >
         <p style={{ fontSize: '0.84rem', color: 'var(--aisbp-muted)', lineHeight: 1.55, margin: '0 0 0.85rem' }}>
@@ -456,7 +461,7 @@ export function AutomationTagsPanel() {
               <input
                 value={newTagName}
                 onChange={e => setNewTagName(e.target.value)}
-                placeholder="e.g. follow_up_needed"
+                placeholder="e.g. follow-up needed tag"
                 style={{ ...mvpInputStyle, marginTop: '0.35rem', width: '100%' }}
               />
             </label>
@@ -546,14 +551,14 @@ export function AutomationTagsPanel() {
             {rules.length === 0 ? (
               <EmptyState
                 title="No tag rules yet."
-                detail="Add your first rule to let AISBP apply approved CRM tags automatically."
+                detail="Add your first rule to let AISalesBot Pro apply approved CRM tags automatically."
               />
             ) : (
               rules.map(rule => {
                 const open = expandedRules[rule.id] ?? false;
                 const mm = matchModeShort(rule.matchMode);
-                const cf = confidenceLabelPretty(rule.confidenceThreshold);
-                const headerSummary = `${mm} · ${cf} confidence`;
+                const cf = confidenceLabelClient(rule.confidenceThreshold);
+                const headerSummary = `${mm} · ${cf}`;
                 const statusBits = [
                   rule.enabled ? 'Enabled' : 'Disabled',
                   rule.autoApply ? 'Auto apply' : 'Manual apply',

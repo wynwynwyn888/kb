@@ -329,7 +329,10 @@ export default function AgencyHomePage() {
                     value: <StatusPill label={aiSnap.hasKey ? 'Saved' : 'Not set'} tone={aiSnap.hasKey ? 'ok' : 'warn'} />,
                   },
                   { label: 'Provider', value: aiSnap.provider, mono: true },
-                  { label: 'Configured model', value: aiSnap.model, mono: true },
+                  {
+                    label: 'Configured model',
+                    value: 'Hidden',
+                  },
                   {
                     label: 'Health',
                     value: aiHealthPill(aiSnap.healthBadge),
@@ -342,10 +345,18 @@ export default function AgencyHomePage() {
                         : '—',
                   },
                   ...(aiSnap.latencyMs != null && aiSnap.healthBadge !== 'UNKNOWN'
-                    ? [{ label: 'Latency', value: `${aiSnap.latencyMs} ms` }]
+                    ? [{ label: 'Response time', value: `${aiSnap.latencyMs} ms` }]
                     : []),
                 ]}
               />
+              <details style={{ marginTop: '0.65rem' }}>
+                <summary style={{ cursor: 'pointer', fontSize: '0.78rem', fontWeight: 700, color: 'var(--aisbp-muted, #64748b)', listStyle: 'none' }}>
+                  Support details
+                </summary>
+                <p style={{ margin: '0.5rem 0 0', fontSize: '0.82rem', color: 'var(--aisbp-text-secondary, #334155)' }}>
+                  <span style={{ fontFamily: 'ui-monospace, monospace' }}>{aiSnap.model}</span>
+                </p>
+              </details>
               {aiSnap.healthBadge === 'FAIL' && aiSnap.healthError ? (
                 <p style={{ fontSize: '0.78rem', color: '#b45309', margin: '0.65rem 0 0', lineHeight: 1.45 }}>
                   {aiSnap.healthError}

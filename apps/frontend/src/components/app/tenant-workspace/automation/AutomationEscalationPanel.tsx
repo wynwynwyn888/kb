@@ -82,11 +82,11 @@ export function AutomationEscalationPanel() {
     <>
       <SectionCard
         title="Workspace scope"
-        subtitle="Human escalation applies to this workspace (tenant). When a customer asks for a person, AISBP stops automated replies for that conversation."
+        subtitle="Human escalation applies to this workspace. When a customer asks for a person, AISalesBot Pro stops automated replies for that conversation."
         accent="muted"
       >
         <p style={{ fontSize: '0.9rem', color: 'var(--aisbp-text-secondary)', lineHeight: 1.55, margin: 0 }}>
-          Profile-specific escalation rules may be added in a future release.
+          These settings apply across the whole workspace.
         </p>
       </SectionCard>
 

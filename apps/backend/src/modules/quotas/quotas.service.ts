@@ -802,18 +802,34 @@ export class QuotasService {
       .maybeSingle();
     if (error || !updated) throw new Error(error?.message ?? 'Failed to update plan');
 
+    // Audit log entry: capture old → new for both annual allowance and reset date so the
+    // Activity log can show what changed. Numbers go into previous_total / new_total to reuse
+    // existing display helpers; period_start / period_end live in metadata.
+    const previousTotal = typeof wallet.total_quota === 'number' ? wallet.total_quota : 0;
+    const newTotal = typeof updated.total_quota === 'number' ? updated.total_quota : previousTotal;
+    const previousPeriodStart = wallet.period_start ? new Date(wallet.period_start).toISOString() : null;
+    const previousPeriodEnd = wallet.period_end ? new Date(wallet.period_end).toISOString() : null;
+    const newPeriodStart = updated.period_start ? new Date(updated.period_start).toISOString() : null;
+    const newPeriodEnd = updated.period_end ? new Date(updated.period_end).toISOString() : null;
     await this.supabase.from('quota_audit_logs').insert({
       id: randomUUID(),
       agency_id: agencyId,
       profile_id: profileId,
       tenant_id: tenantId,
       action: 'subaccount.plan_update',
+      // Plan updates do not move credits — keep delta at 0 so credit reports don't double-count.
       delta: 0,
-      previous_total: wallet.total_quota ?? 0,
-      new_total: updated.total_quota ?? wallet.total_quota ?? 0,
+      previous_total: previousTotal,
+      new_total: newTotal,
       metadata: {
-        periodStart: updated.period_start ?? null,
-        periodEnd: updated.period_end ?? null,
+        previousTotalQuota: previousTotal,
+        newTotalQuota: newTotal,
+        previousPeriodStart,
+        newPeriodStart,
+        previousPeriodEnd,
+        newPeriodEnd,
+        annualAllowanceChanged: previousTotal !== newTotal,
+        resetDateChanged: previousPeriodEnd !== newPeriodEnd,
       },
     });
 

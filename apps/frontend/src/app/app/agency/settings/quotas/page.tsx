@@ -753,9 +753,9 @@ export default function AgencyQuotasPage() {
                 maxWidth: '36rem',
               }}
             >
-              Warnings are sent through the agency workspace CRM connection. The recipient is the client phone number saved in the workspace profile.
+              Low-credit warning SMS cannot be sent until the agency workspace is set up and connected to CRM. The recipient is the client phone number saved in the workspace profile.
             </p>
-            {warnEnabled && agencyWorkspacePresent && agencyWorkspaceCrmConnected === false ? (
+            {!agencyWorkspacePresent ? (
               <div
                 style={{
                   marginTop: '0.6rem',
@@ -767,30 +767,29 @@ export default function AgencyQuotasPage() {
                   fontSize: '0.82rem',
                 }}
               >
-                Connect the agency workspace CRM before automated low-credit warnings can be sent.{' '}
+                The agency workspace has not been set up yet. Low-credit warning SMS cannot be sent until the agency workspace is set up and connected to CRM.{' '}
+                <Link href="/app/agency/tenants" style={{ fontWeight: 650, color: 'var(--aisbp-warning-text, #854d0e)' }}>
+                  Set up agency workspace →
+                </Link>
+              </div>
+            ) : agencyWorkspaceCrmConnected === false ? (
+              <div
+                style={{
+                  marginTop: '0.6rem',
+                  padding: '0.65rem 0.8rem',
+                  borderRadius: 8,
+                  border: '1px solid var(--aisbp-warning-border, #facc15)',
+                  background: 'var(--aisbp-warning-bg, #fef9c3)',
+                  color: 'var(--aisbp-warning-text, #854d0e)',
+                  fontSize: '0.82rem',
+                }}
+              >
+                The agency workspace is set up but its CRM is not connected. Low-credit warning SMS cannot be sent until the agency workspace is set up and connected to CRM.{' '}
                 <Link
                   href="/app/agency/tenants"
                   style={{ fontWeight: 650, color: 'var(--aisbp-warning-text, #854d0e)' }}
                 >
                   Configure CRM →
-                </Link>
-              </div>
-            ) : null}
-            {warnEnabled && !agencyWorkspacePresent ? (
-              <div
-                style={{
-                  marginTop: '0.6rem',
-                  padding: '0.65rem 0.8rem',
-                  borderRadius: 8,
-                  border: '1px solid var(--aisbp-warning-border, #facc15)',
-                  background: 'var(--aisbp-warning-bg, #fef9c3)',
-                  color: 'var(--aisbp-warning-text, #854d0e)',
-                  fontSize: '0.82rem',
-                }}
-              >
-                Set up the agency workspace before automated low-credit warnings can be sent.{' '}
-                <Link href="/app/agency/tenants" style={{ fontWeight: 650, color: 'var(--aisbp-warning-text, #854d0e)' }}>
-                  Open Client Workspaces →
                 </Link>
               </div>
             ) : null}

@@ -14,7 +14,32 @@ describe('credits-billing-copy', () => {
     expect(quotaAuditActionLabel('subaccount.topup')).toBe('Credits added');
     expect(quotaAuditActionLabel('subaccount.manual_adjustment')).toBe('Manual adjustment');
     expect(quotaAuditActionLabel('subaccount.wallet_policy')).toBe('Credit policy updated');
+    expect(quotaAuditActionLabel('subaccount.plan_update')).toBe('Plan updated');
     expect(quotaAuditActionLabel('agency.default_quota')).toBe('Default annual allowance updated');
+  });
+
+  it('renders plan update rows as old → new annual allowance', () => {
+    const o = quotaAuditDeltaAndBalanceAfter({
+      action: 'subaccount.plan_update',
+      delta: 0,
+      previous_total: 36000,
+      new_total: 50000,
+      metadata: { previousPeriodEnd: '2027-05-10T00:00:00Z', newPeriodEnd: '2028-05-10T00:00:00Z' },
+    });
+    expect(o.change).toBe('36,000 → 50,000');
+    expect(o.balanceAfter).toBe('50,000');
+  });
+
+  it('plan update with no allowance change still renders safely', () => {
+    const o = quotaAuditDeltaAndBalanceAfter({
+      action: 'subaccount.plan_update',
+      delta: 0,
+      previous_total: 36000,
+      new_total: 36000,
+      metadata: {},
+    });
+    expect(o.change).toBe('Recorded');
+    expect(o.balanceAfter).toBe('36,000');
   });
 
   it('formats quota default rows without raw delta/range wording', () => {

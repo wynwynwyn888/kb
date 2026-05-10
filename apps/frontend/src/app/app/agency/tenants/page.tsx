@@ -8,6 +8,7 @@ import {
   deleteSubaccount,
   ensureAgencySystemWorkspace,
   getGhlConnection,
+  getQuotaAgencySettings,
   getTenantsByAgency,
   type WorkspaceListItem,
 } from '@/lib/api';
@@ -27,7 +28,9 @@ import {
 
 type TenantRow = WorkspaceListItem;
 
-const DEFAULT_INITIAL_CREDITS = 36000;
+// Hard fallback used only when the agency credit settings request fails or returns no value.
+// The agency-configured default is preferred when available.
+const FALLBACK_INITIAL_CREDITS = 36000;
 const ANNUAL_PLAN_OPTIONS = [{ months: 12, label: '1 year' }];
 
 export default function AgencyTenantDirectoryPage() {
@@ -42,7 +45,9 @@ export default function AgencyTenantDirectoryPage() {
   const [newName, setNewName] = useState('');
   const [newGhlLocationId, setNewGhlLocationId] = useState('');
   const [newAnnualMonths, setNewAnnualMonths] = useState<number>(12);
-  const [newInitialCredits, setNewInitialCredits] = useState<string>(String(DEFAULT_INITIAL_CREDITS));
+  // Defaults to fallback so the modal always opens with a sane number even before settings load.
+  const [agencyDefaultCredits, setAgencyDefaultCredits] = useState<number>(FALLBACK_INITIAL_CREDITS);
+  const [newInitialCredits, setNewInitialCredits] = useState<string>(String(FALLBACK_INITIAL_CREDITS));
   const [newClientName, setNewClientName] = useState('');
   const [newClientPhone, setNewClientPhone] = useState('');
   const [newClientEmail, setNewClientEmail] = useState('');
@@ -94,6 +99,28 @@ export default function AgencyTenantDirectoryPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- loadAttempt refresh
   }, [token, user?.agencyId, loadAttempt]);
 
+  // Best-effort load of agency-configured default credits used to prefill the create modal.
+  // Failure here must not block opening or submitting the modal — fall back to FALLBACK_INITIAL_CREDITS.
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const s = await getQuotaAgencySettings(token);
+        if (cancelled) return;
+        const n = Number(s?.defaultSubaccountQuota);
+        if (Number.isFinite(n) && n > 0) {
+          setAgencyDefaultCredits(Math.floor(n));
+        }
+      } catch {
+        // Intentionally swallow: keep fallback so the modal still works.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
+
   const filtered = useMemo(() => {
     const s = q.trim().toLowerCase();
     if (!s) return list;
@@ -107,7 +134,7 @@ export default function AgencyTenantDirectoryPage() {
     setNewName('');
     setNewGhlLocationId('');
     setNewAnnualMonths(12);
-    setNewInitialCredits(String(DEFAULT_INITIAL_CREDITS));
+    setNewInitialCredits(String(agencyDefaultCredits));
     setNewClientName('');
     setNewClientPhone('');
     setNewClientEmail('');
@@ -289,6 +316,9 @@ export default function AgencyTenantDirectoryPage() {
           <p style={{ margin: 0, color: 'var(--aisbp-muted, #64748b)', fontSize: '0.86rem', lineHeight: 1.5 }}>
             Each agency has one internal workspace used to send low-credit warnings on behalf of the agency.
             It does not appear in client workspace credit totals.
+          </p>
+          <p style={{ margin: 0, color: 'var(--aisbp-muted, #64748b)', fontSize: '0.82rem', lineHeight: 1.5 }}>
+            Low-credit warning SMS cannot be sent until the agency workspace is set up and connected to CRM.
           </p>
           <button
             type="button"
@@ -535,7 +565,9 @@ export default function AgencyTenantDirectoryPage() {
                     min={0}
                     style={mvpInputStyle}
                   />
-                  <span style={mvpFieldHint}>Default: 36,000.</span>
+                  <span style={mvpFieldHint}>
+                    {`Default: ${agencyDefaultCredits.toLocaleString()} (from agency credit settings).`}
+                  </span>
                 </label>
               </div>
 

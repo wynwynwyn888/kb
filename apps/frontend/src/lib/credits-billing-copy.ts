@@ -27,6 +27,7 @@ export function quotaAuditActionLabel(action: string): string {
     'subaccount.topup': 'Credits added',
     'subaccount.manual_adjustment': 'Manual adjustment',
     'subaccount.wallet_policy': 'Credit policy updated',
+    'subaccount.plan_update': 'Plan updated',
     'agency.default_quota': 'Default annual allowance updated',
     'subaccount.create': 'Workspace created',
     'subaccount.renamed': 'Workspace renamed',
@@ -54,7 +55,8 @@ export function quotaAuditLogFilterKind(action: string): 'workspace' | 'credits'
     action === 'subaccount.topup' ||
     action === 'subaccount.manual_adjustment' ||
     action === 'agency.default_quota' ||
-    action === 'subaccount.wallet_policy'
+    action === 'subaccount.wallet_policy' ||
+    action === 'subaccount.plan_update'
   ) {
     return 'credits';
   }
@@ -122,6 +124,16 @@ export function quotaAuditDeltaAndBalanceAfter(row: QuotaAuditRowLike): { change
     case 'agency.active_provider':
     case 'agency.reply_policy':
       return { change: 'Recorded', balanceAfter: '—' };
+    case 'subaccount.plan_update': {
+      const prev = typeof row.previous_total === 'number' && Number.isFinite(row.previous_total) ? row.previous_total : null;
+      const next = typeof row.new_total === 'number' && Number.isFinite(row.new_total) ? row.new_total : null;
+      const allowanceChanged = prev !== null && next !== null && prev !== next;
+      const change = allowanceChanged
+        ? `${formatCreditsInteger(prev)} → ${formatCreditsInteger(next)}`
+        : 'Recorded';
+      const balanceAfter = next !== null ? formatCreditsInteger(next) : '—';
+      return { change, balanceAfter };
+    }
     case 'subaccount.renamed': {
       const pn = md['previousName'];
       const nn = md['newName'];

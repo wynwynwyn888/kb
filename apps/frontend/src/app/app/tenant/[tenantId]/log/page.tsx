@@ -41,7 +41,7 @@ export default function TenantLogPage() {
           />
           <p style={{ marginTop: '1rem', fontSize: '0.9rem' }}>
             <Link href={`/app/tenant/${tenantId}/usage`} style={{ color: '#0070f3', fontWeight: 600 }}>
-              Open Usage →
+              Open Credit & Usage →
             </Link>
           </p>
         </>

@@ -1274,6 +1274,9 @@ export async function getTenantCreditsUsage(token: string, tenantId: string) {
     usedThisMonth: number;
     usedThisYear: number;
     status: 'ACTIVE' | 'LOW_CREDIT' | 'PAUSED_NO_CREDITS' | 'OVER_NEGATIVE_LIMIT';
+    /** ISO timestamps from wallet billing period — reset shown when `periodEnd` is set. */
+    periodStart: string | null;
+    periodEnd: string | null;
   }>(`/quotas/tenant/usage/${encodeURIComponent(tenantId)}`, { token });
 }
 

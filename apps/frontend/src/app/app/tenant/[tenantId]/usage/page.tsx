@@ -9,8 +9,9 @@ import { ErrorBanner, LoadingBlock, PageHeader, SectionCard, formatDateTime } fr
 import { creditStatusLabel, type CreditStatus } from '@/lib/credits-ui';
 import {
   ledgerMovementCustomerLabel,
-  projectedCreditsRemainingDaysDisplay,
+  ledgerRowMatchesActivityFilter,
   softenLedgerCustomerDescription,
+  type LedgerActivityFilter,
 } from '@/lib/credits-billing-copy';
 
 type UsageSnap = NonNullable<Awaited<ReturnType<typeof getTenantCreditsUsage>>>;
@@ -27,6 +28,20 @@ function safeFiniteNumber(value: unknown, fallback = 0): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
+function formatBillingResetDate(iso: string | null | undefined): string | null {
+  if (typeof iso !== 'string' || !iso.trim()) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' });
+}
+
+const LEDGER_FILTER_OPTIONS: { id: LedgerActivityFilter; label: string }[] = [
+  { id: 'all', label: 'All' },
+  { id: 'assistant', label: 'Assistant replies' },
+  { id: 'credits_added', label: 'Credits added' },
+  { id: 'adjustments', label: 'Adjustments' },
+];
+
 export default function TenantUsagePage() {
   const params = useParams();
   const tenantParam = useMemo(
@@ -38,6 +53,7 @@ export default function TenantUsagePage() {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState('');
   const [usage, setUsage] = useState<UsageSnap | null>(null);
+  const [ledgerFilter, setLedgerFilter] = useState<LedgerActivityFilter>('all');
   const [ledger, setLedger] = useState<Array<{
     id: string;
     amount: number;
@@ -100,7 +116,7 @@ export default function TenantUsagePage() {
   }, [authLoading, user, token, tenantParam, loadAttempt]);
 
   const usageSummary = usage ?? null;
-  const ledgerItems = Array.isArray(ledger) ? ledger : [];
+  const ledgerItems = useMemo(() => (Array.isArray(ledger) ? ledger : []), [ledger]);
 
   const totalQuota = safeFiniteNumber(usageSummary?.totalQuota, 0);
   const usedQuota = safeFiniteNumber(usageSummary?.usedQuota, 0);
@@ -115,7 +131,15 @@ export default function TenantUsagePage() {
   const dayOfMonth = new Date().getDate();
   const avgDaily =
     usageSummary != null ? Math.max(0, usedThisMonth / Math.max(1, dayOfMonth)) : null;
-  const projectedOutcome = projectedCreditsRemainingDaysDisplay(balance, avgDaily, dayOfMonth);
+
+  const periodEndRaw =
+    usageSummary != null && typeof usageSummary.periodEnd === 'string' ? usageSummary.periodEnd.trim() : '';
+  const resetDateFormatted = formatBillingResetDate(periodEndRaw || null);
+
+  const filteredLedgerItems = useMemo(
+    () => ledgerItems.filter(r => ledgerRowMatchesActivityFilter(r, ledgerFilter)),
+    [ledgerItems, ledgerFilter],
+  );
 
   const showLow = status === 'LOW_CREDIT';
   const showPaused = status === 'PAUSED_NO_CREDITS' || status === 'OVER_NEGATIVE_LIMIT';
@@ -123,7 +147,7 @@ export default function TenantUsagePage() {
   if (authLoading) {
     return (
       <div>
-        <PageHeader title="Usage" eyebrow="Client workspace" />
+        <PageHeader title="Credit & Usage" eyebrow="Client workspace" />
         <LoadingBlock message="Checking your workspace access…" />
       </div>
     );
@@ -132,7 +156,7 @@ export default function TenantUsagePage() {
   if (!user || !token) {
     return (
       <div>
-        <PageHeader title="Usage" eyebrow="Client workspace" />
+        <PageHeader title="Credit & Usage" eyebrow="Client workspace" />
         <LoadingBlock message="Signing you in…" />
       </div>
     );
@@ -141,8 +165,8 @@ export default function TenantUsagePage() {
   if (!tenantParam) {
     return (
       <div>
-        <PageHeader title="Usage" eyebrow="Client workspace" />
-        <ErrorBanner message="Workspace context is unavailable from this URL. Open Usage from your workspace sidebar." />
+        <PageHeader title="Credit & Usage" eyebrow="Client workspace" />
+        <ErrorBanner message="Workspace context is unavailable from this URL. Open Credit & Usage from your workspace sidebar." />
       </div>
     );
   }
@@ -154,7 +178,7 @@ export default function TenantUsagePage() {
           <Link href="/app/agency/tenants">← Client Workspaces</Link>
         </p>
       )}
-      <PageHeader title="Usage" eyebrow="Client workspace" />
+      <PageHeader title="Credit & Usage" eyebrow="Client workspace" />
       <p style={{ fontSize: '0.88rem', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 1rem', lineHeight: 1.5, maxWidth: '560px' }}>
         Track credits and usage for this workspace.
       </p>
@@ -253,6 +277,56 @@ export default function TenantUsagePage() {
                 </div>
               </div>
 
+              <div
+                style={{
+                  marginTop: '1.15rem',
+                  paddingTop: '1.05rem',
+                  borderTop: '1px solid var(--aisbp-border, #e2e8f0)',
+                }}
+              >
+                <p
+                  style={{
+                    margin: '0 0 0.65rem',
+                    fontSize: '0.75rem',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.06em',
+                    color: 'var(--aisbp-muted, #64748b)',
+                    fontWeight: 600,
+                  }}
+                >
+                  Annual plan
+                </p>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.75rem' }}>
+                  <div>
+                    <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--aisbp-muted, #64748b)' }}>Annual allowance</p>
+                    <p
+                      style={{
+                        margin: '0.2rem 0 0',
+                        fontSize: '1.15rem',
+                        fontWeight: 750,
+                        color: 'var(--aisbp-text-heading, #0f172a)',
+                      }}
+                    >
+                      {totalQuota.toLocaleString()} credits
+                    </p>
+                  </div>
+                  <div>
+                    <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--aisbp-muted, #64748b)' }}>Reset date</p>
+                    <p
+                      style={{
+                        margin: '0.2rem 0 0',
+                        fontSize: '1.05rem',
+                        fontWeight: 650,
+                        color: 'var(--aisbp-text-heading, #0f172a)',
+                        lineHeight: 1.35,
+                      }}
+                    >
+                      {resetDateFormatted ? `Resets on ${resetDateFormatted}` : 'Reset date not configured'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.6rem', marginTop: '0.9rem' }}>
                 <div>
                   <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--aisbp-muted, #64748b)' }}>Credits used this month</p>
@@ -271,17 +345,6 @@ export default function TenantUsagePage() {
                   <p style={{ margin: '0.15rem 0 0', fontSize: '1.05rem', fontWeight: 750, color: 'var(--aisbp-text-heading, #0f172a)' }}>
                     {avgDaily != null && Number.isFinite(avgDaily) ? avgDaily.toFixed(1) : '—'}
                   </p>
-                </div>
-                <div>
-                  <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--aisbp-muted, #64748b)' }}>Projected days remaining</p>
-                  <p style={{ margin: '0.15rem 0 0', fontSize: '1.05rem', fontWeight: 750, color: 'var(--aisbp-text-heading, #0f172a)' }}>
-                    {projectedOutcome.display}
-                  </p>
-                  {!projectedOutcome.showNumber ? (
-                    <p style={{ margin: '0.2rem 0 0', fontSize: '0.72rem', color: 'var(--aisbp-muted, #64748b)', lineHeight: 1.35 }}>
-                      Based on average daily usage this month once there is enough history.
-                    </p>
-                  ) : null}
                 </div>
                 <div>
                   <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--aisbp-muted, #64748b)' }}>Status</p>
@@ -317,60 +380,106 @@ export default function TenantUsagePage() {
 
           <SectionCard
             title="Recent credits activity"
-            subtitle="Top-ups, adjustments, and assistant reply usage appear here."
+            subtitle="Top-ups, adjustments, and assistant replies appear here."
           >
             {ledgerItems.length === 0 ? (
               <p style={{ fontSize: '0.85rem', color: 'var(--aisbp-muted, #64748b)', margin: 0 }}>No ledger entries yet.</p>
             ) : (
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
-                  <thead>
-                    <tr>
-                      {['Time', 'Type', 'Amount', 'Balance after', 'Reason'].map(h => (
-                        <th
-                          key={h}
-                          style={{
-                            textAlign: 'left',
-                            padding: '0.45rem',
-                            borderBottom: '1px solid var(--aisbp-border, #e2e8f0)',
-                            color: 'var(--aisbp-muted, #64748b)',
-                            fontSize: '0.7rem',
-                          }}
-                        >
-                          {h}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {ledgerItems.map((r, idx) => {
-                      const mt = r?.movement_type != null ? String(r.movement_type) : '';
-                      const typeLbl = ledgerMovementCustomerLabel(mt, r?.type != null ? String(r.type) : undefined);
-                      const reasonPrimary = softenLedgerCustomerDescription(r?.description, mt);
-                      return (
-                        <tr key={typeof r?.id === 'string' && r.id.trim().length > 0 ? r.id : `ledger-row-${idx}`}>
-                          <td style={{ padding: '0.45rem', borderBottom: '1px solid var(--aisbp-border, #e2e8f0)', color: 'var(--aisbp-text, #0f172a)' }}>
-                            {r?.created_at ? formatDateTime(String(r.created_at)) : '—'}
-                          </td>
-                          <td style={{ padding: '0.45rem', borderBottom: '1px solid var(--aisbp-border, #e2e8f0)', color: 'var(--aisbp-text, #0f172a)' }}>{typeLbl}</td>
-                          <td style={{ padding: '0.45rem', borderBottom: '1px solid var(--aisbp-border, #e2e8f0)', fontWeight: 750, color: 'var(--aisbp-text, #0f172a)' }}>
-                            {String(r?.type ?? '').toUpperCase() === 'DEBIT' ? '-' : '+'}
-                            {Math.abs(safeFiniteNumber(r?.amount)).toLocaleString()}
-                          </td>
-                          <td style={{ padding: '0.45rem', borderBottom: '1px solid var(--aisbp-border, #e2e8f0)', color: 'var(--aisbp-text, #0f172a)' }}>
-                            {r?.balance_after != null && Number.isFinite(Number(r.balance_after))
-                              ? Number(r.balance_after).toLocaleString()
-                              : '—'}
-                          </td>
-                          <td style={{ padding: '0.45rem', borderBottom: '1px solid var(--aisbp-border, #e2e8f0)', color: 'var(--aisbp-text, #0f172a)' }}>
-                            <div>{reasonPrimary}</div>
-                          </td>
+              <>
+                <div
+                  role="tablist"
+                  aria-label="Filter activity"
+                  style={{
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    gap: '0.35rem',
+                    marginBottom: '0.75rem',
+                  }}
+                >
+                  {LEDGER_FILTER_OPTIONS.map(({ id, label }) => {
+                    const active = ledgerFilter === id;
+                    return (
+                      <button
+                        key={id}
+                        type="button"
+                        role="tab"
+                        aria-selected={active}
+                        onClick={() => setLedgerFilter(id)}
+                        style={{
+                          padding: '0.28rem 0.55rem',
+                          borderRadius: '999px',
+                          border: `1px solid ${active ? 'var(--aisbp-tenant-nav-active-text, #0f62fe)' : 'var(--aisbp-border-strong, #cbd5e1)'}`,
+                          background: active
+                            ? 'color-mix(in srgb, var(--aisbp-tenant-nav-active-text, #0f62fe) 12%, transparent)'
+                            : 'var(--aisbp-surface-elevated, var(--aisbp-surface))',
+                          color: active ? 'var(--aisbp-text-heading, #0f172a)' : 'var(--aisbp-text-secondary, #334155)',
+                          fontSize: '0.78rem',
+                          fontWeight: active ? 700 : 600,
+                          cursor: 'pointer',
+                          lineHeight: 1.2,
+                        }}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+                {filteredLedgerItems.length === 0 ? (
+                  <p style={{ fontSize: '0.85rem', color: 'var(--aisbp-muted, #64748b)', margin: 0 }}>
+                    No entries match this filter.
+                  </p>
+                ) : (
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
+                      <thead>
+                        <tr>
+                          {['Time', 'Type', 'Amount', 'Balance after', 'Reason'].map(h => (
+                            <th
+                              key={h}
+                              style={{
+                                textAlign: 'left',
+                                padding: '0.45rem',
+                                borderBottom: '1px solid var(--aisbp-border, #e2e8f0)',
+                                color: 'var(--aisbp-muted, #64748b)',
+                                fontSize: '0.7rem',
+                              }}
+                            >
+                              {h}
+                            </th>
+                          ))}
                         </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+                      </thead>
+                      <tbody>
+                        {filteredLedgerItems.map((r, idx) => {
+                          const mt = r?.movement_type != null ? String(r.movement_type) : '';
+                          const typeLbl = ledgerMovementCustomerLabel(mt, r?.type != null ? String(r.type) : undefined);
+                          const reasonPrimary = softenLedgerCustomerDescription(r?.description, mt);
+                          return (
+                            <tr key={typeof r?.id === 'string' && r.id.trim().length > 0 ? r.id : `ledger-row-${idx}`}>
+                              <td style={{ padding: '0.45rem', borderBottom: '1px solid var(--aisbp-border, #e2e8f0)', color: 'var(--aisbp-text, #0f172a)' }}>
+                                {r?.created_at ? formatDateTime(String(r.created_at)) : '—'}
+                              </td>
+                              <td style={{ padding: '0.45rem', borderBottom: '1px solid var(--aisbp-border, #e2e8f0)', color: 'var(--aisbp-text, #0f172a)' }}>{typeLbl}</td>
+                              <td style={{ padding: '0.45rem', borderBottom: '1px solid var(--aisbp-border, #e2e8f0)', fontWeight: 750, color: 'var(--aisbp-text, #0f172a)' }}>
+                                {String(r?.type ?? '').toUpperCase() === 'DEBIT' ? '-' : '+'}
+                                {Math.abs(safeFiniteNumber(r?.amount)).toLocaleString()}
+                              </td>
+                              <td style={{ padding: '0.45rem', borderBottom: '1px solid var(--aisbp-border, #e2e8f0)', color: 'var(--aisbp-text, #0f172a)' }}>
+                                {r?.balance_after != null && Number.isFinite(Number(r.balance_after))
+                                  ? Number(r.balance_after).toLocaleString()
+                                  : '—'}
+                              </td>
+                              <td style={{ padding: '0.45rem', borderBottom: '1px solid var(--aisbp-border, #e2e8f0)', color: 'var(--aisbp-text, #0f172a)' }}>
+                                <div>{reasonPrimary}</div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </>
             )}
           </SectionCard>
         </>

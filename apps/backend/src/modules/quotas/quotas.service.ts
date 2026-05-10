@@ -442,10 +442,15 @@ export class QuotasService {
     usedThisMonth: number;
     usedThisYear: number;
     status: 'ACTIVE' | 'LOW_CREDIT' | 'PAUSED_NO_CREDITS' | 'OVER_NEGATIVE_LIMIT';
+    /** ISO timestamps from `quota_wallets` — client shows annual reset / period window; null when wallet missing. */
+    periodStart: string | null;
+    periodEnd: string | null;
   }> {
     const { data: wallet, error: wErr } = await this.supabase
       .from('quota_wallets')
-      .select('id, tenant_id, total_quota, used_quota, allow_negative_credits, negative_credit_limit, low_credit_threshold')
+      .select(
+        'id, tenant_id, total_quota, used_quota, allow_negative_credits, negative_credit_limit, low_credit_threshold, period_start, period_end',
+      )
       .eq('tenant_id', tenantId)
       .maybeSingle();
     if (wErr) {
@@ -466,6 +471,8 @@ export class QuotasService {
         usedThisMonth: 0,
         usedThisYear: 0,
         status: 'ACTIVE',
+        periodStart: null,
+        periodEnd: null,
       };
     }
 
@@ -514,6 +521,9 @@ export class QuotasService {
         ? 'LOW_CREDIT'
         : 'ACTIVE';
 
+    const ps = wallet.period_start as string | undefined;
+    const pe = wallet.period_end as string | undefined;
+
     return {
       tenantId,
       totalQuota,
@@ -526,6 +536,8 @@ export class QuotasService {
       usedThisMonth,
       usedThisYear,
       status,
+      periodStart: typeof ps === 'string' && ps.trim() ? ps : null,
+      periodEnd: typeof pe === 'string' && pe.trim() ? pe : null,
     };
   }
 

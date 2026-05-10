@@ -157,12 +157,27 @@ export function ledgerMovementCustomerLabel(movementType: string | null | undefi
   const map: Record<string, string> = {
     reply_debit: 'Assistant reply',
     top_up: 'Credits added',
-    manual_adjustment: 'Manual adjustment',
+    manual_adjustment: 'Adjustment',
     refund_credit: 'Credit refund',
-    system_correction: 'System correction',
+    system_correction: 'Account adjustment',
   };
   if (map[k]) return map[k];
-  return k.replace(/_/g, ' ').trim() || '—';
+  return 'Account update';
+}
+
+/** Recent credits activity filter chips — maps to `quota_ledgers.movement_type`. */
+export type LedgerActivityFilter = 'all' | 'assistant' | 'credits_added' | 'adjustments';
+
+export function ledgerRowMatchesActivityFilter(
+  row: { movement_type: string | null },
+  filter: LedgerActivityFilter,
+): boolean {
+  const mt = String(row.movement_type ?? '');
+  if (filter === 'all') return true;
+  if (filter === 'assistant') return mt === 'reply_debit';
+  if (filter === 'credits_added') return mt === 'top_up';
+  if (filter === 'adjustments') return mt !== 'reply_debit' && mt !== 'top_up';
+  return true;
 }
 
 /** Default customer-facing wording for ledger rows (`reply_debit` stays backend-only elsewhere). */
@@ -170,6 +185,15 @@ export function softenLedgerCustomerDescription(desc: unknown, movementType: str
   const d = typeof desc === 'string' ? desc.trim() : '';
   const mt = movementType ?? '';
   if (mt === LEDGER_REPLY_DEBIT) return 'Assistant replied to a customer';
+  if (mt === 'top_up') {
+    if (!d) return 'Credits added';
+    const dl = d.toLowerCase();
+    if (dl.includes('wallet created') || dl.startsWith('manual top-up')) return 'Credits added';
+    return d;
+  }
+  if (mt === 'manual_adjustment') return d && !/wallet/i.test(d) ? d : 'Adjustment';
+  if (mt === 'refund_credit') return d || 'Credit refund';
+  if (mt === 'system_correction') return 'Account adjustment';
   return d || '—';
 }
 

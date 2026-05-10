@@ -41,9 +41,10 @@ describe('credits-billing-copy', () => {
   it('labels ledger movements for tenants', () => {
     expect(ledgerMovementCustomerLabel('reply_debit')).toBe('Assistant reply');
     expect(ledgerMovementCustomerLabel('top_up')).toBe('Credits added');
-    expect(ledgerMovementCustomerLabel('manual_adjustment')).toBe('Manual adjustment');
+    expect(ledgerMovementCustomerLabel('manual_adjustment')).toBe('Adjustment');
     expect(ledgerMovementCustomerLabel('refund_credit')).toBe('Credit refund');
-    expect(ledgerMovementCustomerLabel('system_correction')).toBe('System correction');
+    expect(ledgerMovementCustomerLabel('system_correction')).toBe('Account adjustment');
+    expect(ledgerMovementCustomerLabel('internal_only_type')).toBe('Account update');
   });
 
   it('generalizes assistant reply ledger reasons', () => {

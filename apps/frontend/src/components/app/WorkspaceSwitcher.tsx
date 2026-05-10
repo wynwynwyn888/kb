@@ -9,6 +9,7 @@ import { getAgencyById, getMyTenants, getTenantById, getTenantsByAgency } from '
 import { getSubaccountSwitchHref } from '@/components/app/tenant-workspace/path';
 import { TENANT_WORKSPACE_META_CHANGED, type TenantWorkspaceMetaDetail } from '@/lib/workspace-events';
 import { rememberAgencyWorkspaceSelection } from '@/lib/theme-preference';
+import { appFloatingPrimaryButtonStyle } from '@/components/app/mvp-ui';
 
 type SubaccountRow = { id: string; name: string; ghlLocationId?: string | null; status?: string };
 
@@ -50,19 +51,19 @@ const panelBoxStyle = (top: number, left: number): CSSProperties => ({
   padding: '0.35rem 0 0.45rem',
 });
 
-const agencyViewBtn: CSSProperties = {
-  display: 'block',
+/** Full-width primary action — matches app floating primary + theme-aware panel contrast (light popover on dark shell). */
+const backToAgencyAccountBtn: CSSProperties = {
+  ...appFloatingPrimaryButtonStyle,
+  display: 'flex',
   width: '100%',
-  padding: '0.55rem 0.75rem',
-  fontSize: '0.8rem',
-  fontWeight: 700,
-  border: '1px solid #0f172a',
-  background: '#0f172a',
-  color: '#fff',
-  borderRadius: '8px',
-  cursor: 'pointer',
-  textAlign: 'center' as const,
+  maxWidth: 'calc(100% - 1.3rem)',
   margin: '0.5rem 0.65rem 0.55rem',
+  alignSelf: 'center',
+  boxSizing: 'border-box',
+  justifyContent: 'center',
+  fontWeight: 700,
+  fontSize: '0.8125rem',
+  lineHeight: 1.25,
 };
 
 const searchInp: CSSProperties = {
@@ -287,7 +288,7 @@ export function WorkspaceSwitcher() {
   const panelContent = open && panelPos && (
     <div id="ws-panel" ref={panelRef} style={panelBoxStyle(panelPos.top, panelPos.left)} role="dialog" aria-label="Switch workspace">
       {canShowAgencySwitch && inSubContext ? (
-        <button type="button" style={agencyViewBtn} onClick={goAgency}>
+        <button type="button" style={backToAgencyAccountBtn} onClick={goAgency}>
           Back to agency account
         </button>
       ) : null}

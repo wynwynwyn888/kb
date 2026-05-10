@@ -171,7 +171,7 @@ export function buildTenantSidebarNav(
     {
       kind: 'leaf',
       href: `${base}/usage`,
-      label: 'Usage',
+      label: 'Credit & Usage',
       icon: 'chart',
       match: p => p === `${base}/usage`,
     },

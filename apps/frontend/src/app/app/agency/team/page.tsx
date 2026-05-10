@@ -152,6 +152,15 @@ export default function AgencyTeamPage() {
     void refetch();
   }, [refetch, loadKey]);
 
+  // Clear sensitive single-use links from React state when the page unmounts
+  // so they don't linger in DOM if the user navigates back to a cached view.
+  useEffect(() => {
+    return () => {
+      setInviteLink(null);
+      setResetLink(null);
+    };
+  }, []);
+
   const agencyId = user?.agencyId;
 
   const onCreateInvite = async () => {
@@ -173,6 +182,7 @@ export default function AgencyTeamPage() {
     setInviteEmailErr('');
     setErr('');
     setOk('');
+    setResetLink(null);
     setInviteBusy(true);
     try {
       const r = await createAgencyInviteLink(token, {
@@ -224,6 +234,7 @@ export default function AgencyTeamPage() {
     setErr('');
     setOk('');
     setResetLink(null);
+    setInviteLink(null);
     setBusyId(m.id);
     try {
       const r = await createAgencyMemberPasswordResetLink(token, { agencyId, membershipId: m.id });
@@ -438,14 +449,41 @@ export default function AgencyTeamPage() {
 
       {resetLink ? (
         <SectionCard title="Copy reset link" subtitle="No email was sent from the app for this action.">
-          <input readOnly value={resetLink} style={{ ...mvpInputStyle, width: '100%', maxWidth: '100%', fontSize: '0.78rem' }} />
-          <button
-            type="button"
-            onClick={() => void copyText('Reset link', resetLink, m => setOk(m), m => setErr(m))}
-            style={{ ...mvpPrimaryButtonStyle, marginTop: '0.65rem', width: 'fit-content' }}
+          <p
+            role="note"
+            style={{
+              margin: '0 0 0.6rem',
+              fontSize: '0.8rem',
+              color: '#92400e',
+              background: '#fef3c7',
+              border: '1px solid #fde68a',
+              padding: '0.5rem 0.65rem',
+              borderRadius: 6,
+              lineHeight: 1.45,
+            }}
           >
-            Copy reset link
-          </button>
+            Treat this link like a password. Anyone with the link can access or reset the account.
+          </p>
+          <input readOnly value={resetLink} style={{ ...mvpInputStyle, width: '100%', maxWidth: '100%', fontSize: '0.78rem' }} />
+          <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.65rem', flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              onClick={() => void copyText('Reset link', resetLink, m => setOk(m), m => setErr(m))}
+              style={{ ...mvpPrimaryButtonStyle, width: 'fit-content' }}
+            >
+              Copy reset link
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setResetLink(null);
+                setOk('');
+              }}
+              style={{ ...mvpSecondaryButtonStyle, width: 'fit-content' }}
+            >
+              Done
+            </button>
+          </div>
         </SectionCard>
       ) : null}
 
@@ -469,6 +507,21 @@ export default function AgencyTeamPage() {
           {inviteLink ? (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxWidth: '560px' }}>
               <SuccessBanner message={`Invite link created for ${inviteLink.email}.`} />
+              <p
+                role="note"
+                style={{
+                  margin: 0,
+                  fontSize: '0.8rem',
+                  color: '#92400e',
+                  background: '#fef3c7',
+                  border: '1px solid #fde68a',
+                  padding: '0.5rem 0.65rem',
+                  borderRadius: 6,
+                  lineHeight: 1.45,
+                }}
+              >
+                Treat this link like a password. Anyone with the link can access or reset the account.
+              </p>
               <input
                 readOnly
                 value={inviteLink.url}

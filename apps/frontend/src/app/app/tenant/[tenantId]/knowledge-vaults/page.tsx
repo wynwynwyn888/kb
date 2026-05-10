@@ -59,11 +59,13 @@ function vaultListCardStyle(selected: boolean): CSSProperties {
     padding: '0.65rem 0.75rem',
     borderRadius: 10,
     border: '1px solid',
-    borderColor: selected ? 'rgba(191, 219, 254, 0.65)' : 'transparent',
+    borderColor: selected ? 'var(--aisbp-border-strong, #cbd5e1)' : 'var(--aisbp-border, #e2e8f0)',
     borderLeftWidth: 3,
     borderLeftStyle: 'solid',
-    borderLeftColor: selected ? PRIMARY : 'transparent',
-    background: selected ? 'rgba(239, 246, 255, 0.72)' : 'transparent',
+    borderLeftColor: selected ? 'var(--aisbp-tenant-nav-active-text, #0f62fe)' : 'transparent',
+    background: selected
+      ? 'color-mix(in srgb, var(--aisbp-tenant-nav-active-bg, rgba(15, 98, 254, 0.1)) 40%, var(--aisbp-surface-elevated, var(--aisbp-surface)))'
+      : 'var(--aisbp-card-subtle, #f8f9fb)',
     boxShadow: 'none',
     cursor: 'pointer',
     textAlign: 'left' as const,
@@ -81,8 +83,8 @@ const glassSection: CSSProperties = {
   background: 'var(--aisbp-glass-bg, rgba(255, 255, 255, 0.94))',
   backdropFilter: 'blur(18px)',
   WebkitBackdropFilter: 'blur(18px)',
-  border: 'none',
-  boxShadow: '0 4px 28px rgba(15, 23, 42, 0.06)',
+  border: '1px solid var(--aisbp-glass-border, rgba(226, 232, 240, 0.95))',
+  boxShadow: '0 4px 24px rgba(0, 0, 0, 0.08)',
 };
 
 const bentoBtn: CSSProperties = {
@@ -92,11 +94,11 @@ const bentoBtn: CSSProperties = {
   flexDirection: 'column',
   alignItems: 'center',
   gap: 10,
-  background: 'var(--aisbp-bento-bg, rgba(255, 255, 255, 0.9))',
+  background: 'var(--aisbp-surface-elevated, var(--aisbp-surface))',
   backdropFilter: 'blur(14px)',
   WebkitBackdropFilter: 'blur(14px)',
-  border: '1px solid var(--aisbp-bento-border, rgba(255, 255, 255, 1))',
-  boxShadow: '0 12px 40px rgba(15, 23, 42, 0.05)',
+  border: '1px solid var(--aisbp-bento-border, var(--aisbp-border))',
+  boxShadow: '0 8px 28px rgba(0, 0, 0, 0.06)',
   cursor: 'pointer',
   font: 'inherit',
   color: 'var(--aisbp-text-heading, #0f172a)',
@@ -318,8 +320,8 @@ const faqCardShell: CSSProperties = {
   padding: '1.15rem 1.25rem',
   marginBottom: 18,
   background: 'linear-gradient(180deg, var(--aisbp-card-gradient-top, #ffffff) 0%, var(--aisbp-card-gradient-bottom, #fafbfc) 100%)',
-  border: 'none',
-  boxShadow: '0 2px 16px rgba(15, 23, 42, 0.06)',
+  border: '1px solid var(--aisbp-border, #e2e8f0)',
+  boxShadow: '0 2px 14px rgba(0, 0, 0, 0.06)',
 };
 
 function KbVaultPill({ name }: { name: string }) {
@@ -337,9 +339,9 @@ function KbVaultPill({ name }: { name: string }) {
         fontWeight: 700,
         letterSpacing: '0.06em',
         textTransform: 'uppercase' as const,
-        color: '#475569',
-        background: '#f1f5f9',
-        border: '1px solid #e2e8f0',
+        color: 'var(--aisbp-text-secondary, #475569)',
+        background: 'var(--aisbp-surface-muted, #f1f5f9)',
+        border: '1px solid var(--aisbp-border, #e2e8f0)',
         borderRadius: 999,
         padding: '0.22rem 0.6rem',
       }}
@@ -387,7 +389,7 @@ function DocumentVaultLine({
 
   if (vaults.length === 0) {
     return (
-      <p style={{ margin: '0.85rem 0 0', fontSize: '0.78rem', color: '#78716c', lineHeight: 1.45 }}>
+      <p style={{ margin: '0.85rem 0 0', fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)', lineHeight: 1.45 }}>
         No knowledge vaults yet. Create one in the Knowledge Vaults section above.
       </p>
     );
@@ -418,8 +420,8 @@ function DocumentVaultLine({
         marginTop: '0.6rem',
         padding: '0.75rem 0.85rem',
         borderRadius: 12,
-        background: 'rgba(248, 250, 252, 0.95)',
-        border: '1px solid rgba(226, 232, 240, 0.95)',
+        background: 'var(--aisbp-surface-muted, #f8fafc)',
+        border: '1px solid var(--aisbp-border, #e2e8f0)',
       }}
     >
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: '0.45rem' }}>
@@ -433,7 +435,7 @@ function DocumentVaultLine({
             style={{
               fontSize: '0.75rem',
               fontWeight: 600,
-              color: '#64748b',
+              color: 'var(--aisbp-muted, #64748b)',
               background: 'none',
               border: 'none',
               cursor: 'pointer',
@@ -445,7 +447,7 @@ function DocumentVaultLine({
           </button>
         ) : null}
       </div>
-      <p style={{ fontSize: '0.75rem', color: '#64748b', margin: '0 0 0.5rem', lineHeight: 1.4 }}>
+      <p style={{ fontSize: '0.75rem', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 0.5rem', lineHeight: 1.4 }}>
         {inVaultView
           ? 'Pick another vault to move this item into. Live replies still use the vaults chosen on Bot Instructions → Assistant Profile.'
           : 'Choose which vault this item belongs to. Assistant profiles can search all vaults or only selected ones.'}
@@ -1913,15 +1915,15 @@ export default function SubaccountKnowledgePage() {
     border: 'none',
     background: 'none',
     cursor: 'pointer',
-    color: active ? PRIMARY : 'var(--aisbp-muted, #64748b)',
-    borderBottom: active ? `2px solid ${PRIMARY}` : '2px solid transparent',
+    color: active ? 'var(--aisbp-text-heading, #0f172a)' : 'var(--aisbp-muted, #64748b)',
+    borderBottom: active ? '2px solid var(--aisbp-tenant-nav-active-text, #0f62fe)' : '2px solid transparent',
   });
 
   const iconCircle: CSSProperties = {
     width: 48,
     height: 48,
     borderRadius: '50%',
-    background: 'rgba(15, 98, 254, 0.1)',
+    background: 'var(--aisbp-tenant-nav-active-bg, rgba(15, 98, 254, 0.1))',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
@@ -2011,7 +2013,7 @@ export default function SubaccountKnowledgePage() {
                     (profile vault access) — not by this vault list selection alone.
                   </p>
                   {vaults.length === 0 ? (
-                    <p style={{ fontSize: '0.85rem', color: '#64748b', margin: '0 0 0.75rem', lineHeight: 1.45 }}>
+                    <p style={{ fontSize: '0.85rem', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 0.75rem', lineHeight: 1.45 }}>
                       {NO_VAULT_EMPTY_MSG}
                     </p>
                   ) : (
@@ -2039,7 +2041,7 @@ export default function SubaccountKnowledgePage() {
                             fontWeight: 700,
                             letterSpacing: '0.07em',
                             textTransform: 'uppercase' as const,
-                            color: '#94a3b8',
+                            color: 'var(--aisbp-muted, #64748b)',
                             margin: 0,
                           }}
                         >
@@ -2060,14 +2062,16 @@ export default function SubaccountKnowledgePage() {
                             style={vaultListCardStyle(selectedVaultId === v.id)}
                           >
                             <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.35rem' }}>
-                              <span style={{ fontWeight: 700, fontSize: '0.92rem', color: '#0f172a' }}>{v.name}</span>
+                              <span style={{ fontWeight: 700, fontSize: '0.92rem', color: 'var(--aisbp-text-heading, #0f172a)' }}>
+                                {v.name}
+                              </span>
                               {v.isDefault ? (
                                 <span
                                   style={{
                                     fontSize: '0.65rem',
                                     fontWeight: 700,
                                     letterSpacing: '0.06em',
-                                    color: '#64748b',
+                                    color: 'var(--aisbp-muted, #64748b)',
                                     textTransform: 'uppercase' as const,
                                   }}
                                 >
@@ -2075,7 +2079,7 @@ export default function SubaccountKnowledgePage() {
                                 </span>
                               ) : null}
                             </div>
-                            <div style={{ marginTop: 6, fontSize: '0.78rem', color: '#64748b', lineHeight: 1.45 }}>
+                            <div style={{ marginTop: 6, fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)', lineHeight: 1.45 }}>
                               {v.documentCount} document{v.documentCount === 1 ? '' : 's'}
                               {' · '}
                               Last activity {relativeTimeLabel(getVaultActivityAt(v, docs))}
@@ -2089,12 +2093,21 @@ export default function SubaccountKnowledgePage() {
                             style={{
                               borderRadius: 12,
                               padding: '1rem 1.1rem',
-                              background: 'rgba(239, 246, 255, 0.5)',
-                              border: '1px solid rgba(191, 219, 254, 0.55)',
+                              background:
+                                'color-mix(in srgb, var(--aisbp-tenant-nav-active-bg, rgba(15, 98, 254, 0.1)) 30%, var(--aisbp-surface-elevated, var(--aisbp-surface)))',
+                              border: '1px solid var(--aisbp-border-strong, #cbd5e1)',
                             }}
                           >
                             <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'baseline', gap: '0.45rem', marginBottom: '0.5rem' }}>
-                              <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 800, color: '#0f172a', letterSpacing: '-0.02em' }}>
+                              <h3
+                                style={{
+                                  margin: 0,
+                                  fontSize: '1.15rem',
+                                  fontWeight: 800,
+                                  color: 'var(--aisbp-text-heading, #0f172a)',
+                                  letterSpacing: '-0.02em',
+                                }}
+                              >
                                 {selectedVault.name}
                               </h3>
                               {selectedVault.isDefault ? (
@@ -2103,10 +2116,10 @@ export default function SubaccountKnowledgePage() {
                                     fontSize: '0.62rem',
                                     fontWeight: 700,
                                     letterSpacing: '0.08em',
-                                    color: '#0369a1',
+                                    color: 'var(--aisbp-pill-neutral-fg, #475569)',
                                     textTransform: 'uppercase' as const,
-                                    background: 'rgba(224, 242, 254, 0.9)',
-                                    border: '1px solid rgba(125, 211, 252, 0.6)',
+                                    background: 'var(--aisbp-pill-neutral-bg, #f8fafc)',
+                                    border: '1px solid var(--aisbp-pill-neutral-border, #e2e8f0)',
                                     borderRadius: 999,
                                     padding: '0.2rem 0.5rem',
                                   }}
@@ -2115,15 +2128,15 @@ export default function SubaccountKnowledgePage() {
                                 </span>
                               ) : null}
                             </div>
-                            <p style={{ fontSize: '0.84rem', color: '#475569', margin: '0 0 0.5rem', fontWeight: 600 }}>
+                            <p style={{ fontSize: '0.84rem', color: 'var(--aisbp-text-secondary, #475569)', margin: '0 0 0.5rem', fontWeight: 600 }}>
                               {selectedVault.documentCount} document{selectedVault.documentCount === 1 ? '' : 's'}
                             </p>
                             {selectedVault.description?.trim() ? (
-                              <p style={{ fontSize: '0.8125rem', color: '#64748b', margin: '0 0 0.5rem', lineHeight: 1.55 }}>
+                              <p style={{ fontSize: '0.8125rem', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 0.5rem', lineHeight: 1.55 }}>
                                 {selectedVault.description.trim()}
                               </p>
                             ) : null}
-                            <p style={{ fontSize: '0.78rem', color: '#94a3b8', margin: '0 0 0.85rem' }}>
+                            <p style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 0.85rem' }}>
                               Last activity {relativeTimeLabel(getVaultActivityAt(selectedVault, docs))}
                             </p>
                             <div
@@ -2133,7 +2146,7 @@ export default function SubaccountKnowledgePage() {
                                 gap: '0.45rem',
                                 alignItems: 'center',
                                 paddingTop: '0.65rem',
-                                borderTop: '1px solid rgba(191, 219, 254, 0.45)',
+                                borderTop: '1px solid var(--aisbp-border, #e2e8f0)',
                               }}
                             >
                               <button
@@ -2211,11 +2224,13 @@ export default function SubaccountKnowledgePage() {
                                   padding: '0.38rem 0.75rem',
                                   fontSize: '0.8125rem',
                                   color:
-                                    selectedVault.isDefault || selectedVault.documentCount > 0 ? '#cbd5e1' : '#b91c1c',
+                                    selectedVault.isDefault || selectedVault.documentCount > 0
+                                      ? 'var(--aisbp-muted, #94a3b8)'
+                                      : 'var(--aisbp-pill-bad-fg, #b91c1c)',
                                   borderColor:
                                     selectedVault.isDefault || selectedVault.documentCount > 0
-                                      ? 'rgba(148, 163, 184, 0.35)'
-                                      : 'rgba(185, 28, 28, 0.35)',
+                                      ? 'var(--aisbp-border, #e2e8f0)'
+                                      : 'var(--aisbp-pill-bad-border, #fecaca)',
                                   cursor:
                                     selectedVault.isDefault || selectedVault.documentCount > 0
                                       ? 'not-allowed'
@@ -2227,7 +2242,7 @@ export default function SubaccountKnowledgePage() {
                             </div>
                           </div>
                         ) : (
-                          <p style={{ fontSize: '0.85rem', color: '#64748b', margin: 0, lineHeight: 1.45 }}>
+                          <p style={{ fontSize: '0.85rem', color: 'var(--aisbp-muted, #64748b)', margin: 0, lineHeight: 1.45 }}>
                             Select a vault from the list.
                           </p>
                         )}
@@ -2268,12 +2283,12 @@ export default function SubaccountKnowledgePage() {
                   Add to this vault
                 </h2>
                 {selectedVault ? (
-                  <p style={{ fontSize: '0.8125rem', color: '#64748b', margin: '0 0 0.85rem', lineHeight: 1.5 }}>
+                  <p style={{ fontSize: '0.8125rem', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 0.85rem', lineHeight: 1.5 }}>
                     Items you add here will be saved to{' '}
-                    <strong style={{ fontWeight: 600, color: '#334155' }}>{selectedVault.name}</strong>.
+                    <strong style={{ fontWeight: 600, color: 'var(--aisbp-text-secondary, #334155)' }}>{selectedVault.name}</strong>.
                   </p>
                 ) : (
-                  <p style={{ fontSize: '0.8125rem', color: '#64748b', margin: '0 0 0.85rem', lineHeight: 1.45 }}>
+                  <p style={{ fontSize: '0.8125rem', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 0.85rem', lineHeight: 1.45 }}>
                     {NO_VAULT_EMPTY_MSG}
                   </p>
                 )}
@@ -2290,7 +2305,7 @@ export default function SubaccountKnowledgePage() {
                     type="button"
                     style={{
                       ...bentoBtn,
-                      ...(!selectedVaultId ? { opacity: 0.55, cursor: 'not-allowed' as const } : {}),
+                      ...(!selectedVaultId ? { opacity: 0.68, cursor: 'not-allowed' as const } : {}),
                     }}
                     onClick={() => {
                       if (!selectedVaultId) {
@@ -2309,7 +2324,7 @@ export default function SubaccountKnowledgePage() {
                     type="button"
                     style={{
                       ...bentoBtn,
-                      ...(!selectedVaultId ? { opacity: 0.55, cursor: 'not-allowed' as const } : {}),
+                      ...(!selectedVaultId ? { opacity: 0.68, cursor: 'not-allowed' as const } : {}),
                     }}
                     onClick={() => {
                       if (!selectedVaultId) {
@@ -2328,7 +2343,7 @@ export default function SubaccountKnowledgePage() {
                     type="button"
                     style={{
                       ...bentoBtn,
-                      ...(!selectedVaultId ? { opacity: 0.55, cursor: 'not-allowed' as const } : {}),
+                      ...(!selectedVaultId ? { opacity: 0.68, cursor: 'not-allowed' as const } : {}),
                     }}
                     onClick={() => {
                       if (!selectedVaultId) {
@@ -2362,7 +2377,7 @@ export default function SubaccountKnowledgePage() {
                     fontWeight: 700,
                     letterSpacing: '0.07em',
                     textTransform: 'uppercase' as const,
-                    color: '#94a3b8',
+                    color: 'var(--aisbp-muted, #64748b)',
                     margin: '0 0 0.45rem',
                   }}
                 >
@@ -2426,11 +2441,12 @@ export default function SubaccountKnowledgePage() {
                     </p>
                     <form onSubmit={onFaqSave} style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxWidth: 520, marginBottom: '1.25rem' }}>
                       {selectedVault ? (
-                        <p style={{ fontSize: '0.78rem', color: '#64748b', margin: 0, lineHeight: 1.45 }}>
-                          This FAQ will be saved to <strong style={{ fontWeight: 600, color: '#334155' }}>{selectedVault.name}</strong>.
+                        <p style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)', margin: 0, lineHeight: 1.45 }}>
+                          This FAQ will be saved to{' '}
+                          <strong style={{ fontWeight: 600, color: 'var(--aisbp-text-secondary, #334155)' }}>{selectedVault.name}</strong>.
                         </p>
                       ) : (
-                        <p style={{ fontSize: '0.78rem', color: '#64748b', margin: 0, lineHeight: 1.45 }}>{NO_VAULT_EMPTY_MSG}</p>
+                        <p style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)', margin: 0, lineHeight: 1.45 }}>{NO_VAULT_EMPTY_MSG}</p>
                       )}
                       <label>
                         <span style={mvpLabelStyle}>Question</span>
@@ -2473,7 +2489,7 @@ export default function SubaccountKnowledgePage() {
                     </form>
 
                     {faqRows.length === 0 ? (
-                      <p style={{ fontSize: '0.875rem', color: '#64748b', margin: '0.25rem 0 0', lineHeight: 1.5 }}>
+                      <p style={{ fontSize: '0.875rem', color: 'var(--aisbp-muted, #64748b)', margin: '0.25rem 0 0', lineHeight: 1.5 }}>
                         No FAQs in this vault yet.
                       </p>
                     ) : (
@@ -2505,17 +2521,20 @@ export default function SubaccountKnowledgePage() {
 
                 {tab === 'rich' ? (
                   <section style={glassSection}>
-                    <h3 style={{ fontSize: '0.95rem', fontWeight: 700, margin: '0 0 0.5rem', color: '#0f172a' }}>New note</h3>
-                    <p style={{ fontSize: '0.8125rem', color: '#64748b', margin: '0 0 1rem', lineHeight: 1.45 }}>
+                    <h3 style={{ fontSize: '0.95rem', fontWeight: 700, margin: '0 0 0.5rem', color: 'var(--aisbp-text-heading, #0f172a)' }}>
+                      New note
+                    </h3>
+                    <p style={{ fontSize: '0.8125rem', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 1rem', lineHeight: 1.45 }}>
                       Longer context such as policies, menus, or service details.
                     </p>
                     <form onSubmit={onRichSave} style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxWidth: 520, marginBottom: '1.25rem' }}>
                       {selectedVault ? (
-                        <p style={{ fontSize: '0.78rem', color: '#64748b', margin: 0, lineHeight: 1.45 }}>
-                          This note will be saved to <strong style={{ fontWeight: 600, color: '#334155' }}>{selectedVault.name}</strong>.
+                        <p style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)', margin: 0, lineHeight: 1.45 }}>
+                          This note will be saved to{' '}
+                          <strong style={{ fontWeight: 600, color: 'var(--aisbp-text-secondary, #334155)' }}>{selectedVault.name}</strong>.
                         </p>
                       ) : (
-                        <p style={{ fontSize: '0.78rem', color: '#64748b', margin: 0, lineHeight: 1.45 }}>{NO_VAULT_EMPTY_MSG}</p>
+                        <p style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)', margin: 0, lineHeight: 1.45 }}>{NO_VAULT_EMPTY_MSG}</p>
                       )}
                       <label>
                         <span style={mvpLabelStyle}>Title</span>
@@ -2561,9 +2580,9 @@ export default function SubaccountKnowledgePage() {
                       <p
                         style={{
                           fontSize: '0.78rem',
-                          color: '#78716c',
-                          background: 'rgba(250, 250, 249, 0.9)',
-                          border: '1px solid #e7e5e4',
+                          color: 'var(--aisbp-text-secondary, #334155)',
+                          background: 'var(--aisbp-surface-muted, #f8fafc)',
+                          border: '1px solid var(--aisbp-border, #e2e8f0)',
                           borderRadius: 10,
                           padding: '0.5rem 0.65rem',
                           marginBottom: '0.85rem',
@@ -2574,7 +2593,7 @@ export default function SubaccountKnowledgePage() {
                     ) : null}
 
                     {richRows.length === 0 ? (
-                      <p style={{ fontSize: '0.875rem', color: '#64748b', margin: '0.25rem 0 0', lineHeight: 1.5 }}>
+                      <p style={{ fontSize: '0.875rem', color: 'var(--aisbp-muted, #64748b)', margin: '0.25rem 0 0', lineHeight: 1.5 }}>
                         No notes in this vault yet.
                       </p>
                     ) : (
@@ -2619,17 +2638,20 @@ export default function SubaccountKnowledgePage() {
 
                 {tab === 'files' ? (
                   <section style={glassSection}>
-                    <h3 style={{ fontSize: '0.95rem', fontWeight: 700, margin: '0 0 0.5rem', color: '#0f172a' }}>Upload</h3>
-                    <p style={{ fontSize: '0.8125rem', color: '#64748b', margin: '0 0 1rem', lineHeight: 1.45 }}>
+                    <h3 style={{ fontSize: '0.95rem', fontWeight: 700, margin: '0 0 0.5rem', color: 'var(--aisbp-text-heading, #0f172a)' }}>
+                      Upload
+                    </h3>
+                    <p style={{ fontSize: '0.8125rem', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 1rem', lineHeight: 1.45 }}>
                       Plain text (.txt) is indexed right away. Use <strong style={{ fontWeight: 600 }}>View extracted text</strong> on each
                       card to confirm what the bot can read. Original download appears only when the server keeps the uploaded file.
                     </p>
                     {selectedVault ? (
-                      <p style={{ fontSize: '0.78rem', color: '#64748b', margin: '0 0 1rem', lineHeight: 1.45, maxWidth: 520 }}>
-                        Files will be uploaded to <strong style={{ fontWeight: 600, color: '#334155' }}>{selectedVault.name}</strong>.
+                      <p style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 1rem', lineHeight: 1.45, maxWidth: 520 }}>
+                        Files will be uploaded to{' '}
+                        <strong style={{ fontWeight: 600, color: 'var(--aisbp-text-secondary, #334155)' }}>{selectedVault.name}</strong>.
                       </p>
                     ) : (
-                      <p style={{ fontSize: '0.78rem', color: '#64748b', margin: '0 0 1rem', lineHeight: 1.45 }}>{NO_VAULT_EMPTY_MSG}</p>
+                      <p style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 1rem', lineHeight: 1.45 }}>{NO_VAULT_EMPTY_MSG}</p>
                     )}
                     <div
                       role="button"
@@ -2654,19 +2676,19 @@ export default function SubaccountKnowledgePage() {
                         fontSize: '0.8125rem',
                         padding: '1rem 1.1rem',
                         borderRadius: 12,
-                        border: '1px dashed #94a3b8',
-                        background: 'rgba(248, 250, 252, 0.8)',
-                        color: '#334155',
+                        border: '1px dashed var(--aisbp-border-strong, #cbd5e1)',
+                        background: 'var(--aisbp-surface-muted, #f8fafc)',
+                        color: 'var(--aisbp-text-secondary, #334155)',
                         cursor: !selectedVaultId ? 'not-allowed' : 'pointer',
                         textAlign: 'center',
                         marginBottom: '1rem',
-                        opacity: !selectedVaultId ? 0.55 : 1,
+                        opacity: !selectedVaultId ? 0.62 : 1,
                       }}
                     >
                       Choose a file to upload (PDF, DOC, DOCX, or TXT)
                     </div>
                     {fileRows.length === 0 ? (
-                      <p style={{ fontSize: '0.875rem', color: '#64748b', margin: '0.25rem 0 0', lineHeight: 1.5 }}>
+                      <p style={{ fontSize: '0.875rem', color: 'var(--aisbp-muted, #64748b)', margin: '0.25rem 0 0', lineHeight: 1.5 }}>
                         No files in this vault yet.
                       </p>
                     ) : (
@@ -2697,9 +2719,11 @@ export default function SubaccountKnowledgePage() {
                   <h2 style={{ fontSize: '1rem', fontWeight: 700, margin: '0 0 0.2rem', color: 'var(--aisbp-text-heading, #0f172a)' }}>
                     Search this vault
                   </h2>
-                  <p style={{ fontSize: '0.8125rem', color: '#64748b', margin: '0 0 0.85rem', lineHeight: 1.45 }}>
+                  <p style={{ fontSize: '0.8125rem', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 0.85rem', lineHeight: 1.45 }}>
                     Keyword search runs only inside{' '}
-                    <strong style={{ fontWeight: 600, color: '#475569' }}>{selectedVault?.name ?? 'the selected vault'}</strong>
+                    <strong style={{ fontWeight: 600, color: 'var(--aisbp-text-secondary, #334155)' }}>
+                      {selectedVault?.name ?? 'the selected vault'}
+                    </strong>
                     . It does not search other vaults from this page.
                   </p>
                   <form onSubmit={onSearch} style={{ display: 'flex', gap: '0.65rem', flexWrap: 'wrap', alignItems: 'center' }}>
@@ -2715,9 +2739,9 @@ export default function SubaccountKnowledgePage() {
                         flex: 1,
                         minWidth: 200,
                         borderRadius: 999,
-                        background: '#f1f5f9',
-                        border: '1px solid transparent',
-                        opacity: !selectedVaultId ? 0.55 : 1,
+                        background: 'var(--aisbp-input-bg, #ffffff)',
+                        border: '1px solid var(--aisbp-border, #e2e8f0)',
+                        opacity: !selectedVaultId ? 0.62 : 1,
                       }}
                     />
                     <button
@@ -2733,7 +2757,7 @@ export default function SubaccountKnowledgePage() {
                     <div style={{ margin: '0.85rem 0 0' }}>
                       <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>
                         {searchHits.length === 0 ? (
-                          <li style={{ fontSize: '0.875rem', color: '#64748b' }}>No matching knowledge found</li>
+                          <li style={{ fontSize: '0.875rem', color: 'var(--aisbp-muted, #64748b)' }}>No matching knowledge found</li>
                         ) : (
                           searchHits.slice(0, 8).map(h => (
                             <li
@@ -2750,7 +2774,7 @@ export default function SubaccountKnowledgePage() {
                                 style={{
                                   fontSize: '0.65rem',
                                   fontWeight: 700,
-                                  color: '#94a3b8',
+                                  color: 'var(--aisbp-muted, #64748b)',
                                   textTransform: 'uppercase',
                                   letterSpacing: '0.06em',
                                 }}
@@ -2764,7 +2788,7 @@ export default function SubaccountKnowledgePage() {
                                 style={{
                                   fontSize: '0.65rem',
                                   fontWeight: 700,
-                                  color: '#94a3b8',
+                                  color: 'var(--aisbp-muted, #64748b)',
                                   textTransform: 'uppercase',
                                   letterSpacing: '0.06em',
                                   marginTop: '0.65rem',
@@ -2789,7 +2813,7 @@ export default function SubaccountKnowledgePage() {
                                 Relevance:{' '}
                                 <span style={{ fontWeight: 600 }}>{kbSearchRelevanceLabelDisplay(h)}</span>
                                 {typeof h.scorePercent === 'number' ? (
-                                  <span style={{ color: '#94a3b8', marginLeft: 8 }}>({h.scorePercent}%)</span>
+                                  <span style={{ color: 'var(--aisbp-muted, #64748b)', marginLeft: 8 }}>({h.scorePercent}%)</span>
                                 ) : null}
                               </div>
                               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center', marginTop: '0.55rem' }}>
@@ -2820,7 +2844,7 @@ export default function SubaccountKnowledgePage() {
                         )}
                       </ul>
                       {searchHits.length > 8 ? (
-                        <p style={{ fontSize: '0.72rem', color: '#94a3b8', margin: '0.45rem 0 0' }}>
+                        <p style={{ fontSize: '0.72rem', color: 'var(--aisbp-muted, #64748b)', margin: '0.45rem 0 0' }}>
                           Showing top 8 of {searchHits.length} matches — refine your search to narrow results.
                         </p>
                       ) : null}

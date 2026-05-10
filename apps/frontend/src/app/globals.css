@@ -21,6 +21,7 @@ details > summary::-webkit-details-marker {
   --aisbp-main-bg: #f8fafc;
   --aisbp-shell-bg: #f8fafc;
   --aisbp-surface: #ffffff;
+  --aisbp-surface-elevated: #ffffff;
   --aisbp-surface-muted: #f8fafc;
   --aisbp-text: #0f172a;
   --aisbp-text-heading: #0f172a;
@@ -80,6 +81,7 @@ html.dark {
   --aisbp-main-bg: #0b1220;
   --aisbp-shell-bg: #0b1220;
   --aisbp-surface: #111827;
+  --aisbp-surface-elevated: #1e293b;
   --aisbp-surface-muted: #0f172a;
   --aisbp-text: #f1f5f9;
   --aisbp-text-heading: #f8fafc;

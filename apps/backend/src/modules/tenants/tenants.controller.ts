@@ -30,10 +30,20 @@ export class TenantsController {
   ) {}
 
   @Post()
-  @ApiOperation({ summary: 'Create subaccount (agency staff)' })
+  @ApiOperation({ summary: 'Create workspace (agency staff)' })
   async create(
     @CurrentUser() user: SessionUser,
-    @Body() body: { agencyId: string; name: string; ghlLocationId?: string | null },
+    @Body()
+    body: {
+      agencyId: string;
+      name: string;
+      ghlLocationId?: string | null;
+      annualPlanDurationMonths?: number;
+      initialCredits?: number;
+      clientContactName?: string | null;
+      clientContactPhone?: string | null;
+      clientContactEmail?: string | null;
+    },
   ) {
     if (!user?.id) {
       throw new BadRequestException('User required');
@@ -65,8 +75,46 @@ export class TenantsController {
     });
   }
 
+  @Patch(':id/client-profile')
+  @ApiOperation({
+    summary: 'Update workspace client contact profile (agency staff). Used by automated low-credit warnings.',
+  })
+  async patchClientProfile(
+    @Param('id') id: string,
+    @CurrentUser() user: SessionUser,
+    @Body()
+    body: {
+      clientContactName?: string | null;
+      clientContactPhone?: string | null;
+      clientContactEmail?: string | null;
+    },
+  ) {
+    if (!user?.id) throw new BadRequestException('User required');
+    if (
+      body?.clientContactName === undefined &&
+      body?.clientContactPhone === undefined &&
+      body?.clientContactEmail === undefined
+    ) {
+      throw new BadRequestException('Provide at least one client profile field');
+    }
+    return this.tenantsService.updateClientProfile(id, user.id, body);
+  }
+
+  @Post('agency/:agencyId/system-workspace')
+  @ApiOperation({
+    summary: 'Ensure the single agency system workspace exists (idempotent). Returns the workspace summary.',
+  })
+  async ensureAgencyWorkspace(
+    @Param('agencyId') agencyId: string,
+    @CurrentUser() user: SessionUser,
+  ) {
+    if (!user?.id) throw new BadRequestException('User required');
+    if (!agencyId?.trim()) throw new BadRequestException('agencyId is required');
+    return this.tenantsService.ensureAgencySystemWorkspaceForActor(agencyId, user.id);
+  }
+
   @Delete(':id')
-  @ApiOperation({ summary: 'Delete subaccount (agency staff); cascades related data' })
+  @ApiOperation({ summary: 'Delete workspace (agency staff); rejected for the agency system workspace.' })
   async remove(@Param('id') id: string, @CurrentUser() user: SessionUser) {
     if (!user?.id) {
       throw new BadRequestException('User required');

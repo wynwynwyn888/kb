@@ -402,7 +402,7 @@ export class QuotasService {
     const { data, error } = await this.supabase
       .from('agencies')
       .select(
-        'id, default_subaccount_quota, credit_deduction_method, default_allow_temporary_overage, default_overage_limit_credits, default_low_credit_warning_enabled, default_low_credit_warning_level_credits',
+        'id, default_subaccount_quota, credit_deduction_method, default_allow_temporary_overage, default_overage_limit_credits, default_low_credit_warning_enabled, default_low_credit_warning_level_credits, low_credit_warning_thresholds_json, low_credit_warning_message_template, low_credit_warning_send_via_agency_workspace',
       )
       .eq('id', agencyId)
       .single();
@@ -415,7 +415,16 @@ export class QuotasService {
       default_overage_limit_credits?: number;
       default_low_credit_warning_enabled?: boolean;
       default_low_credit_warning_level_credits?: number;
+      low_credit_warning_thresholds_json?: unknown;
+      low_credit_warning_message_template?: string;
+      low_credit_warning_send_via_agency_workspace?: boolean;
     };
+    const thresholdsRaw = Array.isArray(row.low_credit_warning_thresholds_json)
+      ? (row.low_credit_warning_thresholds_json as unknown[])
+      : [];
+    const thresholds = thresholdsRaw
+      .map(v => Number(v))
+      .filter(n => Number.isFinite(n) && [200, 500, 1000, 2000].includes(n));
     return {
       agencyId: row.id,
       defaultSubaccountQuota: row.default_subaccount_quota,
@@ -427,6 +436,15 @@ export class QuotasService {
         typeof row.default_low_credit_warning_level_credits === 'number'
           ? row.default_low_credit_warning_level_credits
           : 0,
+      lowCreditWarningThresholds: thresholds,
+      lowCreditWarningMessageTemplate:
+        typeof row.low_credit_warning_message_template === 'string'
+          ? row.low_credit_warning_message_template
+          : '',
+      lowCreditWarningSendViaAgencyWorkspace:
+        row.low_credit_warning_send_via_agency_workspace === undefined
+          ? true
+          : Boolean(row.low_credit_warning_send_via_agency_workspace),
     };
   }
 
@@ -576,23 +594,34 @@ export class QuotasService {
       negativeCreditLimit: number;
       lowCreditThreshold: number;
       status: string;
+      periodStart: string | null;
+      periodEnd: string | null;
+      isAgencyWorkspace: boolean;
+      creditsUnlimited: boolean;
     }>
   > {
     await this.assertAgencyStaff(agencyId, profileId);
     const lim = Math.min(300, Math.max(1, opts?.limit ?? 200));
     const { data: tenants } = await this.supabase
       .from('tenants')
-      .select('id, name')
+      .select('id, name, is_agency_workspace, credits_unlimited')
       .eq('agency_id', agencyId)
       .order('created_at', { ascending: false })
       .limit(lim);
-    const tlist = (tenants ?? []) as Array<{ id: string; name: string }>;
+    const tlist = (tenants ?? []) as Array<{
+      id: string;
+      name: string;
+      is_agency_workspace?: boolean;
+      credits_unlimited?: boolean;
+    }>;
     if (tlist.length === 0) return [];
 
     const ids = tlist.map(t => t.id);
     const { data: wallets } = await this.supabase
       .from('quota_wallets')
-      .select('id, tenant_id, total_quota, used_quota, allow_negative_credits, negative_credit_limit, low_credit_threshold')
+      .select(
+        'id, tenant_id, total_quota, used_quota, allow_negative_credits, negative_credit_limit, low_credit_threshold, period_start, period_end',
+      )
       .in('tenant_id', ids);
     const wmap = new Map((wallets ?? []).map(w => [w.tenant_id as string, w as any]));
 
@@ -650,17 +679,23 @@ export class QuotasService {
       const allowNegativeCredits = Boolean(w?.allow_negative_credits);
       const negativeCreditLimit = typeof w?.negative_credit_limit === 'number' ? w.negative_credit_limit : 0;
       const lowCreditThreshold = typeof w?.low_credit_threshold === 'number' ? w.low_credit_threshold : 0;
+      const isAgencyWorkspace = Boolean(t.is_agency_workspace);
+      const creditsUnlimited = Boolean(t.credits_unlimited);
       const blocked = allowNegativeCredits ? balance <= negativeCreditLimit : balance <= 0;
-      const status = blocked
-        ? allowNegativeCredits
-          ? 'OVER_NEGATIVE_LIMIT'
-          : 'PAUSED_NO_CREDITS'
-        : balance <= lowCreditThreshold
-          ? 'LOW_CREDIT'
-          : allowNegativeCredits
-            ? 'NEGATIVE_ALLOWED'
-            : 'ACTIVE';
+      const status = creditsUnlimited
+        ? 'UNLIMITED'
+        : blocked
+          ? allowNegativeCredits
+            ? 'OVER_NEGATIVE_LIMIT'
+            : 'PAUSED_NO_CREDITS'
+          : balance <= lowCreditThreshold
+            ? 'LOW_CREDIT'
+            : allowNegativeCredits
+              ? 'NEGATIVE_ALLOWED'
+              : 'ACTIVE';
       const wid = w?.id ? String(w.id) : '';
+      const periodStartRaw = w?.period_start ?? null;
+      const periodEndRaw = w?.period_end ?? null;
       return {
         tenantId: t.id,
         workspaceName: t.name,
@@ -674,8 +709,120 @@ export class QuotasService {
         negativeCreditLimit,
         lowCreditThreshold,
         status,
+        periodStart: periodStartRaw ? new Date(periodStartRaw).toISOString() : null,
+        periodEnd: periodEndRaw ? new Date(periodEndRaw).toISOString() : null,
+        isAgencyWorkspace,
+        creditsUnlimited,
       };
     });
+  }
+
+  /**
+   * Update plan-level wallet metadata for one workspace (agency staff only).
+   *
+   * Currently exposes the next reset date (`period_end`) and total annual allowance
+   * (`total_quota`). Does **not** add or remove credits — agencies use the existing
+   * Top-up / Adjust flows for credit changes. `period_end` must be after `period_start`.
+   */
+  async updateWalletPlan(
+    agencyId: string,
+    profileId: string,
+    tenantId: string,
+    input: { periodEnd?: string | null; totalQuota?: number; periodStart?: string | null },
+  ): Promise<{
+    tenantId: string;
+    periodStart: string | null;
+    periodEnd: string | null;
+    totalQuota: number;
+  }> {
+    await this.assertAgencyStaff(agencyId, profileId);
+    if (
+      input.periodEnd === undefined &&
+      input.totalQuota === undefined &&
+      input.periodStart === undefined
+    ) {
+      throw new BadRequestException('Provide at least one plan field to update');
+    }
+
+    const { data: t } = await this.supabase
+      .from('tenants')
+      .select('id, agency_id, is_agency_workspace')
+      .eq('id', tenantId)
+      .maybeSingle();
+    if (!t || t.agency_id !== agencyId) {
+      throw new NotFoundException('Workspace not in this agency');
+    }
+    if ((t as { is_agency_workspace?: boolean }).is_agency_workspace) {
+      throw new BadRequestException('Agency workspace plan dates are not editable');
+    }
+
+    const { data: wallet } = await this.supabase
+      .from('quota_wallets')
+      .select('id, period_start, period_end, total_quota')
+      .eq('tenant_id', tenantId)
+      .maybeSingle();
+    if (!wallet) throw new NotFoundException('Wallet not found');
+
+    const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+    let nextStart: Date | null = wallet.period_start ? new Date(wallet.period_start) : null;
+    let nextEnd: Date | null = wallet.period_end ? new Date(wallet.period_end) : null;
+
+    if (input.periodStart !== undefined) {
+      if (input.periodStart === null || String(input.periodStart).trim() === '') {
+        throw new BadRequestException('periodStart cannot be empty');
+      }
+      const d = new Date(input.periodStart);
+      if (Number.isNaN(d.getTime())) throw new BadRequestException('periodStart is not a valid date');
+      nextStart = d;
+      patch['period_start'] = d.toISOString();
+    }
+    if (input.periodEnd !== undefined) {
+      if (input.periodEnd === null || String(input.periodEnd).trim() === '') {
+        throw new BadRequestException('periodEnd cannot be empty');
+      }
+      const d = new Date(input.periodEnd);
+      if (Number.isNaN(d.getTime())) throw new BadRequestException('periodEnd is not a valid date');
+      nextEnd = d;
+      patch['period_end'] = d.toISOString();
+    }
+    if (nextStart && nextEnd && nextEnd.getTime() <= nextStart.getTime()) {
+      throw new BadRequestException('periodEnd must be after periodStart');
+    }
+    if (input.totalQuota !== undefined) {
+      const tq = Math.max(0, Math.floor(Number(input.totalQuota)));
+      if (!Number.isFinite(tq)) throw new BadRequestException('totalQuota must be a non-negative whole number');
+      patch['total_quota'] = tq;
+    }
+
+    const { data: updated, error } = await this.supabase
+      .from('quota_wallets')
+      .update(patch)
+      .eq('id', wallet.id)
+      .select('id, period_start, period_end, total_quota')
+      .maybeSingle();
+    if (error || !updated) throw new Error(error?.message ?? 'Failed to update plan');
+
+    await this.supabase.from('quota_audit_logs').insert({
+      id: randomUUID(),
+      agency_id: agencyId,
+      profile_id: profileId,
+      tenant_id: tenantId,
+      action: 'subaccount.plan_update',
+      delta: 0,
+      previous_total: wallet.total_quota ?? 0,
+      new_total: updated.total_quota ?? wallet.total_quota ?? 0,
+      metadata: {
+        periodStart: updated.period_start ?? null,
+        periodEnd: updated.period_end ?? null,
+      },
+    });
+
+    return {
+      tenantId,
+      periodStart: updated.period_start ? new Date(updated.period_start).toISOString() : null,
+      periodEnd: updated.period_end ? new Date(updated.period_end).toISOString() : null,
+      totalQuota: updated.total_quota ?? 0,
+    };
   }
 
   private async assertAgencyStaff(agencyId: string, profileId: string): Promise<void> {

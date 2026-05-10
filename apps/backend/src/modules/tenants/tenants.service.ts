@@ -16,6 +16,12 @@ function toPublicGhlLocationId(stored: string | null | undefined): string | null
   return stored;
 }
 
+export interface TenantClientProfile {
+  clientContactName: string | null;
+  clientContactPhone: string | null;
+  clientContactEmail: string | null;
+}
+
 export interface TenantSummary {
   id: string;
   agencyId: string;
@@ -23,9 +29,32 @@ export interface TenantSummary {
   ghlLocationId: string | null;
   status: string;
   settings: Record<string, unknown>;
+  isAgencyWorkspace: boolean;
+  creditsUnlimited: boolean;
+  clientContactName: string | null;
+  clientContactPhone: string | null;
+  clientContactEmail: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
+
+const PHONE_TRIM_RE = /[\s()\-]+/g;
+function lightlyNormalizePhone(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const trimmed = String(raw).trim();
+  if (!trimmed) return null;
+  // Keep + prefix; strip whitespace and common visual separators only.
+  const cleaned = trimmed.replace(PHONE_TRIM_RE, '');
+  return cleaned.length > 0 ? cleaned : null;
+}
+
+function lightlyNormalizeEmail(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const trimmed = String(raw).trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+const AGENCY_WORKSPACE_NAME_FALLBACK = 'Agency workspace';
 
 export interface TenantDetail extends TenantSummary {
   /** AI reply mode for this workspace; drives `bot_enabled` on write. */
@@ -88,6 +117,11 @@ export class TenantsService {
       ghlLocationId: toPublicGhlLocationId(t.ghl_location_id),
       status: t.status,
       settings: t.settings,
+      isAgencyWorkspace: Boolean((t as { is_agency_workspace?: boolean }).is_agency_workspace),
+      creditsUnlimited: Boolean((t as { credits_unlimited?: boolean }).credits_unlimited),
+      clientContactName: (t as { client_contact_name?: string | null }).client_contact_name ?? null,
+      clientContactPhone: (t as { client_contact_phone?: string | null }).client_contact_phone ?? null,
+      clientContactEmail: (t as { client_contact_email?: string | null }).client_contact_email ?? null,
       createdAt: new Date(t.created_at),
       updatedAt: new Date(t.updated_at),
     }));
@@ -157,6 +191,11 @@ export class TenantsService {
       ghlLocationId: toPublicGhlLocationId(tenant.ghl_location_id),
       status: tenant.status,
       settings: tenant.settings,
+      isAgencyWorkspace: Boolean((tenant as { is_agency_workspace?: boolean }).is_agency_workspace),
+      creditsUnlimited: Boolean((tenant as { credits_unlimited?: boolean }).credits_unlimited),
+      clientContactName: (tenant as { client_contact_name?: string | null }).client_contact_name ?? null,
+      clientContactPhone: (tenant as { client_contact_phone?: string | null }).client_contact_phone ?? null,
+      clientContactEmail: (tenant as { client_contact_email?: string | null }).client_contact_email ?? null,
       botMode: resolveBotMode(settingsObj, botEnabled),
       botEnabled,
       createdAt: new Date(tenant.created_at),
@@ -197,6 +236,11 @@ export class TenantsService {
           ghl_location_id,
           status,
           settings,
+          is_agency_workspace,
+          credits_unlimited,
+          client_contact_name,
+          client_contact_phone,
+          client_contact_email,
           created_at,
           updated_at
         )
@@ -210,7 +254,21 @@ export class TenantsService {
     return data
       .filter(d => d.tenants)
       .map(d => {
-        const tenant = d.tenants as unknown as { id: string; agency_id: string; name: string; ghl_location_id: string; status: string; settings: Record<string, unknown>; created_at: string; updated_at: string };
+        const tenant = d.tenants as unknown as {
+          id: string;
+          agency_id: string;
+          name: string;
+          ghl_location_id: string;
+          status: string;
+          settings: Record<string, unknown>;
+          is_agency_workspace?: boolean;
+          credits_unlimited?: boolean;
+          client_contact_name?: string | null;
+          client_contact_phone?: string | null;
+          client_contact_email?: string | null;
+          created_at: string;
+          updated_at: string;
+        };
         return {
           id: tenant.id,
           agencyId: tenant.agency_id,
@@ -218,6 +276,11 @@ export class TenantsService {
           ghlLocationId: toPublicGhlLocationId(tenant.ghl_location_id),
           status: tenant.status,
           settings: tenant.settings,
+          isAgencyWorkspace: Boolean(tenant.is_agency_workspace),
+          creditsUnlimited: Boolean(tenant.credits_unlimited),
+          clientContactName: tenant.client_contact_name ?? null,
+          clientContactPhone: tenant.client_contact_phone ?? null,
+          clientContactEmail: tenant.client_contact_email ?? null,
           createdAt: new Date(tenant.created_at),
           updatedAt: new Date(tenant.updated_at),
         };
@@ -283,12 +346,28 @@ export class TenantsService {
   }
 
   /**
-   * Create a subaccount under an agency (agency staff only). GHL location optional until Integrations.
+   * Create a client workspace under an agency (agency staff only).
+   *
+   * Lifecycle inputs (all optional with sensible defaults):
+   *  - `annualPlanDurationMonths` — defaults to 12 → wallet `period_end` = now + duration
+   *  - `initialCredits` — defaults to agency `defaultSubaccountQuota`, falling back to 36000
+   *  - `clientContactName` / `clientContactPhone` / `clientContactEmail` — used by the
+   *    automated low-credit warning send path; missing fields don't block create.
+   *
+   * GHL location id is optional (sentinel until Integrations connect).
    */
   async createTenant(
     agencyId: string,
     profileId: string,
-    input: { name: string; ghlLocationId?: string | null },
+    input: {
+      name: string;
+      ghlLocationId?: string | null;
+      annualPlanDurationMonths?: number;
+      initialCredits?: number;
+      clientContactName?: string | null;
+      clientContactPhone?: string | null;
+      clientContactEmail?: string | null;
+    },
   ): Promise<TenantSummary> {
     const supabase = getSupabaseService();
     const ok = await this.assertAgencyStaff(agencyId, profileId);
@@ -311,11 +390,27 @@ export class TenantsService {
       default_low_credit_warning_enabled?: boolean;
       default_low_credit_warning_level_credits?: number;
     } | null;
-    const defaultQuota = a?.default_subaccount_quota ?? 10_000;
+    const agencyDefault = a?.default_subaccount_quota ?? 36_000;
+    const requestedCredits = input.initialCredits;
+    const initialCredits =
+      requestedCredits !== undefined && requestedCredits !== null && Number.isFinite(requestedCredits)
+        ? Math.max(0, Math.floor(requestedCredits))
+        : agencyDefault;
     const allowNeg = Boolean(a?.default_allow_temporary_overage);
     const negLimit = allowNeg ? Math.max(0, Math.floor(a?.default_overage_limit_credits ?? 0)) : 0;
     const warnOn = Boolean(a?.default_low_credit_warning_enabled);
     const lowTh = warnOn ? Math.max(0, Math.floor(a?.default_low_credit_warning_level_credits ?? 0)) : 0;
+
+    // Annual plan duration: only 1y is required for this pass; allow 1..36 months as a guardrail.
+    const requestedMonths = input.annualPlanDurationMonths;
+    const annualPlanDurationMonths =
+      requestedMonths !== undefined && requestedMonths !== null && Number.isFinite(requestedMonths)
+        ? Math.min(36, Math.max(1, Math.floor(requestedMonths)))
+        : 12;
+
+    const clientContactName = input.clientContactName?.trim() || null;
+    const clientContactPhone = lightlyNormalizePhone(input.clientContactPhone);
+    const clientContactEmail = lightlyNormalizeEmail(input.clientContactEmail);
 
     const id = randomUUID();
     const ghl = input.ghlLocationId?.trim() || `${PENDING_GHL_PREFIX}${id}`;
@@ -330,6 +425,11 @@ export class TenantsService {
         ghl_location_id: ghl,
         status: 'pending',
         settings: {},
+        is_agency_workspace: false,
+        credits_unlimited: false,
+        client_contact_name: clientContactName,
+        client_contact_phone: clientContactPhone,
+        client_contact_email: clientContactEmail,
         created_at: nowIso,
         updated_at: nowIso,
       })
@@ -337,18 +437,19 @@ export class TenantsService {
       .single();
 
     if (error || !row) {
-      throw new BadRequestException(error?.message ?? 'Failed to create subaccount');
+      throw new BadRequestException(error?.message ?? 'Failed to create workspace');
     }
 
     const now = new Date();
-    const periodStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    const periodEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+    const periodStart = now;
+    const periodEnd = new Date(now);
+    periodEnd.setMonth(periodEnd.getMonth() + annualPlanDurationMonths);
 
     const walletNow = new Date().toISOString();
     const { error: walletErr } = await supabase.from('quota_wallets').insert({
       id: randomUUID(),
       tenant_id: id,
-      total_quota: defaultQuota,
+      total_quota: initialCredits,
       used_quota: 0,
       allow_negative_credits: allowNeg,
       negative_credit_limit: negLimit,
@@ -358,7 +459,7 @@ export class TenantsService {
       updated_at: walletNow,
     });
     if (walletErr) {
-      throw new BadRequestException(walletErr.message ?? 'Failed to create quota wallet for new workspace');
+      throw new BadRequestException(walletErr.message ?? 'Failed to create credit wallet for new workspace');
     }
 
     await supabase.from('quota_audit_logs').insert({
@@ -367,10 +468,17 @@ export class TenantsService {
       profile_id: profileId,
       tenant_id: id,
       action: 'subaccount.create',
-      delta: defaultQuota,
+      delta: initialCredits,
       previous_total: 0,
-      new_total: defaultQuota,
-      metadata: { name, defaultQuota },
+      new_total: initialCredits,
+      metadata: {
+        name,
+        initialCredits,
+        annualPlanDurationMonths,
+        periodStart: periodStart.toISOString(),
+        periodEnd: periodEnd.toISOString(),
+        hasClientPhone: clientContactPhone !== null,
+      },
     });
 
     return {
@@ -380,8 +488,141 @@ export class TenantsService {
       ghlLocationId: toPublicGhlLocationId(row.ghl_location_id),
       status: row.status,
       settings: row.settings as Record<string, unknown>,
+      isAgencyWorkspace: Boolean((row as { is_agency_workspace?: boolean }).is_agency_workspace),
+      creditsUnlimited: Boolean((row as { credits_unlimited?: boolean }).credits_unlimited),
+      clientContactName: clientContactName,
+      clientContactPhone: clientContactPhone,
+      clientContactEmail: clientContactEmail,
       createdAt: new Date(row.created_at),
       updatedAt: new Date(row.updated_at),
+    };
+  }
+
+  /** Same as `ensureAgencySystemWorkspace` but enforces agency staff access first. */
+  async ensureAgencySystemWorkspaceForActor(agencyId: string, profileId: string): Promise<TenantSummary> {
+    const ok = await this.assertAgencyStaff(agencyId, profileId);
+    if (!ok) throw new ForbiddenException('Agency access required');
+    return this.ensureAgencySystemWorkspace(agencyId);
+  }
+
+  /**
+   * Idempotent: return the agency's single internal workspace, creating it on first use.
+   *
+   * The agency workspace is marked `is_agency_workspace = true` and `credits_unlimited = true`,
+   * so it's never billed and never blocked by credit checks. Only one row per agency is allowed
+   * (enforced by partial unique index on `tenants(agency_id) WHERE is_agency_workspace`).
+   */
+  async ensureAgencySystemWorkspace(agencyId: string): Promise<TenantSummary> {
+    const supabase = getSupabaseService();
+
+    const { data: existing } = await supabase
+      .from('tenants')
+      .select('*')
+      .eq('agency_id', agencyId)
+      .eq('is_agency_workspace', true)
+      .maybeSingle();
+    if (existing) {
+      return this.mapRowToSummary(existing as Record<string, unknown>);
+    }
+
+    const { data: agencyRow } = await supabase
+      .from('agencies')
+      .select('id, name')
+      .eq('id', agencyId)
+      .maybeSingle();
+    const agencyName = (agencyRow as { name?: string } | null)?.name?.trim() ?? '';
+    const wsName = agencyName ? `${agencyName} workspace` : AGENCY_WORKSPACE_NAME_FALLBACK;
+
+    const id = randomUUID();
+    const nowIso = new Date().toISOString();
+    const { data: row, error } = await supabase
+      .from('tenants')
+      .insert({
+        id,
+        agency_id: agencyId,
+        name: wsName,
+        ghl_location_id: `${PENDING_GHL_PREFIX}${id}`,
+        status: 'active',
+        settings: { agencySystemWorkspace: true },
+        bot_enabled: false,
+        is_agency_workspace: true,
+        credits_unlimited: true,
+        created_at: nowIso,
+        updated_at: nowIso,
+      })
+      .select('*')
+      .single();
+
+    if (error || !row) {
+      // Race: another caller may have created it concurrently — re-read and return.
+      const { data: retry } = await supabase
+        .from('tenants')
+        .select('*')
+        .eq('agency_id', agencyId)
+        .eq('is_agency_workspace', true)
+        .maybeSingle();
+      if (retry) return this.mapRowToSummary(retry as Record<string, unknown>);
+      throw new BadRequestException(error?.message ?? 'Failed to create agency workspace');
+    }
+    return this.mapRowToSummary(row as Record<string, unknown>);
+  }
+
+  /**
+   * Update editable client profile fields for a workspace (agency staff only).
+   * Pass `undefined` to leave a field unchanged; pass `null` or `''` to clear it.
+   */
+  async updateClientProfile(
+    tenantId: string,
+    profileId: string,
+    input: { clientContactName?: string | null; clientContactPhone?: string | null; clientContactEmail?: string | null },
+  ): Promise<TenantSummary> {
+    const supabase = getSupabaseService();
+    const { data: t } = await supabase.from('tenants').select('agency_id').eq('id', tenantId).maybeSingle();
+    if (!t) throw new NotFoundException('Workspace not found');
+    const ok = await this.assertAgencyStaff((t as { agency_id: string }).agency_id, profileId);
+    if (!ok) throw new ForbiddenException('Agency access required');
+
+    const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+    if (input.clientContactName !== undefined) {
+      const v = input.clientContactName?.trim();
+      patch['client_contact_name'] = v && v.length > 0 ? v : null;
+    }
+    if (input.clientContactPhone !== undefined) {
+      patch['client_contact_phone'] = lightlyNormalizePhone(input.clientContactPhone);
+    }
+    if (input.clientContactEmail !== undefined) {
+      patch['client_contact_email'] = lightlyNormalizeEmail(input.clientContactEmail);
+    }
+    if (Object.keys(patch).length <= 1) {
+      throw new BadRequestException('Provide at least one client profile field to update');
+    }
+    const { data: row, error } = await supabase
+      .from('tenants')
+      .update(patch)
+      .eq('id', tenantId)
+      .select('*')
+      .single();
+    if (error || !row) {
+      throw new BadRequestException(error?.message ?? 'Update failed');
+    }
+    return this.mapRowToSummary(row as Record<string, unknown>);
+  }
+
+  private mapRowToSummary(t: Record<string, unknown>): TenantSummary {
+    return {
+      id: t['id'] as string,
+      agencyId: t['agency_id'] as string,
+      name: t['name'] as string,
+      ghlLocationId: toPublicGhlLocationId((t['ghl_location_id'] ?? null) as string | null),
+      status: (t['status'] as string) ?? 'pending',
+      settings: (t['settings'] as Record<string, unknown>) ?? {},
+      isAgencyWorkspace: Boolean(t['is_agency_workspace']),
+      creditsUnlimited: Boolean(t['credits_unlimited']),
+      clientContactName: (t['client_contact_name'] as string | null) ?? null,
+      clientContactPhone: (t['client_contact_phone'] as string | null) ?? null,
+      clientContactEmail: (t['client_contact_email'] as string | null) ?? null,
+      createdAt: new Date(String(t['created_at'])),
+      updatedAt: new Date(String(t['updated_at'])),
     };
   }
 
@@ -493,17 +734,21 @@ export class TenantsService {
   }
 
   /**
-   * Permanently remove a subaccount and dependent rows (DB cascades). Agency staff only.
+   * Permanently remove a workspace and dependent rows (DB cascades). Agency staff only.
+   * The agency system workspace cannot be deleted via this path.
    */
   async deleteTenant(tenantId: string, profileId: string): Promise<void> {
     const supabase = getSupabaseService();
     const { data: row, error: fErr } = await supabase
       .from('tenants')
-      .select('id, agency_id, name')
+      .select('id, agency_id, name, is_agency_workspace')
       .eq('id', tenantId)
       .single();
     if (fErr || !row) {
-      throw new NotFoundException('Subaccount not found');
+      throw new NotFoundException('Workspace not found');
+    }
+    if ((row as { is_agency_workspace?: boolean }).is_agency_workspace) {
+      throw new ForbiddenException('Agency workspace cannot be deleted');
     }
     const ok = await this.assertAgencyStaff(row.agency_id, profileId);
     if (!ok) {

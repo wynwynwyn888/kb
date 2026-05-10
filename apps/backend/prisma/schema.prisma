@@ -65,6 +65,12 @@ model Agency {
   defaultOverageLimitCredits     Int     @default(0) @map("default_overage_limit_credits")
   defaultLowCreditWarningEnabled Boolean @default(false) @map("default_low_credit_warning_enabled")
   defaultLowCreditWarningLevelCredits Int @default(0) @map("default_low_credit_warning_level_credits")
+  /// Enabled credit thresholds (descending integers) used by automated low-credit warning sender.
+  lowCreditWarningThresholdsJson Json @default("[2000, 1000, 500, 200]") @map("low_credit_warning_thresholds_json")
+  /// Customizable warning template; supports {{clientName}}, {{workspaceName}}, {{remainingCredits}}, {{threshold}}, {{agencyName}}, {{resetDate}}.
+  lowCreditWarningMessageTemplate String @default("") @map("low_credit_warning_message_template") @db.Text
+  /// When true, the automated send uses the agency system workspace CRM connection.
+  lowCreditWarningSendViaAgencyWorkspace Boolean @default(true) @map("low_credit_warning_send_via_agency_workspace")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -76,6 +82,7 @@ model Agency {
   auditLogs      AuditLog[]
   quotaAuditLogs QuotaAuditLog[]
   userInvitations UserInvitation[]
+  workspaceCreditWarningEvents WorkspaceCreditWarningEvent[]
 
   @@map("agencies")
 }
@@ -143,6 +150,14 @@ model Tenant {
   settings      Json     @default("{}")
   botEnabled    Boolean  @default(true)  @map("bot_enabled")
   handoverPaused Boolean @default(false) @map("handover_paused")
+  /// True for the single internal agency workspace per agency (not a billable client workspace).
+  isAgencyWorkspace Boolean @default(false) @map("is_agency_workspace")
+  /// Bypasses credit enforcement (used by the agency system workspace).
+  creditsUnlimited  Boolean @default(false) @map("credits_unlimited")
+  /// Client contact profile used by automated low-credit warning send (phone is the SMS recipient).
+  clientContactName  String? @map("client_contact_name")
+  clientContactPhone String? @map("client_contact_phone")
+  clientContactEmail String? @map("client_contact_email")
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")
 
@@ -169,10 +184,37 @@ model Tenant {
   humanEscalationSettings TenantHumanEscalationSettings?
   botProfiles        TenantBotProfile[]
   knowledgeVaults  KnowledgeVault[]
+  creditWarningEvents WorkspaceCreditWarningEvent[]
 
   @@unique([ghlLocationId])
   @@index([agencyId])
   @@map("tenants")
+}
+
+/// Tracking log of automated low-credit warning send attempts (SENT / SKIPPED / FAILED).
+/// One SENT per workspace + threshold + billing period is enforced via partial unique index.
+model WorkspaceCreditWarningEvent {
+  id                  String   @id @default(uuid())
+  agencyId            String   @map("agency_id")
+  tenantId            String   @map("tenant_id")
+  threshold           Int
+  balanceAtSend       Int      @map("balance_at_send")
+  /// SENT | SKIPPED | FAILED — enforced by DB CHECK constraint.
+  status              String
+  /// Short reason code (e.g. agency_workspace_crm_not_connected, client_phone_missing, send_failed_*).
+  reason              String?
+  /// First ~500 chars of the message (no tokens / no PII keys).
+  messagePreview      String?  @map("message_preview")
+  billingPeriodStart  DateTime? @map("billing_period_start")
+  billingPeriodEnd    DateTime? @map("billing_period_end")
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  agency Agency @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([agencyId, createdAt])
+  @@index([tenantId, createdAt])
+  @@map("workspace_credit_warning_events")
 }
 
 enum BookingMode {

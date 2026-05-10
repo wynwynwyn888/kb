@@ -348,6 +348,13 @@ describe('OutboundSendService', () => {
   describe('checkQuotaAvailable', () => {
     it('returns true when no wallet', async () => {
       (mockSupabase.from as jest.Mock).mockImplementation((table: string) => {
+        if (table === 'tenants') {
+          return {
+            select: () => ({
+              eq: () => ({ maybeSingle: async () => ({ data: { credits_unlimited: false }, error: null }) }),
+            }),
+          } as never;
+        }
         if (table === 'quota_wallets') {
           return {
             select: () => ({
@@ -363,6 +370,13 @@ describe('OutboundSendService', () => {
 
     it('returns true when sufficient quota', async () => {
       (mockSupabase.from as jest.Mock).mockImplementation((table: string) => {
+        if (table === 'tenants') {
+          return {
+            select: () => ({
+              eq: () => ({ maybeSingle: async () => ({ data: { credits_unlimited: false }, error: null }) }),
+            }),
+          } as never;
+        }
         if (table === 'quota_wallets') {
           return {
             select: () => ({
@@ -378,6 +392,13 @@ describe('OutboundSendService', () => {
 
     it('returns false when insufficient', async () => {
       (mockSupabase.from as jest.Mock).mockImplementation((table: string) => {
+        if (table === 'tenants') {
+          return {
+            select: () => ({
+              eq: () => ({ maybeSingle: async () => ({ data: { credits_unlimited: false }, error: null }) }),
+            }),
+          } as never;
+        }
         if (table === 'quota_wallets') {
           return {
             select: () => ({
@@ -390,11 +411,40 @@ describe('OutboundSendService', () => {
       const result = await (service as never)['checkQuotaAvailable']('tenant_1', 1);
       expect(result).toBe(false);
     });
+
+    it('returns true (unblocked) for unlimited-credit workspace even when wallet would be empty', async () => {
+      (mockSupabase.from as jest.Mock).mockImplementation((table: string) => {
+        if (table === 'tenants') {
+          return {
+            select: () => ({
+              eq: () => ({ maybeSingle: async () => ({ data: { credits_unlimited: true }, error: null }) }),
+            }),
+          } as never;
+        }
+        if (table === 'quota_wallets') {
+          return {
+            select: () => ({
+              eq: () => ({ single: async () => ({ data: { total_quota: 0, used_quota: 0, allow_negative_credits: false, negative_credit_limit: 0 }, error: null }) }),
+            }),
+          } as never;
+        }
+        return {} as never;
+      });
+      const result = await (service as never)['checkQuotaAvailable']('tenant_1', 1);
+      expect(result).toBe(true);
+    });
   });
 
   describe('debitQuota', () => {
     it('creates ledger entry with DEBIT type (reply_debit) and idempotency key', async () => {
       (mockSupabase.from as jest.Mock).mockImplementation((table: string) => {
+        if (table === 'tenants') {
+          return {
+            select: () => ({
+              eq: () => ({ maybeSingle: async () => ({ data: { credits_unlimited: false }, error: null }) }),
+            }),
+          } as never;
+        }
         if (table === 'quota_wallets') {
           return {
             select: () => ({

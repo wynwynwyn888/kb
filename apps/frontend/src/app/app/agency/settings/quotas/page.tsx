@@ -12,7 +12,12 @@ import {
   adjustSubaccountCredits,
   listAgencyCreditWallets,
   updateSubaccountCreditPolicy,
+  updateSubaccountWalletPlan,
+  getAgencyLowCreditWarningSettings,
+  saveAgencyLowCreditWarningSettings,
+  getGhlConnection,
   type CreditDeductionMethod,
+  type AgencyLowCreditWarningSettings,
 } from '@/lib/api';
 import {
   ErrorBanner,
@@ -47,7 +52,26 @@ const tableTd: CSSProperties = {
   verticalAlign: 'middle',
 };
 
-type ManageTab = 'add' | 'adjust' | 'rules';
+type ManageTab = 'add' | 'adjust' | 'rules' | 'plan';
+
+const ALLOWED_WARNING_THRESHOLDS = [2000, 1000, 500, 200] as const;
+
+function formatResetDate(iso: string | null | undefined): string {
+  if (!iso) return 'Not configured';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return 'Not configured';
+  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' });
+}
+
+function isoToDateInputValue(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${dd}`;
+}
 
 function tabBtnStyle(active: boolean): CSSProperties {
   return {
@@ -90,6 +114,10 @@ export default function AgencyQuotasPage() {
       negativeCreditLimit: number;
       lowCreditThreshold: number;
       status: string;
+      periodStart: string | null;
+      periodEnd: string | null;
+      isAgencyWorkspace: boolean;
+      creditsUnlimited: boolean;
     }>
   >([]);
 
@@ -109,6 +137,20 @@ export default function AgencyQuotasPage() {
   const [policyLowThreshold, setPolicyLowThreshold] = useState('0');
   const [savingPolicy, setSavingPolicy] = useState(false);
 
+  // Plan & reset date editor (per-workspace)
+  const [planResetDate, setPlanResetDate] = useState<string>('');
+  const [planTotalQuota, setPlanTotalQuota] = useState<string>('');
+  const [savingPlan, setSavingPlan] = useState(false);
+
+  // Agency low-credit warning settings
+  const [warnSettings, setWarnSettings] = useState<AgencyLowCreditWarningSettings | null>(null);
+  const [warnEnabled, setWarnEnabled] = useState(false);
+  const [warnThresholds, setWarnThresholds] = useState<number[]>([]);
+  const [warnTemplate, setWarnTemplate] = useState('');
+  const [warnSendViaAgency, setWarnSendViaAgency] = useState(true);
+  const [savingWarn, setSavingWarn] = useState(false);
+  const [agencyWorkspaceCrmConnected, setAgencyWorkspaceCrmConnected] = useState<boolean | null>(null);
+
   const selectedWallet = useMemo(
     () => wallets.find(w => w.tenantId === manageTenantId) ?? null,
     [wallets, manageTenantId],
@@ -119,6 +161,8 @@ export default function AgencyQuotasPage() {
     setPolicyAllowNegative(Boolean(w.allowNegativeCredits));
     setPolicyNegativeLimit(String(w.negativeCreditLimit ?? 0));
     setPolicyLowThreshold(String(w.lowCreditThreshold ?? 0));
+    setPlanResetDate(isoToDateInputValue(w.periodEnd));
+    setPlanTotalQuota(String(w.totalQuota ?? 0));
   }, []);
 
   const load = useCallback(async () => {
@@ -133,7 +177,11 @@ export default function AgencyQuotasPage() {
         setErr('No agency on this session.');
         return;
       }
-      const [settings, w] = await Promise.all([getQuotaAgencySettings(token), listAgencyCreditWallets(token)]);
+      const [settings, w, warn] = await Promise.all([
+        getQuotaAgencySettings(token),
+        listAgencyCreditWallets(token),
+        getAgencyLowCreditWarningSettings(token).catch(() => null),
+      ]);
       setDefaultQuota(settings.defaultSubaccountQuota);
       setDefaultInput(String(settings.defaultSubaccountQuota ?? 0));
       setDeductionMethod(settings.deductionMethod ?? 'PER_LOGICAL_REPLY');
@@ -142,6 +190,24 @@ export default function AgencyQuotasPage() {
       setDefaultLowCreditWarningEnabled(Boolean(settings.defaultLowCreditWarningEnabled));
       setDefaultLowCreditWarningLevel(String(settings.defaultLowCreditWarningLevel ?? 0));
       setWallets(w);
+      if (warn) {
+        setWarnSettings(warn);
+        setWarnEnabled(Boolean(warn.enabled));
+        setWarnThresholds(Array.isArray(warn.thresholds) ? warn.thresholds : []);
+        setWarnTemplate(typeof warn.messageTemplate === 'string' ? warn.messageTemplate : '');
+        setWarnSendViaAgency(Boolean(warn.sendViaAgencyWorkspace));
+      }
+      try {
+        const agencyWorkspace = w.find(x => x.isAgencyWorkspace);
+        if (!agencyWorkspace) {
+          setAgencyWorkspaceCrmConnected(false);
+        } else {
+          const conn = await getGhlConnection(token, agencyWorkspace.tenantId).catch(() => null);
+          setAgencyWorkspaceCrmConnected(Boolean(conn?.connected));
+        }
+      } catch {
+        setAgencyWorkspaceCrmConnected(null);
+      }
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Failed to load');
     } finally {
@@ -302,6 +368,96 @@ export default function AgencyQuotasPage() {
     const w = wallets.find(x => x.tenantId === tenantId);
     syncPolicyFromWallet(w);
   };
+
+  const onSavePlan = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!token || !manageTenantId) return;
+    if (!selectedWallet) return;
+    if (selectedWallet.isAgencyWorkspace) {
+      setErr('Plan cannot be edited on the agency workspace.');
+      return;
+    }
+    const totalQuota = parseInt(planTotalQuota, 10);
+    if (!Number.isFinite(totalQuota) || totalQuota < 0) {
+      setErr('Annual allowance must be zero or greater.');
+      return;
+    }
+    let periodEndIso: string | null = null;
+    if (planResetDate.trim()) {
+      const d = new Date(`${planResetDate}T00:00:00Z`);
+      if (Number.isNaN(d.getTime())) {
+        setErr('Reset date is not a valid date.');
+        return;
+      }
+      periodEndIso = d.toISOString();
+    }
+    setSavingPlan(true);
+    setErr('');
+    setOk('');
+    try {
+      await updateSubaccountWalletPlan(token, {
+        tenantId: manageTenantId,
+        totalQuota,
+        periodEnd: periodEndIso,
+      });
+      setOk('Plan settings saved.');
+      setWallets(await listAgencyCreditWallets(token));
+    } catch (e2) {
+      setErr(e2 instanceof Error ? e2.message : 'Could not save plan settings.');
+    } finally {
+      setSavingPlan(false);
+    }
+  };
+
+  const toggleWarnThreshold = (n: number) => {
+    setWarnThresholds(prev => {
+      if (prev.includes(n)) return prev.filter(x => x !== n);
+      return [...prev, n].sort((a, b) => b - a);
+    });
+  };
+
+  const onSaveWarnings = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!token) return;
+    setSavingWarn(true);
+    setErr('');
+    setOk('');
+    try {
+      const r = await saveAgencyLowCreditWarningSettings(token, {
+        enabled: warnEnabled,
+        thresholds: warnThresholds,
+        messageTemplate: warnTemplate,
+        sendViaAgencyWorkspace: warnSendViaAgency,
+      });
+      setWarnSettings(r);
+      setOk('Low-credit warning settings saved.');
+    } catch (e2) {
+      setErr(e2 instanceof Error ? e2.message : 'Could not save warning settings.');
+    } finally {
+      setSavingWarn(false);
+    }
+  };
+
+  const renderedPreview = useMemo(() => {
+    const sample = {
+      clientName: 'Alex',
+      workspaceName: selectedWallet?.workspaceName || 'Acme HQ',
+      remainingCredits: '450',
+      threshold: '500',
+      agencyName: 'Your Agency',
+      resetDate: '10 May 2027',
+    };
+    const tpl = warnTemplate || '';
+    return tpl
+      .replace(/\{\{\s*clientName\s*\}\}/gi, sample.clientName)
+      .replace(/\{\{\s*workspaceName\s*\}\}/gi, sample.workspaceName)
+      .replace(/\{\{\s*remainingCredits\s*\}\}/gi, sample.remainingCredits)
+      .replace(/\{\{\s*threshold\s*\}\}/gi, sample.threshold)
+      .replace(/\{\{\s*agencyName\s*\}\}/gi, sample.agencyName)
+      .replace(/\{\{\s*resetDate\s*\}\}/gi, sample.resetDate);
+  }, [warnTemplate, selectedWallet]);
+
+  const agencyWorkspacePresent = useMemo(() => wallets.some(w => w.isAgencyWorkspace), [wallets]);
 
   if (loading) {
     return (
@@ -553,7 +709,209 @@ export default function AgencyQuotasPage() {
         </form>
       </SectionCard>
 
-      <SectionCard title="Workspace credits" subtitle="Remaining balance, usage, and status for each workspace.">
+      <SectionCard
+        title="Low-credit warnings"
+        subtitle="Send an automated SMS to the client when a workspace's remaining credits drop below selected levels."
+      >
+        <form onSubmit={onSaveWarnings} style={{ display: 'grid', gap: '1rem' }}>
+          <label style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', fontSize: '0.88rem', cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={warnEnabled}
+              onChange={e => setWarnEnabled(e.target.checked)}
+            />
+            Enable low-credit warnings
+          </label>
+
+          <div>
+            <p
+              style={{
+                margin: '0 0 0.45rem',
+                fontSize: '0.72rem',
+                fontWeight: 800,
+                letterSpacing: '0.06em',
+                textTransform: 'uppercase',
+                color: 'var(--aisbp-muted, #64748b)',
+              }}
+            >
+              Send warnings from
+            </p>
+            <label style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', fontSize: '0.88rem' }}>
+              <input
+                type="radio"
+                checked={warnSendViaAgency}
+                onChange={() => setWarnSendViaAgency(true)}
+              />
+              Agency workspace
+            </label>
+            <p
+              style={{
+                margin: '0.4rem 0 0',
+                fontSize: '0.76rem',
+                color: 'var(--aisbp-muted, #94a3b8)',
+                lineHeight: 1.5,
+                maxWidth: '36rem',
+              }}
+            >
+              Warnings are sent through the agency workspace CRM connection. The recipient is the client phone number saved in the workspace profile.
+            </p>
+            {warnEnabled && agencyWorkspacePresent && agencyWorkspaceCrmConnected === false ? (
+              <div
+                style={{
+                  marginTop: '0.6rem',
+                  padding: '0.65rem 0.8rem',
+                  borderRadius: 8,
+                  border: '1px solid var(--aisbp-warning-border, #facc15)',
+                  background: 'var(--aisbp-warning-bg, #fef9c3)',
+                  color: 'var(--aisbp-warning-text, #854d0e)',
+                  fontSize: '0.82rem',
+                }}
+              >
+                Connect the agency workspace CRM before automated low-credit warnings can be sent.{' '}
+                <Link
+                  href="/app/agency/tenants"
+                  style={{ fontWeight: 650, color: 'var(--aisbp-warning-text, #854d0e)' }}
+                >
+                  Configure CRM →
+                </Link>
+              </div>
+            ) : null}
+            {warnEnabled && !agencyWorkspacePresent ? (
+              <div
+                style={{
+                  marginTop: '0.6rem',
+                  padding: '0.65rem 0.8rem',
+                  borderRadius: 8,
+                  border: '1px solid var(--aisbp-warning-border, #facc15)',
+                  background: 'var(--aisbp-warning-bg, #fef9c3)',
+                  color: 'var(--aisbp-warning-text, #854d0e)',
+                  fontSize: '0.82rem',
+                }}
+              >
+                Set up the agency workspace before automated low-credit warnings can be sent.{' '}
+                <Link href="/app/agency/tenants" style={{ fontWeight: 650, color: 'var(--aisbp-warning-text, #854d0e)' }}>
+                  Open Client Workspaces →
+                </Link>
+              </div>
+            ) : null}
+          </div>
+
+          <div>
+            <p
+              style={{
+                margin: '0 0 0.45rem',
+                fontSize: '0.72rem',
+                fontWeight: 800,
+                letterSpacing: '0.06em',
+                textTransform: 'uppercase',
+                color: 'var(--aisbp-muted, #64748b)',
+              }}
+            >
+              Thresholds
+            </p>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '0.4rem', maxWidth: '32rem' }}>
+              {(warnSettings?.allowedThresholds && warnSettings.allowedThresholds.length > 0
+                ? warnSettings.allowedThresholds
+                : ALLOWED_WARNING_THRESHOLDS
+              ).map(t => (
+                <label
+                  key={t}
+                  style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', fontSize: '0.86rem', cursor: 'pointer' }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={warnThresholds.includes(t)}
+                    onChange={() => toggleWarnThreshold(t)}
+                  />
+                  {t.toLocaleString()} credits
+                </label>
+              ))}
+            </div>
+            <p style={{ margin: '0.45rem 0 0', fontSize: '0.76rem', color: 'var(--aisbp-muted, #94a3b8)', lineHeight: 1.45 }}>
+              When a workspace&apos;s remaining credits cross any selected level, one warning is sent per level per billing period.
+            </p>
+          </div>
+
+          <div>
+            <p
+              style={{
+                margin: '0 0 0.45rem',
+                fontSize: '0.72rem',
+                fontWeight: 800,
+                letterSpacing: '0.06em',
+                textTransform: 'uppercase',
+                color: 'var(--aisbp-muted, #64748b)',
+              }}
+            >
+              Warning message
+            </p>
+            <textarea
+              value={warnTemplate}
+              onChange={e => setWarnTemplate(e.target.value)}
+              placeholder="Hi {{clientName}}, your AISalesBot Pro workspace &quot;{{workspaceName}}&quot; is running low on credits."
+              rows={6}
+              style={{
+                ...mvpInputStyle,
+                width: '100%',
+                maxWidth: '40rem',
+                minHeight: '8rem',
+                fontFamily: 'inherit',
+                lineHeight: 1.5,
+                resize: 'vertical',
+              }}
+            />
+            <p style={{ margin: '0.45rem 0 0', fontSize: '0.76rem', color: 'var(--aisbp-muted, #94a3b8)', lineHeight: 1.5 }}>
+              Variables: <code>{'{{clientName}}'}</code>, <code>{'{{workspaceName}}'}</code>, <code>{'{{remainingCredits}}'}</code>,{' '}
+              <code>{'{{threshold}}'}</code>, <code>{'{{agencyName}}'}</code>, <code>{'{{resetDate}}'}</code>. Missing values fall back safely.
+            </p>
+          </div>
+
+          <div>
+            <p
+              style={{
+                margin: '0 0 0.45rem',
+                fontSize: '0.72rem',
+                fontWeight: 800,
+                letterSpacing: '0.06em',
+                textTransform: 'uppercase',
+                color: 'var(--aisbp-muted, #64748b)',
+              }}
+            >
+              Preview
+            </p>
+            <pre
+              style={{
+                margin: 0,
+                padding: '0.75rem 0.9rem',
+                borderRadius: 10,
+                border: '1px solid var(--aisbp-border, #e2e8f0)',
+                background: 'var(--aisbp-surface-muted, #f8fafc)',
+                color: 'var(--aisbp-text, #0f172a)',
+                fontSize: '0.84rem',
+                lineHeight: 1.5,
+                whiteSpace: 'pre-wrap',
+                fontFamily: 'inherit',
+                maxWidth: '40rem',
+              }}
+            >
+              {renderedPreview || '(Add a message above to see a preview.)'}
+            </pre>
+            <p style={{ margin: '0.4rem 0 0', fontSize: '0.74rem', color: 'var(--aisbp-muted, #94a3b8)' }}>
+              Sample values: client &ldquo;Alex&rdquo;, workspace &ldquo;{selectedWallet?.workspaceName || 'Acme HQ'}&rdquo;, remaining 450, threshold 500.
+            </p>
+          </div>
+
+          <button
+            type="submit"
+            disabled={savingWarn}
+            style={{ ...mvpPrimaryButtonStyle, width: 'fit-content', opacity: savingWarn ? 0.75 : 1 }}
+          >
+            {savingWarn ? 'Saving…' : 'Save low-credit warning settings'}
+          </button>
+        </form>
+      </SectionCard>
+
+      <SectionCard title="Workspace credits" subtitle="Remaining balance, usage, next reset, and status for each workspace.">
         {wallets.length === 0 ? (
           <p style={{ fontSize: '0.85rem', color: 'var(--aisbp-muted, #64748b)', margin: 0 }}>No workspaces found yet.</p>
         ) : (
@@ -561,7 +919,7 @@ export default function AgencyQuotasPage() {
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.84rem' }}>
               <thead>
                 <tr>
-                  {(['Workspace', 'Remaining', 'Used today', 'Used this year', 'Overage', 'Status', 'Actions'] as const).map(h => (
+                  {(['Workspace', 'Remaining', 'Used today', 'Used this year', 'Next reset date', 'Overage', 'Status', 'Actions'] as const).map(h => (
                     <th key={h} style={tableTh}>
                       {h}
                     </th>
@@ -571,25 +929,55 @@ export default function AgencyQuotasPage() {
               <tbody>
                 {wallets.map(w => (
                   <tr key={w.tenantId} style={{ background: 'var(--aisbp-table-row-bg, #fff)' }}>
-                    <td style={{ ...tableTd, fontWeight: 700, color: 'var(--aisbp-text-heading, #0f172a)' }}>{w.workspaceName}</td>
+                    <td style={{ ...tableTd, fontWeight: 700, color: 'var(--aisbp-text-heading, #0f172a)' }}>
+                      {w.workspaceName}
+                      {w.isAgencyWorkspace ? (
+                        <span
+                          style={{
+                            marginLeft: '0.4rem',
+                            fontSize: '0.66rem',
+                            fontWeight: 700,
+                            letterSpacing: '0.04em',
+                            textTransform: 'uppercase',
+                            color: 'var(--aisbp-muted, #64748b)',
+                            background: 'var(--aisbp-surface-muted, #f1f5f9)',
+                            border: '1px solid var(--aisbp-border, #e2e8f0)',
+                            padding: '0.1rem 0.35rem',
+                            borderRadius: 6,
+                            verticalAlign: 'middle',
+                          }}
+                        >
+                          Agency workspace
+                        </span>
+                      ) : null}
+                    </td>
                     <td style={{ ...tableTd, fontWeight: 800, color: 'var(--aisbp-text, #0f172a)' }}>
-                      {(w.balance ?? 0).toLocaleString()}
+                      {w.creditsUnlimited ? 'Unlimited' : (w.balance ?? 0).toLocaleString()}
                     </td>
                     <td style={tableTd}>{(w.usedToday ?? 0).toLocaleString()}</td>
                     <td style={tableTd}>{(w.usedThisYear ?? 0).toLocaleString()}</td>
-                    <td style={tableTd}>{w.allowNegativeCredits ? 'Allowed' : 'Not allowed'}</td>
+                    <td style={tableTd}>
+                      {w.creditsUnlimited ? '—' : formatResetDate(w.periodEnd)}
+                    </td>
+                    <td style={tableTd}>
+                      {w.creditsUnlimited ? '—' : w.allowNegativeCredits ? 'Allowed' : 'Not allowed'}
+                    </td>
                     <td style={tableTd}>{creditStatusLabel(w.status)}</td>
                     <td style={tableTd}>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          selectWorkspaceForManage(w.tenantId);
-                          setManageTab('add');
-                        }}
-                        style={{ ...mvpSecondaryButtonStyle, padding: '0.4rem 0.75rem', fontSize: '0.82rem' }}
-                      >
-                        Manage
-                      </button>
+                      {w.isAgencyWorkspace ? (
+                        <span style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)' }}>—</span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            selectWorkspaceForManage(w.tenantId);
+                            setManageTab('add');
+                          }}
+                          style={{ ...mvpSecondaryButtonStyle, padding: '0.4rem 0.75rem', fontSize: '0.82rem' }}
+                        >
+                          Manage
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -615,11 +1003,13 @@ export default function AgencyQuotasPage() {
             style={mvpSelectStyle}
           >
             <option value="">Choose a workspace…</option>
-            {wallets.map(w => (
-              <option key={w.tenantId} value={w.tenantId}>
-                {w.workspaceName}
-              </option>
-            ))}
+            {wallets
+              .filter(w => !w.isAgencyWorkspace)
+              .map(w => (
+                <option key={w.tenantId} value={w.tenantId}>
+                  {w.workspaceName}
+                </option>
+              ))}
           </select>
         </label>
 
@@ -689,6 +1079,9 @@ export default function AgencyQuotasPage() {
               </button>
               <button type="button" onClick={() => setManageTab('adjust')} style={tabBtnStyle(manageTab === 'adjust')}>
                 Adjust credits
+              </button>
+              <button type="button" onClick={() => setManageTab('plan')} style={tabBtnStyle(manageTab === 'plan')}>
+                Plan & reset date
               </button>
               <button type="button" onClick={() => setManageTab('rules')} style={tabBtnStyle(manageTab === 'rules')}>
                 Credit rules
@@ -760,6 +1153,43 @@ export default function AgencyQuotasPage() {
                   style={{ ...mvpPrimaryButtonStyle, width: 'fit-content', opacity: savingAdjust ? 0.75 : 1 }}
                 >
                   {savingAdjust ? 'Applying…' : 'Apply adjustment'}
+                </button>
+              </form>
+            ) : null}
+
+            {manageTab === 'plan' ? (
+              <form onSubmit={onSavePlan} style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem', maxWidth: '28rem' }}>
+                <p style={{ margin: 0, fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)', lineHeight: 1.45 }}>
+                  Set this workspace&apos;s annual allowance and next reset date. Updating the reset date does not add or remove credits — use <strong>Add credits</strong> for that.
+                </p>
+                <label style={mvpLabelStyle}>
+                  Annual allowance (credits)
+                  <input
+                    value={planTotalQuota}
+                    onChange={e => setPlanTotalQuota(e.target.value)}
+                    type="number"
+                    min={0}
+                    style={mvpInputStyle}
+                  />
+                </label>
+                <label style={mvpLabelStyle}>
+                  Next reset date
+                  <input
+                    value={planResetDate}
+                    onChange={e => setPlanResetDate(e.target.value)}
+                    type="date"
+                    style={mvpInputStyle}
+                  />
+                </label>
+                <p style={{ margin: 0, fontSize: '0.76rem', color: 'var(--aisbp-muted, #94a3b8)', lineHeight: 1.45 }}>
+                  Current next reset: <strong>{formatResetDate(selectedWallet?.periodEnd)}</strong>
+                </p>
+                <button
+                  type="submit"
+                  disabled={savingPlan}
+                  style={{ ...mvpPrimaryButtonStyle, width: 'fit-content', opacity: savingPlan ? 0.75 : 1 }}
+                >
+                  {savingPlan ? 'Saving…' : 'Save plan settings'}
                 </button>
               </form>
             ) : null}

@@ -5,7 +5,7 @@
 // for other channels is verified (see @aisbp/ghl-client CHANNEL_MAP) — not derived from
 // conversation context in this service.
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { formatPostgrestError } from '../../lib/format-postgrest-error';
 import { getSupabaseService } from '../../lib/supabase';
@@ -16,6 +16,7 @@ import { newlineDebugMetrics, previewWithVisibleNewlines } from '../../lib/custo
 import { decrypt } from '../../lib/encryption';
 import { isProductionEnv, safeTextPreviewForLog } from '../../lib/safe-text-preview-for-log';
 import type { ReplyDecision, ReplyBubbleDraft } from '../reply-planning/dto';
+import { CreditWarningsService } from '../credit-warnings/credit-warnings.service';
 
 export interface BubbleSendResult {
   index: number;
@@ -49,6 +50,10 @@ export interface SendSummary {
 export class OutboundSendService {
   private readonly logger = new Logger(OutboundSendService.name);
   private readonly supabase = getSupabaseService();
+
+  // Optional so existing tests that `new OutboundSendService()` continue to pass without
+  // wiring the warning service; production wires it via Nest DI from OutboundModule.
+  constructor(@Optional() private readonly creditWarnings?: CreditWarningsService) {}
 
   /**
    * Send all bubbles for a ReplyDecision to GHL.
@@ -318,6 +323,9 @@ export class OutboundSendService {
   }
 
   private async checkQuotaAvailable(tenantId: string, needed: number): Promise<boolean> {
+    // Agency / system workspaces marked unlimited are never blocked by credit checks.
+    if (await this.tenantHasUnlimitedCredits(tenantId)) return true;
+
     const { data: wallet } = await this.supabase
       .from('quota_wallets')
       .select('total_quota, used_quota, allow_negative_credits, negative_credit_limit')
@@ -331,6 +339,15 @@ export class OutboundSendService {
     if (!allowNeg) return balance > 0 && balance >= needed;
     // Allow until balance <= negativeCreditLimit (inclusive).
     return balance > negLimit && balance - needed > negLimit;
+  }
+
+  private async tenantHasUnlimitedCredits(tenantId: string): Promise<boolean> {
+    const { data } = await this.supabase
+      .from('tenants')
+      .select('credits_unlimited')
+      .eq('id', tenantId)
+      .maybeSingle();
+    return Boolean((data as { credits_unlimited?: boolean } | null)?.credits_unlimited);
   }
 
   private async getAgencyCreditDeductionMethodForTenant(
@@ -359,8 +376,8 @@ export class OutboundSendService {
 
   /**
    * Debit credits for a reply send. Amount is usually 1 (logical reply) or successful bubble count.
-   * TODO(low-credit-notify): When balance_after <= wallet.low_credit_threshold, enqueue internal warning
-   * (agency handover / WhatsApp) once notification delivery is implemented — QuotaThresholdAlertProcessor is stubbed.
+   * After a successful (non-idempotent) debit, fires `creditWarnings.maybeSendForCreditDebit`
+   * non-blockingly so a warning failure cannot crash or roll back the customer reply.
    */
   private async debitQuotaForReply(params: {
     tenantId: string;
@@ -375,6 +392,18 @@ export class OutboundSendService {
     if (!idempotencyKey.trim()) return { debited: false };
     const amt = Math.floor(debitAmount);
     if (!Number.isFinite(amt) || amt < 1) return { debited: false };
+
+    // Unlimited-credit (agency system) workspaces never debit and never warn.
+    if (await this.tenantHasUnlimitedCredits(tenantId)) {
+      this.logger.log(
+        `quotaDebitSkipped ${JSON.stringify({
+          tenantId,
+          conversationId,
+          reason: 'unlimited_credits_workspace',
+        })}`,
+      );
+      return { debited: false };
+    }
 
     // Idempotency: check ledger first (best-effort; DB unique index is primary protection in prod).
     const { data: existing } = await this.supabase
@@ -395,12 +424,13 @@ export class OutboundSendService {
 
     const { data: wallet } = await this.supabase
       .from('quota_wallets')
-      .select('id, total_quota, used_quota')
+      .select('id, total_quota, used_quota, period_start, period_end')
       .eq('tenant_id', tenantId)
       .single();
 
     if (!wallet) return { debited: false };
 
+    const balanceBefore = wallet.total_quota - wallet.used_quota;
     const nextUsed = wallet.used_quota + amt;
     const balanceAfter = wallet.total_quota - nextUsed;
 
@@ -437,6 +467,42 @@ export class OutboundSendService {
       }
       throw new Error(`Failed to insert quota ledger: ${msg}`);
     }
+
+    // Trigger automated low-credit warning. Always non-blocking — warning failures must not
+    // bubble back into the outbound send pipeline. Detached promise is intentional.
+    if (this.creditWarnings) {
+      const warner = this.creditWarnings;
+      const periodStart = wallet.period_start ? new Date(String(wallet.period_start)).toISOString() : null;
+      const periodEnd = wallet.period_end ? new Date(String(wallet.period_end)).toISOString() : null;
+      void warner
+        .maybeSendForCreditDebit({
+          tenantId,
+          balanceBefore,
+          balanceAfter,
+          periodStart,
+          periodEnd,
+          triggerSource: 'reply_debit',
+        })
+        .then(result => {
+          if (result.status !== 'SKIPPED' || result.reason !== 'no_threshold_crossed') {
+            this.logger.log(
+              `lowCreditWarning ${JSON.stringify({
+                tenantId,
+                conversationId,
+                status: result.status,
+                threshold: 'threshold' in result ? result.threshold : null,
+                reason: 'reason' in result ? result.reason : null,
+              })}`,
+            );
+          }
+        })
+        .catch(e => {
+          this.logger.warn(
+            `lowCreditWarning fire-and-forget rejected tenant=${tenantId} ${e instanceof Error ? e.message : String(e)}`,
+          );
+        });
+    }
+
     return { debited: true };
   }
 

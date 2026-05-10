@@ -18,13 +18,18 @@ import { QuotasService } from './quotas.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentAgencyId, CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { SessionUser } from '../../lib/supabase';
+import { CreditWarningsService } from '../credit-warnings/credit-warnings.service';
+import { ALL_LOW_CREDIT_WARNING_THRESHOLDS } from '../credit-warnings/credit-warnings.constants';
 
 @ApiTags('quotas')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
 @Controller('quotas')
 export class QuotasController {
-  constructor(private readonly quotasService: QuotasService) {}
+  constructor(
+    private readonly quotasService: QuotasService,
+    private readonly creditWarnings: CreditWarningsService,
+  ) {}
 
   @Get('status/:tenantId')
   @ApiOperation({
@@ -262,6 +267,81 @@ export class QuotasController {
   async agencySettings(@CurrentAgencyId() agencyId: string | null, @CurrentUser() user: SessionUser) {
     if (!agencyId) throw new BadRequestException('Agency context required');
     return this.quotasService.getAgencyQuotaSettings(agencyId, user.id);
+  }
+
+  @Post('agency/wallet-plan')
+  @ApiOperation({ summary: 'Update plan-level wallet metadata for a workspace (next reset date / annual allowance)' })
+  async updateWalletPlan(
+    @CurrentAgencyId() agencyId: string | null,
+    @CurrentUser() user: SessionUser,
+    @Body()
+    dto: { tenantId: string; periodEnd?: string | null; periodStart?: string | null; totalQuota?: number },
+  ) {
+    if (!agencyId) throw new BadRequestException('Agency context required');
+    if (!dto.tenantId?.trim()) throw new BadRequestException('tenantId is required');
+    if (dto.periodEnd === undefined && dto.periodStart === undefined && dto.totalQuota === undefined) {
+      throw new BadRequestException('Provide at least one plan field');
+    }
+    return this.quotasService.updateWalletPlan(agencyId, user.id, dto.tenantId, {
+      periodEnd: dto.periodEnd,
+      periodStart: dto.periodStart,
+      totalQuota: dto.totalQuota,
+    });
+  }
+
+  @Get('agency/low-credit-warning-settings')
+  @ApiOperation({ summary: 'Read agency low-credit warning settings (thresholds + message + send toggle)' })
+  async getWarningSettings(@CurrentAgencyId() agencyId: string | null, @CurrentUser() user: SessionUser) {
+    if (!agencyId) throw new BadRequestException('Agency context required');
+    await this.assertAgencyStaffViaQuotas(agencyId, user.id);
+    const s = await this.creditWarnings.getAgencyLowCreditWarningSettings(agencyId);
+    return { ...s, allowedThresholds: [...ALL_LOW_CREDIT_WARNING_THRESHOLDS] };
+  }
+
+  @Post('agency/low-credit-warning-settings')
+  @ApiOperation({ summary: 'Save agency low-credit warning settings' })
+  async saveWarningSettings(
+    @CurrentAgencyId() agencyId: string | null,
+    @CurrentUser() user: SessionUser,
+    @Body()
+    dto: {
+      enabled?: boolean;
+      thresholds?: number[];
+      messageTemplate?: string;
+      sendViaAgencyWorkspace?: boolean;
+    },
+  ) {
+    if (!agencyId) throw new BadRequestException('Agency context required');
+    await this.assertAgencyStaffViaQuotas(agencyId, user.id);
+    if (
+      dto.enabled === undefined &&
+      dto.thresholds === undefined &&
+      dto.messageTemplate === undefined &&
+      dto.sendViaAgencyWorkspace === undefined
+    ) {
+      throw new BadRequestException('Provide at least one warning setting to save');
+    }
+    if (dto.thresholds !== undefined) {
+      if (!Array.isArray(dto.thresholds)) throw new BadRequestException('thresholds must be an array');
+      const allowed = new Set<number>(ALL_LOW_CREDIT_WARNING_THRESHOLDS as readonly number[]);
+      for (const v of dto.thresholds) {
+        if (typeof v !== 'number' || !allowed.has(v)) {
+          throw new BadRequestException(
+            `Each threshold must be one of ${[...allowed].join(', ')} credits`,
+          );
+        }
+      }
+    }
+    const saved = await this.creditWarnings.saveAgencyLowCreditWarningSettings(agencyId, dto);
+    return { ...saved, allowedThresholds: [...ALL_LOW_CREDIT_WARNING_THRESHOLDS] };
+  }
+
+  /**
+   * Reuse the existing agency-staff guard in quotas (avoids double-membership round-trip).
+   * Wraps `getAgencyQuotaSettings` since it already throws ForbiddenException on non-members.
+   */
+  private async assertAgencyStaffViaQuotas(agencyId: string, profileId: string): Promise<void> {
+    await this.quotasService.getAgencyQuotaSettings(agencyId, profileId);
   }
 
   /** Tenant-scoped users may only act on their tenant; agency-only users are not restricted here (matches conversations). */

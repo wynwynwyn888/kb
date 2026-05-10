@@ -245,27 +245,38 @@ export async function getTenantById(token: string, tenantId: string) {
   }>(`/tenants/${tenantId}`, { token });
 }
 
+export type WorkspaceListItem = {
+  id: string;
+  name: string;
+  ghlLocationId: string | null;
+  status: string;
+  isAgencyWorkspace?: boolean;
+  creditsUnlimited?: boolean;
+  clientContactName?: string | null;
+  clientContactPhone?: string | null;
+  clientContactEmail?: string | null;
+};
+
 export async function getTenantsByAgency(token: string, agencyId: string) {
-  return apiRequest<Array<{
-    id: string;
-    name: string;
-    ghlLocationId: string | null;
-    status: string;
-  }>>(`/tenants/agency/${agencyId}`, { token });
+  return apiRequest<WorkspaceListItem[]>(`/tenants/agency/${agencyId}`, { token });
 }
 
 export async function getMyTenants(token: string) {
-  return apiRequest<Array<{
-    id: string;
-    name: string;
-    ghlLocationId: string | null;
-    status: string;
-  }>>('/tenants/me', { token });
+  return apiRequest<WorkspaceListItem[]>('/tenants/me', { token });
 }
 
 export async function createSubaccount(
   token: string,
-  body: { agencyId: string; name: string; ghlLocationId?: string | null },
+  body: {
+    agencyId: string;
+    name: string;
+    ghlLocationId?: string | null;
+    annualPlanDurationMonths?: number;
+    initialCredits?: number;
+    clientContactName?: string | null;
+    clientContactPhone?: string | null;
+    clientContactEmail?: string | null;
+  },
 ) {
   return apiRequest<{
     id: string;
@@ -273,7 +284,34 @@ export async function createSubaccount(
     ghlLocationId: string | null;
     status: string;
     agencyId: string;
+    isAgencyWorkspace?: boolean;
+    creditsUnlimited?: boolean;
+    clientContactName?: string | null;
+    clientContactPhone?: string | null;
+    clientContactEmail?: string | null;
   }>('/tenants', { token, method: 'POST', body: JSON.stringify(body) });
+}
+
+export async function updateWorkspaceClientProfile(
+  token: string,
+  tenantId: string,
+  body: {
+    clientContactName?: string | null;
+    clientContactPhone?: string | null;
+    clientContactEmail?: string | null;
+  },
+) {
+  return apiRequest<WorkspaceListItem>(
+    `/tenants/${encodeURIComponent(tenantId)}/client-profile`,
+    { token, method: 'PATCH', body: JSON.stringify(body) },
+  );
+}
+
+export async function ensureAgencySystemWorkspace(token: string, agencyId: string) {
+  return apiRequest<WorkspaceListItem>(
+    `/tenants/agency/${encodeURIComponent(agencyId)}/system-workspace`,
+    { token, method: 'POST' },
+  );
 }
 
 export async function updateSubaccountName(token: string, tenantId: string, name: string) {
@@ -1152,7 +1190,65 @@ export type AgencyCreditSettings = {
   defaultOverageLimit: number;
   defaultLowCreditWarningEnabled: boolean;
   defaultLowCreditWarningLevel: number;
+  /** Enabled thresholds for the automated low-credit warning send (descending). */
+  lowCreditWarningThresholds?: number[];
+  /** Customizable warning template (supports {{clientName}}, {{workspaceName}}, etc.). */
+  lowCreditWarningMessageTemplate?: string;
+  /** When true, warnings are sent through the agency system workspace CRM connection. */
+  lowCreditWarningSendViaAgencyWorkspace?: boolean;
 };
+
+export type AgencyLowCreditWarningSettings = {
+  enabled: boolean;
+  thresholds: number[];
+  messageTemplate: string;
+  sendViaAgencyWorkspace: boolean;
+  /** Allow-list of threshold values the UI may show as checkboxes. */
+  allowedThresholds: number[];
+};
+
+export async function getAgencyLowCreditWarningSettings(token: string) {
+  return apiRequest<AgencyLowCreditWarningSettings>('/quotas/agency/low-credit-warning-settings', {
+    token,
+  });
+}
+
+export async function saveAgencyLowCreditWarningSettings(
+  token: string,
+  body: Partial<{
+    enabled: boolean;
+    thresholds: number[];
+    messageTemplate: string;
+    sendViaAgencyWorkspace: boolean;
+  }>,
+) {
+  return apiRequest<AgencyLowCreditWarningSettings>('/quotas/agency/low-credit-warning-settings', {
+    token,
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
+export async function updateSubaccountWalletPlan(
+  token: string,
+  body: {
+    tenantId: string;
+    periodEnd?: string | null;
+    periodStart?: string | null;
+    totalQuota?: number;
+  },
+) {
+  return apiRequest<{
+    tenantId: string;
+    periodStart: string | null;
+    periodEnd: string | null;
+    totalQuota: number;
+  }>('/quotas/agency/wallet-plan', {
+    token,
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
 
 export async function getQuotaAgencySettings(token: string) {
   return apiRequest<AgencyCreditSettings>('/quotas/agency/settings', { token });
@@ -1196,6 +1292,25 @@ export async function topupSubaccountQuota(
   }>('/quotas/agency/topup', { token, method: 'POST', body: JSON.stringify(body) });
 }
 
+export type AgencyCreditWallet = {
+  tenantId: string;
+  workspaceName: string;
+  totalQuota: number;
+  usedQuota: number;
+  balance: number;
+  usedToday: number;
+  usedThisMonth: number;
+  usedThisYear: number;
+  allowNegativeCredits: boolean;
+  negativeCreditLimit: number;
+  lowCreditThreshold: number;
+  status: string;
+  periodStart: string | null;
+  periodEnd: string | null;
+  isAgencyWorkspace: boolean;
+  creditsUnlimited: boolean;
+};
+
 export async function listAgencyCreditWallets(token: string) {
   return apiRequest<Array<{
     tenantId: string;
@@ -1209,6 +1324,10 @@ export async function listAgencyCreditWallets(token: string) {
     allowNegativeCredits: boolean;
     negativeCreditLimit: number;
     lowCreditThreshold: number;
+    periodStart: string | null;
+    periodEnd: string | null;
+    isAgencyWorkspace: boolean;
+    creditsUnlimited: boolean;
     status: string;
   }>>('/quotas/agency/wallets', { token });
 }

@@ -1,18 +1,19 @@
 'use client';
 
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import type { CSSProperties } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   getAgencyAiConfig,
   postAgencyAiModelHealthTest,
   saveAgencyAiConfig,
-  saveSubaccountBehaviorPolicy,
+  setActiveAiProvider,
   type AgencyProviderSnapshot,
   type AiModelHealthSnapshot,
-  type SubaccountBehaviorPolicy,
+  type AgencyAiConfig,
 } from '@/lib/api';
 import type { LiveAiCatalogDto } from '@/lib/api';
-import { catalogProviderIds, getModelFieldForProvider, PROVIDER_LABEL } from '@/lib/ai-model-options';
+import { getModelFieldForProvider, PROVIDER_LABEL } from '@/lib/ai-model-options';
 import { MINIMAX_DEFAULT_API_BASE, OPENAI_DEFAULT_API_BASE } from '@aisbp/types';
 import { hasLiveGeneration, snapshotFor } from '@/lib/ai-provider-options';
 import {
@@ -24,7 +25,6 @@ import {
   SectionCard,
   StatusPill,
   SuccessBanner,
-  mvpButtonStyle,
   mvpFieldHint,
   mvpInputStyle,
   mvpLabelStyle,
@@ -33,18 +33,10 @@ import {
   mvpSelectStyle,
 } from '@/components/app/mvp-ui';
 
-/** Stored on the provider row for stack fallback. */
 const PROVIDER_STACK_DEFAULTS = { temperature: 0.7, maxTokens: 800 };
 
-const defaultBehavior = (): SubaccountBehaviorPolicy => ({
-  temperatureMin: 0,
-  temperatureMax: 2,
-  maxTokensMin: 200,
-  maxTokensMax: 4000,
-  allowModelOverride: true,
-  allowResponseStyleOverride: true,
-  allowMaxTokensOverride: true,
-});
+const LIVE_PROVIDERS = ['OPENAI', 'MINIMAX'] as const;
+type LiveProviderId = (typeof LIVE_PROVIDERS)[number];
 
 function defaultEndpointFor(provider: string): string {
   return provider.toUpperCase() === 'MINIMAX' ? MINIMAX_DEFAULT_API_BASE : OPENAI_DEFAULT_API_BASE;
@@ -59,51 +51,72 @@ function healthAppliesToSelection(
   return snap.lastHealthProvider.toUpperCase() === provider.toUpperCase() && snap.lastHealthModel.trim() === model.trim();
 }
 
+const cardShell: CSSProperties = {
+  border: '1px solid var(--aisbp-border, #e2e8f0)',
+  borderRadius: 12,
+  padding: '1rem 1.1rem',
+  background: 'var(--aisbp-surface, #fff)',
+  color: 'var(--aisbp-text, #0f172a)',
+};
+
+const warnBanner: CSSProperties = {
+  marginBottom: '0.85rem',
+  padding: '0.65rem 0.85rem',
+  borderRadius: 8,
+  border: '1px solid var(--aisbp-pill-warn-border, #fde68a)',
+  background: 'var(--aisbp-pill-warn-bg, #fffbeb)',
+  color: 'var(--aisbp-pill-warn-fg, #b45309)',
+  fontSize: '0.84rem',
+  lineHeight: 1.45,
+};
+
 export default function AgencyAiSettingsPage() {
   const { token } = useAuth();
   const [loadKey, setLoadKey] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [savingPolicy, setSavingPolicy] = useState(false);
   const [bootstrapErr, setBootstrapErr] = useState('');
   const [err, setErr] = useState('');
-  const [policyErr, setPolicyErr] = useState('');
   const [ok, setOk] = useState('');
-  const [policyOk, setPolicyOk] = useState('');
-
-  const [selectedProvider, setSelectedProvider] = useState('OPENAI');
-  const [apiKey, setApiKey] = useState('');
-  const [minimaxGroupId, setMinimaxGroupId] = useState('');
-  const [defaultModel, setDefaultModel] = useState('gpt-4o-mini');
-  const [endpointOverride, setEndpointOverride] = useState('');
-  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   const [activeProvider, setActiveProvider] = useState('OPENAI');
   const [activeModel, setActiveModel] = useState('gpt-4o-mini');
-  const [activeHasKey, setActiveHasKey] = useState(false);
   const [keysPresent, setKeysPresent] = useState<Partial<Record<string, boolean>>>({});
   const [providerSnapshots, setProviderSnapshots] = useState<
     Partial<Record<string, AgencyProviderSnapshot>> | undefined
   >();
   const [healthSnap, setHealthSnap] = useState<AiModelHealthSnapshot | null>(null);
   const [liveAiCatalog, setLiveAiCatalog] = useState<LiveAiCatalogDto | null>(null);
-  const [setAsActive, setSetAsActive] = useState(true);
-  const [policy, setPolicy] = useState<SubaccountBehaviorPolicy>(defaultBehavior);
+  const [activeAiHealth, setActiveAiHealth] = useState<AgencyAiConfig['activeAiHealth'] | null>(null);
 
-  const [testing, setTesting] = useState(false);
-  const [testErr, setTestErr] = useState('');
-  const [testOk, setTestOk] = useState('');
+  const [editingProvider, setEditingProvider] = useState<LiveProviderId | null>(null);
+  const [apiKey, setApiKey] = useState('');
+  const [defaultModel, setDefaultModel] = useState('gpt-4o-mini');
+  const [endpointOverride, setEndpointOverride] = useState('');
+  const [minimaxGroupId, setMinimaxGroupId] = useState('');
+  const [supportOpen, setSupportOpen] = useState(false);
 
-  const modelUi = useMemo(
-    () => getModelFieldForProvider(selectedProvider, liveAiCatalog),
-    [selectedProvider, liveAiCatalog],
+  const [saving, setSaving] = useState(false);
+  const [testingTarget, setTestingTarget] = useState<'active' | LiveProviderId | null>(null);
+
+  const snapshotDefaultModel = useCallback(
+    (p: LiveProviderId): string => {
+      const s = snapshotFor(p, providerSnapshots, {
+        defaultModel: p === 'MINIMAX' ? 'MiniMax-M2.7' : 'gpt-4o-mini',
+        maxTokens: PROVIDER_STACK_DEFAULTS.maxTokens,
+        temperature: PROVIDER_STACK_DEFAULTS.temperature,
+      });
+      const m = getModelFieldForProvider(p, liveAiCatalog);
+      if (m.mode === 'list' && m.options.some(o => o.value === s.defaultModel)) {
+        return s.defaultModel;
+      }
+      return m.defaultModel;
+    },
+    [providerSnapshots, liveAiCatalog],
   );
 
-  const hasKeyThis = Boolean(keysPresent[selectedProvider]);
-
-  const healthForForm = useMemo(
-    () => healthAppliesToSelection(healthSnap, selectedProvider, defaultModel),
-    [healthSnap, selectedProvider, defaultModel],
+  const modelUiForEdit = useMemo(
+    () => (editingProvider ? getModelFieldForProvider(editingProvider, liveAiCatalog) : null),
+    [editingProvider, liveAiCatalog],
   );
 
   useEffect(() => {
@@ -115,42 +128,14 @@ export default function AgencyAiSettingsPage() {
       try {
         const c = await getAgencyAiConfig(token);
         if (cancelled) return;
-        const ap = c.activeProvider ?? c.provider;
+        const ap = (c.activeProvider ?? c.provider).toUpperCase();
         setActiveProvider(ap);
         setActiveModel(c.activeModel ?? c.defaultModel);
-        const apKey = c.activeProvider ?? c.provider ?? 'OPENAI';
-        setActiveHasKey(Boolean(c.keysPresent?.[apKey] ?? c.hasApiKey));
         setKeysPresent(c.keysPresent ?? {});
         setProviderSnapshots(c.providerSnapshots);
         setHealthSnap(c.aiModelHealthSnapshot ?? null);
         setLiveAiCatalog(c.liveAiCatalog ?? null);
-        if (c.subaccountBehaviorPolicy) {
-          setPolicy(c.subaccountBehaviorPolicy);
-        }
-
-        const edit = c.activeProvider ?? c.provider;
-        if (edit && (edit === 'OPENAI' || edit === 'MINIMAX')) {
-          setSelectedProvider(edit);
-          const snapshots = c.providerSnapshots;
-          const s = snapshotFor(edit, snapshots, {
-            defaultModel: 'gpt-4o-mini',
-            maxTokens: PROVIDER_STACK_DEFAULTS.maxTokens,
-            temperature: PROVIDER_STACK_DEFAULTS.temperature,
-          });
-          const m = getModelFieldForProvider(edit, c.liveAiCatalog ?? null);
-          if (m.mode === 'list' && m.options.some(o => o.value === s.defaultModel)) {
-            setDefaultModel(s.defaultModel);
-          } else {
-            setDefaultModel(m.defaultModel);
-          }
-          if (edit === 'MINIMAX') {
-            setMinimaxGroupId(s.minimaxGroupId?.trim() ?? '');
-          } else {
-            setMinimaxGroupId('');
-          }
-          const ep = s.endpoint?.trim() ?? '';
-          setEndpointOverride(ep);
-        }
+        setActiveAiHealth(c.activeAiHealth);
       } catch (e) {
         if (!cancelled) setBootstrapErr(e instanceof Error ? e.message : 'Failed to load');
       } finally {
@@ -162,53 +147,118 @@ export default function AgencyAiSettingsPage() {
     };
   }, [token, loadKey]);
 
-  const onSubmitProviders = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!token) return;
-
-    if (setAsActive && !hasLiveGeneration(selectedProvider)) {
-      setErr('Only OpenAI or MiniMax can be used for live replies right now.');
-      return;
+  useEffect(() => {
+    if (!editingProvider) return;
+    const s = snapshotFor(editingProvider, providerSnapshots, {
+      defaultModel: editingProvider === 'MINIMAX' ? 'MiniMax-M2.7' : 'gpt-4o-mini',
+      maxTokens: PROVIDER_STACK_DEFAULTS.maxTokens,
+      temperature: PROVIDER_STACK_DEFAULTS.temperature,
+    });
+    const m = getModelFieldForProvider(editingProvider, liveAiCatalog);
+    if (m.mode === 'list' && m.options.some(o => o.value === s.defaultModel)) {
+      setDefaultModel(s.defaultModel);
+    } else {
+      setDefaultModel(m.defaultModel);
     }
-    if (selectedProvider === 'MINIMAX' && !apiKey.trim() && !hasKeyThis) {
+    setApiKey('');
+    setEndpointOverride(s.endpoint?.trim() ?? '');
+    setMinimaxGroupId(editingProvider === 'MINIMAX' ? (s.minimaxGroupId?.trim() ?? '') : '');
+    setSupportOpen(false);
+  }, [editingProvider, providerSnapshots, liveAiCatalog]);
+
+  const activeKeyOk = Boolean(keysPresent[activeProvider]);
+  const activeHealthLabel = useMemo(() => {
+    if (!activeAiHealth) return { label: 'Not tested', tone: 'neutral' as const };
+    if (activeAiHealth.healthBadge === 'PASS') return { label: 'Healthy', tone: 'ok' as const };
+    if (activeAiHealth.healthBadge === 'FAIL') return { label: 'Needs attention', tone: 'bad' as const };
+    return { label: 'Not tested', tone: 'neutral' as const };
+  }, [activeAiHealth]);
+
+  const refreshConfig = async () => {
+    if (!token) return;
+    const c = await getAgencyAiConfig(token);
+    setActiveProvider((c.activeProvider ?? c.provider).toUpperCase());
+    setActiveModel(c.activeModel ?? c.defaultModel);
+    setKeysPresent(c.keysPresent ?? {});
+    setProviderSnapshots(c.providerSnapshots);
+    setHealthSnap(c.aiModelHealthSnapshot ?? null);
+    setLiveAiCatalog(c.liveAiCatalog ?? null);
+    setActiveAiHealth(c.activeAiHealth);
+  };
+
+  const runHealthCheck = async (target: 'active' | LiveProviderId) => {
+    if (!token) return;
+    setErr('');
+    setOk('');
+    setTestingTarget(target);
+    try {
+      let provider: string;
+      let model: string;
+      if (target === 'active') {
+        provider = activeProvider;
+        model = activeModel;
+      } else {
+        provider = target;
+        model = snapshotDefaultModel(target);
+      }
+      const r = await postAgencyAiModelHealthTest(token, {
+        provider,
+        model,
+        optionalUseSavedKey: true,
+      });
+      await refreshConfig();
+      if (r.status === 'PASS') {
+        const human =
+          provider === 'MINIMAX'
+            ? 'MiniMax connection healthy.'
+            : 'OpenAI connection healthy.';
+        setOk(`${human} (${r.latencyMs} ms)`);
+      } else {
+        setErr(r.errorSummary || 'Health check failed.');
+      }
+    } catch (er) {
+      setErr(er instanceof Error ? er.message : 'Test failed');
+    } finally {
+      setTestingTarget(null);
+    }
+  };
+
+  const onSaveEditing = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!token || !editingProvider) return;
+    if (editingProvider === 'MINIMAX' && !apiKey.trim() && !keysPresent['MINIMAX']) {
       setErr('MiniMax needs an API key. Paste your key to save.');
       return;
     }
-
     setErr('');
     setOk('');
     setSaving(true);
     try {
-      const baseDefault = defaultEndpointFor(selectedProvider);
+      const baseDefault = defaultEndpointFor(editingProvider);
       const ep = endpointOverride.trim();
       const payload: Parameters<typeof saveAgencyAiConfig>[1] = {
-        provider: selectedProvider,
+        provider: editingProvider,
         apiKey: apiKey.trim() || undefined,
         defaultModel,
         temperature: PROVIDER_STACK_DEFAULTS.temperature,
         maxTokens: PROVIDER_STACK_DEFAULTS.maxTokens,
-        setAsActive: setAsActive !== false,
-        ...(selectedProvider === 'MINIMAX' ? { minimaxGroupId: minimaxGroupId.trim() } : {}),
+        setAsActive: false,
       };
-      if (advancedOpen && ep && ep !== baseDefault) {
-        payload.endpoint = ep;
-      } else if (advancedOpen && !ep) {
-        payload.endpoint = '';
+      if (supportOpen) {
+        if (ep && ep !== baseDefault) {
+          payload.endpoint = ep;
+        } else if (!ep) {
+          payload.endpoint = '';
+        }
+      }
+      if (editingProvider === 'MINIMAX' && supportOpen) {
+        payload.minimaxGroupId = minimaxGroupId.trim();
       }
 
-      const saved = await saveAgencyAiConfig(token, payload);
-      setOk('AI provider saved');
+      await saveAgencyAiConfig(token, payload);
+      setOk(`Saved ${PROVIDER_LABEL[editingProvider] ?? editingProvider} settings.`);
       setApiKey('');
-      setActiveProvider(saved.activeProvider ?? saved.provider);
-      setActiveModel(saved.activeModel ?? saved.defaultModel);
-      if (saved.hasApiKey != null) setActiveHasKey(Boolean(saved.hasApiKey));
-      if (saved.keysPresent) setKeysPresent(saved.keysPresent);
-      if (saved.provider) setSelectedProvider(saved.provider);
-      if (saved.providerSnapshots) setProviderSnapshots(saved.providerSnapshots);
-      if (saved.defaultModel) setDefaultModel(saved.defaultModel);
-      setHealthSnap(saved.aiModelHealthSnapshot ?? null);
-      setLiveAiCatalog(saved.liveAiCatalog ?? null);
-      setSetAsActive(hasLiveGeneration(String(saved.activeProvider || saved.provider || 'OPENAI')));
+      await refreshConfig();
     } catch (er) {
       setErr(er instanceof Error ? er.message : 'Save failed');
     } finally {
@@ -216,74 +266,52 @@ export default function AgencyAiSettingsPage() {
     }
   };
 
-  const onTestModel = async () => {
+  const setActiveWithGuard = async (provider: LiveProviderId) => {
     if (!token) return;
-    setTestErr('');
-    setTestOk('');
-    setTesting(true);
+    const model = snapshotDefaultModel(provider);
+    const applies = healthAppliesToSelection(healthSnap, provider, model);
+    const unhealthy = applies && healthSnap?.lastHealthStatus === 'FAIL';
+    if (unhealthy) {
+      const okConfirm = window.confirm(
+        'This provider is not healthy. Live replies may fail. Set it as active anyway?',
+      );
+      if (!okConfirm) return;
+    }
+    setErr('');
+    setOk('');
     try {
-      const r = await postAgencyAiModelHealthTest(token, {
-        provider: selectedProvider,
-        model: defaultModel,
-        optionalUseSavedKey: true,
-      });
-      const c = await getAgencyAiConfig(token);
-      setHealthSnap(c.aiModelHealthSnapshot ?? null);
-      setLiveAiCatalog(c.liveAiCatalog ?? null);
-      if (r.status === 'PASS') {
-        setTestOk(`Health check passed for ${r.provider} / ${r.model} (${r.latencyMs} ms).`);
-      } else {
-        setTestErr(r.errorSummary || 'Health check failed.');
-      }
+      await setActiveAiProvider(token, provider);
+      setOk(`Active provider is now ${PROVIDER_LABEL[provider] ?? provider}.`);
+      await refreshConfig();
     } catch (er) {
-      setTestErr(er instanceof Error ? er.message : 'Test failed');
-    } finally {
-      setTesting(false);
+      setErr(er instanceof Error ? er.message : 'Could not change active provider');
     }
   };
 
-  const applySubaccountOverrideMaster = (on: boolean) => {
-    setPolicy(p => ({
-      ...p,
-      allowModelOverride: on,
-      allowResponseStyleOverride: on,
-      allowMaxTokensOverride: on,
-    }));
-  };
-
-  const onSubmitPolicy = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!token) return;
-    setPolicyErr('');
-    setPolicyOk('');
-    setSavingPolicy(true);
-    try {
-      const saved = await saveSubaccountBehaviorPolicy(token, policy);
-      setPolicy(saved);
-      setPolicyOk('Workspace limits saved');
-    } catch (er) {
-      setPolicyErr(er instanceof Error ? er.message : 'Save failed');
-    } finally {
-      setSavingPolicy(false);
+  const providerCardHealth = (p: LiveProviderId) => {
+    const m = snapshotDefaultModel(p);
+    if (!healthSnap || !healthAppliesToSelection(healthSnap, p, m)) {
+      return { label: 'Not tested', tone: 'neutral' as const };
     }
-  };
-
-  const activeNeedsKey = ['OPENAI', 'MINIMAX'].includes((activeProvider || '').toUpperCase());
-  const activeKeyOk = !activeNeedsKey || activeHasKey;
-
-  const summaryHealth = (() => {
-    if (!healthSnap) return { label: 'Not tested yet', tone: 'neutral' as const };
-    if (!healthForForm) return { label: 'Run check for current fields', tone: 'warn' as const };
     if (healthSnap.lastHealthStatus === 'PASS') return { label: 'Healthy', tone: 'ok' as const };
     return { label: 'Needs attention', tone: 'bad' as const };
-  })();
+  };
+
+  const canSetActive = (p: LiveProviderId) => hasLiveGeneration(p) && Boolean(keysPresent[p]);
 
   return (
     <div>
       <PageHeader title="AI Provider" eyebrow="Agency account" />
-      <p style={{ fontSize: '0.84rem', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 0.9rem', lineHeight: 1.45, maxWidth: '40rem' }}>
-        Choose the AI provider and default model used across your agency. Workspace-specific bot instructions stay in each
-        client workspace.
+      <p
+        style={{
+          fontSize: '0.84rem',
+          color: 'var(--aisbp-muted, #64748b)',
+          margin: '0 0 0.9rem',
+          lineHeight: 1.45,
+          maxWidth: '44rem',
+        }}
+      >
+        Choose the AI providers and default model used for agency-managed replies.
       </p>
 
       {loading ? (
@@ -297,421 +325,285 @@ export default function AgencyAiSettingsPage() {
               setBootstrapErr('');
               setLoadKey(k => k + 1);
             }}
-            style={{ ...mvpButtonStyle, marginTop: '0.5rem' }}
+            style={{
+              marginTop: '0.5rem',
+              padding: '0.5rem 0.9rem',
+              borderRadius: 8,
+              border: '1px solid var(--aisbp-border-strong, #cbd5e1)',
+              background: 'var(--aisbp-surface, #fff)',
+              cursor: 'pointer',
+              fontSize: '0.88rem',
+              fontWeight: 650,
+              color: 'var(--aisbp-text-secondary, #334155)',
+            }}
           >
             Retry
           </button>
         </div>
       ) : (
         <>
-          <SectionCard title="Current setup" subtitle="What live assistant replies use for your agency today.">
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center', marginBottom: '0.85rem' }}>
-              <StatusPill label={summaryHealth.label} tone={summaryHealth.tone} />
+          {err ? <ErrorBanner message={err} /> : null}
+          {ok ? <SuccessBanner message={ok} /> : null}
+
+          <SectionCard title="Current active provider" subtitle="Used for live assistant replies for workspaces under this agency.">
+            {activeAiHealth?.healthBadge === 'FAIL' ? (
+              <div role="alert" style={warnBanner}>
+                Current provider needs attention before it should be used for live replies.
+              </div>
+            ) : null}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center', marginBottom: '0.75rem' }}>
+              <StatusPill label={activeHealthLabel.label} tone={activeHealthLabel.tone} />
             </div>
             <KeyValueRows
               rows={[
                 { label: 'Provider', value: PROVIDER_LABEL[activeProvider] ?? activeProvider },
-                { label: 'Default model', value: activeModel },
+                { label: 'Model', value: activeModel },
                 {
                   label: 'API key',
-                  value: activeKeyOk ? 'Saved securely' : 'Add a key in Provider setup to enable live replies',
+                  value: activeKeyOk ? 'Saved securely' : 'Missing',
                 },
                 {
-                  label: 'Last health check',
-                  value: healthSnap?.lastHealthCheckedAt ? formatDateTime(healthSnap.lastHealthCheckedAt) : '—',
+                  label: 'Last checked',
+                  value:
+                    activeAiHealth?.lastHealthCheckedAt != null
+                      ? formatDateTime(activeAiHealth.lastHealthCheckedAt)
+                      : '—',
                 },
               ]}
             />
-          </SectionCard>
-
-          <details style={{ marginBottom: '1rem' }}>
-            <summary
-              style={{
-                cursor: 'pointer',
-                fontSize: '0.82rem',
-                fontWeight: 650,
-                color: 'var(--aisbp-muted, #64748b)',
-              }}
-            >
-              How primary and backup models work
-            </summary>
-            <p
-              style={{
-                fontSize: '0.78rem',
-                color: 'var(--aisbp-text-secondary, #475569)',
-                margin: '0.5rem 0 0',
-                lineHeight: 1.45,
-                maxWidth: '40rem',
-              }}
-            >
-              Pick which provider is primary for live generation. If a reply fails with a non-OpenAI primary, AISalesBot Pro
-              can retry once with OpenAI when a valid OpenAI API key is on file.
-            </p>
-          </details>
-
-          <SectionCard title="Provider setup" subtitle="Credentials and default model for the provider you are editing below.">
-            {err ? <ErrorBanner message={err} /> : null}
-            {ok ? <SuccessBanner message={ok} /> : null}
-            <form
-              onSubmit={onSubmitProviders}
-              style={{ maxWidth: '540px', display: 'flex', flexDirection: 'column', gap: '0.85rem' }}
-            >
-              <label style={mvpLabelStyle}>
-                Provider
-                <select
-                  value={selectedProvider}
-                  onChange={e => {
-                    const p = e.target.value;
-                    setSelectedProvider(p);
-                    setApiKey('');
-                    setSetAsActive(p === activeProvider);
-                    const s = snapshotFor(p, providerSnapshots, {
-                      defaultModel: p === 'MINIMAX' ? 'MiniMax-M2.7' : 'gpt-4o-mini',
-                      maxTokens: PROVIDER_STACK_DEFAULTS.maxTokens,
-                      temperature: PROVIDER_STACK_DEFAULTS.temperature,
-                    });
-                    const m = getModelFieldForProvider(p, liveAiCatalog);
-                    if (m.mode === 'list' && m.options.some(o => o.value === s.defaultModel)) {
-                      setDefaultModel(s.defaultModel);
-                    } else {
-                      setDefaultModel(m.defaultModel);
-                    }
-                    setEndpointOverride(s.endpoint?.trim() ?? '');
-                    if (p === 'MINIMAX') {
-                      setMinimaxGroupId(s.minimaxGroupId?.trim() ?? '');
-                    } else {
-                      setMinimaxGroupId('');
-                    }
-                  }}
-                  style={mvpSelectStyle}
-                >
-                  {catalogProviderIds(liveAiCatalog).map(p => (
-                    <option key={p} value={p}>
-                      {PROVIDER_LABEL[p] ?? p}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', cursor: 'pointer' }}>
-                <input
-                  type="checkbox"
-                  checked={setAsActive}
-                  onChange={e => setSetAsActive(e.target.checked)}
-                  disabled={!hasLiveGeneration(selectedProvider)}
-                />
-                Use as primary for live replies after saving
-                {!hasLiveGeneration(selectedProvider) ? (
-                  <span style={{ color: 'var(--aisbp-muted, #94a3b8)', fontSize: '0.75rem' }}>— not available</span>
-                ) : null}
-              </label>
-
-              <label style={mvpLabelStyle}>
-                API key
-                <input
-                  type="password"
-                  value={apiKey}
-                  onChange={e => setApiKey(e.target.value)}
-                  placeholder={hasKeyThis ? 'Leave blank to keep saved key' : 'Paste API key'}
-                  autoComplete="new-password"
-                  style={mvpInputStyle}
-                />
-              </label>
-              {hasKeyThis ? <p style={mvpFieldHint}>A key is already saved for this provider. It is never shown again.</p> : null}
-
-              {selectedProvider === 'MINIMAX' ? (
-                <label style={mvpLabelStyle}>
-                  Organization or group ID (optional)
-                  <input
-                    value={minimaxGroupId}
-                    onChange={e => setMinimaxGroupId(e.target.value)}
-                    style={mvpInputStyle}
-                    placeholder="Optional"
-                    autoComplete="off"
-                  />
-                </label>
-              ) : null}
-
-              <label style={mvpLabelStyle}>
-                Default model
-                <select
-                  value={defaultModel}
-                  onChange={e => setDefaultModel(e.target.value)}
-                  style={mvpSelectStyle}
-                >
-                  {modelUi.mode === 'list' &&
-                    modelUi.options.map(o => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
-                      </option>
-                    ))}
-                </select>
-              </label>
-
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '0.9rem' }}>
               <button
                 type="button"
-                onClick={() => setAdvancedOpen(a => !a)}
+                disabled={!activeKeyOk || testingTarget !== null}
+                onClick={() => runHealthCheck('active')}
                 style={{
-                  alignSelf: 'flex-start',
-                  fontSize: '0.82rem',
-                  fontWeight: 650,
-                  color: 'var(--aisbp-muted, #64748b)',
-                  background: 'none',
-                  border: 'none',
-                  cursor: 'pointer',
-                  textDecoration: 'underline',
-                  padding: 0,
+                  ...mvpPrimaryButtonStyle,
+                  opacity: !activeKeyOk || testingTarget !== null ? 0.65 : 1,
+                  cursor: !activeKeyOk || testingTarget !== null ? 'not-allowed' : 'pointer',
                 }}
               >
-                {advancedOpen ? 'Hide support settings' : 'Support settings — API base URL (optional)'}
+                {testingTarget === 'active' ? 'Running…' : 'Run health check'}
               </button>
-              {advancedOpen ? (
-                <label style={mvpLabelStyle}>
-                  API base URL
-                  <input
-                    value={endpointOverride}
-                    onChange={e => setEndpointOverride(e.target.value)}
-                    style={mvpInputStyle}
-                    placeholder={defaultEndpointFor(selectedProvider)}
-                    autoComplete="off"
-                  />
-                  <span style={mvpFieldHint}>
-                    Leave blank to use the provider default. Change only when your account requires a different API host.
-                  </span>
-                </label>
-              ) : null}
-
-              <p style={mvpFieldHint}>Client-specific persona, goals, and business notes live in each workspace.</p>
-
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
-                <button
-                  type="submit"
-                  disabled={saving}
-                  style={{ ...mvpPrimaryButtonStyle, width: 'fit-content', opacity: saving ? 0.85 : 1 }}
-                >
-                  {saving ? 'Saving…' : 'Save provider settings'}
-                </button>
-                <button
-                  type="button"
-                  disabled={testing || !hasKeyThis}
-                  onClick={onTestModel}
-                  style={{
-                    ...mvpSecondaryButtonStyle,
-                    opacity: testing || !hasKeyThis ? 0.65 : 1,
-                    cursor: testing || !hasKeyThis ? 'not-allowed' : 'pointer',
-                  }}
-                >
-                  {testing ? 'Testing…' : 'Run health check'}
-                </button>
-              </div>
-              {!hasKeyThis ? <p style={{ ...mvpFieldHint, marginTop: 0 }}>Save an API key before running a health check.</p> : null}
-              {testErr ? <ErrorBanner message={testErr} /> : null}
-              {testOk ? <SuccessBanner message={testOk} /> : null}
-            </form>
-
-            <div
-              style={{
-                marginTop: '1.25rem',
-                paddingTop: '1.1rem',
-                borderTop: '1px solid var(--aisbp-border, #e2e8f0)',
-              }}
-            >
-              <p
+              <a
+                href="#saved-configurations"
                 style={{
-                  fontSize: '0.82rem',
-                  fontWeight: 700,
-                  margin: '0 0 0.5rem',
-                  color: 'var(--aisbp-text-heading, #0f172a)',
+                  ...mvpSecondaryButtonStyle,
+                  display: 'inline-block',
+                  textDecoration: 'none',
+                  textAlign: 'center',
                 }}
               >
-                Connection health
+                Change active provider
+              </a>
+            </div>
+            {!activeKeyOk ? (
+              <p style={{ ...mvpFieldHint, marginTop: '0.65rem' }}>
+                Save an API key for this provider in Saved configurations before running a health check.
               </p>
-              {!healthSnap ? (
-                <p style={{ fontSize: '0.85rem', color: 'var(--aisbp-muted, #64748b)', margin: 0 }}>No health check recorded yet.</p>
-              ) : (
-                <>
-                  <KeyValueRows
-                    rows={[
-                      {
-                        label: 'Result',
-                        value: (
-                          <StatusPill
-                            label={healthSnap.lastHealthStatus === 'PASS' ? 'Passing' : 'Failing'}
-                            tone={healthSnap.lastHealthStatus === 'PASS' ? 'ok' : 'bad'}
-                          />
-                        ),
-                      },
-                      { label: 'Checked', value: formatDateTime(healthSnap.lastHealthCheckedAt) },
-                      {
-                        label: 'Latency',
-                        value: healthSnap.lastHealthLatencyMs != null ? `${healthSnap.lastHealthLatencyMs} ms` : '—',
-                      },
-                      {
-                        label: 'Tested',
-                        value: `${PROVIDER_LABEL[healthSnap.lastHealthProvider] ?? healthSnap.lastHealthProvider} · ${healthSnap.lastHealthModel}`,
-                      },
-                      ...(healthSnap.lastHealthStatus === 'FAIL' && healthSnap.lastHealthErrorSummary
-                        ? [
-                            {
-                              label: 'Details',
-                              value: (
-                                <span style={{ color: 'var(--aisbp-pill-bad-fg, #b91c1c)' }}>
-                                  {healthSnap.lastHealthErrorSummary}
-                                </span>
-                              ),
-                            },
-                          ]
-                        : []),
-                    ]}
-                  />
-                  {!healthForForm ? (
-                    <p
+            ) : null}
+          </SectionCard>
+
+          <h2
+            id="saved-configurations"
+            style={{
+              fontSize: '1rem',
+              fontWeight: 700,
+              margin: '1.25rem 0 0.65rem',
+              color: 'var(--aisbp-text-heading, #0f172a)',
+            }}
+          >
+            Saved configurations
+          </h2>
+          <p style={{ fontSize: '0.82rem', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 0.85rem', maxWidth: '44rem' }}>
+            Each provider stores its own API key and default model. Use <strong>Set as active</strong> to switch the live
+            provider.
+          </p>
+
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
+              gap: '0.75rem',
+              marginBottom: '1rem',
+            }}
+          >
+            {LIVE_PROVIDERS.map(p => {
+              const dm = snapshotDefaultModel(p);
+              const h = providerCardHealth(p);
+              const isActive = activeProvider.toUpperCase() === p;
+              const hasKey = Boolean(keysPresent[p]);
+              const ph = healthAppliesToSelection(healthSnap, p, dm);
+              const failActive = isActive && ph && healthSnap?.lastHealthStatus === 'FAIL';
+
+              return (
+                <div key={p} style={cardShell}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem' }}>
+                    <strong style={{ fontSize: '0.95rem', color: 'var(--aisbp-text-heading)' }}>
+                      {PROVIDER_LABEL[p] ?? p}
+                    </strong>
+                    <StatusPill label={isActive ? 'Active' : 'Not active'} tone={isActive ? 'ok' : 'neutral'} />
+                  </div>
+                  <dl style={{ margin: '0.65rem 0', fontSize: '0.84rem', color: 'var(--aisbp-text-secondary, #334155)' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem' }}>
+                      <dt style={{ color: 'var(--aisbp-muted)' }}>API key</dt>
+                      <dd style={{ margin: 0, fontWeight: 600 }}>{hasKey ? 'Saved securely' : 'Missing'}</dd>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem', marginTop: '0.35rem' }}>
+                      <dt style={{ color: 'var(--aisbp-muted)' }}>Default model</dt>
+                      <dd style={{ margin: 0 }}>{dm}</dd>
+                    </div>
+                    <div
                       style={{
-                        fontSize: '0.78rem',
-                        color: 'var(--aisbp-muted, #94a3b8)',
-                        margin: '0.65rem 0 0',
-                        lineHeight: 1.45,
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        gap: '0.5rem',
+                        marginTop: '0.35rem',
                       }}
                     >
-                      This result matches a different provider or model than selected above — run <strong>Run health check</strong>{' '}
-                      to refresh.
+                      <dt style={{ color: 'var(--aisbp-muted)' }}>Health</dt>
+                      <dd style={{ margin: 0 }}>
+                        <StatusPill label={h.label} tone={h.tone} />
+                      </dd>
+                    </div>
+                  </dl>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', marginTop: '0.5rem' }}>
+                    <button
+                      type="button"
+                      onClick={() => setEditingProvider(editingProvider === p ? null : p)}
+                      style={{ ...mvpSecondaryButtonStyle, padding: '0.35rem 0.65rem', fontSize: '0.82rem' }}
+                    >
+                      {editingProvider === p ? 'Close' : 'Edit'}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!hasKey || testingTarget !== null}
+                      onClick={() => runHealthCheck(p)}
+                      style={{
+                        ...mvpSecondaryButtonStyle,
+                        padding: '0.35rem 0.65rem',
+                        fontSize: '0.82rem',
+                        opacity: !hasKey || testingTarget !== null ? 0.65 : 1,
+                      }}
+                    >
+                      {testingTarget === p ? 'Running…' : 'Run health check'}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!canSetActive(p) || testingTarget !== null}
+                      title={!hasKey ? 'Save an API key first' : undefined}
+                      onClick={() => setActiveWithGuard(p)}
+                      style={{
+                        ...mvpPrimaryButtonStyle,
+                        padding: '0.35rem 0.65rem',
+                        fontSize: '0.82rem',
+                        opacity: !canSetActive(p) || testingTarget !== null ? 0.65 : 1,
+                      }}
+                    >
+                      Set as active
+                    </button>
+                  </div>
+                  {failActive ? (
+                    <p style={{ ...mvpFieldHint, marginTop: '0.55rem', marginBottom: 0 }}>
+                      Health check failed for this configuration. Fix credentials or run health check before relying on live
+                      replies.
                     </p>
                   ) : null}
-                </>
-              )}
-            </div>
-          </SectionCard>
+                </div>
+              );
+            })}
+          </div>
 
-          <SectionCard
-            title="Workspace limits"
-            subtitle="Choose how much each client workspace can adjust its own model and reply settings."
-          >
-            {policyErr ? <ErrorBanner message={policyErr} /> : null}
-            {policyOk ? <SuccessBanner message={policyOk} /> : null}
-            <form
-              onSubmit={onSubmitPolicy}
-              style={{ maxWidth: '540px', display: 'flex', flexDirection: 'column', gap: '0.85rem' }}
+          {editingProvider ? (
+            <SectionCard
+              title={`Edit ${PROVIDER_LABEL[editingProvider] ?? editingProvider}`}
+              subtitle="API key is stored securely and never shown again after saving."
             >
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.88rem', cursor: 'pointer', fontWeight: 600 }}>
-                <input
-                  type="checkbox"
-                  checked={
-                    policy.allowModelOverride &&
-                    policy.allowResponseStyleOverride &&
-                    policy.allowMaxTokensOverride
-                  }
-                  onChange={e => applySubaccountOverrideMaster(e.target.checked)}
-                />
-                Allow workspaces to adjust model, reply style, and reply length
-              </label>
-              <p style={{ ...mvpFieldHint, marginTop: 0 }}>Turn this off to keep all client workspaces on your agency defaults.</p>
-              <p style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)', margin: 0 }}>
-                <strong>Reply style range</strong> controls how precise or creative workspace replies are allowed to be.
-              </p>
-              <div style={{ display: 'grid', gap: '0.65rem', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))' }}>
+              <form onSubmit={onSaveEditing} style={{ maxWidth: '520px', display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
                 <label style={mvpLabelStyle}>
-                  Most precise
+                  API key
                   <input
-                    type="number"
-                    value={policy.temperatureMin}
-                    onChange={e => {
-                      const n = parseFloat(e.target.value);
-                      setPolicy(p => {
-                        if (!Number.isFinite(n)) return p;
-                        const tMax = p.temperatureMax;
-                        const tMin = Math.min(n, tMax);
-                        return { ...p, temperatureMin: Math.max(0, tMin) };
-                      });
-                    }}
+                    type="password"
+                    value={apiKey}
+                    onChange={e => setApiKey(e.target.value)}
+                    placeholder={keysPresent[editingProvider] ? 'Leave blank to keep saved key' : 'Paste API key'}
+                    autoComplete="new-password"
                     style={mvpInputStyle}
-                    min={0}
-                    max={2}
-                    step={0.05}
                   />
                 </label>
+                {keysPresent[editingProvider] ? (
+                  <p style={mvpFieldHint}>A key is already saved. Leave blank to keep it.</p>
+                ) : null}
+
                 <label style={mvpLabelStyle}>
-                  Most creative
-                  <input
-                    type="number"
-                    value={policy.temperatureMax}
-                    onChange={e => {
-                      const n = parseFloat(e.target.value);
-                      setPolicy(p => {
-                        if (!Number.isFinite(n)) return p;
-                        const tMin = p.temperatureMin;
-                        const tMax = Math.max(n, tMin);
-                        return { ...p, temperatureMax: Math.min(2, tMax) };
-                      });
-                    }}
-                    style={mvpInputStyle}
-                    min={0}
-                    max={2}
-                    step={0.05}
-                  />
+                  Default model
+                  <select
+                    value={defaultModel}
+                    onChange={e => setDefaultModel(e.target.value)}
+                    style={mvpSelectStyle}
+                  >
+                    {modelUiForEdit?.mode === 'list' &&
+                      modelUiForEdit.options.map(o => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                  </select>
                 </label>
-                <label style={mvpLabelStyle}>
-                  Shortest allowed reply
-                  <input
-                    type="number"
-                    value={policy.maxTokensMin}
-                    onChange={e => {
-                      const n = parseInt(e.target.value, 10) || 0;
-                      setPolicy(p => ({ ...p, maxTokensMin: n, maxTokensMax: n > p.maxTokensMax ? n : p.maxTokensMax }));
-                    }}
-                    style={mvpInputStyle}
-                    min={0}
-                  />
-                </label>
-                <label style={mvpLabelStyle}>
-                  Longest allowed reply
-                  <input
-                    type="number"
-                    value={policy.maxTokensMax}
-                    onChange={e => {
-                      const n = parseInt(e.target.value, 10) || 0;
-                      setPolicy(p => ({ ...p, maxTokensMax: n, maxTokensMin: n < p.maxTokensMin ? n : p.maxTokensMin }));
-                    }}
-                    style={mvpInputStyle}
-                    min={0}
-                  />
-                </label>
-              </div>
-              <p style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted, #94a3b8)', margin: '-0.1rem 0 0' }}>
-                Workspace reply length and style settings must stay within these limits.
-              </p>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', cursor: 'pointer' }}>
-                <input
-                  type="checkbox"
-                  checked={policy.allowResponseStyleOverride}
-                  onChange={e => setPolicy(p => ({ ...p, allowResponseStyleOverride: e.target.checked }))}
-                />
-                Workspaces may change reply style
-              </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', cursor: 'pointer' }}>
-                <input
-                  type="checkbox"
-                  checked={policy.allowMaxTokensOverride}
-                  onChange={e => setPolicy(p => ({ ...p, allowMaxTokensOverride: e.target.checked }))}
-                />
-                Workspaces may change reply length
-              </label>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', cursor: 'pointer' }}>
-                <input
-                  type="checkbox"
-                  checked={policy.allowModelOverride}
-                  onChange={e => setPolicy(p => ({ ...p, allowModelOverride: e.target.checked }))}
-                />
-                Workspaces may choose a different model
-              </label>
-              <button
-                type="submit"
-                disabled={savingPolicy}
-                style={{ ...mvpPrimaryButtonStyle, width: 'fit-content', opacity: savingPolicy ? 0.85 : 1 }}
-              >
-                {savingPolicy ? 'Saving…' : 'Save limits'}
-              </button>
-            </form>
-          </SectionCard>
+
+                <button
+                  type="button"
+                  onClick={() => setSupportOpen(s => !s)}
+                  style={{
+                    alignSelf: 'flex-start',
+                    fontSize: '0.82rem',
+                    fontWeight: 650,
+                    color: 'var(--aisbp-muted, #64748b)',
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                    textDecoration: 'underline',
+                    padding: 0,
+                  }}
+                >
+                  {supportOpen ? 'Hide support settings' : 'Support settings'}
+                </button>
+                {supportOpen ? (
+                  <>
+                    <label style={mvpLabelStyle}>
+                      API base URL
+                      <input
+                        value={endpointOverride}
+                        onChange={e => setEndpointOverride(e.target.value)}
+                        style={mvpInputStyle}
+                        placeholder={defaultEndpointFor(editingProvider)}
+                        autoComplete="off"
+                      />
+                      <span style={mvpFieldHint}>
+                        Leave blank for the default endpoint. Change only when your account requires a different API host.
+                      </span>
+                    </label>
+                    {editingProvider === 'MINIMAX' ? (
+                      <label style={mvpLabelStyle}>
+                        Organization / group ID (optional)
+                        <input
+                          value={minimaxGroupId}
+                          onChange={e => setMinimaxGroupId(e.target.value)}
+                          style={mvpInputStyle}
+                          placeholder="Only if your MiniMax account requires it"
+                          autoComplete="off"
+                        />
+                      </label>
+                    ) : null}
+                  </>
+                ) : null}
+
+                <button type="submit" disabled={saving} style={{ ...mvpPrimaryButtonStyle, width: 'fit-content', opacity: saving ? 0.85 : 1 }}>
+                  {saving ? 'Saving…' : 'Save'}
+                </button>
+              </form>
+            </SectionCard>
+          ) : null}
         </>
       )}
     </div>

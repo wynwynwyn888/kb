@@ -1,5 +1,8 @@
 // MiniMax text generation — OpenAI-compatible (international) by default; legacy chat host optional.
 import axios from 'axios';
+import {
+  extractAssistantTextFromOpenAiCompatibleBody,
+} from '../../lib/openai-compatible-completion-text';
 import { summarizeAxiosErrorForLogs } from '../../lib/safe-http-error';
 
 /** International keys from platform.minimax.io use this base + `/chat/completions`. */
@@ -101,7 +104,7 @@ async function minimaxOpenAiCompat(
   }
 
   const text =
-    data?.choices?.[0]?.message?.content ??
+    extractAssistantTextFromOpenAiCompatibleBody(data) ||
     (data as { reply?: string })?.reply ??
     (data as { text?: string })?.text ??
     '';

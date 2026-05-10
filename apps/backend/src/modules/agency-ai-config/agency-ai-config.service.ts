@@ -10,6 +10,10 @@ import {
   normalizeModelForLiveProvider,
 } from '@aisbp/types';
 import { getSupabaseService } from '../../lib/supabase';
+import {
+  assistantReplyPresentForHealthCheck,
+  extractAssistantTextFromOpenAiCompatibleBody,
+} from '../../lib/openai-compatible-completion-text';
 import { minimaxChatCompletion } from '../generation/minimax.generate';
 import { assertAgencyLiveAiProvider, assertModelBelongsToProvider } from './agency-ai-config.validation';
 import {
@@ -352,10 +356,8 @@ export class AgencyAiConfigService {
           },
         );
         const latencyMs = Date.now() - t0;
-        const text =
-          (res.data as { choices?: Array<{ message?: { content?: string | null } }> })?.choices?.[0]?.message
-            ?.content ?? '';
-        const ok = String(text).toLowerCase().includes('ok');
+        const text = extractAssistantTextFromOpenAiCompatibleBody(res.data);
+        const ok = assistantReplyPresentForHealthCheck(text);
         if (!ok) {
           const fail: AgencyAiModelTestResult = {
             status: 'FAIL',
@@ -363,8 +365,8 @@ export class AgencyAiConfigService {
             model,
             latencyMs,
             checkedAt,
-            errorCode: 'UNEXPECTED_REPLY',
-            errorSummary: 'Model responded but did not include the expected acknowledgment.',
+            errorCode: 'EMPTY_OR_UNREADABLE_REPLY',
+            errorSummary: 'The model responded, but AISalesBot Pro could not verify the response format.',
           };
           await this.persistHealthSnapshot(agencyId, {
             lastHealthStatus: 'FAIL',
@@ -408,7 +410,7 @@ export class AgencyAiConfigService {
         timeoutMs: 10_000,
       });
       const latencyMs = Date.now() - t0;
-      const ok = String(out.content ?? '').toLowerCase().includes('ok');
+      const ok = assistantReplyPresentForHealthCheck(String(out.content ?? ''));
       if (!ok) {
         const fail: AgencyAiModelTestResult = {
           status: 'FAIL',
@@ -416,8 +418,8 @@ export class AgencyAiConfigService {
           model,
           latencyMs,
           checkedAt,
-          errorCode: 'UNEXPECTED_REPLY',
-          errorSummary: 'Model responded but did not include the expected acknowledgment.',
+          errorCode: 'EMPTY_OR_UNREADABLE_REPLY',
+          errorSummary: 'MiniMax responded, but AISalesBot Pro could not verify the response format.',
         };
         await this.persistHealthSnapshot(agencyId, {
           lastHealthStatus: 'FAIL',

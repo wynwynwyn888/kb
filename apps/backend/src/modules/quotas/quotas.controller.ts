@@ -163,17 +163,43 @@ export class QuotasController {
   }
 
   @Post('agency/default')
-  @ApiOperation({ summary: 'Set agency default quota for new subaccount wallets' })
+  @ApiOperation({
+    summary: 'Save agency credit settings for new workspaces',
+    description:
+      'Updates one or more agency-wide credit defaults (new workspace starting credits, deduction method, default overage / low-credit warning). Send any subset of fields.',
+  })
   async setAgencyDefault(
     @CurrentAgencyId() agencyId: string | null,
     @CurrentUser() user: SessionUser,
-    @Body() dto: { defaultSubaccountQuota: number },
+    @Body()
+    dto: {
+      defaultSubaccountQuota?: number;
+      deductionMethod?: 'PER_LOGICAL_REPLY' | 'PER_MESSAGE_BUBBLE';
+      defaultAllowOverage?: boolean;
+      defaultOverageLimit?: number;
+      defaultLowCreditWarningEnabled?: boolean;
+      defaultLowCreditWarningLevel?: number;
+    },
   ) {
     if (!agencyId) throw new BadRequestException('Agency context required');
-    if (dto.defaultSubaccountQuota === undefined) {
-      throw new BadRequestException('defaultSubaccountQuota is required');
+    const hasAny =
+      dto.defaultSubaccountQuota !== undefined ||
+      dto.deductionMethod !== undefined ||
+      dto.defaultAllowOverage !== undefined ||
+      dto.defaultOverageLimit !== undefined ||
+      dto.defaultLowCreditWarningEnabled !== undefined ||
+      dto.defaultLowCreditWarningLevel !== undefined;
+    if (!hasAny) {
+      throw new BadRequestException('Provide at least one field to save');
     }
-    return this.quotasService.setAgencyDefaultQuota(agencyId, user.id, dto.defaultSubaccountQuota);
+    return this.quotasService.saveAgencyCreditSettings(agencyId, user.id, {
+      defaultSubaccountQuota: dto.defaultSubaccountQuota,
+      deductionMethod: dto.deductionMethod,
+      defaultAllowOverage: dto.defaultAllowOverage,
+      defaultOverageLimit: dto.defaultOverageLimit,
+      defaultLowCreditWarningEnabled: dto.defaultLowCreditWarningEnabled,
+      defaultLowCreditWarningLevel: dto.defaultLowCreditWarningLevel,
+    });
   }
 
   @Post('agency/topup')

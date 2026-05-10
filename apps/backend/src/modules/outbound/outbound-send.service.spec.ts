@@ -55,6 +55,22 @@ function makeParams(overrides: {
   };
 }
 
+/** Default agency credit deduction for sendReply tests (PER_LOGICAL_REPLY). */
+function mockTenantAgencyDeduction() {
+  return {
+    tenants: {
+      select: () => ({
+        eq: () => ({ maybeSingle: async () => ({ data: { agency_id: 'ag1' }, error: null }) }),
+      }),
+    } as never,
+    agencies: {
+      select: () => ({
+        eq: () => ({ maybeSingle: async () => ({ data: { credit_deduction_method: 'PER_LOGICAL_REPLY' }, error: null }) }),
+      }),
+    } as never,
+  };
+}
+
 describe('OutboundSendService', () => {
   let service: OutboundSendService;
 
@@ -82,6 +98,9 @@ describe('OutboundSendService', () => {
 
     it('returns zeros and no debit when credentials missing', async () => {
       (mockSupabase.from as jest.Mock).mockImplementation((table: string) => {
+        const ded = mockTenantAgencyDeduction();
+        if (table === 'tenants') return ded.tenants;
+        if (table === 'agencies') return ded.agencies;
         if (table === 'tenant_ghl_connections') {
           return {
             select: () => ({
@@ -107,6 +126,9 @@ describe('OutboundSendService', () => {
       const decryptSpy = jestGlobal.spyOn(encryption, 'decrypt').mockReturnValue('plain_token');
       try {
         (mockSupabase.from as jest.Mock).mockImplementation((table: string) => {
+          const ded = mockTenantAgencyDeduction();
+          if (table === 'tenants') return ded.tenants;
+          if (table === 'agencies') return ded.agencies;
           if (table === 'tenant_ghl_connections') {
             return {
               select: () => ({
@@ -175,6 +197,9 @@ describe('OutboundSendService', () => {
       const decryptSpy = jestGlobal.spyOn(encryption, 'decrypt').mockReturnValue('plain_token');
       try {
         (mockSupabase.from as jest.Mock).mockImplementation((table: string) => {
+          const ded = mockTenantAgencyDeduction();
+          if (table === 'tenants') return ded.tenants;
+          if (table === 'agencies') return ded.agencies;
           if (table === 'tenant_ghl_connections') {
             return {
               select: () => ({
@@ -248,6 +273,9 @@ describe('OutboundSendService', () => {
       try {
         let ledgerSeen = false;
         (mockSupabase.from as jest.Mock).mockImplementation((table: string) => {
+          const ded = mockTenantAgencyDeduction();
+          if (table === 'tenants') return ded.tenants;
+          if (table === 'agencies') return ded.agencies;
           if (table === 'tenant_ghl_connections') {
             return {
               select: () => ({
@@ -388,12 +416,13 @@ describe('OutboundSendService', () => {
         return {} as never;
       });
 
-      await (service as never)['debitQuotaForLogicalReply']({
+      await (service as never)['debitQuotaForReply']({
         tenantId: 'tenant_1',
         conversationId: 'conv_1',
         idempotencyKey: 'reply_debit:tenant_1:conv_1:job_1',
         movementType: 'reply_debit',
         description: 'test',
+        debitAmount: 1,
       });
 
       // Verify insert was called with DEBIT type

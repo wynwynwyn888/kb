@@ -83,6 +83,20 @@ export class OutboundSendService {
       };
     }
 
+    const logicalBubbleCount = replyPlan.bubbles.length;
+    const sanitizedBubbles = replyPlan.bubbles.map(b => ({
+      index: b.index,
+      text: sanitizeOutboundCustomerText(b.text),
+    }));
+    const physicalBubbles = maybeCoalesceOutboundBubbles(sanitizedBubbles);
+    const coalesced = physicalBubbles.length < logicalBubbleCount;
+
+    const creditDeductionMethod = await this.getAgencyCreditDeductionMethodForTenant(tenantId);
+    const plannedDebitCredits =
+      creditDeductionMethod === 'PER_MESSAGE_BUBBLE'
+        ? Math.max(1, physicalBubbles.length)
+        : 1;
+
     // Load GHL connection credentials
     const credentials = await this.loadGhlCredentials(tenantId, ghlLocationId);
     if (!credentials) {
@@ -103,8 +117,8 @@ export class OutboundSendService {
       };
     }
 
-    // Pre-check quota before starting (logical reply = 1 credit)
-    const quotaOk = await this.checkQuotaAvailable(tenantId, 1);
+    // Pre-check credits before starting (depends on agency deduction method).
+    const quotaOk = await this.checkQuotaAvailable(tenantId, plannedDebitCredits);
     if (!quotaOk) {
       this.logger.warn(`Outbound send blocked: quota exhausted for tenant=${tenantId}`);
       return {
@@ -122,14 +136,6 @@ export class OutboundSendService {
         quotaDebited: 0,
       };
     }
-
-    const logicalBubbleCount = replyPlan.bubbles.length;
-    const sanitizedBubbles = replyPlan.bubbles.map(b => ({
-      index: b.index,
-      text: sanitizeOutboundCustomerText(b.text),
-    }));
-    const physicalBubbles = maybeCoalesceOutboundBubbles(sanitizedBubbles);
-    const coalesced = physicalBubbles.length < logicalBubbleCount;
 
     const payloadJoined = physicalBubbles.map(b => b.text).join('\n\n');
     const payM = newlineDebugMetrics(payloadJoined);
@@ -180,21 +186,51 @@ export class OutboundSendService {
     let quotaDebited = 0;
     const physicalSendCount = physicalBubbles.length;
     const allSucceeded = physicalSendCount > 0 && succeeded === physicalSendCount && failed === 0;
-    if (allSucceeded) {
+
+    let debitAmount = 0;
+    if (creditDeductionMethod === 'PER_LOGICAL_REPLY') {
+      if (allSucceeded) debitAmount = 1;
+    } else {
+      // PER_MESSAGE_BUBBLE: debit one credit per successfully sent physical bubble.
+      debitAmount = succeeded > 0 ? succeeded : 0;
+      if (!allSucceeded && succeeded > 0) {
+        this.logger.warn(
+          `creditDebitPartial ${JSON.stringify({
+            tenantId,
+            conversationId,
+            reason: 'per_bubble_mode_partial_success',
+            physicalSendCount,
+            succeeded,
+            failed,
+            debitAmount,
+          })}`,
+        );
+      }
+    }
+
+    if (debitAmount > 0) {
       const idempotencyKey = this.buildReplyDebitIdempotencyKey({
         tenantId,
         conversationId,
         sendBubbleJobId: sendBubbleJobId ?? '',
       });
-      const debit = await this.debitQuotaForLogicalReply({
+      const debit = await this.debitQuotaForReply({
         tenantId,
         conversationId,
         idempotencyKey,
         movementType: 'reply_debit',
         description: `Assistant reply debit (conversation ${conversationId})`,
+        debitAmount,
+        metadata: {
+          deductionMethod: creditDeductionMethod,
+          logicalBubbleCount,
+          physicalSendCount,
+          succeeded,
+          failed,
+        },
       });
-      quotaDebited = debit.debited ? 1 : 0;
-    } else if (failed > 0 && physicalSendCount > 1) {
+      quotaDebited = debit.debited ? debitAmount : 0;
+    } else if (failed > 0 && physicalSendCount > 1 && creditDeductionMethod === 'PER_LOGICAL_REPLY') {
       this.logger.warn(
         `quotaDebitSkipped ${JSON.stringify({
           tenantId,
@@ -297,6 +333,20 @@ export class OutboundSendService {
     return balance > negLimit && balance - needed > negLimit;
   }
 
+  private async getAgencyCreditDeductionMethodForTenant(
+    tenantId: string,
+  ): Promise<'PER_LOGICAL_REPLY' | 'PER_MESSAGE_BUBBLE'> {
+    const { data: t } = await this.supabase.from('tenants').select('agency_id').eq('id', tenantId).maybeSingle();
+    if (!t?.agency_id) return 'PER_LOGICAL_REPLY';
+    const { data: a } = await this.supabase
+      .from('agencies')
+      .select('credit_deduction_method')
+      .eq('id', t.agency_id as string)
+      .maybeSingle();
+    const m = (a as { credit_deduction_method?: string } | null)?.credit_deduction_method;
+    return m === 'PER_MESSAGE_BUBBLE' ? 'PER_MESSAGE_BUBBLE' : 'PER_LOGICAL_REPLY';
+  }
+
   private buildReplyDebitIdempotencyKey(params: {
     tenantId: string;
     conversationId: string;
@@ -307,15 +357,24 @@ export class OutboundSendService {
     return `reply_debit:${tenantId}:${conversationId}:${job}`;
   }
 
-  private async debitQuotaForLogicalReply(params: {
+  /**
+   * Debit credits for a reply send. Amount is usually 1 (logical reply) or successful bubble count.
+   * TODO(low-credit-notify): When balance_after <= wallet.low_credit_threshold, enqueue internal warning
+   * (agency handover / WhatsApp) once notification delivery is implemented — QuotaThresholdAlertProcessor is stubbed.
+   */
+  private async debitQuotaForReply(params: {
     tenantId: string;
     conversationId: string;
     idempotencyKey: string;
     movementType: 'reply_debit';
     description: string;
+    debitAmount: number;
+    metadata?: Record<string, unknown>;
   }): Promise<{ debited: boolean }> {
-    const { tenantId, conversationId, idempotencyKey, movementType, description } = params;
+    const { tenantId, conversationId, idempotencyKey, movementType, description, debitAmount, metadata } = params;
     if (!idempotencyKey.trim()) return { debited: false };
+    const amt = Math.floor(debitAmount);
+    if (!Number.isFinite(amt) || amt < 1) return { debited: false };
 
     // Idempotency: check ledger first (best-effort; DB unique index is primary protection in prod).
     const { data: existing } = await this.supabase
@@ -342,7 +401,7 @@ export class OutboundSendService {
 
     if (!wallet) return { debited: false };
 
-    const nextUsed = wallet.used_quota + 1;
+    const nextUsed = wallet.used_quota + amt;
     const balanceAfter = wallet.total_quota - nextUsed;
 
     await this.supabase
@@ -353,14 +412,14 @@ export class OutboundSendService {
     const { error: ledErr } = await this.supabase.from('quota_ledgers').insert({
       id: randomUUID(),
       wallet_id: wallet.id,
-      amount: 1,
+      amount: amt,
       type: 'DEBIT',
       movement_type: movementType,
       balance_after: balanceAfter,
       idempotency_key: idempotencyKey,
       description,
       conversation_id: conversationId,
-      metadata: { logicalReply: true },
+      metadata: { ...(metadata ?? {}), logicalReply: amt === 1 },
       created_by_user_id: null,
     });
     if (ledErr) {

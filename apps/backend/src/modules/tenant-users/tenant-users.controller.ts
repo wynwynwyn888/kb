@@ -6,27 +6,40 @@ import {
   Controller,
   Delete,
   Get,
+  Headers,
   HttpCode,
   HttpStatus,
   Param,
   Patch,
   Post,
   Query,
+  UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { TenantUsersService } from './tenant-users.service';
+import { InvitationsService } from '../invitations/invitations.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { SessionUser } from '../../lib/supabase';
 import type { TenantRole } from '../../lib/enums';
+
+function bearerFromAuthHeader(authHeader: string | undefined): string {
+  if (!authHeader) throw new UnauthorizedException('Missing authorization');
+  const m = /^Bearer\s+/i.exec(authHeader);
+  if (!m) throw new UnauthorizedException('Missing authorization');
+  return authHeader.slice(m[0].length).trim();
+}
 
 @ApiTags('tenant-users')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
 @Controller('tenant-users')
 export class TenantUsersController {
-  constructor(private readonly service: TenantUsersService) {}
+  constructor(
+    private readonly service: TenantUsersService,
+    private readonly invitations: InvitationsService,
+  ) {}
 
   @Get()
   @ApiOperation({
@@ -42,6 +55,51 @@ export class TenantUsersController {
       throw new BadRequestException('tenantId query parameter is required');
     }
     return this.service.listMembers(tenantId.trim(), user.id);
+  }
+
+  @Get('invites')
+  @ApiOperation({ summary: 'List pending workspace invites' })
+  async listInvites(@Query('tenantId') tenantId: string | undefined, @CurrentUser() user: SessionUser) {
+    if (!tenantId?.trim()) {
+      throw new BadRequestException('tenantId query parameter is required');
+    }
+    return this.invitations.listWorkspaceInvites(user.id, tenantId.trim());
+  }
+
+  @Post('invites')
+  @ApiOperation({ summary: 'Create workspace invite link (Supabase Auth invite)' })
+  async createInvite(
+    @Body() dto: { tenantId: string; email: string; role: 'ADMIN' | 'USER' },
+    @CurrentUser() user: SessionUser,
+  ) {
+    if (!dto.tenantId?.trim()) throw new BadRequestException('tenantId is required');
+    if (!dto.email?.trim()) throw new BadRequestException('email is required');
+    if (dto.role !== 'ADMIN' && dto.role !== 'USER') throw new BadRequestException('role must be ADMIN or USER');
+    return this.invitations.createWorkspaceInvite(user.id, dto.tenantId.trim(), dto.email.trim(), dto.role);
+  }
+
+  @Post('invites/:inviteId/accept')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Accept workspace invite (caller must be signed in as invited email)' })
+  async acceptWorkspaceInvite(
+    @Param('inviteId') inviteId: string,
+    @Headers('authorization') authorization: string | undefined,
+    @CurrentUser() user: SessionUser,
+  ) {
+    const token = bearerFromAuthHeader(authorization);
+    return this.invitations.acceptWorkspaceInvite(user.id, inviteId, token);
+  }
+
+  @Post('members/:membershipId/password-reset-link')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Generate password reset link for a workspace member' })
+  async workspaceMemberResetLink(
+    @Param('membershipId') membershipId: string,
+    @Body() dto: { tenantId: string },
+    @CurrentUser() user: SessionUser,
+  ) {
+    if (!dto.tenantId?.trim()) throw new BadRequestException('tenantId is required');
+    return this.invitations.generateTenantMemberRecoveryLink(user.id, dto.tenantId.trim(), membershipId);
   }
 
   @Post('provision-credentials')

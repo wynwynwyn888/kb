@@ -1141,17 +1141,44 @@ export async function postSubaccountBotTest(
   }>(`/tenants/${encodeURIComponent(tenantId)}/bot-test`, { token, method: 'POST', body: JSON.stringify(body) });
 }
 
-// Quota (agency)
+// Credits (agency defaults for new workspaces)
+export type CreditDeductionMethod = 'PER_LOGICAL_REPLY' | 'PER_MESSAGE_BUBBLE';
+
+export type AgencyCreditSettings = {
+  agencyId: string;
+  defaultSubaccountQuota: number;
+  deductionMethod: CreditDeductionMethod;
+  defaultAllowOverage: boolean;
+  defaultOverageLimit: number;
+  defaultLowCreditWarningEnabled: boolean;
+  defaultLowCreditWarningLevel: number;
+};
+
 export async function getQuotaAgencySettings(token: string) {
-  return apiRequest<{ agencyId: string; defaultSubaccountQuota: number }>('/quotas/agency/settings', { token });
+  return apiRequest<AgencyCreditSettings>('/quotas/agency/settings', { token });
 }
 
-export async function setAgencyDefaultQuota(token: string, defaultSubaccountQuota: number) {
-  return apiRequest<{ defaultSubaccountQuota: number }>('/quotas/agency/default', {
+export async function saveAgencyCreditSettings(
+  token: string,
+  body: Partial<{
+    defaultSubaccountQuota: number;
+    deductionMethod: CreditDeductionMethod;
+    defaultAllowOverage: boolean;
+    defaultOverageLimit: number;
+    defaultLowCreditWarningEnabled: boolean;
+    defaultLowCreditWarningLevel: number;
+  }>,
+) {
+  return apiRequest<AgencyCreditSettings>('/quotas/agency/default', {
     token,
     method: 'POST',
-    body: JSON.stringify({ defaultSubaccountQuota }),
+    body: JSON.stringify(body),
   });
+}
+
+/** @deprecated use saveAgencyCreditSettings */
+export async function setAgencyDefaultQuota(token: string, defaultSubaccountQuota: number) {
+  return saveAgencyCreditSettings(token, { defaultSubaccountQuota });
 }
 
 export async function topupSubaccountQuota(
@@ -1511,6 +1538,34 @@ export async function removeAgencyMember(token: string, membershipId: string): P
   });
 }
 
+export async function listAgencyInvites(token: string, agencyId: string) {
+  return apiRequest<
+    Array<{ id: string; email_original: string; role: string; status: string; expires_at: string; created_at: string }>
+  >(`/agency-users/invites?agencyId=${encodeURIComponent(agencyId)}`, { token });
+}
+
+export async function createAgencyInviteLink(
+  token: string,
+  body: { agencyId: string; email: string; role: 'ADMIN' | 'USER' },
+): Promise<{ invitationId: string; actionLink: string; emailSent: false }> {
+  return apiRequest(`/agency-users/invites`, { token, method: 'POST', body: JSON.stringify(body) });
+}
+
+export async function acceptAgencyInvite(token: string, inviteId: string): Promise<{ accepted?: true; alreadyMember?: true }> {
+  return apiRequest(`/agency-users/invites/${encodeURIComponent(inviteId)}/accept`, { token, method: 'POST' });
+}
+
+export async function createAgencyMemberPasswordResetLink(
+  token: string,
+  body: { agencyId: string; membershipId: string },
+): Promise<{ actionLink: string; emailSent: false }> {
+  return apiRequest(`/agency-users/members/${encodeURIComponent(body.membershipId)}/password-reset-link`, {
+    token,
+    method: 'POST',
+    body: JSON.stringify({ agencyId: body.agencyId }),
+  });
+}
+
 export async function addTenantMember(
   token: string,
   dto: { tenantId: string; profileId: string; role: TenantRoleValue },
@@ -1552,6 +1607,37 @@ export async function removeTenantMember(token: string, membershipId: string): P
   await apiRequestNoContent(`/tenant-users/${encodeURIComponent(membershipId)}`, {
     token,
     method: 'DELETE',
+  });
+}
+
+export async function listWorkspaceInvites(token: string, tenantId: string) {
+  return apiRequest<
+    Array<{ id: string; email_original: string; role: string; status: string; expires_at: string; created_at: string }>
+  >(`/tenant-users/invites?tenantId=${encodeURIComponent(tenantId)}`, { token });
+}
+
+export async function createWorkspaceInviteLink(
+  token: string,
+  body: { tenantId: string; email: string; role: 'ADMIN' | 'USER' },
+): Promise<{ invitationId: string; actionLink: string; emailSent: false }> {
+  return apiRequest(`/tenant-users/invites`, { token, method: 'POST', body: JSON.stringify(body) });
+}
+
+export async function acceptWorkspaceInvite(
+  token: string,
+  inviteId: string,
+): Promise<{ accepted?: true; alreadyMember?: true }> {
+  return apiRequest(`/tenant-users/invites/${encodeURIComponent(inviteId)}/accept`, { token, method: 'POST' });
+}
+
+export async function createWorkspaceMemberPasswordResetLink(
+  token: string,
+  body: { tenantId: string; membershipId: string },
+): Promise<{ actionLink: string; emailSent: false }> {
+  return apiRequest(`/tenant-users/members/${encodeURIComponent(body.membershipId)}/password-reset-link`, {
+    token,
+    method: 'POST',
+    body: JSON.stringify({ tenantId: body.tenantId }),
   });
 }
 

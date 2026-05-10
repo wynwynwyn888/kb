@@ -6,9 +6,11 @@ import { useParams } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   addTenantMember,
+  createWorkspaceInviteLink,
+  createWorkspaceMemberPasswordResetLink,
   getTenantById,
   listTenantUsers,
-  provisionWorkspaceMemberCredentials,
+  listWorkspaceInvites,
   removeTenantMember,
   updateTenantMemberRole,
   type TenantRoleValue,
@@ -24,18 +26,27 @@ import {
   mvpInputStyle,
   mvpLabelStyle,
   mvpPrimaryButtonStyle,
+  mvpSecondaryButtonStyle,
   mvpSelectStyle,
+  mvpFieldHint,
 } from '@/components/app/mvp-ui';
 
 const TENANT_ROLES: TenantRoleValue[] = ['ADMIN', 'AGENT', 'VIEWER'];
 
-function roleLabel(role: string): string {
-  const labels: Record<string, string> = {
-    ADMIN: 'Admin',
-    AGENT: 'Agent',
-    VIEWER: 'Viewer',
-  };
-  return labels[role] ?? role;
+function displayWorkspaceRole(role: string): string {
+  if (role === 'ADMIN') return 'Admin';
+  if (role === 'AGENT' || role === 'VIEWER') return 'User';
+  return role;
+}
+
+type RoleSlot = 'admin' | 'user';
+
+function memberToSlot(role: string): RoleSlot {
+  return role === 'ADMIN' ? 'admin' : 'user';
+}
+
+function slotToTenantRole(slot: RoleSlot): TenantRoleValue {
+  return slot === 'admin' ? 'ADMIN' : 'AGENT';
 }
 
 type Row = {
@@ -44,6 +55,15 @@ type Row = {
   profileId: string | null;
   email?: string | null;
   fullName?: string | null;
+};
+
+type PendingInvite = {
+  id: string;
+  email_original: string;
+  role: string;
+  status: string;
+  expires_at: string;
+  created_at: string;
 };
 
 function isTenantAdminForTenant(
@@ -71,6 +91,24 @@ function canManageTeamRoster(
 const thStyle = { padding: '0.65rem 0.6rem', fontWeight: 600, color: '#334155', fontSize: '0.82rem' };
 const tdStyle = { padding: '0.75rem 0.6rem', verticalAlign: 'top' as const };
 
+function isPlausibleEmail(raw: string): boolean {
+  const s = raw.trim();
+  if (!s) return false;
+  const at = s.indexOf('@');
+  if (at <= 0 || at === s.length - 1) return false;
+  const domain = s.slice(at + 1);
+  return domain.includes('.') && domain.length >= 3;
+}
+
+async function copyText(label: string, text: string, onOk: (m: string) => void, onErr: (m: string) => void) {
+  try {
+    await navigator.clipboard.writeText(text);
+    onOk(`${label} copied to clipboard.`);
+  } catch {
+    onErr('Could not copy automatically — select and copy the link manually.');
+  }
+}
+
 export default function TenantTeamPage() {
   const params = useParams();
   const tenantId = params['tenantId'] as string;
@@ -81,18 +119,22 @@ export default function TenantTeamPage() {
   const [tenantAgencyId, setTenantAgencyId] = useState<string | null>(null);
   const [rows, setRows] = useState<Row[]>([]);
   const [roleDrafts, setRoleDrafts] = useState<Record<string, TenantRoleValue>>({});
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [err, setErr] = useState('');
   const [ok, setOk] = useState('');
   const [loading, setLoading] = useState(true);
-  const [adding, setAdding] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [newProfileId, setNewProfileId] = useState('');
   const [newRole, setNewRole] = useState<TenantRoleValue>('AGENT');
-  const [loginEmail, setLoginEmail] = useState('');
-  const [loginPassword, setLoginPassword] = useState('');
-  const [loginFullName, setLoginFullName] = useState('');
-  const [loginRole, setLoginRole] = useState<TenantRoleValue>('AGENT');
-  const [provisioning, setProvisioning] = useState(false);
+  const [adding, setAdding] = useState(false);
+
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteRoleUi, setInviteRoleUi] = useState<'ADMIN' | 'USER'>('USER');
+  const [inviteBusy, setInviteBusy] = useState(false);
+  const [inviteLink, setInviteLink] = useState<{ email: string; url: string } | null>(null);
+  const [inviteEmailErr, setInviteEmailErr] = useState('');
+  const [pendingInvites, setPendingInvites] = useState<PendingInvite[]>([]);
+  const [resetLink, setResetLink] = useState<string | null>(null);
 
   const canManageTeam = canManageTeamRoster(tenantId, user, tenantAgencyId);
   const canAddByProfileId = isTenantAdminForTenant(tenantId, user);
@@ -127,15 +169,20 @@ export default function TenantTeamPage() {
     setLoading(true);
     setErr('');
     try {
-      const r = await listTenantUsers(token, tenantId);
+      const [r, inv] = await Promise.all([
+        listTenantUsers(token, tenantId),
+        listWorkspaceInvites(token, tenantId).catch(() => [] as PendingInvite[]),
+      ]);
       setRows(r as Row[]);
       const drafts: Record<string, TenantRoleValue> = {};
       for (const m of r) {
-        if (TENANT_ROLES.includes(m.role as TenantRoleValue)) {
-          drafts[m.id] = m.role as TenantRoleValue;
+        const role = m.role as TenantRoleValue;
+        if (TENANT_ROLES.includes(role)) {
+          drafts[m.id] = role === 'VIEWER' ? 'AGENT' : role;
         }
       }
       setRoleDrafts(drafts);
+      setPendingInvites(inv.filter(i => i.status === 'PENDING'));
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Failed to load');
     } finally {
@@ -146,6 +193,43 @@ export default function TenantTeamPage() {
   useEffect(() => {
     void refetch();
   }, [refetch, loadKey]);
+
+  const onCreateInvite = async () => {
+    if (!token) return;
+    const em = inviteEmail.trim();
+    if (!em) {
+      setInviteEmailErr('Enter an email address.');
+      return;
+    }
+    if (!isPlausibleEmail(em)) {
+      setInviteEmailErr('Enter a valid email address.');
+      return;
+    }
+    setInviteEmailErr('');
+    setErr('');
+    setOk('');
+    setInviteBusy(true);
+    try {
+      const r = await createWorkspaceInviteLink(token, {
+        tenantId,
+        email: em,
+        role: inviteRoleUi === 'ADMIN' ? 'ADMIN' : 'USER',
+      });
+      setInviteLink({ email: em, url: r.actionLink });
+      setOk(`Invite link created for ${em}.`);
+      setInviteEmail('');
+      setLoadKey(k => k + 1);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Could not create invite';
+      if (/already has access|409/i.test(msg)) {
+        setInviteEmailErr('This user already has access.');
+      } else {
+        setErr(msg);
+      }
+    } finally {
+      setInviteBusy(false);
+    }
+  };
 
   const onAdd = async () => {
     if (!token || !newProfileId.trim()) return;
@@ -169,7 +253,7 @@ export default function TenantTeamPage() {
     }
   };
 
-  const onApplyRole = async (membershipId: string, currentRole: string) => {
+  const onSaveRole = async (membershipId: string, currentRole: string) => {
     if (!token) return;
     const next = roleDrafts[membershipId];
     if (!next || next === currentRole) return;
@@ -179,6 +263,7 @@ export default function TenantTeamPage() {
     try {
       await updateTenantMemberRole(token, membershipId, next);
       setOk('Role updated.');
+      setEditingId(null);
       setLoadKey(k => k + 1);
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Failed to update role');
@@ -187,14 +272,27 @@ export default function TenantTeamPage() {
     }
   };
 
+  const onResetPassword = async (m: Row) => {
+    if (!token) return;
+    setErr('');
+    setOk('');
+    setResetLink(null);
+    setBusyId(m.id);
+    try {
+      const r = await createWorkspaceMemberPasswordResetLink(token, { tenantId, membershipId: m.id });
+      setResetLink(r.actionLink);
+      setOk('Reset link created. Send this link to the user so they can set a new password.');
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not create reset link');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const onRemove = async (m: Row) => {
     if (!token) return;
     const label = m.email?.trim() || m.fullName?.trim() || m.profileId || m.id;
-    if (
-      !confirm(
-        `Remove ${label} from this workspace? They lose access here until re-added.`,
-      )
-    ) {
+    if (!confirm(`Remove ${label} from this workspace? They lose access here until invited again.`)) {
       return;
     }
     setErr('');
@@ -211,40 +309,17 @@ export default function TenantTeamPage() {
     }
   };
 
-  const onProvisionLogin = async () => {
-    if (!token || !loginEmail.trim() || !loginPassword) return;
-    setErr('');
-    setOk('');
-    setProvisioning(true);
-    try {
-      await provisionWorkspaceMemberCredentials(token, {
-        tenantId,
-        email: loginEmail.trim(),
-        password: loginPassword,
-        fullName: loginFullName.trim() || undefined,
-        role: loginRole,
-      });
-      setOk('Sign-in saved. They can use this email and password on the app login page.');
-      setLoginPassword('');
-      setLoadKey(k => k + 1);
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Could not save sign-in');
-    } finally {
-      setProvisioning(false);
-    }
-  };
-
   return (
     <div>
       {user?.agencyRole && (
         <p style={{ fontSize: '0.85rem', marginBottom: '0.75rem' }}>
-          <Link href="/app/agency/tenants">← Client Workspaces</Link>
+          <Link href="/app/agency/tenants">← Workspaces</Link>
         </p>
       )}
-      <PageHeader title="Workspace Team" eyebrow={tenantName ?? 'Client workspace'} />
+      <PageHeader title="Workspace team" eyebrow={tenantName ?? 'Workspace'} />
       <p style={{ fontSize: '0.88rem', color: '#64748b', margin: '0 0 0.85rem', lineHeight: 1.5, maxWidth: '640px' }}>
-        Manage who can access this client workspace. Workspace admins and your agency team can invite people and reset
-        passwords.
+        Manage who can access this workspace. Workspace admins and your agency team can send invite links and password reset
+        links.
       </p>
 
       <div
@@ -259,7 +334,7 @@ export default function TenantTeamPage() {
         }}
       >
         <span>
-          Your role: <strong>{roleLabel(user?.tenantRole ?? '—')}</strong>
+          Your role: <strong>{displayWorkspaceRole(user?.tenantRole ?? '—')}</strong>
         </span>
         {user?.tenantId && user.tenantId !== tenantId && !isAgencyStaffForTenant(user, tenantAgencyId) ? (
           <span style={{ color: '#b91c1c' }}>This is not your assigned workspace; team changes are disabled.</span>
@@ -271,75 +346,109 @@ export default function TenantTeamPage() {
 
       {canManageTeam ? (
         <SectionCard
-          title="Client sign-in (email & password)"
-          subtitle="Creates a Supabase Auth account (or resets the password) and attaches this workspace. Share credentials securely; anyone with them can sign in at /login."
-          accent="default"
+          title="Invite workspace user"
+          subtitle="Invite someone to access this workspace. They will use the invite link to set up their password."
         >
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem', maxWidth: '440px' }}>
-            <label style={mvpLabelStyle}>
-              Email (sign-in)
-              <input
-                type="email"
-                value={loginEmail}
-                onChange={e => setLoginEmail(e.target.value)}
-                autoComplete="off"
-                disabled={provisioning}
-                style={mvpInputStyle}
-              />
-            </label>
-            <label style={mvpLabelStyle}>
-              New password
-              <input
-                type="password"
-                value={loginPassword}
-                onChange={e => setLoginPassword(e.target.value)}
-                autoComplete="new-password"
-                disabled={provisioning}
-                placeholder="At least 8 characters"
-                style={mvpInputStyle}
-              />
-            </label>
-            <label style={mvpLabelStyle}>
-              Display name (optional)
-              <input
-                type="text"
-                value={loginFullName}
-                onChange={e => setLoginFullName(e.target.value)}
-                disabled={provisioning}
-                style={mvpInputStyle}
-              />
-            </label>
-            <label style={mvpLabelStyle}>
-              Workspace role
-              <select
-                value={loginRole}
-                onChange={e => setLoginRole(e.target.value as TenantRoleValue)}
-                disabled={provisioning}
-                style={mvpSelectStyle}
+          {inviteLink ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxWidth: '560px' }}>
+              <SuccessBanner message="Invite link created." />
+              <p style={{ margin: 0, fontSize: '0.88rem', color: '#334155' }}>For {inviteLink.email}</p>
+              <input readOnly value={inviteLink.url} style={{ ...mvpInputStyle, width: '100%', fontSize: '0.78rem' }} />
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                <button
+                  type="button"
+                  onClick={() => void copyText('Invite link', inviteLink.url, m => setOk(m), m => setErr(m))}
+                  style={{ ...mvpPrimaryButtonStyle, width: 'fit-content' }}
+                >
+                  Copy invite link
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setInviteLink(null);
+                    setOk('');
+                  }}
+                  style={{ ...mvpSecondaryButtonStyle, width: 'fit-content' }}
+                >
+                  Create another invite
+                </button>
+              </div>
+              <p style={{ ...mvpFieldHint, marginBottom: 0 }}>
+                Send this link to the user so they can set up their account. The app does not send invite email automatically
+                yet.
+              </p>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxWidth: '480px' }}>
+              <label style={mvpLabelStyle}>
+                Email
+                <input
+                  type="email"
+                  value={inviteEmail}
+                  onChange={e => {
+                    setInviteEmail(e.target.value);
+                    setInviteEmailErr('');
+                  }}
+                  disabled={inviteBusy}
+                  autoComplete="off"
+                  style={{
+                    ...mvpInputStyle,
+                    ...(inviteEmailErr ? { borderColor: '#f87171', boxShadow: '0 0 0 1px rgba(248, 113, 113, 0.35)' } : {}),
+                  }}
+                />
+              </label>
+              {inviteEmailErr ? (
+                <p role="alert" style={{ fontSize: '0.8rem', color: '#b91c1c', margin: '-0.35rem 0 0' }}>
+                  {inviteEmailErr}
+                </p>
+              ) : null}
+              <label style={mvpLabelStyle}>
+                Role
+                <select
+                  value={inviteRoleUi}
+                  onChange={e => setInviteRoleUi(e.target.value as 'ADMIN' | 'USER')}
+                  disabled={inviteBusy}
+                  style={mvpSelectStyle}
+                >
+                  <option value="USER">User</option>
+                  <option value="ADMIN">Admin</option>
+                </select>
+              </label>
+              <button
+                type="button"
+                onClick={() => void onCreateInvite()}
+                disabled={inviteBusy || !inviteEmail.trim()}
+                style={{ ...mvpPrimaryButtonStyle, width: 'fit-content', opacity: inviteBusy || !inviteEmail.trim() ? 0.65 : 1 }}
               >
-                {TENANT_ROLES.map(r => (
-                  <option key={r} value={r}>
-                    {roleLabel(r)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button
-              type="button"
-              onClick={() => void onProvisionLogin()}
-              disabled={provisioning || !loginEmail.trim() || loginPassword.length < 8}
-              style={{
-                ...mvpPrimaryButtonStyle,
-                width: 'fit-content',
-                opacity: provisioning || !loginEmail.trim() || loginPassword.length < 8 ? 0.65 : 1,
-              }}
-            >
-              {provisioning ? 'Saving…' : 'Save sign-in & access'}
-            </button>
-            <p style={{ fontSize: '0.78rem', color: '#94a3b8', margin: 0, lineHeight: 1.45 }}>
-              If this email already belongs to someone in the workspace, only their password is updated.
-            </p>
-          </div>
+                {inviteBusy ? 'Creating…' : 'Create invite link'}
+              </button>
+            </div>
+          )}
+        </SectionCard>
+      ) : null}
+
+      {resetLink ? (
+        <SectionCard title="Copy reset link" subtitle="No email was sent from the app for this action.">
+          <input readOnly value={resetLink} style={{ ...mvpInputStyle, width: '100%', fontSize: '0.78rem' }} />
+          <button
+            type="button"
+            onClick={() => void copyText('Reset link', resetLink, m => setOk(m), m => setErr(m))}
+            style={{ ...mvpPrimaryButtonStyle, marginTop: '0.65rem', width: 'fit-content' }}
+          >
+            Copy reset link
+          </button>
+        </SectionCard>
+      ) : null}
+
+      {canManageTeam && pendingInvites.length > 0 ? (
+        <SectionCard title="Pending invites" subtitle="Outstanding workspace invitations.">
+          <ul style={{ margin: 0, paddingLeft: '1.1rem', fontSize: '0.86rem', color: '#475569' }}>
+            {pendingInvites.map(i => (
+              <li key={i.id}>
+                {i.email_original} — {displayWorkspaceRole(i.role)}
+              </li>
+            ))}
+          </ul>
         </SectionCard>
       ) : null}
 
@@ -348,10 +457,7 @@ export default function TenantTeamPage() {
       ) : (
         <SectionCard title={`People (${rows.length})`} subtitle="Everyone with access to this workspace.">
           {rows.length === 0 ? (
-            <EmptyState
-              title="No members yet"
-              detail="Create a client login below, or add someone by user ID if your workspace admin prefers the advanced path."
-            />
+            <EmptyState title="No members yet" detail="Use Invite workspace user above to add someone by email." />
           ) : (
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem', minWidth: '560px' }}>
@@ -366,80 +472,109 @@ export default function TenantTeamPage() {
                 <tbody>
                   {rows.map(m => {
                     const draft = roleDrafts[m.id] ?? (m.role as TenantRoleValue);
-                    const changed = draft !== m.role;
+                    const backendRole = m.role as TenantRoleValue;
+                    const normalizedBackend = backendRole === 'VIEWER' ? 'AGENT' : backendRole;
+                    const changed = draft !== normalizedBackend;
                     const busy = busyId === m.id;
+                    const editing = editingId === m.id;
                     return (
                       <tr key={m.id} style={{ borderBottom: '1px solid #f1f5f9' }}>
                         <td style={tdStyle}>{m.email?.trim() ? m.email : '—'}</td>
-                        <td style={tdStyle}>
-                          {m.fullName?.trim() ? m.fullName : '—'}
-                          <details style={{ marginTop: '0.35rem' }}>
-                            <summary style={{ cursor: 'pointer', fontSize: '0.72rem', color: '#94a3b8' }}>Support details</summary>
-                            <p style={{ margin: '0.25rem 0 0', fontSize: '0.72rem', fontFamily: 'inherit', color: '#64748b', wordBreak: 'break-all' }}>
-                              User ID: {m.profileId ?? '—'}
-                            </p>
-                          </details>
-                        </td>
+                        <td style={tdStyle}>{m.fullName?.trim() ? m.fullName : '—'}</td>
                         <td style={tdStyle}>
                           {canManageTeam ? (
-                            <select
-                              value={draft}
-                              onChange={e =>
-                                setRoleDrafts(d => ({
-                                  ...d,
-                                  [m.id]: e.target.value as TenantRoleValue,
-                                }))
-                              }
-                              disabled={busy}
-                              style={{ ...mvpSelectStyle, maxWidth: '140px', padding: '0.35rem 0.45rem' }}
-                            >
-                              {TENANT_ROLES.map(r => (
-                                <option key={r} value={r}>
-                                  {roleLabel(r)}
-                                </option>
-                              ))}
-                            </select>
+                            editing ? (
+                              <select
+                                value={memberToSlot(draft)}
+                                onChange={e =>
+                                  setRoleDrafts(d => ({
+                                    ...d,
+                                    [m.id]: slotToTenantRole(e.target.value as RoleSlot),
+                                  }))
+                                }
+                                disabled={busy}
+                                style={{ ...mvpSelectStyle, maxWidth: '140px', padding: '0.35rem 0.45rem' }}
+                              >
+                                <option value="admin">Admin</option>
+                                <option value="user">User</option>
+                              </select>
+                            ) : (
+                              <span style={{ fontSize: '0.88rem', fontWeight: 650 }}>{displayWorkspaceRole(m.role)}</span>
+                            )
                           ) : (
-                            <StatusPill label={roleLabel(m.role)} tone="neutral" />
+                            <StatusPill label={displayWorkspaceRole(m.role)} tone="neutral" />
                           )}
                         </td>
                         {canManageTeam ? (
                           <td style={tdStyle}>
                             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.45rem', alignItems: 'center' }}>
-                              <button
-                                type="button"
-                                onClick={() => void onApplyRole(m.id, m.role)}
-                                disabled={busy || !changed}
-                                style={{
-                                  padding: '0.4rem 0.7rem',
-                                  fontSize: '0.82rem',
-                                  borderRadius: '6px',
-                                  border: '1px solid #2563eb',
-                                  background: changed ? '#2563eb' : '#e2e8f0',
-                                  color: changed ? '#fff' : '#94a3b8',
-                                  cursor: busy || !changed ? 'not-allowed' : 'pointer',
-                                  fontWeight: 600,
-                                }}
-                              >
-                                {busy ? '…' : 'Apply'}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => void onRemove(m)}
-                                disabled={busy}
-                                style={{
-                                  padding: '0.4rem 0.7rem',
-                                  fontSize: '0.82rem',
-                                  borderRadius: '6px',
-                                  border: '1px solid #fecaca',
-                                  background: '#fff1f2',
-                                  color: '#b91c1c',
-                                  cursor: busy ? 'not-allowed' : 'pointer',
-                                  opacity: busy ? 0.7 : 1,
-                                }}
-                              >
-                                Remove
-                              </button>
+                              {editing ? (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => void onSaveRole(m.id, normalizedBackend)}
+                                    disabled={busy || !changed}
+                                    style={{
+                                      ...mvpPrimaryButtonStyle,
+                                      padding: '0.4rem 0.75rem',
+                                      fontSize: '0.82rem',
+                                      opacity: busy || !changed ? 0.65 : 1,
+                                    }}
+                                  >
+                                    Save
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setEditingId(null);
+                                      setRoleDrafts(d => ({
+                                        ...d,
+                                        [m.id]: (m.role === 'VIEWER' ? 'AGENT' : m.role) as TenantRoleValue,
+                                      }));
+                                    }}
+                                    disabled={busy}
+                                    style={{ ...mvpSecondaryButtonStyle, padding: '0.4rem 0.75rem', fontSize: '0.82rem' }}
+                                  >
+                                    Cancel
+                                  </button>
+                                </>
+                              ) : (
+                                <>
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditingId(m.id)}
+                                    disabled={busy}
+                                    style={{ ...mvpSecondaryButtonStyle, padding: '0.4rem 0.75rem', fontSize: '0.82rem' }}
+                                  >
+                                    Edit
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => void onResetPassword(m)}
+                                    disabled={busy}
+                                    style={{ ...mvpSecondaryButtonStyle, padding: '0.4rem 0.7rem', fontSize: '0.82rem' }}
+                                  >
+                                    {busy ? '…' : 'Reset password'}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => void onRemove(m)}
+                                    disabled={busy}
+                                    style={{
+                                      padding: '0.4rem 0.7rem',
+                                      fontSize: '0.82rem',
+                                      borderRadius: '6px',
+                                      border: '1px solid #fecaca',
+                                      background: '#fff1f2',
+                                      color: '#b91c1c',
+                                      cursor: busy ? 'not-allowed' : 'pointer',
+                                      opacity: busy ? 0.7 : 1,
+                                    }}
+                                  >
+                                    Remove
+                                  </button>
+                                </>
+                              )}
                             </div>
                           </td>
                         ) : null}
@@ -454,10 +589,10 @@ export default function TenantTeamPage() {
       )}
 
       {canAddByProfileId && (
-        <SectionCard title="Add user" subtitle="Advanced setup for support-assisted workspace access." accent="muted">
+        <SectionCard title="Advanced" subtitle="Support-only: attach an existing profile by user ID." accent="muted">
           <details>
             <summary style={{ cursor: 'pointer', fontSize: '0.85rem', fontWeight: 600, color: '#475569' }}>
-              Add by user ID (advanced)
+              Add by user ID
             </summary>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxWidth: '480px', marginTop: '0.85rem' }}>
               <label style={mvpLabelStyle}>
@@ -479,11 +614,9 @@ export default function TenantTeamPage() {
                   disabled={adding}
                   style={mvpSelectStyle}
                 >
-                  {TENANT_ROLES.map(r => (
-                    <option key={r} value={r}>
-                      {roleLabel(r)}
-                    </option>
-                  ))}
+                  <option value="ADMIN">Admin</option>
+                  <option value="AGENT">User</option>
+                  <option value="VIEWER">Viewer</option>
                 </select>
               </label>
               <button
@@ -497,12 +630,6 @@ export default function TenantTeamPage() {
             </div>
           </details>
         </SectionCard>
-      )}
-
-      {!canManageTeam && (
-        <p style={{ fontSize: '0.82rem', color: '#94a3b8', marginTop: '0.75rem' }}>
-          Workspace ID: <code style={{ fontSize: '0.75rem' }}>{tenantId}</code>
-        </p>
       )}
     </div>
   );

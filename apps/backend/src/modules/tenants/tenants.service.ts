@@ -299,10 +299,23 @@ export class TenantsService {
 
     const { data: agency } = await supabase
       .from('agencies')
-      .select('default_subaccount_quota')
+      .select(
+        'default_subaccount_quota, default_allow_temporary_overage, default_overage_limit_credits, default_low_credit_warning_enabled, default_low_credit_warning_level_credits',
+      )
       .eq('id', agencyId)
       .single();
-    const defaultQuota = (agency as { default_subaccount_quota?: number } | null)?.default_subaccount_quota ?? 10_000;
+    const a = agency as {
+      default_subaccount_quota?: number;
+      default_allow_temporary_overage?: boolean;
+      default_overage_limit_credits?: number;
+      default_low_credit_warning_enabled?: boolean;
+      default_low_credit_warning_level_credits?: number;
+    } | null;
+    const defaultQuota = a?.default_subaccount_quota ?? 10_000;
+    const allowNeg = Boolean(a?.default_allow_temporary_overage);
+    const negLimit = allowNeg ? Math.max(0, Math.floor(a?.default_overage_limit_credits ?? 0)) : 0;
+    const warnOn = Boolean(a?.default_low_credit_warning_enabled);
+    const lowTh = warnOn ? Math.max(0, Math.floor(a?.default_low_credit_warning_level_credits ?? 0)) : 0;
 
     const id = randomUUID();
     const ghl = input.ghlLocationId?.trim() || `${PENDING_GHL_PREFIX}${id}`;
@@ -337,6 +350,9 @@ export class TenantsService {
       tenant_id: id,
       total_quota: defaultQuota,
       used_quota: 0,
+      allow_negative_credits: allowNeg,
+      negative_credit_limit: negLimit,
+      low_credit_threshold: lowTh,
       period_start: periodStart.toISOString(),
       period_end: periodEnd.toISOString(),
       updated_at: walletNow,

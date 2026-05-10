@@ -33,6 +33,23 @@ model Profile {
 // AGENCY
 // ============================================================================
 
+enum CreditDeductionMethod {
+  PER_LOGICAL_REPLY
+  PER_MESSAGE_BUBBLE
+}
+
+enum InvitationScope {
+  AGENCY
+  WORKSPACE
+}
+
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  REVOKED
+  EXPIRED
+}
+
 model Agency {
   id        String   @id @default(uuid())
   name      String
@@ -41,6 +58,13 @@ model Agency {
   activeAiProvider AiProvider @default(OPENAI) @map("active_ai_provider")
   /// Credits applied to new subaccount wallets when created (period total baseline).
   defaultSubaccountQuota Int @default(10000) @map("default_subaccount_quota")
+  /// How outbound assistant sends consume credits for workspaces under this agency (runtime reads via tenant → agency).
+  creditDeductionMethod CreditDeductionMethod @default(PER_LOGICAL_REPLY) @map("credit_deduction_method")
+  /// Applied to new workspace `quota_wallets` rows when the workspace is created.
+  defaultAllowTemporaryOverage Boolean @default(false) @map("default_allow_temporary_overage")
+  defaultOverageLimitCredits     Int     @default(0) @map("default_overage_limit_credits")
+  defaultLowCreditWarningEnabled Boolean @default(false) @map("default_low_credit_warning_enabled")
+  defaultLowCreditWarningLevelCredits Int @default(0) @map("default_low_credit_warning_level_credits")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -51,8 +75,34 @@ model Agency {
   systemPolicies AgencySystemPolicy[]
   auditLogs      AuditLog[]
   quotaAuditLogs QuotaAuditLog[]
+  userInvitations UserInvitation[]
 
   @@map("agencies")
+}
+
+/// Pending or completed invite for agency or workspace membership (Supabase Auth magic link).
+model UserInvitation {
+  id                   String           @id @default(uuid())
+  emailNormalized      String           @map("email_normalized")
+  emailOriginal        String           @map("email_original")
+  scope                InvitationScope
+  agencyId             String           @map("agency_id")
+  tenantId             String?          @map("tenant_id")
+  role                 String
+  invitedByProfileId   String           @map("invited_by_profile_id")
+  status               InvitationStatus @default(PENDING)
+  expiresAt            DateTime         @map("expires_at")
+  acceptedAt           DateTime?        @map("accepted_at")
+  acceptedProfileId    String?          @map("accepted_profile_id")
+  createdAt            DateTime         @default(now()) @map("created_at")
+  updatedAt            DateTime         @updatedAt @map("updated_at")
+
+  agency Agency  @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([agencyId, emailNormalized, status])
+  @@index([tenantId, emailNormalized, status])
+  @@map("user_invitations")
 }
 
 // Agency user roles
@@ -111,6 +161,7 @@ model Tenant {
   webhookEvents  WebhookEvent[]
   orchestrationLogs OrchestrationLog[]
   quotaAuditLogs    QuotaAuditLog[]
+  userInvitations   UserInvitation[]
   bookingSettings    TenantBookingSettings?
   taggingSettings    TenantTaggingSettings?
   tagRules           TenantTagRule[]

@@ -6,27 +6,40 @@ import {
   Controller,
   Delete,
   Get,
+  Headers,
   HttpCode,
   HttpStatus,
   Param,
   Patch,
   Post,
   Query,
+  UnauthorizedException,
   UseGuards,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { AgencyUsersService } from './agency-users.service';
+import { InvitationsService } from '../invitations/invitations.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { SessionUser } from '../../lib/supabase';
 import type { AgencyRole } from '../../lib/enums';
+
+function bearerFromAuthHeader(authHeader: string | undefined): string {
+  if (!authHeader) throw new UnauthorizedException('Missing authorization');
+  const m = /^Bearer\s+/i.exec(authHeader);
+  if (!m) throw new UnauthorizedException('Missing authorization');
+  return authHeader.slice(m[0].length).trim();
+}
 
 @ApiTags('agency-users')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
 @Controller('agency-users')
 export class AgencyUsersController {
-  constructor(private readonly service: AgencyUsersService) {}
+  constructor(
+    private readonly service: AgencyUsersService,
+    private readonly invitations: InvitationsService,
+  ) {}
 
   @Get()
   @ApiOperation({
@@ -42,6 +55,49 @@ export class AgencyUsersController {
       throw new BadRequestException('agencyId query parameter is required');
     }
     return this.service.listMembers(agencyId.trim(), user.id);
+  }
+
+  @Get('invites')
+  @ApiOperation({ summary: 'List pending agency invites (admin)' })
+  async listInvites(@Query('agencyId') agencyId: string | undefined, @CurrentUser() user: SessionUser) {
+    if (!agencyId?.trim()) throw new BadRequestException('agencyId query parameter is required');
+    return this.invitations.listAgencyInvites(user.id, agencyId.trim());
+  }
+
+  @Post('invites')
+  @ApiOperation({ summary: 'Create agency team invite link (Supabase Auth invite)' })
+  async createInvite(
+    @Body() dto: { agencyId: string; email: string; role: 'ADMIN' | 'USER' },
+    @CurrentUser() user: SessionUser,
+  ) {
+    if (!dto.agencyId?.trim()) throw new BadRequestException('agencyId is required');
+    if (!dto.email?.trim()) throw new BadRequestException('email is required');
+    if (dto.role !== 'ADMIN' && dto.role !== 'USER') throw new BadRequestException('role must be ADMIN or USER');
+    return this.invitations.createAgencyInvite(user.id, dto.agencyId.trim(), dto.email.trim(), dto.role);
+  }
+
+  @Post('invites/:inviteId/accept')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Accept agency invite (caller must be signed in as invited email)' })
+  async acceptAgencyInvite(
+    @Param('inviteId') inviteId: string,
+    @Headers('authorization') authorization: string | undefined,
+    @CurrentUser() user: SessionUser,
+  ) {
+    const token = bearerFromAuthHeader(authorization);
+    return this.invitations.acceptAgencyInvite(user.id, inviteId, token);
+  }
+
+  @Post('members/:membershipId/password-reset-link')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Generate password reset link for an agency member (admin)' })
+  async agencyMemberResetLink(
+    @Param('membershipId') membershipId: string,
+    @Body() dto: { agencyId: string },
+    @CurrentUser() user: SessionUser,
+  ) {
+    if (!dto.agencyId?.trim()) throw new BadRequestException('agencyId is required');
+    return this.invitations.generateAgencyMemberRecoveryLink(user.id, dto.agencyId.trim(), membershipId);
   }
 
   @Post()

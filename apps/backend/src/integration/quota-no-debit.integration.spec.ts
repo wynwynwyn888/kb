@@ -55,6 +55,20 @@ describe('Quota Debit Integration (OutboundSendService)', () => {
     // Mock credentials found
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (mockSupabase.from as jest.Mock).mockImplementation((table: string): any => {
+      if (table === 'tenants') {
+        return {
+          select: () => ({
+            eq: () => ({ maybeSingle: async () => ({ data: { agency_id: 'ag1' }, error: null }) }),
+          }),
+        };
+      }
+      if (table === 'agencies') {
+        return {
+          select: () => ({
+            eq: () => ({ maybeSingle: async () => ({ data: { credit_deduction_method: 'PER_LOGICAL_REPLY' }, error: null }) }),
+          }),
+        };
+      }
       if (table === 'tenant_ghl_connections') {
         return {
           select: () => ({
@@ -149,6 +163,20 @@ describe('Quota Debit Integration (OutboundSendService)', () => {
 
     let ledgerSeen = false;
     (mockSupabase.from as jest.Mock).mockImplementation((table: string): any => {
+      if (table === 'tenants') {
+        return {
+          select: () => ({
+            eq: () => ({ maybeSingle: async () => ({ data: { agency_id: 'ag1' }, error: null }) }),
+          }),
+        };
+      }
+      if (table === 'agencies') {
+        return {
+          select: () => ({
+            eq: () => ({ maybeSingle: async () => ({ data: { credit_deduction_method: 'PER_LOGICAL_REPLY' }, error: null }) }),
+          }),
+        };
+      }
       if (table === 'tenant_ghl_connections') {
         return {
           select: () => ({

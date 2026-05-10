@@ -1,4 +1,5 @@
 import { jest as jestGlobal } from '@jest/globals';
+import { BadRequestException } from '@nestjs/common';
 import { QuotasService } from './quotas.service';
 import { createMockSupabase, mockFrom } from '../../test/mock-supabase';
 
@@ -14,6 +15,31 @@ describe('QuotasService', () => {
   beforeEach(() => {
     jestGlobal.clearAllMocks();
     service = new QuotasService({ add: jest.fn() } as never);
+  });
+
+  describe('saveAgencyCreditSettings', () => {
+    it('rejects an empty patch', async () => {
+      jest.spyOn(service as any, 'assertAgencyStaff').mockResolvedValue(undefined);
+      await expect(service.saveAgencyCreditSettings('agency-1', 'profile-1', {})).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+    });
+
+    it('rejects an unknown deduction method', async () => {
+      jest.spyOn(service as any, 'assertAgencyStaff').mockResolvedValue(undefined);
+      await expect(
+        service.saveAgencyCreditSettings('agency-1', 'profile-1', {
+          deductionMethod: 'PER_MESSAGE' as 'PER_LOGICAL_REPLY',
+        }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
+
+    it('rejects negative default overage limit', async () => {
+      jest.spyOn(service as any, 'assertAgencyStaff').mockResolvedValue(undefined);
+      await expect(
+        service.saveAgencyCreditSettings('agency-1', 'profile-1', { defaultOverageLimit: -1 }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+    });
   });
 
   describe('getTenantUsageSummary', () => {

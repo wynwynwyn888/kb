@@ -1,10 +1,27 @@
 // Quotas service — wallets, top-ups, agency default, audit.
 
-import { ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { getSupabaseService } from '../../lib/supabase';
 import { randomUUID } from 'node:crypto';
+
+export type AgencyCreditDeductionMethod = 'PER_LOGICAL_REPLY' | 'PER_MESSAGE_BUBBLE';
+
+export interface AgencyCreditSettingsPatch {
+  defaultSubaccountQuota?: number;
+  deductionMethod?: AgencyCreditDeductionMethod;
+  defaultAllowOverage?: boolean;
+  defaultOverageLimit?: number;
+  defaultLowCreditWarningEnabled?: boolean;
+  defaultLowCreditWarningLevel?: number;
+}
 
 @Injectable()
 export class QuotasService {
@@ -29,24 +46,60 @@ export class QuotasService {
     return wallet.total_quota - wallet.used_quota >= amount;
   }
 
+  /** @deprecated Prefer `saveAgencyCreditSettings`; kept for callers that only bump default credits. */
   async setAgencyDefaultQuota(agencyId: string, profileId: string, defaultQuota: number) {
-    await this.assertAgencyStaff(agencyId, profileId);
-    if (!Number.isFinite(defaultQuota) || defaultQuota < 0) {
-      throw new ForbiddenException('Invalid default quota');
-    }
-    const { data: prev } = await this.supabase
-      .from('agencies')
-      .select('default_subaccount_quota')
-      .eq('id', agencyId)
-      .single();
+    return this.saveAgencyCreditSettings(agencyId, profileId, { defaultSubaccountQuota: defaultQuota });
+  }
 
-    const { error } = await this.supabase
-      .from('agencies')
-      .update({
-        default_subaccount_quota: Math.floor(defaultQuota),
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', agencyId);
+  async saveAgencyCreditSettings(agencyId: string, profileId: string, patch: AgencyCreditSettingsPatch) {
+    await this.assertAgencyStaff(agencyId, profileId);
+    const keys = Object.keys(patch).filter(k => (patch as Record<string, unknown>)[k] !== undefined);
+    if (keys.length === 0) {
+      throw new BadRequestException('Provide at least one credit setting to save');
+    }
+
+    const update: Record<string, unknown> = { updated_at: new Date().toISOString() };
+
+    if (patch.defaultSubaccountQuota !== undefined) {
+      const n = patch.defaultSubaccountQuota;
+      if (!Number.isFinite(n) || n < 0) throw new BadRequestException('defaultSubaccountQuota must be >= 0');
+      update['default_subaccount_quota'] = Math.floor(n);
+    }
+
+    if (patch.deductionMethod !== undefined) {
+      if (patch.deductionMethod !== 'PER_LOGICAL_REPLY' && patch.deductionMethod !== 'PER_MESSAGE_BUBBLE') {
+        throw new BadRequestException('deductionMethod must be PER_LOGICAL_REPLY or PER_MESSAGE_BUBBLE');
+      }
+      update['credit_deduction_method'] = patch.deductionMethod;
+    }
+
+    if (patch.defaultAllowOverage !== undefined) {
+      update['default_allow_temporary_overage'] = Boolean(patch.defaultAllowOverage);
+      if (patch.defaultAllowOverage === false) {
+        update['default_overage_limit_credits'] = 0;
+      }
+    }
+
+    if (patch.defaultOverageLimit !== undefined) {
+      const lim = patch.defaultOverageLimit;
+      if (!Number.isFinite(lim) || lim < 0) throw new BadRequestException('defaultOverageLimit must be >= 0');
+      update['default_overage_limit_credits'] = Math.floor(lim);
+    }
+
+    if (patch.defaultLowCreditWarningEnabled !== undefined) {
+      update['default_low_credit_warning_enabled'] = Boolean(patch.defaultLowCreditWarningEnabled);
+      if (patch.defaultLowCreditWarningEnabled === false) {
+        update['default_low_credit_warning_level_credits'] = 0;
+      }
+    }
+
+    if (patch.defaultLowCreditWarningLevel !== undefined) {
+      const w = patch.defaultLowCreditWarningLevel;
+      if (!Number.isFinite(w) || w < 0) throw new BadRequestException('defaultLowCreditWarningLevel must be >= 0');
+      update['default_low_credit_warning_level_credits'] = Math.floor(w);
+    }
+
+    const { error } = await this.supabase.from('agencies').update(update).eq('id', agencyId);
     if (error) throw new Error(error.message);
 
     await this.supabase.from('quota_audit_logs').insert({
@@ -54,13 +107,14 @@ export class QuotasService {
       agency_id: agencyId,
       profile_id: profileId,
       tenant_id: null,
-      action: 'agency.default_quota',
+      action: 'agency.credit_settings',
       delta: 0,
-      previous_total: (prev as { default_subaccount_quota?: number })?.default_subaccount_quota ?? null,
-      new_total: Math.floor(defaultQuota),
-      metadata: { field: 'default_subaccount_quota' },
+      previous_total: null,
+      new_total: null,
+      metadata: { patch: keys },
     });
-    return { defaultSubaccountQuota: Math.floor(defaultQuota) };
+
+    return this.getAgencyQuotaSettings(agencyId, profileId);
   }
 
   async topUpSubaccount(agencyId: string, profileId: string, tenantId: string, amount: number, note?: string) {
@@ -347,13 +401,32 @@ export class QuotasService {
     await this.assertAgencyStaff(agencyId, profileId);
     const { data, error } = await this.supabase
       .from('agencies')
-      .select('id, default_subaccount_quota, active_ai_provider')
+      .select(
+        'id, default_subaccount_quota, credit_deduction_method, default_allow_temporary_overage, default_overage_limit_credits, default_low_credit_warning_enabled, default_low_credit_warning_level_credits',
+      )
       .eq('id', agencyId)
       .single();
     if (error || !data) throw new NotFoundException('Agency not found');
+    const row = data as {
+      id: string;
+      default_subaccount_quota: number;
+      credit_deduction_method?: string;
+      default_allow_temporary_overage?: boolean;
+      default_overage_limit_credits?: number;
+      default_low_credit_warning_enabled?: boolean;
+      default_low_credit_warning_level_credits?: number;
+    };
     return {
-      agencyId: data.id,
-      defaultSubaccountQuota: (data as { default_subaccount_quota: number }).default_subaccount_quota,
+      agencyId: row.id,
+      defaultSubaccountQuota: row.default_subaccount_quota,
+      deductionMethod: (row.credit_deduction_method ?? 'PER_LOGICAL_REPLY') as AgencyCreditDeductionMethod,
+      defaultAllowOverage: Boolean(row.default_allow_temporary_overage),
+      defaultOverageLimit: typeof row.default_overage_limit_credits === 'number' ? row.default_overage_limit_credits : 0,
+      defaultLowCreditWarningEnabled: Boolean(row.default_low_credit_warning_enabled),
+      defaultLowCreditWarningLevel:
+        typeof row.default_low_credit_warning_level_credits === 'number'
+          ? row.default_low_credit_warning_level_credits
+          : 0,
     };
   }
 

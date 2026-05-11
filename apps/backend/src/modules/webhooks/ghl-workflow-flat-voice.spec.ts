@@ -40,6 +40,25 @@ function baseFlatWorkflow(overrides: Record<string, unknown> = {}) {
 }
 
 describe('GHL workflow-flat InboundMessage + voice URL extraction', () => {
+  it('coerce prefers nested location.id over mistaken customData.locationId', () => {
+    const raw = {
+      location: { id: 'loc_from_nested_99' },
+      event: 'InboundMessage',
+      timestamp: '2026-05-05T10:00:00.000Z',
+      customData: {
+        locationId: 'loc_typo_wrong',
+        id: 'wf_msg_nested_loc',
+        conversationId: 'conv_wf',
+        contactId: 'ct_wf',
+        message: 'hello',
+        messageType: 'text',
+      },
+    };
+    const { payload, shape } = coerceGhlWebhookPayload(raw);
+    expect(shape).toBe('ghl_workflow_flat');
+    expect(payload.locationId).toBe('loc_from_nested_99');
+  });
+
   it('coerce merges top-level mediaUrl into canonical data', () => {
     const raw = {
       ...baseFlatWorkflow(),

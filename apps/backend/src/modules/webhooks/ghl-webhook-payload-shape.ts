@@ -142,6 +142,34 @@ function extractConversationId(
   return undefined;
 }
 
+/**
+ * GHL workflow custom fields often hard-code `locationId` (easy to typo `l` vs `I`).
+ * When the platform includes a nested `location` object, prefer its `id` after scanning the
+ * root body first, then other pick sources.
+ */
+function extractLocationId(
+  r: Record<string, unknown>,
+  sources: Record<string, unknown>[],
+): string | undefined {
+  const scanRows: Record<string, unknown>[] = [r];
+  for (const s of sources) {
+    if (s !== r) scanRows.push(s);
+  }
+  for (const row of scanRows) {
+    const loc = row['location'];
+    if (isPlainObject(loc)) {
+      const id = firstString(loc, ['id', 'locationId', 'location_id']);
+      if (id !== undefined) return id;
+    }
+  }
+  return pickFromSources(sources, [
+    'locationId',
+    'location_id',
+    'LocationId',
+    'data.locationId',
+  ]);
+}
+
 /** Copy attachments / media / HTTP URL fields from workflow-flat sources into canonical `data` for downstream extractors. */
 function mergeWorkflowFlatMediaIntoInbound(
   inbound: Record<string, unknown>,
@@ -236,7 +264,7 @@ export function coerceGhlWebhookPayload(raw: unknown): {
     mergeWorkflowFlatMediaIntoInbound(inbound, r, sources);
   }
 
-  const locationId = pickFromSources(sources, ['locationId']);
+  const locationId = extractLocationId(r, sources);
   const event = pickFromSources(sources, ['event']);
   if (!locationId || !event) {
     throw new Error(

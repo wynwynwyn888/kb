@@ -14,6 +14,7 @@ import {
   SectionCard,
   StatusPill,
   formatDateTime,
+  mvpPrimaryButtonStyle,
 } from '@/components/app/mvp-ui';
 
 export default function TenantGhlStatusPage() {
@@ -96,7 +97,11 @@ export default function TenantGhlStatusPage() {
           type="button"
           onClick={runHealth}
           disabled={healthLoading}
-          style={{ padding: '0.4rem 0.65rem', opacity: healthLoading ? 0.7 : 1 }}
+          style={{
+            ...mvpPrimaryButtonStyle,
+            opacity: healthLoading ? 0.65 : 1,
+            cursor: healthLoading ? 'not-allowed' : 'pointer',
+          }}
         >
           {healthLoading ? 'Checking…' : 'Run connection check'}
         </button>
@@ -104,7 +109,11 @@ export default function TenantGhlStatusPage() {
           type="button"
           onClick={refresh}
           disabled={connLoading}
-          style={{ padding: '0.4rem 0.65rem', opacity: connLoading ? 0.7 : 1 }}
+          style={{
+            ...mvpPrimaryButtonStyle,
+            opacity: connLoading ? 0.65 : 1,
+            cursor: connLoading ? 'not-allowed' : 'pointer',
+          }}
         >
           {connLoading ? 'Refreshing…' : 'Refresh status'}
         </button>

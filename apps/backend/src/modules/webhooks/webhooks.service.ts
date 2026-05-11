@@ -71,7 +71,9 @@ export class WebhooksService {
     // Unregistered or non-connected location: acknowledge, skip processing
     if (!tenantConnection) {
       this.logger.warn(
-        `Webhook received for unregistered or inactive location: ${payload.locationId}`,
+        `Webhook skipped: no CONNECTED workspace for locationId=${payload.locationId} ` +
+          `(must exactly match tenants.ghl_location_id; if CRM works in-app but webhooks fail, compare this string ` +
+          `to Advanced → CRM Location ID — workflow customData typos like I/l or W/w are common).`,
       );
       return { success: true, duplicate: false };
     }

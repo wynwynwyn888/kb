@@ -1,7 +1,10 @@
 // Message formatter - interfaces for cleaning and bubble splitting
 
+import { normalizeLiveCustomerMarkdownForWhatsAppOutbound } from './live-customer-whatsapp-outbound.js';
+
 export { stripModelThinking } from './strip-model-thinking.js';
 export { stripCustomerFacingMeta } from './strip-customer-facing-meta.js';
+export { normalizeLiveCustomerMarkdownForWhatsAppOutbound };
 
 export interface FormatOptions {
   format: OutputFormat;
@@ -106,17 +109,7 @@ export class DefaultMessageFormatter implements MessageFormatter {
   }
 
   stripMarkdown(content: string): string {
-    // Basic markdown stripping
-    return content
-      .replace(/\*\*(.*?)\*\*/g, '$1') // bold
-      .replace(/\*(.*?)\*/g, '$1') // italic
-      .replace(/__(.*?)__/g, '$1') // underline
-      .replace(/~~(.*?)~~/g, '$1') // strikethrough
-      .replace(/`{1,3}(.*?)`{1,3}/gs, '$1') // code
-      .replace(/#{1,6}\s+(.*?)\s*$/gm, '$1') // headers
-      .replace(/\[(.*?)\]\(.*?\)/g, '$1') // links
-      .replace(/!\[(.*?)\]\(.*?\)/g, '$1') // images
-      .trim();
+    return normalizeLiveCustomerMarkdownForWhatsAppOutbound(content);
   }
 
   stripHtml(content: string): string {

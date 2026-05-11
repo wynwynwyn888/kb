@@ -387,11 +387,11 @@ describe('ReplyPlannerService', () => {
   describe('stripLiveCustomerMarkdownForOutbound', () => {
     const strip = stripLiveCustomerMarkdownForOutbound;
 
-    it('removes bold', () => {
-      expect(strip('**hello**')).toBe('hello');
+    it('normalizes markdown bold to WhatsApp single asterisk', () => {
+      expect(strip('**hello**')).toBe('*hello*');
     });
-    it('removes italic', () => {
-      expect(strip('*hello*')).toBe('hello');
+    it('preserves WhatsApp single-asterisk bold', () => {
+      expect(strip('*hello*')).toBe('*hello*');
     });
     it('removes strikethrough', () => {
       expect(strip('~~hello~~')).toBe('hello');

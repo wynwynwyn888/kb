@@ -192,7 +192,14 @@ export const NO_KB_FALLBACK_BREED_OR_SPECIES_SERVICE =
   "I can help with grooming enquiries, but I don’t have breed-specific details confirmed here. Could you share a bit more about what you need?";
 
 export const NO_KB_FALLBACK_PRICE =
-  "I don’t have confirmed pricing here. Could you let me know which service you’re asking about?";
+  'Pricing depends on the setup.\n\n' +
+  'Usually it comes down to:\n\n' +
+  '• Channels you want to connect\n' +
+  '• How many workflows are needed\n' +
+  '• Whether CRM, follow-up, and booking are included\n' +
+  '• How much customization is required\n\n' +
+  'A simple WhatsApp reply flow is different from a full CRM-connected setup.\n\n' +
+  '*Best next step:* join the webinar first, or book a quick call if you already have a use case.';
 
 export const NO_KB_FALLBACK_HOURS = "I don’t have the confirmed opening hours here.";
 

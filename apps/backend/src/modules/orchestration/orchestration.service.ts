@@ -68,6 +68,12 @@ import {
   estimateApproxTokens,
 } from '../../lib/compact-runtime-system-prompt';
 import { shouldSkipKbShortFollowUpActiveTopic } from '../../lib/short-followup-kb';
+import { WHATSAPP_OUTPUT_CONTRACT_BLOCK } from '../../lib/whatsapp-output-contract';
+import {
+  promptCompactTruncationWarnKey,
+  shouldEmitPromptCompactTruncationWarn,
+} from '../../lib/prompt-compact-truncation-warn';
+import { promptFootprintDebugEnabled } from '../../lib/production-log-flags';
 
 @Injectable()
 export class ConversationOrchestrationService {
@@ -1090,12 +1096,24 @@ export class ConversationOrchestrationService {
     const assembled = `${base}\n\n${block}${caps}`;
     const runtimePromptCharLength = assembled.length;
     const estimatedPromptTokens = estimateApproxTokens(runtimePromptCharLength);
-    this.logger.log(
-      `Runtime prompt footprint: personaLengthRaw=${tenantRaw.length} agencyPolicyLengthRaw=${agencyRaw.length} ` +
-        `personaCompactTruncated=${compact.tenantTruncated} agencyCompactTruncated=${compact.agencyTruncated} ` +
-        `runtimePromptCharLength=${runtimePromptCharLength} estimatedPromptTokens=${estimatedPromptTokens}`,
-    );
-    return assembled;
+    if (promptFootprintDebugEnabled()) {
+      this.logger.log(
+        `Runtime prompt footprint: personaLengthRaw=${tenantRaw.length} agencyPolicyLengthRaw=${agencyRaw.length} ` +
+          `personaCompactTruncated=${compact.tenantTruncated} agencyCompactTruncated=${compact.agencyTruncated} ` +
+          `runtimePromptCharLength=${runtimePromptCharLength} estimatedPromptTokens=${estimatedPromptTokens}`,
+      );
+    }
+    if (compact.tenantTruncated || compact.agencyTruncated) {
+      const warnKey = promptCompactTruncationWarnKey(input.tenantId, input.promptConfig?.id);
+      if (shouldEmitPromptCompactTruncationWarn(warnKey)) {
+        this.logger.warn(
+          `Prompt compacted/truncated; consider moving long business content into KB or shortening global prompt. ` +
+            `tenantId=${input.tenantId} promptConfigId=${input.promptConfig?.id ?? 'n/a'} ` +
+            `personaLengthRaw=${tenantRaw.length} agencyPolicyLengthRaw=${agencyRaw.length}`,
+        );
+      }
+    }
+    return `${assembled}\n\n${WHATSAPP_OUTPUT_CONTRACT_BLOCK}`;
   }
 
   private buildRoutingRequest(

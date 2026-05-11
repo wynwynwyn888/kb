@@ -19,6 +19,7 @@ import {
   coerceGhlWebhookPayload,
   summarizeGhlWebhookBodyKeys,
 } from './ghl-webhook-payload-shape';
+import { ghlWebhookLogBodyKeysEnabled } from '../../lib/production-log-flags';
 
 @ApiTags('webhooks')
 @Controller('webhooks/ghl')
@@ -39,7 +40,9 @@ export class WebhooksController {
     @Headers('x-ghl-signature') signature: string,
     @Headers('x-aisbp-smoke-immediate') aisbpSmokeImmediate?: string,
   ) {
-    this.logger.log(summarizeGhlWebhookBodyKeys(body));
+    if (ghlWebhookLogBodyKeysEnabled()) {
+      this.logger.log(summarizeGhlWebhookBodyKeys(body));
+    }
 
     let payload: GhlWebhookPayload;
     let workflowFlatRaw: Record<string, unknown> | undefined;

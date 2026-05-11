@@ -20,6 +20,11 @@ import {
   previewWithVisibleNewlines,
   stripLiveCustomerMarkdownForOutbound,
 } from '../../lib/customer-facing-live-format';
+import { outboundWhitespaceDebugEnabled } from '../../lib/production-log-flags';
+import {
+  bulletizeAdjacentShortPhraseLines,
+  tryReadabilityTwoBubbleDrafts,
+} from '../../lib/whatsapp-readability-post';
 import { polishKbSnippetForCustomer } from '../../lib/kb-faq-customer-text';
 import { applyBusinessHoursGroundingGuard } from '../../lib/business-hours-grounding-guard';
 import { applyMenuKbGroundingGuard } from '../../lib/menu-kb-grounding-guard';
@@ -567,7 +572,10 @@ export class ReplyPlannerService {
       stripCustomerFacingMeta(stripModelThinking(text)),
     );
     const prepared = prepareCustomerFacingPlainTextForOutboundSplit(stripped);
-    return packPlainTextIntoOutboundBubbles(prepared);
+    const bulletized = bulletizeAdjacentShortPhraseLines(prepared);
+    const readabilityTwo = tryReadabilityTwoBubbleDrafts(bulletized);
+    if (readabilityTwo) return readabilityTwo;
+    return packPlainTextIntoOutboundBubbles(bulletized);
   }
 
   private logLiveWhitespaceDebug(opts: {
@@ -603,7 +611,7 @@ export class ReplyPlannerService {
       opts.bubbles.length > 1 ||
       physical.length < opts.bubbles.length ||
       (opts.inboundBatchCount ?? 0) > 1;
-    if (forceLog) {
+    if (outboundWhitespaceDebugEnabled() && forceLog) {
       this.logger.log(line);
     } else {
       this.logger.debug(line);

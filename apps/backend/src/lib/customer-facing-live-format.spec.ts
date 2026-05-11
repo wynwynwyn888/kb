@@ -23,14 +23,14 @@ describe('customer-facing-live-format', () => {
     const prepared = prepareCustomerFacingPlainTextForOutboundSplit(
       stripLiveCustomerMarkdownForOutbound(raw),
     );
-    expect(prepared).toMatch(/dollars\.\n\nWould you like/);
+    expect(prepared).toMatch(/\*forty five dollars\*\.\n\nWould you like/);
   });
 
-  it('markdown stripping keeps paragraph breaks', () => {
+  it('markdown stripping keeps paragraph breaks and WhatsApp bold', () => {
     const out = stripLiveCustomerMarkdownForOutbound('Hello **there**\n\nSecond paragraph.');
-    expect(out).toContain('Hello there');
+    expect(out).toContain('Hello *there*');
     expect(out).toContain('Second paragraph.');
-    expect(out).toMatch(/there\n\nSecond/);
+    expect(out).toMatch(/\*there\*\n\nSecond/);
   });
 
   it('recommendation answer + next question keeps a blank line', () => {
@@ -45,5 +45,24 @@ describe('customer-facing-live-format', () => {
   it('normalizes excessive blank lines without removing all spacing', () => {
     const raw = 'Line one\n\n\n\n\nLine two';
     expect(normalizeExcessiveBlankLines(raw)).toBe('Line one\n\nLine two');
+  });
+
+  it('keeps existing • bullets and blank lines', () => {
+    const raw = 'Head\n\n• One\n• Two\n\nTail';
+    const out = stripLiveCustomerMarkdownForOutbound(raw);
+    expect(out).toContain('• One');
+    expect(out).toMatch(/Two\n\nTail/);
+  });
+
+  it('preserves inline WhatsApp bold with single asterisks', () => {
+    expect(stripLiveCustomerMarkdownForOutbound('The *best next step* is a call.')).toBe(
+      'The *best next step* is a call.',
+    );
+  });
+
+  it('normalizes double-asterisk bold to WhatsApp bold', () => {
+    expect(stripLiveCustomerMarkdownForOutbound('The **best next step** is a call.')).toBe(
+      'The *best next step* is a call.',
+    );
   });
 });

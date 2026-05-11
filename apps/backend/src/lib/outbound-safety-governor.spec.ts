@@ -126,9 +126,11 @@ describe('outbound-safety-governor', () => {
       noConnect(NO_KB_FALLBACK_BROAD_SERVICE);
     });
 
-    it('NO_KB_FALLBACK_PRICE asks which service instead of offering team connect', () => {
+    it('NO_KB_FALLBACK_PRICE uses safe template with factors and CTA', () => {
       noConnect(NO_KB_FALLBACK_PRICE);
-      expect(NO_KB_FALLBACK_PRICE.toLowerCase()).toContain('service');
+      expect(NO_KB_FALLBACK_PRICE.toLowerCase()).toContain('pricing depends');
+      expect(NO_KB_FALLBACK_PRICE).toMatch(/•\s+Channels you want to connect/);
+      expect(NO_KB_FALLBACK_PRICE).toMatch(/\*Best next step:\*/);
     });
 
     it('NO_KB_FALLBACK_HOURS is a plain uncertainty line', () => {

@@ -5,6 +5,8 @@
  * Drift note: FormatterService / `@aisbp/formatter` HTTP path is separate; do not assume parity.
  */
 
+import { normalizeLiveCustomerMarkdownForWhatsAppOutbound } from '@aisbp/formatter';
+
 /** Collapse 3+ consecutive newlines to 2 (one blank paragraph separator). */
 export function normalizeExcessiveBlankLines(text: string): string {
   return text.replace(/\n{3,}/g, '\n\n');
@@ -22,21 +24,11 @@ export function prepareCustomerFacingPlainTextForOutboundSplit(text: string): st
 }
 
 /**
- * Regex markdown strip for outbound (not full CommonMark). Keeps paragraph breaks; does not
- * collapse `\n\n` to `\n`.
+ * Markdown cleanup for WhatsApp outbound: preserves `*bold*`, maps `**bold**` → `*bold*`,
+ * converts line-start list markers to `•`, keeps blank lines (caller trims via prepare step).
  */
 export function stripLiveCustomerMarkdownForOutbound(text: string): string {
-  return text
-    .replace(/\*\*(.+?)\*\*/g, '$1')
-    .replace(/\*(.+?)\*/g, '$1')
-    .replace(/__(.+?)__/g, '$1')
-    .replace(/~~(.+?)~~/g, '$1')
-    .replace(/#{1,6}\s+(.+)/g, '$1')
-    .replace(/`(.+?)`/g, '$1')
-    .replace(/\[(.+?)\]\(.+?\)/g, '$1')
-    .replace(/^\s*[-*+]\s+/gm, '')
-    .replace(/^\s*\d+\.\s+/gm, '')
-    .trim();
+  return normalizeLiveCustomerMarkdownForWhatsAppOutbound(text);
 }
 
 export function newlineDebugMetrics(s: string): { newlineCount: number; doubleNewlineSeqCount: number } {

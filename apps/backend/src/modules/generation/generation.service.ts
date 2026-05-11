@@ -13,6 +13,7 @@ import type { MemoryEntry } from '../orchestration/dto';
 import type { RetrievalChunk } from '../kb/dto/retrieval.dto';
 import type { ConversationIntent } from '../conversation-policy/conversation-intent';
 import type { SelectionResolution } from '../conversation-policy/option-resolver';
+import { userRequestsFormattingPreference } from '../../lib/formatting-preference-intent';
 
 export interface GenerateDraftPolicyContext {
   latestIntent: ConversationIntent;
@@ -481,6 +482,16 @@ export class GenerationService {
         role: 'system',
         content:
           'The customer has asked the same thing multiple times. Reply with a short, polite "just to confirm" style answer — restate the key fact once; do not ignore them.',
+      });
+    }
+
+    const inboundTrim = params.incomingMessage?.trim() ?? '';
+    if (inboundTrim && userRequestsFormattingPreference(inboundTrim)) {
+      messages.push({
+        role: 'system',
+        content:
+          'Formatting preference: the customer asked for a specific reply shape (bolding, bullets, shorter text, or split messages). ' +
+          'Treat this as a normal formatting request. Briefly confirm you can use WhatsApp *bold* for important points and bullet lists for clarity — do not claim you cannot bold text here.',
       });
     }
 

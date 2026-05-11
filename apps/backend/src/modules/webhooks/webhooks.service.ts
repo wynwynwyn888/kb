@@ -30,6 +30,7 @@ import {
 } from './ghl-inbound-audio-media';
 import { safeTextPreviewForLog } from '../../lib/safe-text-preview-for-log';
 import { resolveInboundGhlWebhookTenant } from './ghl-inbound-webhook-tenant-resolution';
+import { ghlWebhookShapeDiagnosticsEnabled } from '../../lib/production-log-flags';
 
 @Injectable()
 export class WebhooksService {
@@ -220,7 +221,7 @@ export class WebhooksService {
       placeholderResolved.shapeSourceRaw,
     );
 
-    if (runInboundShapeDiagnostics) {
+    if (runInboundShapeDiagnostics && ghlWebhookShapeDiagnosticsEnabled()) {
       this.logGhlInboundNormalizeDiagnostics(payload, data, envelope, workflowFlatRaw, {
         rawMessageType: rawMessageType ?? null,
         mappedMessageType: messageType,

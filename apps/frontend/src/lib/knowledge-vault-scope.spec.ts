@@ -8,6 +8,11 @@ import {
 import type { KbDocumentRow } from './api';
 
 describe('knowledge-vault-scope', () => {
+  it('resolveSelectedVaultId returns empty when no vaults', () => {
+    expect(resolveSelectedVaultId([], '')).toBe('');
+    expect(resolveSelectedVaultId([], 'stale-id')).toBe('');
+  });
+
   it('selectDefaultVaultId prefers isDefault', () => {
     const id = selectDefaultVaultId([
       { id: 'a', isDefault: false },

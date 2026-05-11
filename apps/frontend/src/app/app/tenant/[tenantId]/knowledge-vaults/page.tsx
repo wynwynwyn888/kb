@@ -52,7 +52,9 @@ import { relativeTimeLabel } from '@/lib/datetime-display';
 const PRIMARY = '#0F62FE';
 const PAGE_BG = 'var(--aisbp-page-bg, #F8FAFC)';
 
-const NO_VAULT_EMPTY_MSG = 'Create a knowledge vault before adding knowledge.';
+const NO_VAULT_EMPTY_MSG = 'Create or select a knowledge vault before adding knowledge.';
+const NO_VAULT_YET_HEADING = 'No vault yet';
+const NO_VAULT_YET_BODY = 'Create a vault before adding FAQs, notes, or files.';
 
 function vaultListCardStyle(selected: boolean): CSSProperties {
   return {
@@ -390,7 +392,7 @@ function DocumentVaultLine({
   if (vaults.length === 0) {
     return (
       <p style={{ margin: '0.85rem 0 0', fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)', lineHeight: 1.45 }}>
-        No knowledge vaults yet. Create one in the Knowledge Vaults section above.
+        No knowledge vault yet. Create one on the Knowledge Vaults page.
       </p>
     );
   }
@@ -1688,6 +1690,8 @@ export default function SubaccountKnowledgePage() {
   }, [selectedVaultId]);
 
   const sortedVaultsForUi = useMemo(() => sortVaultsForDisplay(vaults, docs), [vaults, docs]);
+  /** No auto-created default vault on workspace signup — user creates the first vault here (or via API). */
+  const noVaultsYet = vaults.length === 0;
 
   const vaultScopeDocs = useMemo(
     () => vaultScopedDocuments(docs, selectedVaultId),
@@ -1721,7 +1725,11 @@ export default function SubaccountKnowledgePage() {
 
   const onFaqSave = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!token || !subId) return;
+    if (!token || !subId) {
+      setWriteErr('You must be signed in to save.');
+      setSaveOk('');
+      return;
+    }
     if (!selectedVaultId) {
       setWriteErr(NO_VAULT_EMPTY_MSG);
       setSaveOk('');
@@ -1761,7 +1769,11 @@ export default function SubaccountKnowledgePage() {
 
   const onRichSave = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!token || !subId) return;
+    if (!token || !subId) {
+      setWriteErr('You must be signed in to save.');
+      setSaveOk('');
+      return;
+    }
     if (!selectedVaultId) {
       setWriteErr(NO_VAULT_EMPTY_MSG);
       setSaveOk('');
@@ -1851,7 +1863,10 @@ export default function SubaccountKnowledgePage() {
     const form = e.currentTarget;
     const qel = form.elements.namedItem('kb-search-query') as HTMLInputElement | null;
     const q = (qel?.value ?? qSearch).trim();
-    if (!q) return;
+    if (!q) {
+      setSearchErr('Enter a search term.');
+      return;
+    }
     setQSearch(q);
     setSearchErr('');
     setSearching(true);
@@ -2012,10 +2027,56 @@ export default function SubaccountKnowledgePage() {
                     </Link>{' '}
                     (profile vault access) — not by this vault list selection alone.
                   </p>
-                  {vaults.length === 0 ? (
-                    <p style={{ fontSize: '0.85rem', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 0.75rem', lineHeight: 1.45 }}>
-                      {NO_VAULT_EMPTY_MSG}
-                    </p>
+                  {noVaultsYet ? (
+                    <div
+                      style={{
+                        textAlign: 'center',
+                        padding: '1.75rem 1rem 1.25rem',
+                        maxWidth: 440,
+                        margin: '0 auto',
+                      }}
+                    >
+                      <p
+                        style={{
+                          fontSize: '1.05rem',
+                          fontWeight: 800,
+                          margin: '0 0 0.5rem',
+                          color: 'var(--aisbp-text-heading, #0f172a)',
+                          letterSpacing: '-0.02em',
+                        }}
+                      >
+                        {NO_VAULT_YET_HEADING}
+                      </p>
+                      <p
+                        style={{
+                          fontSize: '0.875rem',
+                          color: 'var(--aisbp-muted, #64748b)',
+                          margin: '0 0 1.25rem',
+                          lineHeight: 1.55,
+                        }}
+                      >
+                        {NO_VAULT_YET_BODY}
+                      </p>
+                      <button
+                        type="button"
+                        disabled={vaultMutating}
+                        onClick={() => {
+                          setCreateVaultOpen(true);
+                          setCreateVaultName('');
+                          setCreateVaultDesc('');
+                          setWriteErr('');
+                          setSaveOk('');
+                        }}
+                        style={{
+                          ...mvpPrimaryButtonStyle,
+                          padding: '0.55rem 1.25rem',
+                          fontWeight: 700,
+                          fontSize: '0.9rem',
+                        }}
+                      >
+                        Create knowledge vault
+                      </button>
+                    </div>
                   ) : (
                     <div
                       style={{
@@ -2249,29 +2310,33 @@ export default function SubaccountKnowledgePage() {
                       </div>
                     </div>
                   )}
-                  <div style={{ marginTop: '1rem' }}>
-                    <button
-                      type="button"
-                      disabled={vaultMutating}
-                      onClick={() => {
-                        setCreateVaultOpen(true);
-                        setCreateVaultName('');
-                        setCreateVaultDesc('');
-                        setWriteErr('');
-                        setSaveOk('');
-                      }}
-                      style={{
-                        ...mvpSecondaryButtonStyle,
-                        padding: '0.45rem 0.85rem',
-                        fontWeight: 700,
-                        fontSize: '0.875rem',
-                      }}
-                    >
-                      + Create vault
-                    </button>
-                  </div>
+                  {!noVaultsYet ? (
+                    <div style={{ marginTop: '1rem' }}>
+                      <button
+                        type="button"
+                        disabled={vaultMutating}
+                        onClick={() => {
+                          setCreateVaultOpen(true);
+                          setCreateVaultName('');
+                          setCreateVaultDesc('');
+                          setWriteErr('');
+                          setSaveOk('');
+                        }}
+                        style={{
+                          ...mvpSecondaryButtonStyle,
+                          padding: '0.45rem 0.85rem',
+                          fontWeight: 700,
+                          fontSize: '0.875rem',
+                        }}
+                      >
+                        + Create vault
+                      </button>
+                    </div>
+                  ) : null}
                 </section>
 
+                {!noVaultsYet ? (
+                  <>
                 <h2
                   style={{
                     fontSize: '1.05rem',
@@ -2280,7 +2345,7 @@ export default function SubaccountKnowledgePage() {
                     color: 'var(--aisbp-text-heading, #0f172a)',
                   }}
                 >
-                  Add to this vault
+                  Add knowledge
                 </h2>
                 {selectedVault ? (
                   <p style={{ fontSize: '0.8125rem', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 0.85rem', lineHeight: 1.5 }}>
@@ -2481,7 +2546,7 @@ export default function SubaccountKnowledgePage() {
                       </label>
                       <button
                         type="submit"
-                        disabled={saving || !selectedVaultId}
+                        disabled={saving}
                         style={{ ...mvpPrimaryButtonStyle, width: 'fit-content' }}
                       >
                         {saving ? 'Saving…' : 'Save FAQ'}
@@ -2569,7 +2634,7 @@ export default function SubaccountKnowledgePage() {
                       </label>
                       <button
                         type="submit"
-                        disabled={saving || !selectedVaultId}
+                        disabled={saving}
                         style={{ ...mvpPrimaryButtonStyle, width: 'fit-content' }}
                       >
                         {saving ? 'Saving…' : 'Save note'}
@@ -2851,6 +2916,8 @@ export default function SubaccountKnowledgePage() {
                     </div>
                   )}
                 </section>
+                  </>
+                ) : null}
               </>
             ) : null}
 

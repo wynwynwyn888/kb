@@ -97,6 +97,7 @@ export function TenantSettingsGeneralContent() {
     (clientContactPhone && String(clientContactPhone).trim()) || (clientContactEmail && String(clientContactEmail).trim()),
   );
   const clientContactSummaryLabel = clientContactComplete ? 'Complete' : 'Missing';
+  const showClientContactInSetupSummary = isAgencyWorkspace || clientContactComplete;
 
   const onSaveContact = async () => {
     if (!token || !tenantId || !canRenameWorkspace) return;
@@ -338,14 +339,18 @@ export function TenantSettingsGeneralContent() {
                 label: 'Reply style',
                 value: replyStyleSummary,
               },
-              {
-                label: 'Client contact',
-                value: isAgencyWorkspace ? (
-                  <span style={{ color: 'var(--aisbp-muted, #64748b)' }}>N/A (agency workspace)</span>
-                ) : (
-                  <StatusPill label={clientContactSummaryLabel} tone={clientContactComplete ? 'ok' : 'warn'} />
-                ),
-              },
+              ...(showClientContactInSetupSummary
+                ? [
+                    {
+                      label: 'Client contact' as const,
+                      value: isAgencyWorkspace ? (
+                        <span style={{ color: 'var(--aisbp-muted, #64748b)' }}>N/A (agency workspace)</span>
+                      ) : (
+                        <StatusPill label={clientContactSummaryLabel} tone={clientContactComplete ? 'ok' : 'warn'} />
+                      ),
+                    },
+                  ]
+                : []),
             ]}
           />
           <div style={{ marginTop: '0.85rem', display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>

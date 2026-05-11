@@ -309,7 +309,7 @@ export function WorkspaceSwitcher() {
     <div id="ws-panel" ref={panelRef} style={panelBoxStyle(panelPos.top, panelPos.left)} role="dialog" aria-label="Switch workspace">
       {canShowAgencySwitch && inSubContext ? (
         <button type="button" style={backToAgencyAccountBtn} onClick={goAgency}>
-          Back to agency account
+          Back to Agency View
         </button>
       ) : null}
       {canShowAgencySwitch && !inSubContext && isAgencyRoute ? (

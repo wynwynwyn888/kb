@@ -1,8 +1,10 @@
 /**
  * Coalesce multiple outbound reply bubbles into one physical send when the joined body still
  * fits WhatsApp-style limits. Preserves `\n\n` between former bubbles so paragraph spacing
- * matches the Bot Test preview (which joins bubbles with blank lines) instead of separate
- * cramped message bubbles.
+ * can match a single-block preview.
+ *
+ * **Channel policy:** `OutboundSendService` skips this for `conversations.channel === WHATSAPP`
+ * unless `WHATSAPP_COALESCE_BUBBLES=true`. Other channels still call this helper by default.
  */
 
 export const WHATSAPP_SAFE_SINGLE_MESSAGE_MAX = 3800;

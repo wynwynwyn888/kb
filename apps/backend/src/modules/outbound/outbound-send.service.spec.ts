@@ -343,6 +343,155 @@ describe('OutboundSendService', () => {
         decryptSpy.mockRestore();
       }
     });
+
+    function mockSuccessfulSendReply(opts: { conversationChannel?: 'WHATSAPP' | 'SMS' | null }) {
+      const ch = opts.conversationChannel;
+      return (table: string) => {
+        const ded = mockTenantAgencyDeduction();
+        if (table === 'tenants') return ded.tenants;
+        if (table === 'agencies') return ded.agencies;
+        if (table === 'tenant_ghl_connections') {
+          return {
+            select: () => ({
+              eq: () => ({
+                eq: () => ({
+                  eq: () => ({
+                    single: async () => ({ data: { private_token_encrypted: 'cipher_blob' }, error: null }),
+                  }),
+                }),
+              }),
+            }),
+          } as never;
+        }
+        if (table === 'messages') {
+          return { insert: jestGlobal.fn(async () => ({ data: null, error: null })) } as never;
+        }
+        if (table === 'conversations') {
+          return {
+            select: () => ({
+              eq: () => ({
+                maybeSingle: async () =>
+                  ch == null
+                    ? { data: null, error: { code: 'PGRST116' } }
+                    : { data: { channel: ch }, error: null },
+              }),
+            }),
+            update: jestGlobal.fn(() => ({
+              eq: jestGlobal.fn(async () => ({ data: null, error: null })),
+            })),
+          } as never;
+        }
+        if (table === 'quota_wallets') {
+          return {
+            select: () => ({
+              eq: () => ({
+                single: async () => ({
+                  data: {
+                    id: 'w1',
+                    total_quota: 100,
+                    used_quota: 1,
+                    allow_negative_credits: false,
+                    negative_credit_limit: 0,
+                  },
+                  error: null,
+                }),
+              }),
+            }),
+            update: jestGlobal.fn(() => ({
+              eq: jestGlobal.fn(async () => ({ data: null, error: null })),
+            })),
+          } as never;
+        }
+        if (table === 'quota_ledgers') {
+          return {
+            select: () => ({
+              eq: () => ({ maybeSingle: async () => ({ data: null, error: { code: 'PGRST116' } }) }),
+            }),
+            insert: jestGlobal.fn(async () => ({ data: null, error: null })),
+          } as never;
+        }
+        return {} as never;
+      };
+    }
+
+    it('WhatsApp: sends one physical GHL message per logical bubble by default (no coalesce)', async () => {
+      const decryptSpy = jestGlobal.spyOn(encryption, 'decrypt').mockReturnValue('plain_token');
+      delete process.env['WHATSAPP_COALESCE_BUBBLES'];
+      try {
+        (mockSupabase.from as jest.Mock).mockImplementation(mockSuccessfulSendReply({ conversationChannel: 'WHATSAPP' }));
+        mockSendMessage.mockResolvedValue({ success: true, messageId: 'ghl_1' });
+
+        await service.sendReply(
+          makeParams({
+            replyPlan: makeReplyPlan({
+              bubbles: [
+                { index: 0, text: 'First bubble' },
+                { index: 1, text: 'Second bubble' },
+              ],
+            }),
+          }),
+        );
+
+        expect(mockSendMessage).toHaveBeenCalledTimes(2);
+        expect(mockSendMessage).toHaveBeenNthCalledWith(1, expect.objectContaining({ message: 'First bubble' }));
+        expect(mockSendMessage).toHaveBeenNthCalledWith(2, expect.objectContaining({ message: 'Second bubble' }));
+      } finally {
+        decryptSpy.mockRestore();
+      }
+    });
+
+    it('WhatsApp: joins bubbles when WHATSAPP_COALESCE_BUBBLES=true', async () => {
+      const decryptSpy = jestGlobal.spyOn(encryption, 'decrypt').mockReturnValue('plain_token');
+      const prev = process.env['WHATSAPP_COALESCE_BUBBLES'];
+      process.env['WHATSAPP_COALESCE_BUBBLES'] = 'true';
+      try {
+        (mockSupabase.from as jest.Mock).mockImplementation(mockSuccessfulSendReply({ conversationChannel: 'WHATSAPP' }));
+        mockSendMessage.mockResolvedValue({ success: true, messageId: 'ghl_1' });
+
+        await service.sendReply(
+          makeParams({
+            replyPlan: makeReplyPlan({
+              bubbles: [
+                { index: 0, text: 'A' },
+                { index: 1, text: 'B' },
+              ],
+            }),
+          }),
+        );
+
+        expect(mockSendMessage).toHaveBeenCalledTimes(1);
+        expect(mockSendMessage).toHaveBeenCalledWith(expect.objectContaining({ message: 'A\n\nB' }));
+      } finally {
+        decryptSpy.mockRestore();
+        if (prev === undefined) delete process.env['WHATSAPP_COALESCE_BUBBLES'];
+        else process.env['WHATSAPP_COALESCE_BUBBLES'] = prev;
+      }
+    });
+
+    it('SMS channel: still coalesces multiple bubbles into one send under the size cap', async () => {
+      const decryptSpy = jestGlobal.spyOn(encryption, 'decrypt').mockReturnValue('plain_token');
+      delete process.env['WHATSAPP_COALESCE_BUBBLES'];
+      try {
+        (mockSupabase.from as jest.Mock).mockImplementation(mockSuccessfulSendReply({ conversationChannel: 'SMS' }));
+        mockSendMessage.mockResolvedValue({ success: true, messageId: 'ghl_1' });
+
+        await service.sendReply(
+          makeParams({
+            replyPlan: makeReplyPlan({
+              bubbles: [
+                { index: 0, text: 'Part one' },
+                { index: 1, text: 'Part two' },
+              ],
+            }),
+          }),
+        );
+
+        expect(mockSendMessage).toHaveBeenCalledTimes(1);
+        expect(mockSendMessage).toHaveBeenCalledWith(expect.objectContaining({ message: 'Part one\n\nPart two' }));
+      } finally {
+        decryptSpy.mockRestore();
+      }
+    });
   });
 
   describe('checkQuotaAvailable', () => {

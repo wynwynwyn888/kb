@@ -93,7 +93,13 @@ export class OutboundSendService {
       index: b.index,
       text: sanitizeOutboundCustomerText(b.text),
     }));
-    const physicalBubbles = maybeCoalesceOutboundBubbles(sanitizedBubbles);
+    const conversationChannel = await this.loadConversationChannelForCoalesce(conversationId);
+    const whatsappCoalesceEnabled = process.env['WHATSAPP_COALESCE_BUBBLES'] === 'true';
+    const skipCoalesceForWhatsApp =
+      conversationChannel === 'WHATSAPP' && !whatsappCoalesceEnabled;
+    const physicalBubbles = skipCoalesceForWhatsApp
+      ? sanitizedBubbles
+      : maybeCoalesceOutboundBubbles(sanitizedBubbles);
     const coalesced = physicalBubbles.length < logicalBubbleCount;
 
     const creditDeductionMethod = await this.getAgencyCreditDeductionMethodForTenant(tenantId);
@@ -148,7 +154,8 @@ export class OutboundSendService {
     const preview = previewWithVisibleNewlines(payloadJoined, 500);
     this.logger.log(
       `liveOutboundWhitespace: logicalBubbleCount=${logicalBubbleCount} physicalOutboundBubbleCount=${physicalBubbles.length} ` +
-        `outboundCoalesced=${coalesced} outboundPayloadNewlines=${payM.newlineCount} outboundPayloadDoubleNl=${payM.doubleNewlineSeqCount} ` +
+        `outboundCoalesced=${coalesced} conversationChannel=${conversationChannel ?? 'unknown'} ` +
+        `whatsappCoalesceBubbles=${whatsappCoalesceEnabled} outboundPayloadNewlines=${payM.newlineCount} outboundPayloadDoubleNl=${payM.doubleNewlineSeqCount} ` +
         `finalOutboundPreview=${JSON.stringify(safePayload)}` +
         (isProductionEnv() ? '' : ` finalOutboundWhitespacePreview=${JSON.stringify(preview)}`) +
         `conversationId=${conversationId}`,
@@ -262,6 +269,27 @@ export class OutboundSendService {
       bubbleResults,
       quotaDebited,
     };
+  }
+
+  /**
+   * Outbound bubble coalesce policy uses `conversations.channel`:
+   * - WHATSAPP: do not coalesce by default (one GHL send per logical bubble). Set `WHATSAPP_COALESCE_BUBBLES=true` to restore joining.
+   * - Other channels: keep `maybeCoalesceOutboundBubbles` (e.g. SMS) unless extended later.
+   * When the row is missing or `select` fails, treat as unknown → allow coalesce (legacy behaviour).
+   */
+  private async loadConversationChannelForCoalesce(conversationId: string): Promise<string | null> {
+    try {
+      const { data, error } = await this.supabase
+        .from('conversations')
+        .select('channel')
+        .eq('id', conversationId)
+        .maybeSingle();
+      if (error || !data) return null;
+      const ch = (data as { channel?: string }).channel;
+      return typeof ch === 'string' && ch.trim() ? ch.trim().toUpperCase() : null;
+    } catch {
+      return null;
+    }
   }
 
   private async sendSingleBubble(

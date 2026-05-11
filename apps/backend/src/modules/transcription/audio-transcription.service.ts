@@ -4,7 +4,7 @@ import { formatPostgrestError } from '../../lib/format-postgrest-error';
 import { isUsableOpenAiFallbackKey } from '../../lib/ai-live-model-resolve';
 
 export const VOICE_NOTE_TRANSCRIPTION_FAILED_USER_MESSAGE =
-  "I'm sorry — I couldn't read that voice note. Please type your message or try sending it again.";
+  "I couldn't read the voice note clearly. Could you send it again or type the key point?";
 
 /** Persisted inbound text when GHL sends an audio/voice placeholder but no downloadable media URL. */
 export const VOICE_INBOUND_PLACEHOLDER_NO_MEDIA_USER_MESSAGE =

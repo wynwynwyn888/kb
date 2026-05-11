@@ -157,7 +157,11 @@ describe('ghl-inbound-audio-media', () => {
 
     it('maps legacy unsupported phrases to UNSUPPORTED', () => {
       expect(classifyGhlAudioPlaceholderBody('This Message type is not supported')).toBe('UNSUPPORTED');
-      expect(classifyGhlAudioPlaceholderBody('voice message')).toBe('UNSUPPORTED');
+    });
+
+    it('treats WhatsApp-style "Voice message" / "Audio message" labels as voice/audio placeholders', () => {
+      expect(classifyGhlAudioPlaceholderBody('voice message')).toBe('VOICE');
+      expect(classifyGhlAudioPlaceholderBody('Audio Message')).toBe('AUDIO');
     });
   });
 

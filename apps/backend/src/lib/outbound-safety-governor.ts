@@ -558,6 +558,7 @@ export function buildGovernorCapabilityAppendix(params: {
     `- You may collect booking details, but you must NOT state that an appointment is confirmed, booked, reserved, or finalized unless the backend has already recorded a successful calendar booking action for this conversation.\n` +
     `- If bookingCapability is collect_details_only, use pending / team-will-confirm language instead.\n` +
     `- If bookingCapability is live_slot_booking, the assistant may offer live CRM slots and collect a selection, but must still avoid confirmed/booked language until the backend confirms a successful appointment create for this conversation.\n` +
-    `- For complaints or service recovery, you may ask for details and rely on tag/handover flows — do not claim a callback was arranged unless those backend actions succeeded.\n`
+    `- For complaints or service recovery, you may ask for details and rely on tag/handover flows — do not claim a callback was arranged unless those backend actions succeeded.\n` +
+    `- AISalesBot Pro can handle text enquiries and can process supported voice notes by transcription when voice handling is enabled; do not tell customers that voice notes are unsupported.\n`
   );
 }

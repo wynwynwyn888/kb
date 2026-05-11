@@ -206,6 +206,35 @@ export class InboundMessageProcessor extends WorkerHost {
         },
       });
 
+      const vm = resolved.voiceMetadata as Record<string, unknown>;
+      const voiceDetected =
+        Boolean(vm['inboundVoiceNote']) ||
+        ['audio', 'voice'].includes(String(messageType ?? '').toLowerCase()) ||
+        Boolean(voiceInboundAudioPlaceholderWithoutMediaUrl) ||
+        Boolean(voiceInboundNeedsTranscribe);
+      const transcriptionAttempted = Object.keys(vm).length > 0;
+      const transcriptionSucceeded = vm['voiceTranscriptionStatus'] === 'succeeded';
+      const transcriptCharLength =
+        transcriptionSucceeded && typeof resolved.content === 'string' ? resolved.content.length : null;
+      const transcriptionFailureReason =
+        transcriptionSucceeded === true
+          ? null
+          : ((vm['voiceRetrievalFailureReason'] ?? vm['voiceTranscriptionStatus']) as string | null) ?? null;
+      if (voiceDetected || transcriptionAttempted) {
+        this.logger.log(
+          JSON.stringify({
+            inboundVoiceTelemetry: {
+              messageType,
+              voiceDetected,
+              transcriptionAttempted,
+              transcriptionSucceeded,
+              transcriptCharLength,
+              transcriptionFailureReason,
+            },
+          }),
+        );
+      }
+
       this.logger.log(
         `Inbound message stored: conversationId=${conversation.id}, messageType=${resolved.persistContentType}`,
       );
@@ -426,12 +455,22 @@ export class InboundMessageProcessor extends WorkerHost {
             inboundVoiceNote: true,
             voiceTranscriptionStatus: 'succeeded',
             voiceRecordingFetchedFromGhl: true,
-              voiceRetrievalMethod: 'ghl_recording_fetch_direct',
+            voiceRetrievalMethod: 'ghl_recording_fetch_direct',
             voiceMediaBytes: tr.mediaBytes,
             voiceMediaContentType: tr.contentType,
           },
         };
       }
+      return {
+        content: VOICE_NOTE_TRANSCRIPTION_FAILED_USER_MESSAGE,
+        persistContentType: 'text',
+        voiceMetadata: {
+          inboundVoiceNote: true,
+          voiceTranscriptionStatus: 'failed',
+          voiceRetrievalMethod: 'ghl_recording_fetch_direct',
+          voiceRetrievalFailureReason: tr.failureReason,
+        },
+      };
     }
 
     if (
@@ -494,12 +533,12 @@ export class InboundMessageProcessor extends WorkerHost {
             }),
           );
           return {
-            content: job.messageContent,
+            content: VOICE_NOTE_TRANSCRIPTION_FAILED_USER_MESSAGE,
             persistContentType: 'text',
             voiceMetadata: {
               inboundVoiceNote: true,
               voiceInboundAudioPlaceholderWithoutMediaUrl: true,
-              voiceTranscriptionStatus: 'media_url_missing',
+              voiceTranscriptionStatus: 'failed',
               voiceRetrievalMethod: 'ghl_message_history_direct_media_url',
               voiceDiscoveredMessageId: Boolean(discovered.messageId),
               voiceDiscoveredConversationId: true,
@@ -546,12 +585,12 @@ export class InboundMessageProcessor extends WorkerHost {
           };
         }
         return {
-          content: job.messageContent,
+          content: VOICE_NOTE_TRANSCRIPTION_FAILED_USER_MESSAGE,
           persistContentType: 'text',
           voiceMetadata: {
             inboundVoiceNote: true,
             voiceInboundAudioPlaceholderWithoutMediaUrl: true,
-            voiceTranscriptionStatus: 'media_url_missing',
+            voiceTranscriptionStatus: 'failed',
             voiceRetrievalMethod: 'ghl_message_discovery_recording_fetch',
             voiceDiscoveredMessageId: true,
             voiceDiscoveredConversationId: true,
@@ -675,12 +714,12 @@ export class InboundMessageProcessor extends WorkerHost {
           }),
         );
         return {
-          content: job.messageContent,
+          content: VOICE_NOTE_TRANSCRIPTION_FAILED_USER_MESSAGE,
           persistContentType: 'text',
           voiceMetadata: {
             inboundVoiceNote: true,
             voiceInboundAudioPlaceholderWithoutMediaUrl: true,
-            voiceTranscriptionStatus: 'media_url_missing',
+            voiceTranscriptionStatus: 'failed',
             voiceRetrievalMethod: 'ghl_message_history_direct_media_url',
             voiceDiscoveredConversationId: true,
             voiceDiscoveredMessageId: Boolean(discoveredMsg.messageId),
@@ -731,12 +770,12 @@ export class InboundMessageProcessor extends WorkerHost {
       }
 
       return {
-        content: job.messageContent,
+        content: VOICE_NOTE_TRANSCRIPTION_FAILED_USER_MESSAGE,
         persistContentType: 'text',
         voiceMetadata: {
           inboundVoiceNote: true,
           voiceInboundAudioPlaceholderWithoutMediaUrl: true,
-          voiceTranscriptionStatus: 'media_url_missing',
+          voiceTranscriptionStatus: 'failed',
           voiceRetrievalMethod:
             'ghl_conversation_discovery_message_discovery_recording_fetch',
           voiceDiscoveredConversationId: true,

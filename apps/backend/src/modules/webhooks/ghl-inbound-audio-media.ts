@@ -93,8 +93,6 @@ function isGhlUnsupportedPlaceholderPhrase(s: string): boolean {
   return (
     /\bthis message type is not supported\b/i.test(s) ||
     /\bmessage type is not supported\b/i.test(s) ||
-    /\bvoice message\b/i.test(s) ||
-    /\baudio message\b/i.test(s) ||
     /\bunsupported message\b/i.test(s) ||
     /\bunsupported audio\b/i.test(s)
   );
@@ -136,6 +134,15 @@ export function classifyGhlAudioPlaceholderBody(value: unknown): GhlAudioPlaceho
   }
   if (core === 'voice') {
     return 'VOICE';
+  }
+
+  // WhatsApp / GHL often send the literal labels "Voice message" / "Audio message" with no URL.
+  const peeledLower = peeled.toLowerCase().trim();
+  if (peeledLower === 'voice message') {
+    return 'VOICE';
+  }
+  if (peeledLower === 'audio message') {
+    return 'AUDIO';
   }
 
   if (isGhlUnsupportedPlaceholderPhrase(n) || isGhlUnsupportedPlaceholderPhrase(peeled)) {

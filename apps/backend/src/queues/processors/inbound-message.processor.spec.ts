@@ -172,6 +172,45 @@ function makeConversationsTableMock(externalIdLookup: { id: string } | null) {
   };
 }
 
+/** Row returned by `tenants` lookup after `tenant_ghl_connections` match — must satisfy `tryConnectionRow` (bot on, not paused). */
+const DEFAULT_TENANT_ROW_FOR_INBOUND_RESOLUTION = {
+  id: 'tenant-1',
+  ghl_location_id: 'loc_1',
+  bot_enabled: true,
+  handover_paused: false,
+  name: 'Spec tenant',
+  is_agency_workspace: false,
+} as const;
+
+/**
+ * Chained mock for `resolveInboundGhlWebhookTenant`: `.select().eq('ghl_location_id', …).eq('status', 'CONNECTED')`.
+ */
+function makeTenantGhlConnectionsTableMock() {
+  return {
+    select: () => ({
+      eq: (col: string, val: unknown) => {
+        if (col !== 'ghl_location_id') {
+          return {
+            eq: async () => ({ data: [], error: null }),
+          };
+        }
+        const location = String(val);
+        return {
+          eq: async (_c2: string, status: string) => {
+            if (status !== 'CONNECTED') {
+              return { data: [], error: null };
+            }
+            return {
+              data: [{ tenant_id: 'tenant-1', ghl_location_id: location, status: 'CONNECTED' }],
+              error: null,
+            };
+          },
+        };
+      },
+    }),
+  };
+}
+
 describe('InboundMessageProcessor', () => {
   let processor: InboundMessageProcessor;
 
@@ -220,11 +259,14 @@ describe('InboundMessageProcessor', () => {
 
   it('persist stores inbound and schedules orchestrate with default debounce delay and versioned jobId', async () => {
     mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'tenant_ghl_connections') {
+        return makeTenantGhlConnectionsTableMock();
+      }
       if (table === 'tenants') {
         return {
           select: () => ({
             eq: () => ({
-              single: async () => ({ data: { id: 'tenant-1' }, error: null }),
+              single: async () => ({ data: { ...DEFAULT_TENANT_ROW_FOR_INBOUND_RESOLUTION }, error: null }),
             }),
           }),
         };
@@ -265,14 +307,59 @@ describe('InboundMessageProcessor', () => {
     expect(orchestrate).not.toHaveBeenCalled();
   });
 
-  it('persist schedules orchestrate delay from AISBP_INBOUND_DEBOUNCE_MS when set', async () => {
-    process.env[INBOUND_DEBOUNCE_ENV_KEY] = '4300';
+  it('persist: resolvedTenantId skips querying tenant_ghl_connections', async () => {
+    let tenantGhlFromCalls = 0;
     mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'tenant_ghl_connections') {
+        tenantGhlFromCalls++;
+        return makeTenantGhlConnectionsTableMock();
+      }
       if (table === 'tenants') {
         return {
           select: () => ({
             eq: () => ({
-              single: async () => ({ data: { id: 'tenant-1' }, error: null }),
+              single: async () => ({ data: { ...DEFAULT_TENANT_ROW_FOR_INBOUND_RESOLUTION }, error: null }),
+            }),
+          }),
+        };
+      }
+      if (table === 'conversations') {
+        return makeConversationsTableMock({ id: CONV_ID });
+      }
+      if (table === 'messages') {
+        return { insert: () => ({ error: null }) };
+      }
+      return {} as never;
+    });
+
+    await processor.process(
+      makeJob('persist', {
+        locationId: 'loc_1',
+        ghlConversationId: 'ghl_conv_1',
+        ghlContactId: 'ct_1',
+        messageContent: 'Hello',
+        messageType: 'text',
+        timestamp: '2026-01-01T00:00:00Z',
+        smokeImmediate: false,
+        resolvedTenantId: 'tenant-1',
+      }),
+    );
+
+    expect(tenantGhlFromCalls).toBe(0);
+    expect(mockInboundQueueAdd).toHaveBeenCalled();
+  });
+
+  it('persist schedules orchestrate delay from AISBP_INBOUND_DEBOUNCE_MS when set', async () => {
+    process.env[INBOUND_DEBOUNCE_ENV_KEY] = '4300';
+    mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'tenant_ghl_connections') {
+        return makeTenantGhlConnectionsTableMock();
+      }
+      if (table === 'tenants') {
+        return {
+          select: () => ({
+            eq: () => ({
+              single: async () => ({ data: { ...DEFAULT_TENANT_ROW_FOR_INBOUND_RESOLUTION }, error: null }),
             }),
           }),
         };
@@ -308,11 +395,14 @@ describe('InboundMessageProcessor', () => {
   it('persist without provider conversationId reuses the same row by tenant+channel+contact', async () => {
     let createCalls = 0;
     mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'tenant_ghl_connections') {
+        return makeTenantGhlConnectionsTableMock();
+      }
       if (table === 'tenants') {
         return {
           select: () => ({
             eq: () => ({
-              single: async () => ({ data: { id: 'tenant-1' }, error: null }),
+              single: async () => ({ data: { ...DEFAULT_TENANT_ROW_FOR_INBOUND_RESOLUTION }, error: null }),
             }),
           }),
         };
@@ -384,6 +474,9 @@ describe('InboundMessageProcessor', () => {
 
   it('orchestrate skips when conversation debounce version advanced (stale job)', async () => {
     mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'tenant_ghl_connections') {
+        return makeTenantGhlConnectionsTableMock();
+      }
       if (table === 'conversations') {
         return {
           select: () => ({
@@ -415,6 +508,9 @@ describe('InboundMessageProcessor', () => {
 
   it('orchestrate runs pipeline when version matches and passes recent inbound batch', async () => {
     mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'tenant_ghl_connections') {
+        return makeTenantGhlConnectionsTableMock();
+      }
       if (table === 'conversations') {
         return {
           select: () => ({
@@ -475,6 +571,9 @@ describe('InboundMessageProcessor', () => {
       guards: { final: 'SKIP_HANDOVER_ACTIVE', guards: [] },
     } as never);
     mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'tenant_ghl_connections') {
+        return makeTenantGhlConnectionsTableMock();
+      }
       if (table === 'conversations') {
         return {
           select: () => ({
@@ -543,6 +642,9 @@ describe('InboundMessageProcessor', () => {
       contactMatchedWhitelist: true,
     });
     mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'tenant_ghl_connections') {
+        return makeTenantGhlConnectionsTableMock();
+      }
       if (table === 'conversations') {
         return {
           select: () => ({
@@ -602,6 +704,9 @@ describe('InboundMessageProcessor', () => {
       contactMatchedWhitelist: true,
     });
     mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'tenant_ghl_connections') {
+        return makeTenantGhlConnectionsTableMock();
+      }
       if (table === 'conversations') {
         return {
           select: () => ({
@@ -652,6 +757,9 @@ describe('InboundMessageProcessor', () => {
       contactMatchedWhitelist: true,
     });
     mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'tenant_ghl_connections') {
+        return makeTenantGhlConnectionsTableMock();
+      }
       if (table === 'conversations') {
         return {
           select: () => ({
@@ -701,6 +809,9 @@ describe('InboundMessageProcessor', () => {
       contactMatchedWhitelist: true,
     });
     mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'tenant_ghl_connections') {
+        return makeTenantGhlConnectionsTableMock();
+      }
       if (table === 'conversations') {
         return {
           select: () => ({
@@ -757,6 +868,9 @@ describe('InboundMessageProcessor', () => {
       contactMatchedWhitelist: true,
     });
     mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'tenant_ghl_connections') {
+        return makeTenantGhlConnectionsTableMock();
+      }
       if (table === 'conversations') {
         return {
           select: () => ({
@@ -806,11 +920,14 @@ describe('InboundMessageProcessor', () => {
   it('persist: audio with media URL transcribes and stores transcript as message text', async () => {
     let inserted: Record<string, unknown> | null = null;
     mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'tenant_ghl_connections') {
+        return makeTenantGhlConnectionsTableMock();
+      }
       if (table === 'tenants') {
         return {
           select: () => ({
             eq: () => ({
-              single: async () => ({ data: { id: 'tenant-1' }, error: null }),
+              single: async () => ({ data: { ...DEFAULT_TENANT_ROW_FOR_INBOUND_RESOLUTION }, error: null }),
             }),
           }),
         };
@@ -866,11 +983,14 @@ describe('InboundMessageProcessor', () => {
   it('persist: empty body + attachment path transcribes when voice flag is set', async () => {
     let inserted: Record<string, unknown> | null = null;
     mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'tenant_ghl_connections') {
+        return makeTenantGhlConnectionsTableMock();
+      }
       if (table === 'tenants') {
         return {
           select: () => ({
             eq: () => ({
-              single: async () => ({ data: { id: 'tenant-1' }, error: null }),
+              single: async () => ({ data: { ...DEFAULT_TENANT_ROW_FOR_INBOUND_RESOLUTION }, error: null }),
             }),
           }),
         };
@@ -910,11 +1030,14 @@ describe('InboundMessageProcessor', () => {
   it('persist: transcription failure stores safe fallback text', async () => {
     let inserted: Record<string, unknown> | null = null;
     mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'tenant_ghl_connections') {
+        return makeTenantGhlConnectionsTableMock();
+      }
       if (table === 'tenants') {
         return {
           select: () => ({
             eq: () => ({
-              single: async () => ({ data: { id: 'tenant-1' }, error: null }),
+              single: async () => ({ data: { ...DEFAULT_TENANT_ROW_FOR_INBOUND_RESOLUTION }, error: null }),
             }),
           }),
         };
@@ -959,11 +1082,14 @@ describe('InboundMessageProcessor', () => {
 
   it('persist: normal text inbound does not call transcription', async () => {
     mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'tenant_ghl_connections') {
+        return makeTenantGhlConnectionsTableMock();
+      }
       if (table === 'tenants') {
         return {
           select: () => ({
             eq: () => ({
-              single: async () => ({ data: { id: 'tenant-1' }, error: null }),
+              single: async () => ({ data: { ...DEFAULT_TENANT_ROW_FOR_INBOUND_RESOLUTION }, error: null }),
             }),
           }),
         };
@@ -995,11 +1121,14 @@ describe('InboundMessageProcessor', () => {
   it('persist: GHL placeholder-without-media skips transcription and sets metadata', async () => {
     let inserted: Record<string, unknown> | null = null;
     mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'tenant_ghl_connections') {
+        return makeTenantGhlConnectionsTableMock();
+      }
       if (table === 'tenants') {
         return {
           select: () => ({
             eq: () => ({
-              single: async () => ({ data: { id: 'tenant-1' }, error: null }),
+              single: async () => ({ data: { ...DEFAULT_TENANT_ROW_FOR_INBOUND_RESOLUTION }, error: null }),
             }),
           }),
         };
@@ -1058,11 +1187,14 @@ describe('InboundMessageProcessor', () => {
     });
 
     mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'tenant_ghl_connections') {
+        return makeTenantGhlConnectionsTableMock();
+      }
       if (table === 'tenants') {
         return {
           select: () => ({
             eq: () => ({
-              single: async () => ({ data: { id: 'tenant-1' }, error: null }),
+              single: async () => ({ data: { ...DEFAULT_TENANT_ROW_FOR_INBOUND_RESOLUTION }, error: null }),
             }),
           }),
         };
@@ -1118,6 +1250,76 @@ describe('InboundMessageProcessor', () => {
     }
   });
 
+  it('persist: recording fetch by message id failure returns safe fallback (not placeholder)', async () => {
+    const prev = process.env['GHL_VOICE_FETCH_RECORDING_BY_MESSAGE_ID'];
+    process.env['GHL_VOICE_FETCH_RECORDING_BY_MESSAGE_ID'] = 'true';
+
+    let inserted: Record<string, unknown> | null = null;
+    mockGhlVoiceRecordingFetch.tryFetchRecording.mockResolvedValue({
+      ok: false as const,
+      reason: 'http_404',
+    });
+
+    mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'tenant_ghl_connections') {
+        return makeTenantGhlConnectionsTableMock();
+      }
+      if (table === 'tenants') {
+        return {
+          select: () => ({
+            eq: () => ({
+              single: async () => ({ data: { ...DEFAULT_TENANT_ROW_FOR_INBOUND_RESOLUTION }, error: null }),
+            }),
+          }),
+        };
+      }
+      if (table === 'conversations') {
+        return makeConversationsTableMock({ id: CONV_ID });
+      }
+      if (table === 'messages') {
+        return {
+          insert: (row: Record<string, unknown>) => {
+            inserted = row;
+            return { error: null };
+          },
+        };
+      }
+      return {} as never;
+    });
+
+    try {
+      await processor.process(
+        makeJob('persist', {
+          locationId: 'loc_1',
+          ghlConversationId: 'ghl_conv_1',
+          ghlContactId: 'ct_1',
+          messageContent: VOICE_INBOUND_PLACEHOLDER_NO_MEDIA_USER_MESSAGE,
+          messageType: 'text',
+          timestamp: '2026-01-01T00:00:00Z',
+          smokeImmediate: false,
+          voiceInboundNeedsTranscribe: false,
+          voiceInboundAudioPlaceholderWithoutMediaUrl: true,
+          voiceInboundPlaceholderRawBody: 'VOICE',
+          voiceInboundPlaceholderKind: 'VOICE',
+          ghlInboundMessageId: 'ghl_msg_rec_fail',
+        }),
+      );
+
+      expect(mockGhlVoiceRecordingFetch.tryFetchRecording).toHaveBeenCalled();
+      expect(mockAudioTranscription.transcribeAudioBuffer).not.toHaveBeenCalled();
+      expect(inserted?.['content']).toBe(VOICE_NOTE_TRANSCRIPTION_FAILED_USER_MESSAGE);
+      const meta = inserted?.['metadata'] as Record<string, unknown> | undefined;
+      expect(meta?.['voiceTranscriptionStatus']).toBe('failed');
+      expect(meta?.['voiceRetrievalFailureReason']).toBe('http_404');
+    } finally {
+      if (prev === undefined) {
+        delete process.env['GHL_VOICE_FETCH_RECORDING_BY_MESSAGE_ID'];
+      } else {
+        process.env['GHL_VOICE_FETCH_RECORDING_BY_MESSAGE_ID'] = prev;
+      }
+    }
+  });
+
   it('persist: Phase 1C discovery + recording + transcribe when webhook has no messageId', async () => {
     process.env['GHL_VOICE_DISCOVER_MESSAGE_ID'] = 'true';
     process.env['GHL_VOICE_DISCOVER_DELAY_MS'] = '0';
@@ -1142,11 +1344,14 @@ describe('InboundMessageProcessor', () => {
     });
 
     mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'tenant_ghl_connections') {
+        return makeTenantGhlConnectionsTableMock();
+      }
       if (table === 'tenants') {
         return {
           select: () => ({
             eq: () => ({
-              single: async () => ({ data: { id: 'tenant-1' }, error: null }),
+              single: async () => ({ data: { ...DEFAULT_TENANT_ROW_FOR_INBOUND_RESOLUTION }, error: null }),
             }),
           }),
         };
@@ -1213,11 +1418,14 @@ describe('InboundMessageProcessor', () => {
     });
 
     mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'tenant_ghl_connections') {
+        return makeTenantGhlConnectionsTableMock();
+      }
       if (table === 'tenants') {
         return {
           select: () => ({
             eq: () => ({
-              single: async () => ({ data: { id: 'tenant-1' }, error: null }),
+              single: async () => ({ data: { ...DEFAULT_TENANT_ROW_FOR_INBOUND_RESOLUTION }, error: null }),
             }),
           }),
         };
@@ -1275,11 +1483,14 @@ describe('InboundMessageProcessor', () => {
     });
 
     mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'tenant_ghl_connections') {
+        return makeTenantGhlConnectionsTableMock();
+      }
       if (table === 'tenants') {
         return {
           select: () => ({
             eq: () => ({
-              single: async () => ({ data: { id: 'tenant-1' }, error: null }),
+              single: async () => ({ data: { ...DEFAULT_TENANT_ROW_FOR_INBOUND_RESOLUTION }, error: null }),
             }),
           }),
         };
@@ -1315,9 +1526,10 @@ describe('InboundMessageProcessor', () => {
     );
 
     const meta = inserted?.['metadata'] as Record<string, unknown> | undefined;
+    expect(inserted?.['content']).toBe(VOICE_NOTE_TRANSCRIPTION_FAILED_USER_MESSAGE);
     expect(meta?.['voiceDiscoveredMessageId']).toBe(true);
     expect(meta?.['voiceRetrievalFailureReason']).toBe('http_404');
-    expect(meta?.['voiceTranscriptionStatus']).toBe('media_url_missing');
+    expect(meta?.['voiceTranscriptionStatus']).toBe('failed');
   });
 
   it('persist: discovery id but recording 422 — voiceRetrievalFailureReason recording_fetch_http_422', async () => {
@@ -1337,11 +1549,14 @@ describe('InboundMessageProcessor', () => {
 
     let inserted: Record<string, unknown> | null = null;
     mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'tenant_ghl_connections') {
+        return makeTenantGhlConnectionsTableMock();
+      }
       if (table === 'tenants') {
         return {
           select: () => ({
             eq: () => ({
-              single: async () => ({ data: { id: 'tenant-1' }, error: null }),
+              single: async () => ({ data: { ...DEFAULT_TENANT_ROW_FOR_INBOUND_RESOLUTION }, error: null }),
             }),
           }),
         };
@@ -1377,19 +1592,23 @@ describe('InboundMessageProcessor', () => {
     );
 
     const meta = inserted?.['metadata'] as Record<string, unknown> | undefined;
+    expect(inserted?.['content']).toBe(VOICE_NOTE_TRANSCRIPTION_FAILED_USER_MESSAGE);
     expect(meta?.['voiceRetrievalFailureReason']).toBe('recording_fetch_http_422');
-    expect(meta?.['voiceTranscriptionStatus']).toBe('media_url_missing');
+    expect(meta?.['voiceTranscriptionStatus']).toBe('failed');
   });
 
   it('persist: normal text does not run message-id discovery', async () => {
     process.env['GHL_VOICE_DISCOVER_MESSAGE_ID'] = 'true';
 
     mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'tenant_ghl_connections') {
+        return makeTenantGhlConnectionsTableMock();
+      }
       if (table === 'tenants') {
         return {
           select: () => ({
             eq: () => ({
-              single: async () => ({ data: { id: 'tenant-1' }, error: null }),
+              single: async () => ({ data: { ...DEFAULT_TENANT_ROW_FOR_INBOUND_RESOLUTION }, error: null }),
             }),
           }),
         };
@@ -1449,11 +1668,14 @@ describe('InboundMessageProcessor', () => {
     });
 
     mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'tenant_ghl_connections') {
+        return makeTenantGhlConnectionsTableMock();
+      }
       if (table === 'tenants') {
         return {
           select: () => ({
             eq: () => ({
-              single: async () => ({ data: { id: 'tenant-1' }, error: null }),
+              single: async () => ({ data: { ...DEFAULT_TENANT_ROW_FOR_INBOUND_RESOLUTION }, error: null }),
             }),
           }),
         };
@@ -1537,11 +1759,14 @@ describe('InboundMessageProcessor', () => {
     });
 
     mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'tenant_ghl_connections') {
+        return makeTenantGhlConnectionsTableMock();
+      }
       if (table === 'tenants') {
         return {
           select: () => ({
             eq: () => ({
-              single: async () => ({ data: { id: 'tenant-1' }, error: null }),
+              single: async () => ({ data: { ...DEFAULT_TENANT_ROW_FOR_INBOUND_RESOLUTION }, error: null }),
             }),
           }),
         };
@@ -1587,6 +1812,77 @@ describe('InboundMessageProcessor', () => {
     expect(meta?.['voiceDiscoveredMessageId']).toBe(true);
   });
 
+  it('persist: discovery direct media URL but transcribeRemoteMedia fails — safe fallback', async () => {
+    process.env['GHL_VOICE_DISCOVER_CONVERSATION_ID'] = 'true';
+    process.env['GHL_VOICE_DISCOVER_MESSAGE_ID'] = 'true';
+    process.env['GHL_VOICE_DISCOVER_DELAY_MS'] = '0';
+
+    let inserted: Record<string, unknown> | null = null;
+    mockGhlVoiceConversationDiscovery.discoverConversationIdByContact.mockResolvedValue({
+      ok: true,
+      conversationId: 'disc_conv_txfail',
+      candidateCount: 1,
+    });
+    mockGhlVoiceMessageDiscovery.discoverVoicePlaceholderMessageId.mockResolvedValue({
+      ok: true,
+      messageId: 'disc_msg_txfail',
+      audioMediaUrl: 'https://storage.googleapis.com/stark-media/p/fail.mp3',
+      candidateReason: 'inbound_with_direct_audio_url',
+      candidateCount: 1,
+    });
+    mockAudioTranscription.transcribeRemoteMedia.mockResolvedValue({
+      ok: false as const,
+      errorCode: 'openai_500',
+      userFacingFallback: true,
+    });
+
+    mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'tenant_ghl_connections') {
+        return makeTenantGhlConnectionsTableMock();
+      }
+      if (table === 'tenants') {
+        return {
+          select: () => ({
+            eq: () => ({
+              single: async () => ({ data: { ...DEFAULT_TENANT_ROW_FOR_INBOUND_RESOLUTION }, error: null }),
+            }),
+          }),
+        };
+      }
+      if (table === 'conversations') return makeConversationsTableMock({ id: CONV_ID });
+      if (table === 'messages') {
+        return {
+          insert: (row: Record<string, unknown>) => {
+            inserted = row;
+            return { error: null };
+          },
+        };
+      }
+      return {} as never;
+    });
+
+    await processor.process(
+      makeJob('persist', {
+        locationId: 'loc_1',
+        ghlConversationId: '',
+        ghlContactId: 'ct_1',
+        messageContent: VOICE_INBOUND_PLACEHOLDER_NO_MEDIA_USER_MESSAGE,
+        messageType: 'text',
+        timestamp: '2026-01-01T00:00:00Z',
+        smokeImmediate: false,
+        voiceInboundNeedsTranscribe: false,
+        voiceInboundAudioPlaceholderWithoutMediaUrl: true,
+        voiceInboundPlaceholderKind: 'AUDIO',
+      }),
+    );
+
+    expect(mockAudioTranscription.transcribeRemoteMedia).toHaveBeenCalled();
+    expect(inserted?.['content']).toBe(VOICE_NOTE_TRANSCRIPTION_FAILED_USER_MESSAGE);
+    const meta = inserted?.['metadata'] as Record<string, unknown> | undefined;
+    expect(meta?.['voiceTranscriptionStatus']).toBe('failed');
+    expect(meta?.['voiceRetrievalFailureReason']).toBe('transcription_failed');
+  });
+
   it('persist: conversation discovery none -> fallback with conversation_id_not_found', async () => {
     process.env['GHL_VOICE_DISCOVER_CONVERSATION_ID'] = 'true';
     process.env['GHL_VOICE_DISCOVER_MESSAGE_ID'] = 'true';
@@ -1600,11 +1896,14 @@ describe('InboundMessageProcessor', () => {
     });
 
     mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'tenant_ghl_connections') {
+        return makeTenantGhlConnectionsTableMock();
+      }
       if (table === 'tenants') {
         return {
           select: () => ({
             eq: () => ({
-              single: async () => ({ data: { id: 'tenant-1' }, error: null }),
+              single: async () => ({ data: { ...DEFAULT_TENANT_ROW_FOR_INBOUND_RESOLUTION }, error: null }),
             }),
           }),
         };
@@ -1656,11 +1955,14 @@ describe('InboundMessageProcessor', () => {
     });
 
     mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'tenant_ghl_connections') {
+        return makeTenantGhlConnectionsTableMock();
+      }
       if (table === 'tenants') {
         return {
           select: () => ({
             eq: () => ({
-              single: async () => ({ data: { id: 'tenant-1' }, error: null }),
+              single: async () => ({ data: { ...DEFAULT_TENANT_ROW_FOR_INBOUND_RESOLUTION }, error: null }),
             }),
           }),
         };
@@ -1709,11 +2011,14 @@ describe('InboundMessageProcessor', () => {
     });
 
     mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'tenant_ghl_connections') {
+        return makeTenantGhlConnectionsTableMock();
+      }
       if (table === 'tenants') {
         return {
           select: () => ({
             eq: () => ({
-              single: async () => ({ data: { id: 'tenant-1' }, error: null }),
+              single: async () => ({ data: { ...DEFAULT_TENANT_ROW_FOR_INBOUND_RESOLUTION }, error: null }),
             }),
           }),
         };
@@ -1756,11 +2061,14 @@ describe('InboundMessageProcessor', () => {
     process.env['GHL_VOICE_DISCOVER_DELAY_MS'] = '0';
 
     mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'tenant_ghl_connections') {
+        return makeTenantGhlConnectionsTableMock();
+      }
       if (table === 'tenants') {
         return {
           select: () => ({
             eq: () => ({
-              single: async () => ({ data: { id: 'tenant-1' }, error: null }),
+              single: async () => ({ data: { ...DEFAULT_TENANT_ROW_FOR_INBOUND_RESOLUTION }, error: null }),
             }),
           }),
         };
@@ -1794,11 +2102,14 @@ describe('InboundMessageProcessor', () => {
     process.env['GHL_VOICE_DISCOVER_DELAY_MS'] = '0';
 
     mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'tenant_ghl_connections') {
+        return makeTenantGhlConnectionsTableMock();
+      }
       if (table === 'tenants') {
         return {
           select: () => ({
             eq: () => ({
-              single: async () => ({ data: { id: 'tenant-1' }, error: null }),
+              single: async () => ({ data: { ...DEFAULT_TENANT_ROW_FOR_INBOUND_RESOLUTION }, error: null }),
             }),
           }),
         };
@@ -1836,11 +2147,14 @@ describe('InboundMessageProcessor', () => {
       contentType: 'audio/mpeg',
     });
     mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'tenant_ghl_connections') {
+        return makeTenantGhlConnectionsTableMock();
+      }
       if (table === 'tenants') {
         return {
           select: () => ({
             eq: () => ({
-              single: async () => ({ data: { id: 'tenant-1' }, error: null }),
+              single: async () => ({ data: { ...DEFAULT_TENANT_ROW_FOR_INBOUND_RESOLUTION }, error: null }),
             }),
           }),
         };
@@ -1899,11 +2213,14 @@ describe('InboundMessageProcessor', () => {
     });
 
     mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'tenant_ghl_connections') {
+        return makeTenantGhlConnectionsTableMock();
+      }
       if (table === 'tenants') {
         return {
           select: () => ({
             eq: () => ({
-              single: async () => ({ data: { id: 'tenant-1' }, error: null }),
+              single: async () => ({ data: { ...DEFAULT_TENANT_ROW_FOR_INBOUND_RESOLUTION }, error: null }),
             }),
           }),
         };

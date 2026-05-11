@@ -9,6 +9,10 @@ import {
 import { VOICE_INBOUND_PLACEHOLDER_NO_MEDIA_USER_MESSAGE } from '../transcription/audio-transcription.service';
 import { WebhooksService } from './webhooks.service';
 import { createMockSupabase } from '../../test/mock-supabase';
+import {
+  attachInboundRoutingMockImplementation,
+  defaultConnectedRouting,
+} from '../../test/webhook-inbound-routing-mock';
 
 jestGlobal.mock('@nestjs/bullmq', () => ({
   InjectQueue: () => jestGlobal.fn(),
@@ -175,34 +179,9 @@ describe('WebhooksService + workflowFlatRaw enqueue', () => {
   });
 
   it('enqueues InboundMessage with merged mediaUrl and transcription flag', async () => {
-    (mockSupabase.from as jest.Mock).mockImplementation((table: string) => {
-      if (table === 'tenants') {
-        return {
-          select: () => ({
-            eq: () => ({ single: async () => ({ data: { id: 'tnt_1' }, error: null }) }),
-          }),
-        };
-      }
-      if (table === 'tenant_ghl_connections') {
-        return {
-          select: () => ({
-            eq: () => ({
-              eq: () => ({ single: async () => ({ data: { tenant_id: 'tnt_1', status: 'CONNECTED' }, error: null }) }),
-            }),
-          }),
-        };
-      }
-      if (table === 'webhook_events') {
-        return {
-          select: () => ({
-            eq: () => ({
-              eq: () => ({ single: async () => ({ data: null, error: { code: 'PGRST116' } }) }),
-            }),
-          }),
-          insert: () => ({ select: () => ({ single: async () => ({ data: { id: 'evt_wf' }, error: null }) }) }),
-        };
-      }
-      return {};
+    attachInboundRoutingMockImplementation(mockSupabase.from as jest.Mock, {
+      ...defaultConnectedRouting,
+      newEventId: 'evt_wf',
     });
 
     const raw = baseFlatWorkflow({
@@ -221,40 +200,16 @@ describe('WebhooksService + workflowFlatRaw enqueue', () => {
         messageType: 'text',
         audioMediaUrl: 'https://cdn.example.com/inbound-wf.m4a',
         voiceInboundNeedsTranscribe: true,
+        resolvedTenantId: 'tnt_1',
       }),
       expect.any(Object),
     );
   });
 
   it('enqueues InboundMessage placeholder-no-media when only unsupported text in customData', async () => {
-    (mockSupabase.from as jest.Mock).mockImplementation((table: string) => {
-      if (table === 'tenants') {
-        return {
-          select: () => ({
-            eq: () => ({ single: async () => ({ data: { id: 'tnt_1' }, error: null }) }),
-          }),
-        };
-      }
-      if (table === 'tenant_ghl_connections') {
-        return {
-          select: () => ({
-            eq: () => ({
-              eq: () => ({ single: async () => ({ data: { tenant_id: 'tnt_1', status: 'CONNECTED' }, error: null }) }),
-            }),
-          }),
-        };
-      }
-      if (table === 'webhook_events') {
-        return {
-          select: () => ({
-            eq: () => ({
-              eq: () => ({ single: async () => ({ data: null, error: { code: 'PGRST116' } }) }),
-            }),
-          }),
-          insert: () => ({ select: () => ({ single: async () => ({ data: { id: 'evt_ph2' }, error: null }) }) }),
-        };
-      }
-      return {};
+    attachInboundRoutingMockImplementation(mockSupabase.from as jest.Mock, {
+      ...defaultConnectedRouting,
+      newEventId: 'evt_ph2',
     });
 
     const raw = baseFlatWorkflow({
@@ -271,40 +226,16 @@ describe('WebhooksService + workflowFlatRaw enqueue', () => {
         messageContent: VOICE_INBOUND_PLACEHOLDER_NO_MEDIA_USER_MESSAGE,
         voiceInboundNeedsTranscribe: false,
         voiceInboundAudioPlaceholderWithoutMediaUrl: true,
+        resolvedTenantId: 'tnt_1',
       }),
       expect.any(Object),
     );
   });
 
   it('enqueues InboundMessage placeholder-no-media for exact AUDIO with no URL', async () => {
-    (mockSupabase.from as jest.Mock).mockImplementation((table: string) => {
-      if (table === 'tenants') {
-        return {
-          select: () => ({
-            eq: () => ({ single: async () => ({ data: { id: 'tnt_1' }, error: null }) }),
-          }),
-        };
-      }
-      if (table === 'tenant_ghl_connections') {
-        return {
-          select: () => ({
-            eq: () => ({
-              eq: () => ({ single: async () => ({ data: { tenant_id: 'tnt_1', status: 'CONNECTED' }, error: null }) }),
-            }),
-          }),
-        };
-      }
-      if (table === 'webhook_events') {
-        return {
-          select: () => ({
-            eq: () => ({
-              eq: () => ({ single: async () => ({ data: null, error: { code: 'PGRST116' } }) }),
-            }),
-          }),
-          insert: () => ({ select: () => ({ single: async () => ({ data: { id: 'evt_audio' }, error: null }) }) }),
-        };
-      }
-      return {};
+    attachInboundRoutingMockImplementation(mockSupabase.from as jest.Mock, {
+      ...defaultConnectedRouting,
+      newEventId: 'evt_audio',
     });
 
     const raw = baseFlatWorkflow({
@@ -324,40 +255,16 @@ describe('WebhooksService + workflowFlatRaw enqueue', () => {
         voiceInboundPlaceholderRawBody: 'AUDIO',
         ghlInboundMessageId: 'wf_msg_1',
         audioMediaUrl: undefined,
+        resolvedTenantId: 'tnt_1',
       }),
       expect.any(Object),
     );
   });
 
   it('enqueues InboundMessage placeholder-no-media for [AUDIO] with no URL', async () => {
-    (mockSupabase.from as jest.Mock).mockImplementation((table: string) => {
-      if (table === 'tenants') {
-        return {
-          select: () => ({
-            eq: () => ({ single: async () => ({ data: { id: 'tnt_1' }, error: null }) }),
-          }),
-        };
-      }
-      if (table === 'tenant_ghl_connections') {
-        return {
-          select: () => ({
-            eq: () => ({
-              eq: () => ({ single: async () => ({ data: { tenant_id: 'tnt_1', status: 'CONNECTED' }, error: null }) }),
-            }),
-          }),
-        };
-      }
-      if (table === 'webhook_events') {
-        return {
-          select: () => ({
-            eq: () => ({
-              eq: () => ({ single: async () => ({ data: null, error: { code: 'PGRST116' } }) }),
-            }),
-          }),
-          insert: () => ({ select: () => ({ single: async () => ({ data: { id: 'evt_a2' }, error: null }) }) }),
-        };
-      }
-      return {};
+    attachInboundRoutingMockImplementation(mockSupabase.from as jest.Mock, {
+      ...defaultConnectedRouting,
+      newEventId: 'evt_a2',
     });
 
     const raw = baseFlatWorkflow({
@@ -375,6 +282,7 @@ describe('WebhooksService + workflowFlatRaw enqueue', () => {
         voiceInboundAudioPlaceholderWithoutMediaUrl: true,
         voiceInboundPlaceholderRawBody: '[AUDIO]',
         ghlInboundMessageId: 'id_brack',
+        resolvedTenantId: 'tnt_1',
       }),
       expect.any(Object),
     );

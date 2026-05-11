@@ -32,6 +32,7 @@ import { GhlVoiceRecordingFetchService } from '../../modules/transcription/ghl-v
 import { GhlVoiceMessageDiscoveryService } from '../../modules/transcription/ghl-voice-message-discovery.service';
 import { GhlVoiceConversationDiscoveryService } from '../../modules/transcription/ghl-voice-conversation-discovery.service';
 import { classifyGhlAudioPlaceholderBody } from '../../modules/webhooks/ghl-inbound-audio-media';
+import { resolveInboundGhlWebhookTenant } from '../../modules/webhooks/ghl-inbound-webhook-tenant-resolution';
 import { FollowUpEngineService } from '../../modules/follow-up-engine/follow-up-engine.service';
 import { HumanEscalationHoldingReplyService } from '../../modules/human-escalation/human-escalation-holding-reply.service';
 
@@ -63,6 +64,8 @@ export interface InboundMessageJobData {
   ghlInboundMessageId?: string;
   /** Webhook timestamp used to rank discovered message candidates. */
   webhookTimestampIso?: string;
+  /** Set by WebhooksService when tenant was resolved at ingress (canonical routing). */
+  resolvedTenantId?: string;
 }
 
 export interface OrchestrateDebouncedJobData {
@@ -135,6 +138,7 @@ export class InboundMessageProcessor extends WorkerHost {
       voiceInboundPlaceholderRawBody,
       voiceInboundPlaceholderKind,
       ghlInboundMessageId,
+      resolvedTenantId,
     } = job.data;
 
     this.logger.log(
@@ -146,10 +150,19 @@ export class InboundMessageProcessor extends WorkerHost {
     }
 
     try {
-      const tenant = await this.findTenantByLocationId(locationId);
-      if (!tenant) {
-        throw new Error(`Tenant not found for locationId: ${locationId}`);
+      let tenantId = resolvedTenantId;
+      if (!tenantId) {
+        const r = await resolveInboundGhlWebhookTenant({
+          supabase: this.supabase,
+          locationId,
+          logger: this.logger,
+        });
+        if (!r.ok) {
+          throw new Error(`Tenant not found for locationId: ${locationId} (${r.reason})`);
+        }
+        tenantId = r.tenantId;
       }
+      const tenant = { id: tenantId };
 
       const conversation = await this.getOrCreateConversation(
         tenant.id,
@@ -1193,11 +1206,6 @@ export class InboundMessageProcessor extends WorkerHost {
     const withoutResetCmd = excludeChatResetInboundRows(rows);
     const orchestrationBatch = filterInboundRowsToBurstWindow(withoutResetCmd);
     return { orchestrationBatch, resetDetectionBatch };
-  }
-
-  private async findTenantByLocationId(locationId: string): Promise<{ id: string } | null> {
-    const { data } = await this.supabase.from('tenants').select('id').eq('ghl_location_id', locationId).single();
-    return data;
   }
 
   /**

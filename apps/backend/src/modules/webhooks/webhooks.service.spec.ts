@@ -2,9 +2,12 @@ import { jest as jestGlobal } from '@jest/globals';
 
 import { VOICE_INBOUND_PLACEHOLDER_NO_MEDIA_USER_MESSAGE } from '../transcription/audio-transcription.service';
 import { WebhooksService } from './webhooks.service';
-import { createMockSupabase, mockFrom } from '../../test/mock-supabase';
+import { createMockSupabase } from '../../test/mock-supabase';
+import {
+  attachInboundRoutingMockImplementation,
+  defaultConnectedRouting,
+} from '../../test/webhook-inbound-routing-mock';
 
-// Mock BullMQ Queue
 jestGlobal.mock('@nestjs/bullmq', () => ({
   InjectQueue: () => jestGlobal.fn(),
   Queue: jestGlobal.fn(() => ({
@@ -43,91 +46,41 @@ describe('WebhooksService', () => {
 
   describe('extractDedupeKey (via handleGhlWebhook behavior)', () => {
     it('returns success+skip for unregistered location', async () => {
-      mockFrom(mockSupabase, 'tenants', null, { code: 'PGRST116' });
+      attachInboundRoutingMockImplementation(mockSupabase.from as jest.Mock, {
+        connectedMatchRows: [],
+        tenantByIdRow: null,
+        legacyByLocationRow: null,
+      });
 
       const result = await service.handleGhlWebhook(makePayload());
 
       expect(result.success).toBe(true);
       expect(result.duplicate).toBe(false);
+      expect(mockQueue.add).not.toHaveBeenCalled();
     });
 
     it('returns duplicate=true when event already exists', async () => {
-      // Set up full mock chain in one mockImplementation
-      (mockSupabase.from as jest.Mock).mockImplementation((table: string) => {
-        if (table === 'tenants') {
-          return {
-            select: () => ({
-              eq: () => ({ single: async () => ({ data: { id: 'tnt_1' }, error: null }) }),
-            }),
-          };
-        }
-        if (table === 'tenant_ghl_connections') {
-          return {
-            select: () => ({
-              eq: () => ({
-                eq: () => ({ single: async () => ({ data: { tenant_id: 'tnt_1', status: 'CONNECTED' }, error: null }) }),
-              }),
-            }),
-          };
-        }
-        if (table === 'webhook_events') {
-          // Existing event found → duplicate
-          return {
-            select: () => ({
-              eq: () => ({
-                eq: () => ({ single: async () => ({ data: { id: 'existing_event_123' }, error: null }) }),
-              }),
-            }),
-            insert: () => ({ select: () => ({ single: async () => ({ data: null, error: null }) }) }),
-          };
-        }
-        return {};
+      attachInboundRoutingMockImplementation(mockSupabase.from as jest.Mock, {
+        ...defaultConnectedRouting,
+        duplicateEvent: true,
       });
 
-      const result = await service.handleGhlWebhook(makePayload({
-        data: { id: 'msg_dup', conversationId: 'conv_1', message: 'Hi' }
-      }));
+      const result = await service.handleGhlWebhook(
+        makePayload({ data: { id: 'msg_dup', conversationId: 'conv_1', message: 'Hi' } }),
+      );
 
       expect(result.success).toBe(true);
       expect(result.duplicate).toBe(true);
     });
 
     it('proceses new event and enqueues job', async () => {
-      // Set up full mock chain in one mockImplementation
-      (mockSupabase.from as jest.Mock).mockImplementation((table: string) => {
-        if (table === 'tenants') {
-          return {
-            select: () => ({
-              eq: () => ({ single: async () => ({ data: { id: 'tnt_1' }, error: null }) }),
-            }),
-          };
-        }
-        if (table === 'tenant_ghl_connections') {
-          return {
-            select: () => ({
-              eq: () => ({
-                eq: () => ({ single: async () => ({ data: { tenant_id: 'tnt_1', status: 'CONNECTED' }, error: null }) }),
-              }),
-            }),
-          };
-        }
-        if (table === 'webhook_events') {
-          // No existing event (PGRST116 = no rows) → not duplicate
-          return {
-            select: () => ({
-              eq: () => ({
-                eq: () => ({ single: async () => ({ data: null, error: { code: 'PGRST116' } }) }),
-              }),
-            }),
-            insert: () => ({ select: () => ({ single: async () => ({ data: { id: 'evt_new' }, error: null }) }) }),
-          };
-        }
-        return {};
+      attachInboundRoutingMockImplementation(mockSupabase.from as jest.Mock, {
+        ...defaultConnectedRouting,
       });
 
-      const result = await service.handleGhlWebhook(makePayload({
-        data: { id: 'msg_new', conversationId: 'conv_1', message: 'Hello' }
-      }));
+      const result = await service.handleGhlWebhook(
+        makePayload({ data: { id: 'msg_new', conversationId: 'conv_1', message: 'Hello' } }),
+      );
 
       expect(result.success).toBe(true);
       expect(result.duplicate).toBe(false);
@@ -137,40 +90,16 @@ describe('WebhooksService', () => {
           locationId: 'loc_123',
           ghlConversationId: 'conv_1',
           smokeImmediate: false,
+          resolvedTenantId: 'tnt_1',
         }),
         expect.any(Object),
       );
     });
 
     it('enqueues persist with smokeImmediate when opts request it', async () => {
-      (mockSupabase.from as jest.Mock).mockImplementation((table: string) => {
-        if (table === 'tenants') {
-          return {
-            select: () => ({
-              eq: () => ({ single: async () => ({ data: { id: 'tnt_1' }, error: null }) }),
-            }),
-          };
-        }
-        if (table === 'tenant_ghl_connections') {
-          return {
-            select: () => ({
-              eq: () => ({
-                eq: () => ({ single: async () => ({ data: { tenant_id: 'tnt_1', status: 'CONNECTED' }, error: null }) }),
-              }),
-            }),
-          };
-        }
-        if (table === 'webhook_events') {
-          return {
-            select: () => ({
-              eq: () => ({
-                eq: () => ({ single: async () => ({ data: null, error: { code: 'PGRST116' } }) }),
-              }),
-            }),
-            insert: () => ({ select: () => ({ single: async () => ({ data: { id: 'evt_smoke' }, error: null }) }) }),
-          };
-        }
-        return {};
+      attachInboundRoutingMockImplementation(mockSupabase.from as jest.Mock, {
+        ...defaultConnectedRouting,
+        newEventId: 'evt_smoke',
       });
 
       await service.handleGhlWebhook(
@@ -180,40 +109,15 @@ describe('WebhooksService', () => {
 
       expect(mockQueue.add).toHaveBeenCalledWith(
         'persist',
-        expect.objectContaining({ smokeImmediate: true }),
+        expect.objectContaining({ smokeImmediate: true, resolvedTenantId: 'tnt_1' }),
         expect.any(Object),
       );
     });
 
     it('enqueues inbound audio with attachment URL and voice transcription flag', async () => {
-      (mockSupabase.from as jest.Mock).mockImplementation((table: string) => {
-        if (table === 'tenants') {
-          return {
-            select: () => ({
-              eq: () => ({ single: async () => ({ data: { id: 'tnt_1' }, error: null }) }),
-            }),
-          };
-        }
-        if (table === 'tenant_ghl_connections') {
-          return {
-            select: () => ({
-              eq: () => ({
-                eq: () => ({ single: async () => ({ data: { tenant_id: 'tnt_1', status: 'CONNECTED' }, error: null }) }),
-              }),
-            }),
-          };
-        }
-        if (table === 'webhook_events') {
-          return {
-            select: () => ({
-              eq: () => ({
-                eq: () => ({ single: async () => ({ data: null, error: { code: 'PGRST116' } }) }),
-              }),
-            }),
-            insert: () => ({ select: () => ({ single: async () => ({ data: { id: 'evt_voice' }, error: null }) }) }),
-          };
-        }
-        return {};
+      attachInboundRoutingMockImplementation(mockSupabase.from as jest.Mock, {
+        ...defaultConnectedRouting,
+        newEventId: 'evt_voice',
       });
 
       await service.handleGhlWebhook(
@@ -235,40 +139,16 @@ describe('WebhooksService', () => {
           messageType: 'audio',
           audioMediaUrl: 'https://cdn.example.com/inbound.m4a',
           voiceInboundNeedsTranscribe: true,
+          resolvedTenantId: 'tnt_1',
         }),
         expect.any(Object),
       );
     });
 
     it('enqueues placeholder-no-media path when unsupported body and no URL', async () => {
-      (mockSupabase.from as jest.Mock).mockImplementation((table: string) => {
-        if (table === 'tenants') {
-          return {
-            select: () => ({
-              eq: () => ({ single: async () => ({ data: { id: 'tnt_1' }, error: null }) }),
-            }),
-          };
-        }
-        if (table === 'tenant_ghl_connections') {
-          return {
-            select: () => ({
-              eq: () => ({
-                eq: () => ({ single: async () => ({ data: { tenant_id: 'tnt_1', status: 'CONNECTED' }, error: null }) }),
-              }),
-            }),
-          };
-        }
-        if (table === 'webhook_events') {
-          return {
-            select: () => ({
-              eq: () => ({
-                eq: () => ({ single: async () => ({ data: null, error: { code: 'PGRST116' } }) }),
-              }),
-            }),
-            insert: () => ({ select: () => ({ single: async () => ({ data: { id: 'evt_ph' }, error: null }) }) }),
-          };
-        }
-        return {};
+      attachInboundRoutingMockImplementation(mockSupabase.from as jest.Mock, {
+        ...defaultConnectedRouting,
+        newEventId: 'evt_ph',
       });
 
       await service.handleGhlWebhook(
@@ -291,40 +171,16 @@ describe('WebhooksService', () => {
           voiceInboundNeedsTranscribe: false,
           voiceInboundAudioPlaceholderWithoutMediaUrl: true,
           audioMediaUrl: undefined,
+          resolvedTenantId: 'tnt_1',
         }),
         expect.any(Object),
       );
     });
 
     it('enqueues voice transcription when unsupported placeholder but nested data.attachments has URL', async () => {
-      (mockSupabase.from as jest.Mock).mockImplementation((table: string) => {
-        if (table === 'tenants') {
-          return {
-            select: () => ({
-              eq: () => ({ single: async () => ({ data: { id: 'tnt_1' }, error: null }) }),
-            }),
-          };
-        }
-        if (table === 'tenant_ghl_connections') {
-          return {
-            select: () => ({
-              eq: () => ({
-                eq: () => ({ single: async () => ({ data: { tenant_id: 'tnt_1', status: 'CONNECTED' }, error: null }) }),
-              }),
-            }),
-          };
-        }
-        if (table === 'webhook_events') {
-          return {
-            select: () => ({
-              eq: () => ({
-                eq: () => ({ single: async () => ({ data: null, error: { code: 'PGRST116' } }) }),
-              }),
-            }),
-            insert: () => ({ select: () => ({ single: async () => ({ data: { id: 'evt_v2' }, error: null }) }) }),
-          };
-        }
-        return {};
+      attachInboundRoutingMockImplementation(mockSupabase.from as jest.Mock, {
+        ...defaultConnectedRouting,
+        newEventId: 'evt_v2',
       });
 
       await service.handleGhlWebhook(
@@ -350,40 +206,16 @@ describe('WebhooksService', () => {
           audioMediaUrl: 'https://cdn.example.com/hidden.m4a',
           voiceInboundNeedsTranscribe: true,
           voiceInboundAudioPlaceholderWithoutMediaUrl: false,
+          resolvedTenantId: 'tnt_1',
         }),
         expect.any(Object),
       );
     });
 
     it('does not treat customer text containing "voice note" as a GHL audio placeholder', async () => {
-      (mockSupabase.from as jest.Mock).mockImplementation((table: string) => {
-        if (table === 'tenants') {
-          return {
-            select: () => ({
-              eq: () => ({ single: async () => ({ data: { id: 'tnt_1' }, error: null }) }),
-            }),
-          };
-        }
-        if (table === 'tenant_ghl_connections') {
-          return {
-            select: () => ({
-              eq: () => ({
-                eq: () => ({ single: async () => ({ data: { tenant_id: 'tnt_1', status: 'CONNECTED' }, error: null }) }),
-              }),
-            }),
-          };
-        }
-        if (table === 'webhook_events') {
-          return {
-            select: () => ({
-              eq: () => ({
-                eq: () => ({ single: async () => ({ data: null, error: { code: 'PGRST116' } }) }),
-              }),
-            }),
-            insert: () => ({ select: () => ({ single: async () => ({ data: { id: 'evt_vn' }, error: null }) }) }),
-          };
-        }
-        return {};
+      attachInboundRoutingMockImplementation(mockSupabase.from as jest.Mock, {
+        ...defaultConnectedRouting,
+        newEventId: 'evt_vn',
       });
 
       const prose = 'If you get stuck, you can always send a voice note and we will help.';
@@ -404,7 +236,202 @@ describe('WebhooksService', () => {
         expect.objectContaining({
           messageContent: prose,
           voiceInboundAudioPlaceholderWithoutMediaUrl: false,
+          resolvedTenantId: 'tnt_1',
         }),
+        expect.any(Object),
+      );
+    });
+
+    it('routes by tenant_ghl_connections when tenants.ghl_location_id is null (legacy mirror drift)', async () => {
+      attachInboundRoutingMockImplementation(mockSupabase.from as jest.Mock, {
+        ...defaultConnectedRouting,
+        tenantByIdRow: {
+          id: 'tnt_1',
+          ghl_location_id: null,
+          bot_enabled: true,
+          handover_paused: false,
+        },
+      });
+
+      await service.handleGhlWebhook(
+        makePayload({ data: { id: 'msg_m1', conversationId: 'conv_1', message: 'Hi' } }),
+      );
+
+      expect(mockQueue.add).toHaveBeenCalledWith(
+        'persist',
+        expect.objectContaining({ resolvedTenantId: 'tnt_1' }),
+        expect.any(Object),
+      );
+    });
+
+    it('enqueues persist to workspace B when only B has CONNECTED for location (post-transfer same GHL location)', async () => {
+      attachInboundRoutingMockImplementation(mockSupabase.from as jest.Mock, {
+        connectedMatchRows: [
+          { tenant_id: 'workspace-b', ghl_location_id: 'loc-x', status: 'CONNECTED' },
+        ],
+        tenantByIdRow: {
+          id: 'workspace-b',
+          ghl_location_id: 'loc-x',
+          bot_enabled: true,
+          handover_paused: false,
+        },
+        legacyByLocationRow: null,
+      });
+
+      const result = await service.handleGhlWebhook(
+        makePayload({
+          locationId: 'loc-x',
+          data: { id: 'msg_xfer', conversationId: 'conv_xfer', message: 'Hi' },
+        }),
+      );
+
+      expect(result.success).toBe(true);
+      expect(mockQueue.add).toHaveBeenCalledWith(
+        'persist',
+        expect.objectContaining({
+          locationId: 'loc-x',
+          ghlConversationId: 'conv_xfer',
+          resolvedTenantId: 'workspace-b',
+        }),
+        expect.any(Object),
+      );
+    });
+
+    it('logs CRM location drift when tenants.ghl_location_id differs from connection location', async () => {
+      const warnSpy = jestGlobal.spyOn(service['logger'], 'warn');
+      attachInboundRoutingMockImplementation(mockSupabase.from as jest.Mock, {
+        ...defaultConnectedRouting,
+        tenantByIdRow: {
+          id: 'tnt_1',
+          ghl_location_id: 'legacy-loc-old',
+          bot_enabled: true,
+          handover_paused: false,
+        },
+      });
+
+      await service.handleGhlWebhook(
+        makePayload({ data: { id: 'msg_drift', conversationId: 'conv_1', message: 'Hi' } }),
+      );
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('CRM location drift tenantId=tnt_1'),
+      );
+      warnSpy.mockRestore();
+    });
+
+    it('uses tenant_legacy_location_match when no CONNECTED connection row but legacy tenant matches', async () => {
+      attachInboundRoutingMockImplementation(mockSupabase.from as jest.Mock, {
+        connectedMatchRows: [],
+        tenantByIdRow: null,
+        legacyByLocationRow: {
+          id: 'tnt_legacy',
+          ghl_location_id: 'loc_123',
+          bot_enabled: true,
+          handover_paused: false,
+        },
+      });
+
+      await service.handleGhlWebhook(
+        makePayload({ data: { id: 'msg_leg', conversationId: 'conv_1', message: 'Hi' } }),
+      );
+
+      expect(mockQueue.add).toHaveBeenCalledWith(
+        'persist',
+        expect.objectContaining({ resolvedTenantId: 'tnt_legacy' }),
+        expect.any(Object),
+      );
+    });
+
+    it('fails closed on duplicate CONNECTED connections for same locationId (no enqueue)', async () => {
+      attachInboundRoutingMockImplementation(mockSupabase.from as jest.Mock, {
+        connectedMatchRows: [
+          { tenant_id: 'tnt_a', ghl_location_id: 'loc_123', status: 'CONNECTED' },
+          { tenant_id: 'tnt_b', ghl_location_id: 'loc_123', status: 'CONNECTED' },
+        ],
+        tenantByIdRow: null,
+        legacyByLocationRow: null,
+      });
+
+      const result = await service.handleGhlWebhook(
+        makePayload({ data: { id: 'msg_dup_loc', conversationId: 'conv_1', message: 'Hi' } }),
+      );
+
+      expect(result.success).toBe(true);
+      expect(mockQueue.add).not.toHaveBeenCalled();
+    });
+
+    it('allows agency-style tenant when connection + bot flags qualify', async () => {
+      attachInboundRoutingMockImplementation(mockSupabase.from as jest.Mock, {
+        ...defaultConnectedRouting,
+        tenantByIdRow: {
+          id: 'tnt_agency',
+          ghl_location_id: 'loc_123',
+          bot_enabled: true,
+          handover_paused: false,
+        },
+      });
+
+      (mockSupabase.from as jest.Mock).mockImplementation((table: string) => {
+        if (table === 'tenant_ghl_connections') {
+          return {
+            select: () => ({
+              eq: () => ({
+                eq: async () => ({
+                  data: [{ tenant_id: 'tnt_agency', ghl_location_id: 'loc_123', status: 'CONNECTED' }],
+                  error: null,
+                }),
+              }),
+            }),
+          };
+        }
+        if (table === 'tenants') {
+          return {
+            select: () => ({
+              eq: (col: string) => {
+                if (col === 'id') {
+                  return {
+                    single: async () => ({
+                      data: {
+                        id: 'tnt_agency',
+                        ghl_location_id: 'loc_123',
+                        bot_enabled: true,
+                        handover_paused: false,
+                        is_agency_workspace: true,
+                      },
+                      error: null,
+                    }),
+                  };
+                }
+                if (col === 'ghl_location_id') {
+                  return { maybeSingle: async () => ({ data: null, error: null }) };
+                }
+                return { single: async () => ({ data: null, error: { code: 'PGRST116' } }) };
+              },
+            }),
+          };
+        }
+        if (table === 'webhook_events') {
+          return {
+            select: () => ({
+              eq: () => ({
+                eq: () => ({ single: async () => ({ data: null, error: { code: 'PGRST116' } }) }),
+              }),
+            }),
+            insert: () => ({
+              select: () => ({ single: async () => ({ data: { id: 'evt_ag' }, error: null }) }),
+            }),
+          };
+        }
+        return {};
+      });
+
+      await service.handleGhlWebhook(
+        makePayload({ data: { id: 'msg_ag', conversationId: 'conv_1', message: 'Lead' } }),
+      );
+
+      expect(mockQueue.add).toHaveBeenCalledWith(
+        'persist',
+        expect.objectContaining({ resolvedTenantId: 'tnt_agency' }),
         expect.any(Object),
       );
     });

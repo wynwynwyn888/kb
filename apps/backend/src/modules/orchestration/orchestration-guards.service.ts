@@ -100,7 +100,6 @@ export class OrchestrationGuards {
       .from('tenant_ghl_connections')
       .select('status')
       .eq('tenant_id', input.tenantId)
-      .eq('ghl_location_id', input.tenant.ghlLocationId)
       .single();
 
     if (!conn || conn.status !== 'CONNECTED') {

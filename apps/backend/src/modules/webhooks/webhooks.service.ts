@@ -29,6 +29,7 @@ import {
   VOICE_INBOUND_PLACEHOLDER_NO_MEDIA_USER_MESSAGE,
 } from './ghl-inbound-audio-media';
 import { safeTextPreviewForLog } from '../../lib/safe-text-preview-for-log';
+import { resolveInboundGhlWebhookTenant } from './ghl-inbound-webhook-tenant-resolution';
 
 @Injectable()
 export class WebhooksService {
@@ -63,24 +64,37 @@ export class WebhooksService {
 
     const { externalEventId, dedupeKey, dedupeReason } = extractGhlInboundDedupeKeys(payload);
 
-    // Identify tenant and verify active connection
-    const tenantConnection = await this.findTenantByLocationId(
-      payload.locationId,
-    );
+    const route = await resolveInboundGhlWebhookTenant({
+      supabase: this.supabase,
+      locationId: payload.locationId,
+      logger: this.logger,
+    });
 
-    // Unregistered or non-connected location: acknowledge, skip processing
-    if (!tenantConnection) {
+    if (!route.ok) {
+      if (route.reason === 'duplicate_crm_location') {
+        return { success: true, duplicate: false };
+      }
       this.logger.warn(
         `Webhook skipped: no CONNECTED workspace for locationId=${payload.locationId} ` +
-          `(must exactly match tenants.ghl_location_id; if CRM works in-app but webhooks fail, compare this string ` +
-          `to Advanced → CRM Location ID — workflow customData typos like I/l or W/w are common).`,
+          `(routing uses tenant_ghl_connections + bot_enabled + handover_paused; legacy tenants.ghl_location_id fallback only when unambiguous).`,
       );
       return { success: true, duplicate: false };
     }
 
+    if (route.routeSource === 'tenant_ghl_connection') {
+      const legacy = (route.tenantLegacyGhlLocationId ?? '').trim();
+      const conn = (route.connectionLocationId ?? '').trim();
+      if (legacy.length > 0 && legacy !== conn) {
+        this.logger.warn(
+          `CRM location drift tenantId=${route.tenantId} locationId=${payload.locationId} ` +
+            `tenantLegacyLocationId=${legacy} connectionLocationId=${conn || '(empty)'}`,
+        );
+      }
+    }
+
     // Check for duplicate event
     const existingEvent = await this.findExistingEvent(
-      tenantConnection.tenantId,
+      route.tenantId,
       externalEventId,
     );
 
@@ -106,7 +120,7 @@ export class WebhooksService {
 
     // Persist webhook event
     const webhookEvent = await this.persistWebhookEvent(
-      tenantConnection.tenantId,
+      route.tenantId,
       {
         externalEventId,
         dedupeKey,
@@ -121,6 +135,7 @@ export class WebhooksService {
     // Enqueue for async processing
     await this.enqueueInboundMessage(normalizedPayload, webhookEvent.id, {
       smokeImmediate: Boolean(opts?.smokeImmediate),
+      resolvedTenantId: route.tenantId,
     });
 
     this.logger.log(
@@ -128,45 +143,6 @@ export class WebhooksService {
     );
 
     return { success: true, eventId: webhookEvent.id, duplicate: false };
-  }
-
-  /**
-   * Find tenant by GHL location ID and verify connection is CONNECTED
-   */
-  private async findTenantByLocationId(
-    locationId: string,
-  ): Promise<{ tenantId: string; status: string } | null> {
-    // Find tenant by location
-    const { data: tenant, error: tenantError } = await this.supabase
-      .from('tenants')
-      .select('id')
-      .eq('ghl_location_id', locationId)
-      .single();
-
-    if (tenantError || !tenant) {
-      return null;
-    }
-
-    // Check connection status
-    const { data: connection, error: connError } = await this.supabase
-      .from('tenant_ghl_connections')
-      .select('tenant_id, status')
-      .eq('tenant_id', tenant.id)
-      .eq('ghl_location_id', locationId)
-      .single();
-
-    if (connError || !connection) {
-      return null;
-    }
-
-    if (connection.status !== 'CONNECTED') {
-      return null;
-    }
-
-    return {
-      tenantId: connection.tenant_id,
-      status: connection.status,
-    };
   }
 
   /**
@@ -492,9 +468,10 @@ export class WebhooksService {
   async enqueueInboundMessage(
     payload: NormalizedWebhookPayload,
     webhookEventId?: string,
-    opts?: { smokeImmediate?: boolean },
+    opts?: { smokeImmediate?: boolean; resolvedTenantId?: string },
   ): Promise<void> {
     const jobData: InboundMessageJobData = {
+      resolvedTenantId: opts?.resolvedTenantId,
       locationId: payload.ghlLocationId,
       ghlConversationId: payload.ghlConversationId,
       ghlContactId: payload.ghlContactId,

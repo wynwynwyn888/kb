@@ -145,6 +145,7 @@ model Tenant {
   id            String   @id @default(uuid())
   agencyId      String   @map("agency_id")
   name          String
+  /// Compatibility mirror of `tenant_ghl_connections.ghl_location_id` when CRM is connected; not authoritative for webhook routing.
   ghlLocationId String?  @map("ghl_location_id")
   status        String   @default("pending") // active, suspended, pending
   settings      Json     @default("{}")
@@ -397,6 +398,9 @@ model TenantUser {
 // GHL INTEGRATION
 // ============================================================================
 
+/// CRM auth + routing source of truth for inbound GHL webhooks (CONNECTED rows).
+/// Partial unique index `tenant_ghl_connections_connected_location_uidx` (migration 20260511143000)
+/// enforces at most one CONNECTED row per non-empty `ghl_location_id`.
 model TenantGhlConnection {
   id                     String            @id @default(uuid())
   tenantId               String            @unique @map("tenant_id")

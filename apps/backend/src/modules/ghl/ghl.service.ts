@@ -9,7 +9,14 @@
 // Tokens are stored encrypted (`encrypt()`); always `decrypt()` before calling GHL (`createGhlClient`).
 
 import { randomUUID } from 'node:crypto';
-import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  ForbiddenException,
+  BadRequestException,
+  ConflictException,
+} from '@nestjs/common';
 import { getSupabaseService } from '../../lib/supabase';
 import { decrypt, encrypt, maskToken, safeLog } from '../../lib/encryption';
 import { createGhlClient, GhlConnectionStatus, type GhlClient } from '@aisbp/ghl-client';
@@ -32,7 +39,62 @@ export interface ConnectionStatusResponse {
 
 @Injectable()
 export class GhlService {
+  private readonly logger = new Logger(GhlService.name);
   private supabase = getSupabaseService();
+
+  private async fetchTenantDisplayName(id: string): Promise<string> {
+    const { data } = await this.supabase.from('tenants').select('name').eq('id', id).maybeSingle();
+    const row = data as { name?: string | null } | null;
+    const n = row?.name?.trim();
+    return n && n.length > 0 ? n : id;
+  }
+
+  /**
+   * Before saving a CONNECTED CRM row for this workspace, ensure no other workspace
+   * already owns this GHL location (connected row or legacy tenants.ghl_location_id).
+   */
+  private async assertGhlLocationSaveAllowed(savingTenantId: string, ghlLocationId: string): Promise<void> {
+    const { data: connectedOthers, error: cErr } = await this.supabase
+      .from('tenant_ghl_connections')
+      .select('tenant_id')
+      .eq('ghl_location_id', ghlLocationId)
+      .eq('status', 'CONNECTED')
+      .neq('tenant_id', savingTenantId);
+
+    if (cErr) {
+      this.logger.warn(`assertGhlLocationSaveAllowed connected query error: ${cErr.message}`);
+    } else if (connectedOthers && connectedOthers.length > 0) {
+      const first = (connectedOthers as { tenant_id: string }[])[0];
+      if (!first?.tenant_id) return;
+      const name = await this.fetchTenantDisplayName(first.tenant_id);
+      throw new ConflictException(
+        `This CRM location is already connected to "${name}". Disconnect it there before using it here.`,
+      );
+    }
+
+    const { data: staleOther, error: sErr } = await this.supabase
+      .from('tenants')
+      .select('id, name')
+      .eq('ghl_location_id', ghlLocationId)
+      .neq('id', savingTenantId)
+      .maybeSingle();
+
+    if (sErr) {
+      this.logger.warn(`assertGhlLocationSaveAllowed legacy tenant query error: ${sErr.message}`);
+      return;
+    }
+
+    if (staleOther) {
+      const row = staleOther as { id: string; name?: string | null };
+      this.logger.warn(
+        `crmLegacyGhlLocationIdBlocksSave otherTenantId=${row.id} otherWorkspaceName=${JSON.stringify(row.name ?? '')} locationId=${ghlLocationId} savingTenantId=${savingTenantId}`,
+      );
+      const label = row.name?.trim() ? `"${row.name.trim()}"` : `"${row.id}"`;
+      throw new ConflictException(
+        `This CRM location is already listed on workspace ${label}. Disconnect or clear CRM there before using it here.`,
+      );
+    }
+  }
 
   private decryptGhlTokenOrThrow(encrypted: string): string {
     try {
@@ -94,6 +156,8 @@ export class GhlService {
       throw new BadRequestException('GHL location ID is required');
     }
 
+    await this.assertGhlLocationSaveAllowed(tenantId, ghlLocationId);
+
     const { data: existingRow } = await this.supabase
       .from('tenant_ghl_connections')
       .select('id, private_token_encrypted')
@@ -118,11 +182,11 @@ export class GhlService {
     const ghlClient = createGhlClient(tokenForGhl, ghlLocationId);
     const verification = await ghlClient.verifyConnection();
 
-    console.log('[GhlService] Token verification:', safeLog({
+    this.logger.log(`Token verification: ${safeLog({
       locationId: ghlLocationId,
       valid: verification.valid,
       error: verification.error,
-    }));
+    })}`);
 
     if (!verification.valid) {
       throw new BadRequestException(verification.error || 'Invalid token');
@@ -164,7 +228,9 @@ export class GhlService {
       .single();
 
     if (error) {
-      console.error('[GhlService] Failed to save connection:', safeLog({ error: error.message, code: error.code, details: error }));
+      this.logger.error(
+        `Failed to save connection: ${safeLog({ error: error.message, code: error.code, details: error })}`,
+      );
       const detail = error.message?.trim() || 'Database error';
       throw new BadRequestException(`Could not save connection: ${detail}`);
     }
@@ -212,6 +278,10 @@ export class GhlService {
     const ghlClient = createGhlClient(plaintextToken, existing.ghl_location_id);
     const verification = await ghlClient.verifyConnection();
 
+    if (verification.valid) {
+      await this.assertGhlLocationSaveAllowed(tenantId, String(existing.ghl_location_id).trim());
+    }
+
     // Update status based on verification
     const newStatus = verification.valid ? 'CONNECTED' : 'INVALID';
     const lastError = verification.error || null;
@@ -230,6 +300,13 @@ export class GhlService {
 
     if (error) {
       throw new BadRequestException('Failed to update connection status');
+    }
+
+    if (verification.valid && data.ghl_location_id) {
+      await this.supabase
+        .from('tenants')
+        .update({ ghl_location_id: String(data.ghl_location_id).trim(), updated_at: new Date().toISOString() })
+        .eq('id', tenantId);
     }
 
     return {
@@ -318,13 +395,29 @@ export class GhlService {
       throw new ForbiddenException('Access denied to this tenant');
     }
 
-    const { error } = await this.supabase
+    const { data: existingConn } = await this.supabase
       .from('tenant_ghl_connections')
-      .delete()
-      .eq('tenant_id', tenantId);
+      .select('ghl_location_id')
+      .eq('tenant_id', tenantId)
+      .maybeSingle();
+
+    const connectionLocationId =
+      existingConn && typeof (existingConn as { ghl_location_id?: unknown }).ghl_location_id === 'string'
+        ? String((existingConn as { ghl_location_id: string }).ghl_location_id).trim()
+        : '';
+
+    const { error } = await this.supabase.from('tenant_ghl_connections').delete().eq('tenant_id', tenantId);
 
     if (error) {
       throw new BadRequestException('Failed to delete connection');
+    }
+
+    if (connectionLocationId) {
+      await this.supabase
+        .from('tenants')
+        .update({ ghl_location_id: null, updated_at: new Date().toISOString() })
+        .eq('id', tenantId)
+        .eq('ghl_location_id', connectionLocationId);
     }
   }
 

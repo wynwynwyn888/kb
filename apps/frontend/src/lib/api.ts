@@ -228,6 +228,11 @@ export async function getTenantById(token: string, tenantId: string) {
     agencyId: string;
     botMode: WorkspaceBotMode;
     botEnabled: boolean;
+    isAgencyWorkspace?: boolean;
+    creditsUnlimited?: boolean;
+    clientContactName?: string | null;
+    clientContactPhone?: string | null;
+    clientContactEmail?: string | null;
     promptConfig?: {
       id: string;
       name: string;

@@ -28,6 +28,10 @@ export type TenantSettingsContextValue = {
   tenantName: string | null;
   tenantAgencyId: string | null;
   tenantStatus: string | null;
+  isAgencyWorkspace: boolean;
+  clientContactName: string | null;
+  clientContactPhone: string | null;
+  clientContactEmail: string | null;
   botMode: WorkspaceBotMode;
   promptConfigSnap: TenantSettingsPromptSnap | null;
   ghl: GhlConnectionStatus | null;
@@ -50,6 +54,10 @@ export function TenantSettingsProvider({ children }: { children: ReactNode }) {
   const [tenantName, setTenantName] = useState<string | null>(null);
   const [tenantAgencyId, setTenantAgencyId] = useState<string | null>(null);
   const [tenantStatus, setTenantStatus] = useState<string | null>(null);
+  const [isAgencyWorkspace, setIsAgencyWorkspace] = useState(false);
+  const [clientContactName, setClientContactName] = useState<string | null>(null);
+  const [clientContactPhone, setClientContactPhone] = useState<string | null>(null);
+  const [clientContactEmail, setClientContactEmail] = useState<string | null>(null);
   const [botMode, setBotMode] = useState<WorkspaceBotMode>('autopilot');
   const [promptConfigSnap, setPromptConfigSnap] = useState<TenantSettingsPromptSnap | null>(null);
   const [ghl, setGhl] = useState<GhlConnectionStatus | null>(null);
@@ -82,6 +90,10 @@ export function TenantSettingsProvider({ children }: { children: ReactNode }) {
         setTenantName(tenant?.name ?? null);
         setTenantAgencyId(tenant?.agencyId ?? null);
         setTenantStatus(tenant?.status ?? null);
+        setIsAgencyWorkspace(Boolean(tenant?.isAgencyWorkspace));
+        setClientContactName(tenant?.clientContactName ?? null);
+        setClientContactPhone(tenant?.clientContactPhone ?? null);
+        setClientContactEmail(tenant?.clientContactEmail ?? null);
         if (tenant?.botMode) setBotMode(tenant.botMode);
         const pc = tenant?.promptConfig;
         setPromptConfigSnap(
@@ -119,6 +131,10 @@ export function TenantSettingsProvider({ children }: { children: ReactNode }) {
       tenantName,
       tenantAgencyId,
       tenantStatus,
+      isAgencyWorkspace,
+      clientContactName,
+      clientContactPhone,
+      clientContactEmail,
       botMode,
       promptConfigSnap,
       ghl,
@@ -135,6 +151,10 @@ export function TenantSettingsProvider({ children }: { children: ReactNode }) {
       tenantName,
       tenantAgencyId,
       tenantStatus,
+      isAgencyWorkspace,
+      clientContactName,
+      clientContactPhone,
+      clientContactEmail,
       botMode,
       promptConfigSnap,
       ghl,

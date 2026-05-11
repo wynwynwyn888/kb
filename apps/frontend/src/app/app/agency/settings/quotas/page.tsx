@@ -33,6 +33,7 @@ import {
   mvpSelectStyle,
 } from '@/components/app/mvp-ui';
 import { creditStatusLabel, formatSignedInt } from '@/lib/credits-ui';
+import { formatWorkspaceDisplayName } from '@/lib/workspace-display';
 
 const tableTh: CSSProperties = {
   textAlign: 'left',
@@ -599,9 +600,12 @@ export default function AgencyQuotasPage() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem', minWidth: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
                 <strong style={{ fontSize: '0.92rem', color: 'var(--aisbp-text-heading, #0f172a)' }}>
-                  {agencyWalletRow.workspaceName}
+                  {formatWorkspaceDisplayName({
+                    name: agencyWalletRow.workspaceName,
+                    id: agencyWalletRow.tenantId,
+                    isAgencyWorkspace: agencyWalletRow.isAgencyWorkspace,
+                  })}
                 </strong>
-                <StatusPill label="Agency workspace" tone="neutral" />
                 <StatusPill label="Unlimited credits" tone="neutral" />
               </div>
               <span style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)' }}>
@@ -649,7 +653,11 @@ export default function AgencyQuotasPage() {
                 {clientWallets.map(w => (
                   <tr key={w.tenantId} style={{ background: 'var(--aisbp-table-row-bg, transparent)' }}>
                     <td style={{ ...tableTd, fontWeight: 700, color: 'var(--aisbp-text-heading, #0f172a)' }}>
-                      {w.workspaceName}
+                      {formatWorkspaceDisplayName({
+                        name: w.workspaceName,
+                        id: w.tenantId,
+                        isAgencyWorkspace: w.isAgencyWorkspace,
+                      })}
                     </td>
                     <td style={{ ...tableTd, fontWeight: 800, color: 'var(--aisbp-text, #0f172a)' }}>
                       {(w.balance ?? 0).toLocaleString()}
@@ -697,7 +705,11 @@ export default function AgencyQuotasPage() {
             <option value="">Choose a workspace…</option>
             {clientWallets.map(w => (
               <option key={w.tenantId} value={w.tenantId}>
-                {w.workspaceName}
+                {formatWorkspaceDisplayName({
+                  name: w.workspaceName,
+                  id: w.tenantId,
+                  isAgencyWorkspace: w.isAgencyWorkspace,
+                })}
               </option>
             ))}
           </select>

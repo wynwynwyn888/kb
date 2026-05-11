@@ -30,8 +30,9 @@ import {
   mvpDangerButtonStyle,
 } from '@/components/app/mvp-ui';
 import { readAgencyWorkspaceSelection } from '@/lib/theme-preference';
+import { formatWorkspaceDisplayName } from '@/lib/workspace-display';
 
-type TenantOpt = { id: string; name: string; status: string; ghlLocationId?: string | null };
+type TenantOpt = { id: string; name: string; status: string; ghlLocationId?: string | null; isAgencyWorkspace?: boolean };
 
 function ghlTone(s: GhlConnectionStatus['status']): 'ok' | 'warn' | 'bad' | 'neutral' {
   if (s === 'CONNECTED') return 'ok';
@@ -92,6 +93,7 @@ function AgencyGhlConnectionsInner() {
           name: x.name,
           status: x.status,
           ghlLocationId: x.ghlLocationId,
+          isAgencyWorkspace: Boolean(x.isAgencyWorkspace),
         }));
         setTenants(mapped);
       })
@@ -267,7 +269,13 @@ function AgencyGhlConnectionsInner() {
           }}
         >
           <p style={{ margin: 0, fontSize: '0.82rem', color: 'var(--aisbp-muted, #64748b)' }}>Configuring CRM for</p>
-          <p style={{ margin: '0.2rem 0 0', fontSize: '1.05rem', fontWeight: 800, color: 'var(--aisbp-text-heading, #0f172a)' }}>{selected.name}</p>
+          <p style={{ margin: '0.2rem 0 0', fontSize: '1.05rem', fontWeight: 800, color: 'var(--aisbp-text-heading, #0f172a)' }}>
+            {formatWorkspaceDisplayName({
+              name: selected.name,
+              id: selected.id,
+              isAgencyWorkspace: selected.isAgencyWorkspace,
+            })}
+          </p>
           <p style={{ margin: '0.4rem 0 0', display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
             {(() => {
               const summary = connectionSummaryPill(conn, connLoading, selected);

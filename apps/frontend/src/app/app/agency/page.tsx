@@ -21,6 +21,7 @@ import {
   appFloatingSecondaryButtonStyle,
   formatDateTime,
 } from '@/components/app/mvp-ui';
+import { formatWorkspaceDisplayName } from '@/lib/workspace-display';
 
 function fmtCompact(n: number) {
   return n.toLocaleString();
@@ -37,6 +38,7 @@ type GhlBreakdown = {
 type WorkspaceDetailRow = {
   id: string;
   name: string;
+  isAgencyWorkspace?: boolean;
   ghlLocationId?: string | null;
   ghl: GhlConnectionStatus | null;
   quota: {
@@ -199,6 +201,7 @@ export default function AgencyHomePage() {
             tlist.map((t, i) => ({
               id: t.id,
               name: t.name,
+              isAgencyWorkspace: Boolean(t.isAgencyWorkspace),
               ghlLocationId: t.ghlLocationId,
               ghl: ghlRows[i] ?? null,
               quota: qRows[i] ?? null,
@@ -298,7 +301,11 @@ export default function AgencyHomePage() {
             }}
           >
             <td style={{ padding: '0.85rem 0.65rem', fontWeight: 700, color: 'var(--aisbp-text-heading, #0f172a)' }}>
-              {row.name}
+              {formatWorkspaceDisplayName({
+                name: row.name,
+                id: row.id,
+                isAgencyWorkspace: row.isAgencyWorkspace,
+              })}
             </td>
             <td style={{ padding: '0.85rem 0.65rem' }}>{crmPill}</td>
             <td style={{ padding: '0.85rem 0.65rem' }}>{aiPill}</td>

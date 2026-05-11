@@ -123,10 +123,10 @@ async function seed() {
     console.log('\n🏢 Creating agency...');
     const agency = await prisma.agency.upsert({
       where: { id: 'demo-agency-001' },
-      update: { name: 'Demo Agency' },
+      update: { name: 'Main Agency' },
       create: {
         id: 'demo-agency-001',
-        name: 'Demo Agency',
+        name: 'Main Agency',
         settings: {
           defaultOutputFormat: 'bubble',
           allowTenantModelOverride: true,

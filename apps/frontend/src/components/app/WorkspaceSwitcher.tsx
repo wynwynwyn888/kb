@@ -10,8 +10,9 @@ import { getSubaccountSwitchHref } from '@/components/app/tenant-workspace/path'
 import { TENANT_WORKSPACE_META_CHANGED, type TenantWorkspaceMetaDetail } from '@/lib/workspace-events';
 import { rememberAgencyWorkspaceSelection } from '@/lib/theme-preference';
 import { appFloatingPrimaryButtonStyle } from '@/components/app/mvp-ui';
+import { formatWorkspaceDisplayName } from '@/lib/workspace-display';
 
-type SubaccountRow = { id: string; name: string; ghlLocationId?: string | null; status?: string };
+type SubaccountRow = { id: string; name: string; ghlLocationId?: string | null; status?: string; isAgencyWorkspace?: boolean };
 
 const PANEL_WIDTH = 320;
 
@@ -100,6 +101,7 @@ export function WorkspaceSwitcher() {
   const panelRef = useRef<HTMLDivElement>(null);
 
   const [subTitleName, setSubTitleName] = useState<string | null>(null);
+  const [subIsAgencyWorkspace, setSubIsAgencyWorkspace] = useState(false);
   const [agencyName, setAgencyName] = useState<string | null>(null);
   const [subaccounts, setSubaccounts] = useState<SubaccountRow[]>([]);
   const [listErr, setListErr] = useState('');
@@ -109,8 +111,10 @@ export function WorkspaceSwitcher() {
     try {
       const t = await getTenantById(token, activeSubaccountId);
       setSubTitleName(t?.name ?? null);
+      setSubIsAgencyWorkspace(Boolean(t?.isAgencyWorkspace));
     } catch {
       setSubTitleName(null);
+      setSubIsAgencyWorkspace(false);
     }
   }, [token, activeSubaccountId]);
 
@@ -168,28 +172,42 @@ export function WorkspaceSwitcher() {
     return () => window.removeEventListener(TENANT_WORKSPACE_META_CHANGED, onWorkspaceMeta);
   }, [activeSubaccountId, loadList, loadSubName]);
 
-  const selectedGhlName = useMemo(() => {
+  const selectedGhlDisplay = useMemo(() => {
     if (!isGhlSettings || !ghlSubParam) return null;
-    return subaccounts.find(s => s.id === ghlSubParam)?.name ?? null;
+    const s = subaccounts.find(x => x.id === ghlSubParam);
+    if (!s) return null;
+    return formatWorkspaceDisplayName({
+      name: s.name,
+      id: s.id,
+      isAgencyWorkspace: s.isAgencyWorkspace,
+    });
   }, [isGhlSettings, ghlSubParam, subaccounts]);
 
   const triggerLabel = useMemo(() => {
     if (user?.agencyRole) {
       if (isSubaccountRoute) {
-        return subTitleName ?? 'Workspace';
+        return formatWorkspaceDisplayName({
+          name: subTitleName,
+          id: activeSubaccountId,
+          isAgencyWorkspace: subIsAgencyWorkspace,
+        });
       }
       if (isGhlSettings && ghlSubParam) {
-        return selectedGhlName ? `CRM · ${selectedGhlName}` : 'CRM · workspace';
+        return selectedGhlDisplay ? `CRM · ${selectedGhlDisplay}` : 'CRM · workspace';
       }
       if (isAgencyRoute) {
         return agencyName ?? 'Agency account';
       }
     }
     if (isSubaccountRoute) {
-      return subTitleName ?? 'Workspace';
+      return formatWorkspaceDisplayName({
+        name: subTitleName,
+        id: activeSubaccountId,
+        isAgencyWorkspace: subIsAgencyWorkspace,
+      });
     }
     if (isGhlSettings && ghlSubParam) {
-      return selectedGhlName ? `CRM · ${selectedGhlName}` : 'CRM';
+      return selectedGhlDisplay ? `CRM · ${selectedGhlDisplay}` : 'CRM';
     }
     return 'Workspace';
   }, [
@@ -200,7 +218,9 @@ export function WorkspaceSwitcher() {
     isAgencyRoute,
     agencyName,
     subTitleName,
-    selectedGhlName,
+    activeSubaccountId,
+    subIsAgencyWorkspace,
+    selectedGhlDisplay,
   ]);
 
   const triggerTitle = useMemo(() => {
@@ -356,7 +376,11 @@ export function WorkspaceSwitcher() {
                     transition: 'background 0.12s ease',
                   }}
                 >
-                  {s.name?.trim() ? s.name : s.id ?? 'Workspace'}
+                  {formatWorkspaceDisplayName({
+                    name: s.name,
+                    id: s.id,
+                    isAgencyWorkspace: s.isAgencyWorkspace,
+                  })}
                 </button>
               </li>
             );

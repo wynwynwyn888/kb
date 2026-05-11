@@ -34,7 +34,7 @@ const tabLinkStyle = (active: boolean): CSSProperties => ({
 const statTile: CSSProperties = {
   padding: '0.55rem 0.75rem',
   borderRadius: 12,
-  background: 'var(--aisbp-stat-tile-bg, #f8fafc)',
+  background: 'var(--aisbp-surface, #fff)',
   border: '1px solid var(--aisbp-border, #e2e8f0)',
   minWidth: '6.5rem',
 };
@@ -49,6 +49,7 @@ export function TenantSettingsShell({ children }: { children: ReactNode }) {
     err,
     reload,
     tenantName,
+    isAgencyWorkspace,
     botMode,
     promptConfigSnap,
     ghl,
@@ -81,7 +82,7 @@ export function TenantSettingsShell({ children }: { children: ReactNode }) {
             margin: '0 0 0.35rem',
           }}
         >
-          Control panel
+          Control Panel
         </p>
         <h1
           style={{
@@ -103,7 +104,7 @@ export function TenantSettingsShell({ children }: { children: ReactNode }) {
             maxWidth: '40rem',
           }}
         >
-          See how this workspace is set up: CRM Connection, assistant, and automatic replies.
+          Manage this workspace&apos;s CRM connection, assistant behavior, and client contact details.
         </p>
       </header>
 
@@ -125,18 +126,39 @@ export function TenantSettingsShell({ children }: { children: ReactNode }) {
               borderRadius: 16,
               marginBottom: '1.25rem',
               padding: '1.2rem 1.25rem 1.25rem',
-              background: 'linear-gradient(125deg, #0f172a 0%, #1e293b 100%)',
-              color: '#f1f5f9',
-              boxShadow: '0 16px 48px rgba(15, 23, 42, 0.28)',
+              background: 'var(--aisbp-surface-elevated, var(--aisbp-surface, #fff))',
+              color: 'var(--aisbp-text, #0f172a)',
+              border: '1px solid var(--aisbp-border, #e2e8f0)',
+              boxShadow: '0 4px 24px rgba(15, 23, 42, 0.06)',
             }}
             aria-label="Workspace overview"
           >
             <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', gap: '1rem', alignItems: 'flex-start' }}>
               <div style={{ flex: '1 1 220px', minWidth: 0 }}>
-                <div style={{ fontSize: '0.62rem', fontWeight: 800, letterSpacing: '0.12em', color: 'rgba(148, 163, 184, 0.95)' }}>
-                  WORKSPACE
+                <div
+                  style={{
+                    fontSize: '0.62rem',
+                    fontWeight: 800,
+                    letterSpacing: '0.12em',
+                    color: 'var(--aisbp-muted, #64748b)',
+                  }}
+                >
+                  {isAgencyWorkspace ? 'AGENCY WORKSPACE' : 'WORKSPACE'}
                 </div>
-                <div style={{ fontSize: '1.45rem', fontWeight: 800, margin: '0.25rem 0 0', lineHeight: 1.2 }}>{tenantName ?? 'Workspace'}</div>
+                <div
+                  style={{
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    marginTop: '0.25rem',
+                  }}
+                >
+                  <div style={{ fontSize: '1.35rem', fontWeight: 800, lineHeight: 1.2, color: 'var(--aisbp-text-heading, #0f172a)' }}>
+                    {tenantName ?? 'Workspace'}
+                  </div>
+                  {isAgencyWorkspace ? <StatusPill label="Agency Workspace" tone="neutral" /> : null}
+                </div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.45rem', marginTop: '0.65rem' }}>
                   {ghl && !ghlLoadErr && ghl.status === 'CONNECTED' ? <StatusPill label="CRM connected" tone="ok" /> : null}
                   {ghl && !ghlLoadErr && ghl.status !== 'CONNECTED' ? (
@@ -151,32 +173,28 @@ export function TenantSettingsShell({ children }: { children: ReactNode }) {
                   style={{
                     margin: '0.75rem 0 0',
                     fontSize: '0.8rem',
-                    color: 'rgba(226, 232, 240, 0.92)',
+                    color: 'var(--aisbp-muted, #64748b)',
                     lineHeight: 1.5,
                     maxWidth: '36rem',
                   }}
                 >
-                  {heroMetaLine}
+                  {isAgencyWorkspace
+                    ? 'This workspace supports internal operations, agency-owned CRM activity, and automated low-credit warning delivery.'
+                    : heroMetaLine}
                 </p>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem', alignItems: 'stretch', minWidth: '12rem' }}>
-                <Link
-                  href={`${base}/assistant`}
-                  style={{ ...appFloatingPrimaryButtonStyle, textAlign: 'center' as const }}
-                >
+                <Link href={`${base}/assistant`} style={{ ...appFloatingPrimaryButtonStyle, textAlign: 'center' as const }}>
                   Assistant
                 </Link>
-                <Link
-                  href={`${base}/knowledge-vaults`}
-                  style={{ ...appFloatingSecondaryButtonStyle, background: 'rgba(255,255,255,0.12)', borderColor: 'rgba(255,255,255,0.25)', color: '#f8fafc', boxShadow: 'none', textAlign: 'center' as const }}
-                >
+                <Link href={`${base}/knowledge-vaults`} style={{ ...appFloatingSecondaryButtonStyle, textAlign: 'center' as const }}>
                   Knowledge vaults
                 </Link>
-                <Link href={`${base}/ghl-status`} style={{ ...appFloatingSecondaryButtonStyle, background: 'rgba(255,255,255,0.12)', borderColor: 'rgba(255,255,255,0.25)', color: '#f8fafc', boxShadow: 'none', textAlign: 'center' as const }}>
+                <Link href={`${base}/ghl-status`} style={{ ...appFloatingSecondaryButtonStyle, textAlign: 'center' as const }}>
                   CRM Connection
                 </Link>
                 {canRenameWorkspace ? (
-                  <a href="#workspace-details" style={{ ...appFloatingSecondaryButtonStyle, background: 'rgba(255,255,255,0.12)', borderColor: 'rgba(255,255,255,0.25)', color: '#f8fafc', boxShadow: 'none', textAlign: 'center' as const }}>
+                  <a href="#workspace-details" style={{ ...appFloatingSecondaryButtonStyle, textAlign: 'center' as const }}>
                     Edit workspace name
                   </a>
                 ) : null}

@@ -250,28 +250,50 @@ export default function AgencyTenantDirectoryPage() {
   );
 
   const agencyWorkspaceCard = (
-    <SectionCard
-      title="Agency workspace"
-      subtitle="Used for internal notifications and agency-owned CRM sending. Cannot be deleted."
+    <div
+      style={{
+        marginBottom: '1.1rem',
+        border: '1px solid var(--aisbp-border, #e2e8f0)',
+        borderRadius: 14,
+        padding: '1.2rem 1.25rem',
+        background: 'var(--aisbp-surface-elevated, var(--aisbp-surface, #fff))',
+      }}
     >
       {systemWorkspace ? (
-        <div
-          style={{
-            display: 'flex',
-            flexWrap: 'wrap',
-            gap: '0.85rem',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-          }}
-        >
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-            <span style={{ fontWeight: 700, color: 'var(--aisbp-text-heading, #0f172a)', fontSize: '1rem' }}>
+        <>
+          <p
+            style={{
+              fontSize: '0.65rem',
+              fontWeight: 800,
+              letterSpacing: '0.1em',
+              color: 'var(--aisbp-muted, #64748b)',
+              margin: '0 0 0.45rem',
+              textTransform: 'uppercase',
+            }}
+          >
+            Agency workspace
+          </p>
+          <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.5rem', marginBottom: '0.65rem' }}>
+            <span style={{ fontSize: '1.2rem', fontWeight: 800, color: 'var(--aisbp-text, #0f172a)', lineHeight: 1.2 }}>
               {systemWorkspace.name}
             </span>
-            <span style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)' }}>
-              Unlimited credits · Used to send automated low-credit warnings to client workspaces.
-            </span>
+            <StatusPill label="Agency Workspace" tone="neutral" />
           </div>
+          <p
+            style={{
+              margin: '0 0 0.5rem',
+              fontSize: '0.86rem',
+              color: 'var(--aisbp-muted, #64748b)',
+              lineHeight: 1.55,
+              maxWidth: '48rem',
+            }}
+          >
+            Reserved for internal agency operations, agency-owned CRM sending, and automated low-credit warning delivery. This
+            workspace cannot be deleted.
+          </p>
+          <p style={{ margin: '0 0 1rem', fontSize: '0.82rem', color: 'var(--aisbp-muted, #64748b)', lineHeight: 1.5 }}>
+            Unlimited credits · Used for notifications and internal CRM actions.
+          </p>
           <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.65rem' }}>
             {ghlById[systemWorkspace.id] ? (
               <StatusPill
@@ -299,8 +321,8 @@ export default function AgencyTenantDirectoryPage() {
                 display: 'inline-block',
                 padding: '0.35rem 0.65rem',
                 borderRadius: 6,
-                border: '1px solid var(--aisbp-border-strong, #cbd5e1)',
-                color: 'var(--aisbp-text-secondary, #1a1a1a)',
+                border: '1px solid var(--aisbp-border, #cbd5e1)',
+                color: 'var(--aisbp-text, #0f172a)',
                 background: 'var(--aisbp-surface, #fff)',
                 textDecoration: 'none',
                 fontSize: '0.82rem',
@@ -310,12 +332,24 @@ export default function AgencyTenantDirectoryPage() {
               Configure CRM
             </Link>
           </div>
-        </div>
+        </>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.55rem' }}>
+          <p
+            style={{
+              fontSize: '0.65rem',
+              fontWeight: 800,
+              letterSpacing: '0.1em',
+              color: 'var(--aisbp-muted, #64748b)',
+              margin: 0,
+              textTransform: 'uppercase',
+            }}
+          >
+            Agency workspace
+          </p>
           <p style={{ margin: 0, color: 'var(--aisbp-muted, #64748b)', fontSize: '0.86rem', lineHeight: 1.5 }}>
-            Each agency has one internal workspace used to send low-credit warnings on behalf of the agency.
-            It does not appear in client workspace credit totals.
+            Each agency has one internal workspace used to send low-credit warnings on behalf of the agency. It does not appear
+            in client workspace credit totals.
           </p>
           <p style={{ margin: 0, color: 'var(--aisbp-muted, #64748b)', fontSize: '0.82rem', lineHeight: 1.5 }}>
             Low-credit warning SMS cannot be sent until the agency workspace is set up and connected to CRM.
@@ -330,7 +364,7 @@ export default function AgencyTenantDirectoryPage() {
           </button>
         </div>
       )}
-    </SectionCard>
+    </div>
   );
 
   return (

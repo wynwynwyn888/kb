@@ -558,75 +558,83 @@ export default function TenantTeamPage() {
         </SectionCard>
       ) : null}
 
-      {canManageTeam && pendingInvites.length > 0 ? (
+      {canManageTeam ? (
         <SectionCard
-          title={`Pending invites (${pendingInvites.length})`}
-          subtitle="Re-send the email or revoke the link if the invite is no longer needed."
+          title={pendingInvites.length > 0 ? `Pending invites (${pendingInvites.length})` : 'Pending invites'}
+          subtitle={
+            pendingInvites.length > 0
+              ? 'Re-send the email or revoke the link if the invite is no longer needed.'
+              : 'Invites you send appear here until someone accepts them or you revoke them.'
+          }
         >
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem', minWidth: '520px' }}>
-              <thead>
-                <tr style={{ textAlign: 'left', borderBottom: '2px solid var(--aisbp-border, #e2e8f0)' }}>
-                  <th style={thStyle}>Email</th>
-                  <th style={thStyle}>Role</th>
-                  <th style={thStyle}>Status</th>
-                  <th style={thStyle}>Sent</th>
-                  <th style={thStyle}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {pendingInvites.map(inv => {
-                  const busy = pendingBusyId === inv.id;
-                  const created = inv.created_at ? new Date(inv.created_at) : null;
-                  const createdLabel = created && !Number.isNaN(created.getTime()) ? created.toLocaleDateString() : '—';
-                  return (
-                    <tr key={inv.id} style={{ borderBottom: '1px solid var(--aisbp-border, #f1f5f9)' }}>
-                      <td style={tdStyle}>{inv.email_original}</td>
-                      <td style={tdStyle}>{displayWorkspaceRole(inv.role)}</td>
-                      <td style={tdStyle}>
-                        <StatusPill label="Pending" tone="warn" />
-                      </td>
-                      <td style={{ ...tdStyle, color: 'var(--aisbp-muted, #64748b)', fontSize: '0.82rem' }}>{createdLabel}</td>
-                      <td style={tdStyle}>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.45rem' }}>
-                          <button
-                            type="button"
-                            onClick={() => void onResendPendingInvite(inv)}
-                            disabled={busy}
-                            style={{
-                              ...mvpSecondaryButtonStyle,
-                              padding: '0.4rem 0.75rem',
-                              fontSize: '0.82rem',
-                              opacity: busy ? 0.7 : 1,
-                            }}
-                          >
-                            {busy ? '…' : 'Re-send invite'}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => void onRevokePendingInvite(inv)}
-                            disabled={busy}
-                            style={{
-                              padding: '0.4rem 0.7rem',
-                              fontSize: '0.82rem',
-                              borderRadius: '6px',
-                              border: '1px solid #fecaca',
-                              background: '#fff1f2',
-                              color: '#b91c1c',
-                              cursor: busy ? 'not-allowed' : 'pointer',
-                              opacity: busy ? 0.7 : 1,
-                            }}
-                          >
-                            Revoke
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          {pendingInvites.length === 0 ? (
+            <EmptyState title="No pending invites" detail="Send an invite above to add someone to this workspace." />
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem', minWidth: '520px' }}>
+                <thead>
+                  <tr style={{ textAlign: 'left', borderBottom: '2px solid var(--aisbp-border, #e2e8f0)' }}>
+                    <th style={thStyle}>Email</th>
+                    <th style={thStyle}>Role</th>
+                    <th style={thStyle}>Status</th>
+                    <th style={thStyle}>Sent</th>
+                    <th style={thStyle}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pendingInvites.map(inv => {
+                    const busy = pendingBusyId === inv.id;
+                    const created = inv.created_at ? new Date(inv.created_at) : null;
+                    const createdLabel = created && !Number.isNaN(created.getTime()) ? created.toLocaleDateString() : '—';
+                    return (
+                      <tr key={inv.id} style={{ borderBottom: '1px solid var(--aisbp-border, #f1f5f9)' }}>
+                        <td style={tdStyle}>{inv.email_original}</td>
+                        <td style={tdStyle}>{displayWorkspaceRole(inv.role)}</td>
+                        <td style={tdStyle}>
+                          <StatusPill label="Pending" tone="warn" />
+                        </td>
+                        <td style={{ ...tdStyle, color: 'var(--aisbp-muted, #64748b)', fontSize: '0.82rem' }}>{createdLabel}</td>
+                        <td style={tdStyle}>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.45rem' }}>
+                            <button
+                              type="button"
+                              onClick={() => void onResendPendingInvite(inv)}
+                              disabled={busy}
+                              style={{
+                                ...mvpSecondaryButtonStyle,
+                                padding: '0.4rem 0.75rem',
+                                fontSize: '0.82rem',
+                                opacity: busy ? 0.7 : 1,
+                              }}
+                            >
+                              {busy ? '…' : 'Re-send invite'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => void onRevokePendingInvite(inv)}
+                              disabled={busy}
+                              style={{
+                                padding: '0.4rem 0.7rem',
+                                fontSize: '0.82rem',
+                                borderRadius: '6px',
+                                border: '1px solid #fecaca',
+                                background: '#fff1f2',
+                                color: '#b91c1c',
+                                cursor: busy ? 'not-allowed' : 'pointer',
+                                opacity: busy ? 0.7 : 1,
+                              }}
+                            >
+                              Revoke
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
         </SectionCard>
       ) : null}
 

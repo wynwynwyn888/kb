@@ -25,6 +25,11 @@ function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
+function displayNameFromEmail(email: string): string {
+  const local = normalizeEmail(email).split('@')[0] ?? 'User';
+  return local.replace(/[._-]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) || 'User';
+}
+
 /**
  * Resolve the public app origin used in Supabase invite/recovery `redirectTo`.
  *
@@ -139,14 +144,18 @@ export class InvitationsService {
   }
 
   async acceptAgencyInvite(actorProfileId: string, inviteId: string, accessToken: string) {
-    const email = await this.emailForAuthUser(accessToken, actorProfileId);
+    const { email, fullName } = await this.resolveAuthSessionForInvite(accessToken, actorProfileId);
     const inv = (await this.loadPendingInvite(inviteId, 'AGENCY')) as {
       email_normalized: string;
+      email_original?: string;
       agency_id: string;
       role: string;
     };
+    const invitedLabel = String(inv['email_original'] ?? inv.email_normalized ?? '').trim() || inv.email_normalized;
     if (inv.email_normalized !== normalizeEmail(email)) {
-      throw new ForbiddenException('Signed-in email does not match this invite');
+      throw new ForbiddenException(
+        `This invite was sent to ${invitedLabel}, but you are signed in as ${email.trim()}. Sign out and continue with the invited email.`,
+      );
     }
 
     const agencyId = inv.agency_id;
@@ -155,6 +164,12 @@ export class InvitationsService {
       await this.markInviteAccepted(inviteId, actorProfileId);
       return { alreadyMember: true as const };
     }
+
+    await this.ensureProfileForAuthUser({
+      profileId: actorProfileId,
+      email,
+      fullName,
+    });
 
     const role = inv.role as AgencyRole;
     const now = new Date().toISOString();
@@ -170,6 +185,9 @@ export class InvitationsService {
       if (/duplicate|23505/i.test(insErr.message)) {
         await this.markInviteAccepted(inviteId, actorProfileId);
         return { alreadyMember: true as const };
+      }
+      if (/23503|foreign key|violates foreign key/i.test(String(insErr.message))) {
+        throw new BadRequestException('We could not attach this account to the invite. Please contact support.');
       }
       throw new BadRequestException(insErr.message);
     }
@@ -227,14 +245,18 @@ export class InvitationsService {
   }
 
   async acceptWorkspaceInvite(actorProfileId: string, inviteId: string, accessToken: string) {
-    const email = await this.emailForAuthUser(accessToken, actorProfileId);
+    const { email, fullName } = await this.resolveAuthSessionForInvite(accessToken, actorProfileId);
     const inv = (await this.loadPendingInvite(inviteId, 'WORKSPACE')) as {
       email_normalized: string;
+      email_original?: string;
       tenant_id: string;
       role: string;
     };
+    const invitedLabel = String(inv['email_original'] ?? inv.email_normalized ?? '').trim() || inv.email_normalized;
     if (inv.email_normalized !== normalizeEmail(email)) {
-      throw new ForbiddenException('Signed-in email does not match this invite');
+      throw new ForbiddenException(
+        `This invite was sent to ${invitedLabel}, but you are signed in as ${email.trim()}. Sign out and continue with the invited email.`,
+      );
     }
     const tenantId = inv.tenant_id;
     const existing = await this.findTenantMembershipByProfile(tenantId, actorProfileId);
@@ -242,6 +264,13 @@ export class InvitationsService {
       await this.markInviteAccepted(inviteId, actorProfileId);
       return { alreadyMember: true as const };
     }
+
+    await this.ensureProfileForAuthUser({
+      profileId: actorProfileId,
+      email,
+      fullName,
+    });
+
     const role = inv.role as TenantRole;
     const now = new Date().toISOString();
     const { error: insErr } = await this.supabase.from('tenant_users').insert({
@@ -256,6 +285,9 @@ export class InvitationsService {
       if (/duplicate|23505/i.test(insErr.message)) {
         await this.markInviteAccepted(inviteId, actorProfileId);
         return { alreadyMember: true as const };
+      }
+      if (/23503|foreign key|violates foreign key/i.test(String(insErr.message))) {
+        throw new BadRequestException('We could not attach this account to the invite. Please contact support.');
       }
       throw new BadRequestException(insErr.message);
     }
@@ -404,13 +436,68 @@ export class InvitationsService {
     return r ? String(r).toUpperCase() : null;
   }
 
-  private async emailForAuthUser(accessToken: string, profileId: string): Promise<string> {
+  /**
+   * Resolve the Supabase Auth user for an invite acceptance. JWT `sub` must match the access token user id.
+   */
+  private async resolveAuthSessionForInvite(
+    accessToken: string,
+    actorProfileId: string,
+  ): Promise<{ email: string; fullName: string | null }> {
     const { data, error } = await this.supabase.auth.getUser(accessToken);
     if (error || !data.user?.email) throw new UnauthorizedException('Invalid session');
-    if (data.user.id !== profileId) {
-      this.logger.warn(`accept invite: auth user id ${data.user.id} !== profile id ${profileId}`);
+    if (data.user.id !== actorProfileId) {
+      this.logger.warn(`accept invite: auth user id ${data.user.id} !== JWT profile id ${actorProfileId}`);
+      throw new ForbiddenException('Your session does not match this sign-in. Sign out and open the invite link again.');
     }
-    return data.user.email;
+    const meta = data.user.user_metadata as Record<string, unknown> | undefined;
+    const fromMeta =
+      typeof meta?.['full_name'] === 'string'
+        ? meta['full_name'].trim()
+        : typeof meta?.['name'] === 'string'
+          ? (meta['name'] as string).trim()
+          : '';
+    return { email: data.user.email, fullName: fromMeta || null };
+  }
+
+  /**
+   * Ensure `public.profiles` has a row for this auth user (Supabase invite creates auth.users only).
+   * Call only after the invite is verified PENDING and the signed-in email matches the invitation.
+   */
+  private async ensureProfileForAuthUser(params: {
+    profileId: string;
+    email: string;
+    fullName?: string | null;
+  }): Promise<void> {
+    const emailTrim = params.email.trim();
+    if (!emailTrim) throw new BadRequestException('We could not attach this account to the invite. Please contact support.');
+
+    const { data: existing, error: readErr } = await this.supabase
+      .from('profiles')
+      .select('id')
+      .eq('id', params.profileId)
+      .maybeSingle();
+    if (readErr) {
+      this.logger.warn(`ensureProfile read failed: ${readErr.message}`);
+      throw new BadRequestException('We could not attach this account to the invite. Please contact support.');
+    }
+    if (existing?.id) return;
+
+    const now = new Date().toISOString();
+    const fullName = (params.fullName?.trim() || displayNameFromEmail(emailTrim)) || null;
+    const { error: insErr } = await this.supabase.from('profiles').insert({
+      id: params.profileId,
+      email: emailTrim,
+      full_name: fullName,
+      created_at: now,
+      updated_at: now,
+    });
+    if (insErr) {
+      if (/23505|duplicate/i.test(insErr.message)) {
+        throw new BadRequestException('We could not attach this account to the invite. Please contact support.');
+      }
+      this.logger.warn(`ensureProfile insert failed: ${insErr.message}`);
+      throw new BadRequestException('We could not attach this account to the invite. Please contact support.');
+    }
   }
 
   private async assertAgencyAdminOrOwner(actorProfileId: string, agencyId: string) {

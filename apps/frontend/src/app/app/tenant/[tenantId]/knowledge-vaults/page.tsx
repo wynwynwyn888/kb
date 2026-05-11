@@ -2,6 +2,7 @@
 
 import type { CSSProperties, ReactNode } from 'react';
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { stripModelThinking } from '@aisbp/formatter';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
@@ -235,6 +236,143 @@ function KbModal({
         {footer ? <div style={{ padding: '0.75rem 1.15rem', borderTop: '1px solid var(--aisbp-modal-divider, #f1f5f9)' }}>{footer}</div> : null}
       </div>
     </div>
+  );
+}
+
+/** Portaled to `document.body` so it sits above bento / glass / search stacking contexts. Uses theme CSS vars for `html.dark`. */
+function KbExtractedTextModal({
+  title,
+  onClose,
+  chunkLoading,
+  chunkErr,
+  chunkText,
+}: {
+  title: string;
+  onClose: () => void;
+  chunkLoading: boolean;
+  chunkErr: string;
+  chunkText: string;
+}) {
+  if (typeof document === 'undefined') return null;
+
+  const overlay: CSSProperties = {
+    position: 'fixed',
+    inset: 0,
+    zIndex: 10000,
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 16,
+    background: 'var(--aisbp-overlay, rgba(15, 23, 42, 0.48))',
+  };
+
+  const panel: CSSProperties = {
+    position: 'relative',
+    zIndex: 10001,
+    width: 'min(768px, 100%)',
+    maxHeight: 'min(80vh, 900px)',
+    overflow: 'hidden',
+    display: 'flex',
+    flexDirection: 'column',
+    borderRadius: 16,
+    border: '1px solid var(--aisbp-modal-border, #e2e8f0)',
+    background: 'var(--aisbp-modal-bg, #ffffff)',
+    color: 'var(--aisbp-text, #0f172a)',
+    boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.35)',
+  };
+
+  const headerBar: CSSProperties = {
+    flexShrink: 0,
+    padding: '1rem 1.25rem',
+    borderBottom: '1px solid var(--aisbp-modal-divider, #f1f5f9)',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 12,
+  };
+
+  const body: CSSProperties = {
+    flex: 1,
+    minHeight: 0,
+    maxHeight: '65vh',
+    overflowY: 'auto',
+    padding: '1rem 1.25rem',
+  };
+
+  const preBlock: CSSProperties = {
+    margin: 0,
+    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+    fontSize: '0.8125rem',
+    lineHeight: 1.625,
+    whiteSpace: 'pre-wrap',
+    wordBreak: 'break-word',
+    overflowWrap: 'break-word',
+    color: 'var(--aisbp-text, #0f172a)',
+    background: 'var(--aisbp-surface-muted, #f8fafc)',
+    border: '1px solid var(--aisbp-border, #e2e8f0)',
+    borderRadius: 12,
+    padding: '0.85rem 1rem',
+  };
+
+  const closeBtn: CSSProperties = {
+    border: 'none',
+    background: 'var(--aisbp-modal-close-bg, #f1f5f9)',
+    borderRadius: 8,
+    width: 36,
+    height: 36,
+    cursor: 'pointer',
+    fontSize: '1.1rem',
+    lineHeight: 1,
+    color: 'var(--aisbp-text-secondary, #475569)',
+    flexShrink: 0,
+  };
+
+  return createPortal(
+    <div
+      style={overlay}
+      role="presentation"
+      onClick={e => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div
+        style={panel}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="kb-extracted-text-modal-title"
+        onClick={e => e.stopPropagation()}
+      >
+        <div style={headerBar}>
+          <h2
+            id="kb-extracted-text-modal-title"
+            style={{
+              fontSize: '1.05rem',
+              fontWeight: 700,
+              margin: 0,
+              flex: 1,
+              minWidth: 0,
+              color: 'var(--aisbp-text-heading, #0f172a)',
+            }}
+          >
+            {title}
+          </h2>
+          <button type="button" onClick={onClose} style={closeBtn} aria-label="Close">
+            ×
+          </button>
+        </div>
+        <div style={body}>
+          {chunkLoading ? (
+            <p style={{ margin: 0, color: 'var(--aisbp-text-secondary, #334155)' }}>Loading…</p>
+          ) : null}
+          {chunkErr ? (
+            <p style={{ margin: 0, color: '#b91c1c', fontSize: '0.875rem' }}>{chunkErr}</p>
+          ) : null}
+          {!chunkLoading && !chunkErr ? (
+            <pre style={preBlock}>{chunkText || 'No text chunks for this document.'}</pre>
+          ) : null}
+        </div>
+      </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -1562,25 +1700,13 @@ function FileKnowledgeCard({
       ) : null}
 
       {extractedOpen ? (
-        <KbModal title="Extracted text (what the bot reads)" onClose={() => setExtractedOpen(false)}>
-          {chunkLoading ? <p style={{ margin: 0, color: '#64748b' }}>Loading…</p> : null}
-          {chunkErr ? <p style={{ margin: 0, color: '#b91c1c', fontSize: '0.875rem' }}>{chunkErr}</p> : null}
-          {!chunkLoading && !chunkErr ? (
-            <pre
-              style={{
-                margin: 0,
-                fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-                fontSize: '0.8125rem',
-                lineHeight: 1.5,
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-word',
-                color: '#1e293b',
-              }}
-            >
-              {chunkText || 'No text chunks for this document.'}
-            </pre>
-          ) : null}
-        </KbModal>
+        <KbExtractedTextModal
+          title="Extracted text (what the bot reads)"
+          onClose={() => setExtractedOpen(false)}
+          chunkLoading={chunkLoading}
+          chunkErr={chunkErr}
+          chunkText={chunkText}
+        />
       ) : null}
     </>
   );

@@ -36,6 +36,7 @@ import {
   resolveSelectedVaultId,
   vaultScopedDocuments,
 } from '@/lib/knowledge-vault-scope';
+import { filterKbSearchHitsForKnowledgeVaultUi } from '@/lib/knowledge-vault-search-display';
 import { getVaultActivityAt, sortVaultsForDisplay } from '@/lib/knowledge-vault-activity';
 import {
   ErrorBanner,
@@ -1620,6 +1621,8 @@ export default function SubaccountKnowledgePage() {
   const [searching, setSearching] = useState(false);
   const [searchErr, setSearchErr] = useState('');
   const [searchHits, setSearchHits] = useState<KbSearchHit[] | null>(null);
+  /** API returned hits but all were below the vault UI relevance threshold. */
+  const [searchStrongMatchEmpty, setSearchStrongMatchEmpty] = useState(false);
   const [searchTraceHit, setSearchTraceHit] = useState<KbSearchHit | null>(null);
   const [searchTraceLoading, setSearchTraceLoading] = useState(false);
   const [searchTraceErr, setSearchTraceErr] = useState('');
@@ -1871,9 +1874,13 @@ export default function SubaccountKnowledgePage() {
     setSearchErr('');
     setSearching(true);
     setSearchHits(null);
+    setSearchStrongMatchEmpty(false);
     try {
       const r = await searchKb(token, { tenantId: subId, query: q, topK: 12, vaultId: selectedVaultId });
-      setSearchHits(Array.isArray(r.hits) ? r.hits : []);
+      const raw = Array.isArray(r.hits) ? r.hits : [];
+      const visible = filterKbSearchHitsForKnowledgeVaultUi(raw);
+      setSearchHits(visible);
+      setSearchStrongMatchEmpty(visible.length === 0 && raw.length > 0);
     } catch (er) {
       const raw = er instanceof Error ? er.message : 'Search failed';
       setSearchErr(friendlifyKbMessage(raw));
@@ -2822,7 +2829,20 @@ export default function SubaccountKnowledgePage() {
                     <div style={{ margin: '0.85rem 0 0' }}>
                       <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>
                         {searchHits.length === 0 ? (
-                          <li style={{ fontSize: '0.875rem', color: 'var(--aisbp-muted, #64748b)' }}>No matching knowledge found</li>
+                          <li style={{ fontSize: '0.875rem', color: 'var(--aisbp-muted, #64748b)' }}>
+                            {searchStrongMatchEmpty ? (
+                              <>
+                                <div style={{ fontWeight: 600, color: 'var(--aisbp-text-secondary, #334155)' }}>
+                                  No strong matches found.
+                                </div>
+                                <div style={{ marginTop: 6 }}>
+                                  Try a more specific keyword, or add the information as a note.
+                                </div>
+                              </>
+                            ) : (
+                              'No matching knowledge found'
+                            )}
+                          </li>
                         ) : (
                           searchHits.slice(0, 8).map(h => (
                             <li

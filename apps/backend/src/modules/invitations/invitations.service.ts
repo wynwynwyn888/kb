@@ -1,4 +1,7 @@
-// Invitations — Supabase Auth admin generateLink (invite / recovery). Service role stays server-side only.
+// Invitations — Supabase Auth invite + recovery email (with action_link fallback).
+// Sends real Supabase emails by default; falls back to a copyable action link only when
+// the project has no email provider configured (or, for recovery, on transient failure).
+// Service role key stays server-side only — the frontend only ever sees the API response.
 
 import {
   BadRequestException,
@@ -12,7 +15,7 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
-import { getSupabaseService } from '../../lib/supabase';
+import { getSupabaseServer, getSupabaseService } from '../../lib/supabase';
 import type { AgencyRole, TenantRole } from '../../lib/enums';
 import { AuthService } from '../auth/auth.service';
 
@@ -26,14 +29,25 @@ function normalizeEmail(email: string): string {
  * Resolve the public app origin used in Supabase invite/recovery `redirectTo`.
  *
  * Order: `INVITE_APP_BASE_URL` → `NEXT_PUBLIC_APP_URL` → (dev only) `http://localhost:3000`.
- * In production the localhost fallback is blocked: missing config throws at call time
- * so invite/reset endpoints fail fast with a clear operator error instead of silently
- * generating links that point to localhost.
+ * In production:
+ *   - missing config → throw (do not silently emit localhost links)
+ *   - localhost / 127.0.0.1 hostname → throw (a misconfigured prod deploy must not email
+ *     working "localhost" links to real users)
+ * Local dev (`NODE_ENV !== 'production'`) keeps the localhost fallback for convenience.
  */
-function inviteAppBaseUrl(): string {
-  const raw = (process.env['INVITE_APP_BASE_URL'] ?? process.env['NEXT_PUBLIC_APP_URL'] ?? '').trim();
-  if (raw) return raw.replace(/\/+$/, '');
-  if (process.env['NODE_ENV'] === 'production') {
+export function resolveInviteAppBaseUrl(env: NodeJS.ProcessEnv = process.env): string {
+  const raw = (env['INVITE_APP_BASE_URL'] ?? env['NEXT_PUBLIC_APP_URL'] ?? '').trim();
+  const isProd = env['NODE_ENV'] === 'production';
+  if (raw) {
+    const trimmed = raw.replace(/\/+$/, '');
+    if (isProd && /^https?:\/\/(localhost|127\.0\.0\.1)(:|\/|$)/i.test(trimmed)) {
+      throw new Error(
+        'INVITE_APP_BASE_URL points to localhost in production. Set it to the public app origin (e.g. https://app.example.com) before issuing invite or recovery links.',
+      );
+    }
+    return trimmed;
+  }
+  if (isProd) {
     throw new Error(
       'INVITE_APP_BASE_URL is not set. Set INVITE_APP_BASE_URL (or NEXT_PUBLIC_APP_URL) on the backend to the public app origin (e.g. https://app.example.com) before issuing invite or recovery links.',
     );
@@ -41,10 +55,41 @@ function inviteAppBaseUrl(): string {
   return 'http://localhost:3000';
 }
 
+function inviteAppBaseUrl(): string {
+  return resolveInviteAppBaseUrl();
+}
+
+/**
+ * Result of sending an invite (or refreshing one). When Supabase Auth
+ * accepts the invite request, `emailSent` is true and `actionLink` is null —
+ * the UI should not show a copy-link field. When email delivery is unavailable
+ * (no project SMTP configured, or transient send failure), the service falls
+ * back to a one-shot magic link the operator can copy/paste, and the UI is
+ * expected to label it clearly as a fallback.
+ */
+type InviteSendResult = {
+  invitationId: string;
+  emailSent: boolean;
+  actionLink: string | null;
+};
+
+/**
+ * Result of issuing a password recovery. `emailSent: true` means Supabase
+ * delivered the recovery email (UI should say "Reset password email sent").
+ * `emailSent: false` with an `actionLink` is the fallback path — UI should
+ * show a copyable link labelled "Reset link created".
+ */
+type RecoverySendResult = {
+  emailSent: boolean;
+  actionLink: string | null;
+};
+
 @Injectable()
 export class InvitationsService {
   private readonly logger = new Logger(InvitationsService.name);
   private readonly supabase = getSupabaseService();
+  /** Anon-key client used for `auth.resetPasswordForEmail`, which only the public client exposes. */
+  private readonly supabaseAnon = getSupabaseServer();
 
   constructor(private readonly auth: AuthService) {}
 
@@ -66,7 +111,7 @@ export class InvitationsService {
     agencyId: string,
     emailRaw: string,
     roleUi: 'ADMIN' | 'USER',
-  ): Promise<{ invitationId: string; actionLink: string; emailSent: false }> {
+  ): Promise<InviteSendResult> {
     await this.assertAgencyAdminOrOwner(actorProfileId, agencyId);
     const email = emailRaw.trim();
     if (!email || !email.includes('@')) throw new BadRequestException('Valid email is required');
@@ -89,10 +134,8 @@ export class InvitationsService {
       invitedByProfileId: actorProfileId,
     });
 
-    const redirectTo = `${inviteAppBaseUrl()}/auth/invite?invite_id=${encodeURIComponent(inviteRow.id)}&scope=agency`;
-    const actionLink = await this.generateInviteLink(email, redirectTo, { invite_id: inviteRow.id, scope: 'agency' });
-
-    return { invitationId: inviteRow.id, actionLink, emailSent: false };
+    const send = await this.sendAgencyInviteEmail(email, inviteRow.id);
+    return { invitationId: inviteRow.id, emailSent: send.emailSent, actionLink: send.actionLink };
   }
 
   async acceptAgencyInvite(actorProfileId: string, inviteId: string, accessToken: string) {
@@ -152,7 +195,7 @@ export class InvitationsService {
     tenantId: string,
     emailRaw: string,
     roleUi: 'ADMIN' | 'USER',
-  ): Promise<{ invitationId: string; actionLink: string; emailSent: false }> {
+  ): Promise<InviteSendResult> {
     await this.assertCanManageWorkspaceInvites(actorProfileId, tenantId);
     const email = emailRaw.trim();
     if (!email || !email.includes('@')) throw new BadRequestException('Valid email is required');
@@ -179,14 +222,8 @@ export class InvitationsService {
       invitedByProfileId: actorProfileId,
     });
 
-    const redirectTo = `${inviteAppBaseUrl()}/auth/invite?invite_id=${encodeURIComponent(inviteRow.id)}&scope=workspace`;
-    const actionLink = await this.generateInviteLink(email, redirectTo, {
-      invite_id: inviteRow.id,
-      scope: 'workspace',
-      tenant_id: tenantId,
-    });
-
-    return { invitationId: inviteRow.id, actionLink, emailSent: false };
+    const send = await this.sendWorkspaceInviteEmail(email, inviteRow.id, tenantId);
+    return { invitationId: inviteRow.id, emailSent: send.emailSent, actionLink: send.actionLink };
   }
 
   async acceptWorkspaceInvite(actorProfileId: string, inviteId: string, accessToken: string) {
@@ -258,7 +295,7 @@ export class InvitationsService {
     const em = ((row as { profiles?: { email?: string } }).profiles?.email ?? '').trim();
     if (!em) throw new BadRequestException('Member has no email on file');
     const redirectTo = `${inviteAppBaseUrl()}/auth/reset-password`;
-    const actionLink = await this.generateRecoveryLink(em, redirectTo);
+    const send = await this.sendRecoveryEmail(em, redirectTo);
     await this.auditRecoveryLink({
       agencyId,
       tenantId: null,
@@ -267,7 +304,7 @@ export class InvitationsService {
       targetRole,
       scope: 'AGENCY',
     });
-    return { actionLink, emailSent: false as const };
+    return send;
   }
 
   /**
@@ -318,7 +355,7 @@ export class InvitationsService {
     const em = ((row as { profiles?: { email?: string } }).profiles?.email ?? '').trim();
     if (!em) throw new BadRequestException('Member has no email on file');
     const redirectTo = `${inviteAppBaseUrl()}/auth/reset-password`;
-    const actionLink = await this.generateRecoveryLink(em, redirectTo);
+    const send = await this.sendRecoveryEmail(em, redirectTo);
     await this.auditRecoveryLink({
       agencyId,
       tenantId,
@@ -327,7 +364,7 @@ export class InvitationsService {
       targetRole,
       scope: 'WORKSPACE',
     });
-    return { actionLink, emailSent: false as const };
+    return send;
   }
 
   /** Best-effort audit row for recovery-link issuance (reuses `quota_audit_logs` like other agency events). */
@@ -538,7 +575,91 @@ export class InvitationsService {
       .eq('id', inviteId);
   }
 
-  private async generateInviteLink(email: string, redirectTo: string, data: Record<string, string>) {
+  /**
+   * Send an agency invite email through Supabase Auth (`admin.inviteUserByEmail`).
+   * Falls back to a copyable magic link only when Supabase explicitly tells us email
+   * delivery is not available — e.g. project SMTP not configured. We never silently
+   * swallow real send errors.
+   */
+  private async sendAgencyInviteEmail(email: string, inviteId: string): Promise<{ emailSent: boolean; actionLink: string | null }> {
+    const redirectTo = `${inviteAppBaseUrl()}/auth/invite?invite_id=${encodeURIComponent(inviteId)}&scope=agency`;
+    return this.sendInviteEmail(email, redirectTo, { invite_id: inviteId, scope: 'agency' });
+  }
+
+  /** Workspace variant — see {@link sendAgencyInviteEmail}. */
+  private async sendWorkspaceInviteEmail(
+    email: string,
+    inviteId: string,
+    tenantId: string,
+  ): Promise<{ emailSent: boolean; actionLink: string | null }> {
+    const redirectTo = `${inviteAppBaseUrl()}/auth/invite?invite_id=${encodeURIComponent(inviteId)}&scope=workspace`;
+    return this.sendInviteEmail(email, redirectTo, { invite_id: inviteId, scope: 'workspace', tenant_id: tenantId });
+  }
+
+  private async sendInviteEmail(
+    email: string,
+    redirectTo: string,
+    data: Record<string, string>,
+  ): Promise<{ emailSent: boolean; actionLink: string | null }> {
+    // Primary path — Supabase sends the invite email through configured SMTP.
+    const { error: sendErr } = await this.supabase.auth.admin.inviteUserByEmail(email, {
+      redirectTo,
+      data,
+    });
+    if (!sendErr) {
+      this.logger.log(`invite email sent via supabase to ${email}`);
+      return { emailSent: true, actionLink: null };
+    }
+
+    if (this.isMissingEmailProviderError(sendErr)) {
+      // Project SMTP not configured. Fall back to a one-shot magic link the operator
+      // can paste into their own email — the UI labels this as "copy link" mode.
+      this.logger.warn(
+        `invite email skipped — Supabase project has no email provider configured; falling back to action_link for ${email}`,
+      );
+      const actionLink = await this.generateMagicInviteLink(email, redirectTo, data);
+      return { emailSent: false, actionLink };
+    }
+
+    // A real send failure (rate limit, bad SMTP, etc.) — do NOT pretend it was sent.
+    this.logger.warn(`invite email failed: ${sendErr.message}`);
+    throw new BadRequestException(sendErr.message || 'Could not send invite email');
+  }
+
+  /**
+   * Send a recovery email through Supabase Auth using the public client
+   * (`auth.resetPasswordForEmail`). On failure or when SMTP is not configured,
+   * fall back to `admin.generateLink({ type: 'recovery' })` so the operator can
+   * still copy a working link — the UI clearly labels the two states.
+   */
+  private async sendRecoveryEmail(email: string, redirectTo: string): Promise<RecoverySendResult> {
+    const { error: sendErr } = await this.supabaseAnon.auth.resetPasswordForEmail(email, { redirectTo });
+    if (!sendErr) {
+      this.logger.log(`recovery email sent via supabase to ${email}`);
+      return { emailSent: true, actionLink: null };
+    }
+
+    if (this.isMissingEmailProviderError(sendErr)) {
+      this.logger.warn(
+        `recovery email skipped — Supabase project has no email provider configured; falling back to action_link for ${email}`,
+      );
+      const actionLink = await this.generateMagicRecoveryLink(email, redirectTo);
+      return { emailSent: false, actionLink };
+    }
+
+    this.logger.warn(`recovery email send failed (${sendErr.message}); falling back to action_link for ${email}`);
+    // For recovery the spec allows a fallback in any failure case so admins are not
+    // blocked entirely if email is misconfigured. The fallback UI is clearly distinct.
+    const actionLink = await this.generateMagicRecoveryLink(email, redirectTo);
+    return { emailSent: false, actionLink };
+  }
+
+  private isMissingEmailProviderError(err: { message?: string; status?: number; name?: string }): boolean {
+    const m = String(err?.message ?? '').toLowerCase();
+    return /email provider|email service|email is not configured|smtp/.test(m);
+  }
+
+  private async generateMagicInviteLink(email: string, redirectTo: string, data: Record<string, string>): Promise<string> {
     const { data: linkData, error } = await this.supabase.auth.admin.generateLink({
       type: 'invite',
       email,
@@ -554,7 +675,7 @@ export class InvitationsService {
     return actionLink;
   }
 
-  private async generateRecoveryLink(email: string, redirectTo: string) {
+  private async generateMagicRecoveryLink(email: string, redirectTo: string): Promise<string> {
     const { data: linkData, error } = await this.supabase.auth.admin.generateLink({
       type: 'recovery',
       email,
@@ -568,5 +689,100 @@ export class InvitationsService {
     const actionLink = props.properties?.action_link ?? props.action_link;
     if (!actionLink) throw new BadRequestException('Could not create reset link');
     return actionLink;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Pending invite revoke + resend
+  // ---------------------------------------------------------------------------
+
+  async revokeAgencyInvite(actorProfileId: string, agencyId: string, inviteId: string): Promise<{ revoked: true }> {
+    await this.assertAgencyAdminOrOwner(actorProfileId, agencyId);
+    await this.revokePendingInvite({ scope: 'AGENCY', agencyId, tenantId: null, inviteId });
+    return { revoked: true };
+  }
+
+  async revokeWorkspaceInvite(actorProfileId: string, tenantId: string, inviteId: string): Promise<{ revoked: true }> {
+    await this.assertCanManageWorkspaceInvites(actorProfileId, tenantId);
+    const { data: t } = await this.supabase.from('tenants').select('agency_id').eq('id', tenantId).maybeSingle();
+    const agencyId = (t as { agency_id?: string } | null)?.agency_id ?? null;
+    if (!agencyId) throw new NotFoundException('Workspace not found');
+    await this.revokePendingInvite({ scope: 'WORKSPACE', agencyId, tenantId, inviteId });
+    return { revoked: true };
+  }
+
+  async resendAgencyInvite(actorProfileId: string, agencyId: string, inviteId: string): Promise<InviteSendResult> {
+    await this.assertAgencyAdminOrOwner(actorProfileId, agencyId);
+    const inv = await this.loadPendingInviteForResend({ scope: 'AGENCY', agencyId, tenantId: null, inviteId });
+    await this.refreshInviteExpiry(inviteId);
+    const send = await this.sendAgencyInviteEmail(inv.email_original, inviteId);
+    return { invitationId: inviteId, emailSent: send.emailSent, actionLink: send.actionLink };
+  }
+
+  async resendWorkspaceInvite(actorProfileId: string, tenantId: string, inviteId: string): Promise<InviteSendResult> {
+    await this.assertCanManageWorkspaceInvites(actorProfileId, tenantId);
+    const { data: t } = await this.supabase.from('tenants').select('agency_id').eq('id', tenantId).maybeSingle();
+    const agencyId = (t as { agency_id?: string } | null)?.agency_id ?? null;
+    if (!agencyId) throw new NotFoundException('Workspace not found');
+    const inv = await this.loadPendingInviteForResend({ scope: 'WORKSPACE', agencyId, tenantId, inviteId });
+    await this.refreshInviteExpiry(inviteId);
+    const send = await this.sendWorkspaceInviteEmail(inv.email_original, inviteId, tenantId);
+    return { invitationId: inviteId, emailSent: send.emailSent, actionLink: send.actionLink };
+  }
+
+  /** Fetch a pending invite within the caller's scope (404s otherwise — no cross-scope leakage). */
+  private async loadPendingInviteForResend(params: {
+    scope: 'AGENCY' | 'WORKSPACE';
+    agencyId: string;
+    tenantId: string | null;
+    inviteId: string;
+  }): Promise<{ id: string; email_original: string }> {
+    const { data, error } = await this.supabase
+      .from('user_invitations')
+      .select('id, email_original, scope, status, agency_id, tenant_id')
+      .eq('id', params.inviteId)
+      .maybeSingle();
+    if (error || !data) throw new NotFoundException('Invite not found');
+    const row = data as { scope?: string; status?: string; agency_id?: string; tenant_id?: string | null; email_original?: string };
+    if (row.scope !== params.scope) throw new NotFoundException('Invite not found');
+    if (row.agency_id !== params.agencyId) throw new NotFoundException('Invite not found');
+    if (params.scope === 'WORKSPACE' && row.tenant_id !== params.tenantId) throw new NotFoundException('Invite not found');
+    if (row.status !== 'PENDING') throw new BadRequestException('Only pending invites can be re-sent.');
+    if (!row.email_original?.trim()) throw new BadRequestException('Invite has no email on file');
+    return { id: params.inviteId, email_original: row.email_original.trim() };
+  }
+
+  /** Mark a PENDING invite as REVOKED. Idempotent — already-revoked rows return successfully. */
+  private async revokePendingInvite(params: {
+    scope: 'AGENCY' | 'WORKSPACE';
+    agencyId: string;
+    tenantId: string | null;
+    inviteId: string;
+  }): Promise<void> {
+    const { data, error } = await this.supabase
+      .from('user_invitations')
+      .select('id, scope, status, agency_id, tenant_id')
+      .eq('id', params.inviteId)
+      .maybeSingle();
+    if (error || !data) throw new NotFoundException('Invite not found');
+    const row = data as { scope?: string; status?: string; agency_id?: string; tenant_id?: string | null };
+    if (row.scope !== params.scope) throw new NotFoundException('Invite not found');
+    if (row.agency_id !== params.agencyId) throw new NotFoundException('Invite not found');
+    if (params.scope === 'WORKSPACE' && row.tenant_id !== params.tenantId) throw new NotFoundException('Invite not found');
+    if (row.status === 'REVOKED') return;
+    if (row.status !== 'PENDING') throw new BadRequestException('Only pending invites can be revoked.');
+    const { error: upErr } = await this.supabase
+      .from('user_invitations')
+      .update({ status: 'REVOKED' })
+      .eq('id', params.inviteId);
+    if (upErr) throw new BadRequestException(upErr.message || 'Failed to revoke invite');
+  }
+
+  private async refreshInviteExpiry(inviteId: string): Promise<void> {
+    const expiresAt = new Date(Date.now() + INVITE_TTL_MS).toISOString();
+    const { error } = await this.supabase
+      .from('user_invitations')
+      .update({ expires_at: expiresAt })
+      .eq('id', inviteId);
+    if (error) this.logger.warn(`invite expiry refresh failed: ${error.message}`);
   }
 }

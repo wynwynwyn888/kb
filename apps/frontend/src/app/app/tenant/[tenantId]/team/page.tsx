@@ -12,6 +12,8 @@ import {
   listTenantUsers,
   listWorkspaceInvites,
   removeTenantMember,
+  resendWorkspaceInvite,
+  revokeWorkspaceInvite,
   updateTenantMemberRole,
   type TenantRoleValue,
 } from '@/lib/api';
@@ -131,9 +133,12 @@ export default function TenantTeamPage() {
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRoleUi, setInviteRoleUi] = useState<'ADMIN' | 'USER'>('USER');
   const [inviteBusy, setInviteBusy] = useState(false);
+  /** Set only when Supabase email delivery is unavailable and the backend returned a fallback action_link. */
   const [inviteLink, setInviteLink] = useState<{ email: string; url: string } | null>(null);
   const [inviteEmailErr, setInviteEmailErr] = useState('');
   const [pendingInvites, setPendingInvites] = useState<PendingInvite[]>([]);
+  const [pendingBusyId, setPendingBusyId] = useState<string | null>(null);
+  /** Set only when Supabase email delivery is unavailable. */
   const [resetLink, setResetLink] = useState<string | null>(null);
 
   const canManageTeam = canManageTeamRoster(tenantId, user, tenantAgencyId);
@@ -218,6 +223,7 @@ export default function TenantTeamPage() {
     setErr('');
     setOk('');
     setResetLink(null);
+    setInviteLink(null);
     setInviteBusy(true);
     try {
       const r = await createWorkspaceInviteLink(token, {
@@ -225,8 +231,14 @@ export default function TenantTeamPage() {
         email: em,
         role: inviteRoleUi === 'ADMIN' ? 'ADMIN' : 'USER',
       });
-      setInviteLink({ email: em, url: r.actionLink });
-      setOk(`Invite link created for ${em}.`);
+      if (r.emailSent) {
+        setOk(`Invite email sent to ${em}.`);
+      } else if (r.actionLink) {
+        setInviteLink({ email: em, url: r.actionLink });
+        setOk(`Invite link created for ${em}. Email delivery is unavailable — copy the link below.`);
+      } else {
+        setOk(`Invite created for ${em}.`);
+      }
       setInviteEmail('');
       setLoadKey(k => k + 1);
     } catch (e: unknown) {
@@ -291,12 +303,59 @@ export default function TenantTeamPage() {
     setBusyId(m.id);
     try {
       const r = await createWorkspaceMemberPasswordResetLink(token, { tenantId, membershipId: m.id });
-      setResetLink(r.actionLink);
-      setOk('Reset link created. Send this link to the user so they can set a new password.');
+      if (r.emailSent) {
+        setOk(`Reset password email sent${m.email?.trim() ? ` to ${m.email}` : ''}.`);
+      } else if (r.actionLink) {
+        setResetLink(r.actionLink);
+        setOk('Reset link created. Email delivery is unavailable — copy the link below and send it manually.');
+      } else {
+        setOk('Reset link created.');
+      }
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Could not create reset link');
     } finally {
       setBusyId(null);
+    }
+  };
+
+  const onResendPendingInvite = async (inv: PendingInvite) => {
+    if (!token) return;
+    setErr('');
+    setOk('');
+    setInviteLink(null);
+    setPendingBusyId(inv.id);
+    try {
+      const r = await resendWorkspaceInvite(token, { tenantId, inviteId: inv.id });
+      if (r.emailSent) {
+        setOk(`Invite email re-sent to ${inv.email_original}.`);
+      } else if (r.actionLink) {
+        setInviteLink({ email: inv.email_original, url: r.actionLink });
+        setOk(`New invite link created for ${inv.email_original}. Email delivery is unavailable — copy the link below.`);
+      } else {
+        setOk(`Invite re-sent for ${inv.email_original}.`);
+      }
+      setLoadKey(k => k + 1);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not re-send invite');
+    } finally {
+      setPendingBusyId(null);
+    }
+  };
+
+  const onRevokePendingInvite = async (inv: PendingInvite) => {
+    if (!token) return;
+    if (!confirm(`Revoke invite for ${inv.email_original}? The link will no longer work.`)) return;
+    setErr('');
+    setOk('');
+    setPendingBusyId(inv.id);
+    try {
+      await revokeWorkspaceInvite(token, { tenantId, inviteId: inv.id });
+      setOk(`Invite for ${inv.email_original} revoked.`);
+      setLoadKey(k => k + 1);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not revoke invite');
+    } finally {
+      setPendingBusyId(null);
     }
   };
 
@@ -329,8 +388,8 @@ export default function TenantTeamPage() {
       )}
       <PageHeader title="Workspace team" eyebrow={tenantName ?? 'Workspace'} />
       <p style={{ fontSize: '0.88rem', color: '#64748b', margin: '0 0 0.85rem', lineHeight: 1.5, maxWidth: '640px' }}>
-        Manage who can access this workspace. Workspace admins and your agency team can send invite links and password reset
-        links.
+        Manage who can access this workspace. Workspace admins and your agency team can send Supabase invite emails and password
+        reset emails.
       </p>
 
       <div
@@ -355,106 +414,112 @@ export default function TenantTeamPage() {
       {err && <ErrorBanner message={err} />}
       {ok && <SuccessBanner message={ok} />}
 
+      {canManageTeam && inviteLink ? (
+        <SectionCard
+          title="Copy invite link"
+          subtitle="Email delivery is unavailable — paste this link into your own email client."
+        >
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxWidth: '560px' }}>
+            <p style={{ margin: 0, fontSize: '0.88rem', color: '#334155' }}>For {inviteLink.email}</p>
+            <p
+              role="note"
+              style={{
+                margin: 0,
+                fontSize: '0.8rem',
+                color: '#92400e',
+                background: '#fef3c7',
+                border: '1px solid #fde68a',
+                padding: '0.5rem 0.65rem',
+                borderRadius: 6,
+                lineHeight: 1.45,
+              }}
+            >
+              Treat this link like a password. Anyone with the link can access or reset the account.
+            </p>
+            <input readOnly value={inviteLink.url} style={{ ...mvpInputStyle, width: '100%', fontSize: '0.78rem' }} />
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+              <button
+                type="button"
+                onClick={() => void copyText('Invite link', inviteLink.url, m => setOk(m), m => setErr(m))}
+                style={{ ...mvpPrimaryButtonStyle, width: 'fit-content' }}
+              >
+                Copy invite link
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setInviteLink(null);
+                  setOk('');
+                }}
+                style={{ ...mvpSecondaryButtonStyle, width: 'fit-content' }}
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </SectionCard>
+      ) : null}
+
       {canManageTeam ? (
         <SectionCard
           title="Invite workspace user"
-          subtitle="Invite someone to access this workspace. They will use the invite link to set up their password."
+          subtitle="Sends an invite email through Supabase Auth. The user clicks the link and sets their own password."
         >
-          {inviteLink ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxWidth: '560px' }}>
-              <SuccessBanner message="Invite link created." />
-              <p style={{ margin: 0, fontSize: '0.88rem', color: '#334155' }}>For {inviteLink.email}</p>
-              <p
-                role="note"
-                style={{
-                  margin: 0,
-                  fontSize: '0.8rem',
-                  color: '#92400e',
-                  background: '#fef3c7',
-                  border: '1px solid #fde68a',
-                  padding: '0.5rem 0.65rem',
-                  borderRadius: 6,
-                  lineHeight: 1.45,
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxWidth: '480px' }}>
+            <label style={mvpLabelStyle}>
+              Email
+              <input
+                type="email"
+                value={inviteEmail}
+                onChange={e => {
+                  setInviteEmail(e.target.value);
+                  setInviteEmailErr('');
                 }}
-              >
-                Treat this link like a password. Anyone with the link can access or reset the account.
+                disabled={inviteBusy}
+                autoComplete="off"
+                style={{
+                  ...mvpInputStyle,
+                  ...(inviteEmailErr ? { borderColor: '#f87171', boxShadow: '0 0 0 1px rgba(248, 113, 113, 0.35)' } : {}),
+                }}
+              />
+            </label>
+            {inviteEmailErr ? (
+              <p role="alert" style={{ fontSize: '0.8rem', color: '#b91c1c', margin: '-0.35rem 0 0' }}>
+                {inviteEmailErr}
               </p>
-              <input readOnly value={inviteLink.url} style={{ ...mvpInputStyle, width: '100%', fontSize: '0.78rem' }} />
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-                <button
-                  type="button"
-                  onClick={() => void copyText('Invite link', inviteLink.url, m => setOk(m), m => setErr(m))}
-                  style={{ ...mvpPrimaryButtonStyle, width: 'fit-content' }}
-                >
-                  Copy invite link
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setInviteLink(null);
-                    setOk('');
-                  }}
-                  style={{ ...mvpSecondaryButtonStyle, width: 'fit-content' }}
-                >
-                  Create another invite
-                </button>
-              </div>
-              <p style={{ ...mvpFieldHint, marginBottom: 0 }}>
-                Send this link to the user so they can set up their account. The app does not send invite email automatically
-                yet.
-              </p>
-            </div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxWidth: '480px' }}>
-              <label style={mvpLabelStyle}>
-                Email
-                <input
-                  type="email"
-                  value={inviteEmail}
-                  onChange={e => {
-                    setInviteEmail(e.target.value);
-                    setInviteEmailErr('');
-                  }}
-                  disabled={inviteBusy}
-                  autoComplete="off"
-                  style={{
-                    ...mvpInputStyle,
-                    ...(inviteEmailErr ? { borderColor: '#f87171', boxShadow: '0 0 0 1px rgba(248, 113, 113, 0.35)' } : {}),
-                  }}
-                />
-              </label>
-              {inviteEmailErr ? (
-                <p role="alert" style={{ fontSize: '0.8rem', color: '#b91c1c', margin: '-0.35rem 0 0' }}>
-                  {inviteEmailErr}
-                </p>
-              ) : null}
-              <label style={mvpLabelStyle}>
-                Role
-                <select
-                  value={inviteRoleUi}
-                  onChange={e => setInviteRoleUi(e.target.value as 'ADMIN' | 'USER')}
-                  disabled={inviteBusy}
-                  style={mvpSelectStyle}
-                >
-                  <option value="USER">User</option>
-                  <option value="ADMIN">Admin</option>
-                </select>
-              </label>
-              <button
-                type="button"
-                onClick={() => void onCreateInvite()}
-                disabled={inviteBusy || !inviteEmail.trim()}
-                style={{ ...mvpPrimaryButtonStyle, width: 'fit-content', opacity: inviteBusy || !inviteEmail.trim() ? 0.65 : 1 }}
+            ) : null}
+            <label style={mvpLabelStyle}>
+              Role
+              <select
+                value={inviteRoleUi}
+                onChange={e => setInviteRoleUi(e.target.value as 'ADMIN' | 'USER')}
+                disabled={inviteBusy}
+                style={mvpSelectStyle}
               >
-                {inviteBusy ? 'Creating…' : 'Create invite link'}
-              </button>
-            </div>
-          )}
+                <option value="USER">User</option>
+                <option value="ADMIN">Admin</option>
+              </select>
+            </label>
+            <button
+              type="button"
+              onClick={() => void onCreateInvite()}
+              disabled={inviteBusy || !inviteEmail.trim()}
+              style={{ ...mvpPrimaryButtonStyle, width: 'fit-content', opacity: inviteBusy || !inviteEmail.trim() ? 0.65 : 1 }}
+            >
+              {inviteBusy ? 'Sending…' : 'Send invite'}
+            </button>
+            <p style={{ ...mvpFieldHint, marginBottom: 0 }}>
+              Existing pending invites for the same email are refreshed and re-sent — no duplicates are created.
+            </p>
+          </div>
         </SectionCard>
       ) : null}
 
       {resetLink ? (
-        <SectionCard title="Copy reset link" subtitle="No email was sent from the app for this action.">
+        <SectionCard
+          title="Copy reset link"
+          subtitle="Email delivery is unavailable — paste this link into your own email client."
+        >
           <p
             role="note"
             style={{
@@ -494,14 +559,74 @@ export default function TenantTeamPage() {
       ) : null}
 
       {canManageTeam && pendingInvites.length > 0 ? (
-        <SectionCard title="Pending invites" subtitle="Outstanding workspace invitations.">
-          <ul style={{ margin: 0, paddingLeft: '1.1rem', fontSize: '0.86rem', color: '#475569' }}>
-            {pendingInvites.map(i => (
-              <li key={i.id}>
-                {i.email_original} — {displayWorkspaceRole(i.role)}
-              </li>
-            ))}
-          </ul>
+        <SectionCard
+          title={`Pending invites (${pendingInvites.length})`}
+          subtitle="Re-send the email or revoke the link if the invite is no longer needed."
+        >
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem', minWidth: '520px' }}>
+              <thead>
+                <tr style={{ textAlign: 'left', borderBottom: '2px solid var(--aisbp-border, #e2e8f0)' }}>
+                  <th style={thStyle}>Email</th>
+                  <th style={thStyle}>Role</th>
+                  <th style={thStyle}>Status</th>
+                  <th style={thStyle}>Sent</th>
+                  <th style={thStyle}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pendingInvites.map(inv => {
+                  const busy = pendingBusyId === inv.id;
+                  const created = inv.created_at ? new Date(inv.created_at) : null;
+                  const createdLabel = created && !Number.isNaN(created.getTime()) ? created.toLocaleDateString() : '—';
+                  return (
+                    <tr key={inv.id} style={{ borderBottom: '1px solid var(--aisbp-border, #f1f5f9)' }}>
+                      <td style={tdStyle}>{inv.email_original}</td>
+                      <td style={tdStyle}>{displayWorkspaceRole(inv.role)}</td>
+                      <td style={tdStyle}>
+                        <StatusPill label="Pending" tone="warn" />
+                      </td>
+                      <td style={{ ...tdStyle, color: 'var(--aisbp-muted, #64748b)', fontSize: '0.82rem' }}>{createdLabel}</td>
+                      <td style={tdStyle}>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.45rem' }}>
+                          <button
+                            type="button"
+                            onClick={() => void onResendPendingInvite(inv)}
+                            disabled={busy}
+                            style={{
+                              ...mvpSecondaryButtonStyle,
+                              padding: '0.4rem 0.75rem',
+                              fontSize: '0.82rem',
+                              opacity: busy ? 0.7 : 1,
+                            }}
+                          >
+                            {busy ? '…' : 'Re-send invite'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void onRevokePendingInvite(inv)}
+                            disabled={busy}
+                            style={{
+                              padding: '0.4rem 0.7rem',
+                              fontSize: '0.82rem',
+                              borderRadius: '6px',
+                              border: '1px solid #fecaca',
+                              background: '#fff1f2',
+                              color: '#b91c1c',
+                              cursor: busy ? 'not-allowed' : 'pointer',
+                              opacity: busy ? 0.7 : 1,
+                            }}
+                          >
+                            Revoke
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </SectionCard>
       ) : null}
 

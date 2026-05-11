@@ -88,6 +88,30 @@ export class AgencyUsersController {
     return this.invitations.acceptAgencyInvite(user.id, inviteId, token);
   }
 
+  @Post('invites/:inviteId/resend')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Re-send a pending agency invite email (admin)' })
+  async resendAgencyInvite(
+    @Param('inviteId') inviteId: string,
+    @Body() dto: { agencyId: string },
+    @CurrentUser() user: SessionUser,
+  ) {
+    if (!dto.agencyId?.trim()) throw new BadRequestException('agencyId is required');
+    return this.invitations.resendAgencyInvite(user.id, dto.agencyId.trim(), inviteId);
+  }
+
+  @Delete('invites/:inviteId')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Revoke a pending agency invite (admin). Only PENDING invites can be revoked.' })
+  async revokeAgencyInvite(
+    @Param('inviteId') inviteId: string,
+    @Query('agencyId') agencyId: string | undefined,
+    @CurrentUser() user: SessionUser,
+  ) {
+    if (!agencyId?.trim()) throw new BadRequestException('agencyId is required');
+    return this.invitations.revokeAgencyInvite(user.id, agencyId.trim(), inviteId);
+  }
+
   @Post('members/:membershipId/password-reset-link')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Generate password reset link for an agency member (admin)' })

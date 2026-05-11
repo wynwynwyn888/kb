@@ -46,6 +46,12 @@ services:
       API_PREFIX: ${API_PREFIX:-api/v1}
       QUEUE_PREFIX: ${QUEUE_PREFIX:-aisbp}
       ALLOW_INSECURE_DEV_KEY: ${ALLOW_INSECURE_DEV_KEY:-false}
+      # Public app origin used in Supabase invite/recovery `redirectTo`. Required in
+      # production — backend throws on first invite/reset call if missing or localhost.
+      # Must also be allow-listed in Supabase Auth → URL Configuration → Redirect URLs:
+      #   {INVITE_APP_BASE_URL}/auth/invite
+      #   {INVITE_APP_BASE_URL}/auth/reset-password
+      INVITE_APP_BASE_URL: ${INVITE_APP_BASE_URL}
 
   frontend:
     build:

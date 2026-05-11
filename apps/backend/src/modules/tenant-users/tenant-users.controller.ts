@@ -90,6 +90,30 @@ export class TenantUsersController {
     return this.invitations.acceptWorkspaceInvite(user.id, inviteId, token);
   }
 
+  @Post('invites/:inviteId/resend')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Re-send a pending workspace invite email' })
+  async resendWorkspaceInvite(
+    @Param('inviteId') inviteId: string,
+    @Body() dto: { tenantId: string },
+    @CurrentUser() user: SessionUser,
+  ) {
+    if (!dto.tenantId?.trim()) throw new BadRequestException('tenantId is required');
+    return this.invitations.resendWorkspaceInvite(user.id, dto.tenantId.trim(), inviteId);
+  }
+
+  @Delete('invites/:inviteId')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Revoke a pending workspace invite. Only PENDING invites can be revoked.' })
+  async revokeWorkspaceInvite(
+    @Param('inviteId') inviteId: string,
+    @Query('tenantId') tenantId: string | undefined,
+    @CurrentUser() user: SessionUser,
+  ) {
+    if (!tenantId?.trim()) throw new BadRequestException('tenantId is required');
+    return this.invitations.revokeWorkspaceInvite(user.id, tenantId.trim(), inviteId);
+  }
+
   @Post('members/:membershipId/password-reset-link')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Generate password reset link for a workspace member' })

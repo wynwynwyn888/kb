@@ -1666,10 +1666,23 @@ export async function listAgencyInvites(token: string, agencyId: string) {
   >(`/agency-users/invites?agencyId=${encodeURIComponent(agencyId)}`, { token });
 }
 
+/**
+ * Send (or refresh) an agency invite. Backend returns `{ emailSent: true, actionLink: null }`
+ * when Supabase delivered the email; the fallback `{ emailSent: false, actionLink: '...' }`
+ * shape is only returned when the Supabase project has no email provider configured.
+ */
+export type InviteSendResult = { invitationId: string; emailSent: boolean; actionLink: string | null };
+
+/**
+ * Recovery (password reset) result. `emailSent: true` → UI shows "Reset password email sent".
+ * `emailSent: false` with `actionLink` → fallback "Reset link created" copy-link UI.
+ */
+export type RecoverySendResult = { emailSent: boolean; actionLink: string | null };
+
 export async function createAgencyInviteLink(
   token: string,
   body: { agencyId: string; email: string; role: 'ADMIN' | 'USER' },
-): Promise<{ invitationId: string; actionLink: string; emailSent: false }> {
+): Promise<InviteSendResult> {
   return apiRequest(`/agency-users/invites`, { token, method: 'POST', body: JSON.stringify(body) });
 }
 
@@ -1677,10 +1690,31 @@ export async function acceptAgencyInvite(token: string, inviteId: string): Promi
   return apiRequest(`/agency-users/invites/${encodeURIComponent(inviteId)}/accept`, { token, method: 'POST' });
 }
 
+export async function resendAgencyInvite(
+  token: string,
+  body: { agencyId: string; inviteId: string },
+): Promise<InviteSendResult> {
+  return apiRequest(`/agency-users/invites/${encodeURIComponent(body.inviteId)}/resend`, {
+    token,
+    method: 'POST',
+    body: JSON.stringify({ agencyId: body.agencyId }),
+  });
+}
+
+export async function revokeAgencyInvite(
+  token: string,
+  body: { agencyId: string; inviteId: string },
+): Promise<{ revoked: true }> {
+  return apiRequest(
+    `/agency-users/invites/${encodeURIComponent(body.inviteId)}?agencyId=${encodeURIComponent(body.agencyId)}`,
+    { token, method: 'DELETE' },
+  );
+}
+
 export async function createAgencyMemberPasswordResetLink(
   token: string,
   body: { agencyId: string; membershipId: string },
-): Promise<{ actionLink: string; emailSent: false }> {
+): Promise<RecoverySendResult> {
   return apiRequest(`/agency-users/members/${encodeURIComponent(body.membershipId)}/password-reset-link`, {
     token,
     method: 'POST',
@@ -1741,7 +1775,7 @@ export async function listWorkspaceInvites(token: string, tenantId: string) {
 export async function createWorkspaceInviteLink(
   token: string,
   body: { tenantId: string; email: string; role: 'ADMIN' | 'USER' },
-): Promise<{ invitationId: string; actionLink: string; emailSent: false }> {
+): Promise<InviteSendResult> {
   return apiRequest(`/tenant-users/invites`, { token, method: 'POST', body: JSON.stringify(body) });
 }
 
@@ -1752,10 +1786,31 @@ export async function acceptWorkspaceInvite(
   return apiRequest(`/tenant-users/invites/${encodeURIComponent(inviteId)}/accept`, { token, method: 'POST' });
 }
 
+export async function resendWorkspaceInvite(
+  token: string,
+  body: { tenantId: string; inviteId: string },
+): Promise<InviteSendResult> {
+  return apiRequest(`/tenant-users/invites/${encodeURIComponent(body.inviteId)}/resend`, {
+    token,
+    method: 'POST',
+    body: JSON.stringify({ tenantId: body.tenantId }),
+  });
+}
+
+export async function revokeWorkspaceInvite(
+  token: string,
+  body: { tenantId: string; inviteId: string },
+): Promise<{ revoked: true }> {
+  return apiRequest(
+    `/tenant-users/invites/${encodeURIComponent(body.inviteId)}?tenantId=${encodeURIComponent(body.tenantId)}`,
+    { token, method: 'DELETE' },
+  );
+}
+
 export async function createWorkspaceMemberPasswordResetLink(
   token: string,
   body: { tenantId: string; membershipId: string },
-): Promise<{ actionLink: string; emailSent: false }> {
+): Promise<RecoverySendResult> {
   return apiRequest(`/tenant-users/members/${encodeURIComponent(body.membershipId)}/password-reset-link`, {
     token,
     method: 'POST',

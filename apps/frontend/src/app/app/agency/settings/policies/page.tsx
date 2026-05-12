@@ -133,7 +133,7 @@ export default function AgencyPoliciesPage() {
   return (
     <div>
       <PageHeader title="Global Prompt" eyebrow="Agency account" />
-      <p style={{ fontSize: '0.83rem', color: '#64748b', margin: '0 0 1rem', lineHeight: 1.45, maxWidth: '40rem' }}>
+      <p style={{ fontSize: '0.83rem', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 1rem', lineHeight: 1.45, maxWidth: '40rem' }}>
         Set the agency-wide reply standards applied before each workspace’s own bot instructions.
       </p>
 
@@ -152,8 +152,9 @@ export default function AgencyPoliciesPage() {
               marginTop: '0.5rem',
               padding: '0.4rem 0.75rem',
               borderRadius: '6px',
-              border: '1px solid #ccc',
-              background: '#fff',
+              border: '1px solid var(--aisbp-border-strong, #cbd5e1)',
+              background: 'var(--aisbp-surface, #fff)',
+              color: 'var(--aisbp-text, #0f172a)',
               cursor: 'pointer',
               fontSize: '0.85rem',
             }}
@@ -171,7 +172,9 @@ export default function AgencyPoliciesPage() {
               <EmptyState title="No Global Prompt yet" detail="Create your first prompt version below." />
             ) : (
               <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                {rows.map(r => (
+                {rows.map(r => {
+                  const selected = selectedId === r.id;
+                  return (
                   <li key={r.id}>
                     <button
                       type="button"
@@ -181,22 +184,25 @@ export default function AgencyPoliciesPage() {
                         textAlign: 'left',
                         padding: '0.65rem 0.75rem',
                         borderRadius: '8px',
-                        border: selectedId === r.id ? '2px solid #2563eb' : '1px solid #e5e5e5',
-                        background: selectedId === r.id ? '#eff6ff' : '#fafafa',
-                        boxShadow: selectedId === r.id ? '0 0 0 3px rgba(37, 99, 235, 0.1)' : 'none',
+                        border: selected ? '2px solid #2563eb' : '1px solid var(--aisbp-border, #e5e5e5)',
+                        background: selected
+                          ? 'color-mix(in srgb, var(--aisbp-tenant-nav-active-bg, rgba(37, 99, 235, 0.12)) 55%, var(--aisbp-surface, #fff))'
+                          : 'var(--aisbp-card-subtle, #fafafa)',
+                        boxShadow: selected ? '0 0 0 3px rgba(37, 99, 235, 0.12)' : 'none',
                         cursor: 'pointer',
                       }}
                     >
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', alignItems: 'center' }}>
-                        <strong style={{ fontSize: '0.9rem' }}>{r.name}</strong>
+                        <strong style={{ fontSize: '0.9rem', color: 'var(--aisbp-text-heading, #0f172a)' }}>{r.name}</strong>
                         {r.isDefault ? <StatusPill label="Default" tone="ok" /> : null}
                         {r.priority != null ? (
-                          <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>Priority {r.priority}</span>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--aisbp-muted, #94a3b8)' }}>Priority {r.priority}</span>
                         ) : null}
                       </div>
                     </button>
                   </li>
-                ))}
+                  );
+                })}
               </ul>
             )}
           </SectionCard>

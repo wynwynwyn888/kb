@@ -225,7 +225,7 @@ function KbModal({
               cursor: 'pointer',
               fontSize: '1.1rem',
               lineHeight: 1,
-              color: 'var(--aisbp-muted, #475569)',
+              color: 'var(--aisbp-muted, #64748b)',
             }}
             aria-label="Close"
           >
@@ -720,14 +720,14 @@ function FaqKnowledgeCard({
               fontSize: '0.68rem',
               fontWeight: 700,
               letterSpacing: '0.08em',
-              color: '#94a3b8',
+              color: 'var(--aisbp-muted, #94a3b8)',
               margin: '0 0 0.35rem',
               textTransform: 'uppercase' as const,
             }}
           >
             Question
           </p>
-          <h3 style={{ fontSize: '1.05rem', fontWeight: 700, margin: 0, color: '#0f172a', lineHeight: 1.4 }}>
+          <h3 style={{ fontSize: '1.05rem', fontWeight: 700, margin: 0, color: 'var(--aisbp-text-heading, #0f172a)', lineHeight: 1.4 }}>
             {question}
           </h3>
         </div>
@@ -757,7 +757,7 @@ function FaqKnowledgeCard({
               fontSize: '0.68rem',
               fontWeight: 700,
               letterSpacing: '0.08em',
-              color: '#94a3b8',
+              color: 'var(--aisbp-muted, #94a3b8)',
               margin: '1rem 0 0.35rem',
               textTransform: 'uppercase' as const,
             }}
@@ -770,7 +770,7 @@ function FaqKnowledgeCard({
                 expanded
                   ? {
                       fontSize: '0.875rem',
-                      color: '#475569',
+                      color: 'var(--aisbp-text-secondary, #475569)',
                       lineHeight: 1.55,
                       whiteSpace: 'pre-wrap' as const,
                       maxHeight: 260,
@@ -778,7 +778,7 @@ function FaqKnowledgeCard({
                     }
                   : {
                       fontSize: '0.875rem',
-                      color: '#475569',
+                      color: 'var(--aisbp-text-secondary, #475569)',
                       lineHeight: 1.55,
                       whiteSpace: 'pre-wrap' as const,
                       display: '-webkit-box',
@@ -791,7 +791,7 @@ function FaqKnowledgeCard({
               {preview}
             </div>
           ) : (
-            <p style={{ fontSize: '0.8125rem', color: '#94a3b8', margin: 0 }}>No answer text yet.</p>
+            <p style={{ fontSize: '0.8125rem', color: 'var(--aisbp-muted, #94a3b8)', margin: 0 }}>No answer text yet.</p>
           )}
           {needsShowMore && !expanded ? (
             <button
@@ -819,7 +819,7 @@ function FaqKnowledgeCard({
                 marginTop: 8,
                 fontSize: '0.8125rem',
                 fontWeight: 600,
-                color: '#64748b',
+                color: 'var(--aisbp-muted, #64748b)',
                 background: 'none',
                 border: 'none',
                 cursor: 'pointer',
@@ -852,7 +852,7 @@ function FaqKnowledgeCard({
             />
           </label>
           {loadingEdit ? (
-            <p style={{ fontSize: '0.75rem', color: '#64748b', margin: 0 }}>Loading answer…</p>
+            <p style={{ fontSize: '0.75rem', color: 'var(--aisbp-muted, #64748b)', margin: 0 }}>Loading answer…</p>
           ) : null}
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
             <button
@@ -886,14 +886,14 @@ function FaqKnowledgeCard({
           gap: '12px 16px',
           marginTop: '1.1rem',
           paddingTop: '0.85rem',
-          borderTop: '1px solid rgba(241, 245, 249, 0.95)',
+          borderTop: '1px solid var(--aisbp-border, #e2e8f0)',
         }}
       >
-        <span style={{ fontSize: '0.68rem', fontWeight: 600, letterSpacing: '0.04em', color: '#94a3b8' }}>
+        <span style={{ fontSize: '0.68rem', fontWeight: 600, letterSpacing: '0.04em', color: 'var(--aisbp-muted, #94a3b8)' }}>
           {fmtKind(doc.documentKind ?? 'faq')} · {typeof doc.chunkCount === 'number' ? `${doc.chunkCount} chunk${doc.chunkCount === 1 ? '' : 's'}` : '—'}
         </span>
-        <span style={{ fontSize: '0.68rem', color: '#cbd5e1' }}>·</span>
-        <span style={{ fontSize: '0.68rem', fontWeight: 600, letterSpacing: '0.04em', color: '#94a3b8' }}>
+        <span style={{ fontSize: '0.68rem', color: 'var(--aisbp-muted, #94a3b8)', opacity: 0.85 }}>·</span>
+        <span style={{ fontSize: '0.68rem', fontWeight: 600, letterSpacing: '0.04em', color: 'var(--aisbp-muted, #94a3b8)' }}>
           Updated {relativeTimeLabel(doc.updatedAt ?? doc.createdAt)}
         </span>
         <div style={{ marginLeft: 'auto', display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
@@ -922,7 +922,7 @@ function FaqKnowledgeCard({
             style={{
               fontSize: '0.75rem',
               fontWeight: 500,
-              color: '#94a3b8',
+              color: 'var(--aisbp-muted, #94a3b8)',
               background: 'none',
               border: 'none',
               cursor: deleting ? 'wait' : 'pointer',
@@ -1074,14 +1074,14 @@ function NoteKnowledgeCard({
                 fontSize: '0.68rem',
                 fontWeight: 700,
                 letterSpacing: '0.08em',
-                color: '#94a3b8',
+                color: 'var(--aisbp-muted, #94a3b8)',
                 margin: '0 0 0.35rem',
                 textTransform: 'uppercase' as const,
               }}
             >
               Title
             </p>
-            <h3 style={{ fontSize: '1.05rem', fontWeight: 700, margin: 0, color: '#0f172a', lineHeight: 1.4 }}>{doc.title}</h3>
+            <h3 style={{ fontSize: '1.05rem', fontWeight: 700, margin: 0, color: 'var(--aisbp-text-heading, #0f172a)', lineHeight: 1.4 }}>{doc.title}</h3>
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, flexShrink: 0 }}>
             {!inVaultView ? <KbVaultPill name={doc.vaultName?.trim() || 'Unassigned'} /> : null}
@@ -1107,7 +1107,7 @@ function NoteKnowledgeCard({
             fontSize: '0.68rem',
             fontWeight: 700,
             letterSpacing: '0.08em',
-            color: '#94a3b8',
+            color: 'var(--aisbp-muted, #94a3b8)',
             margin: '1rem 0 0.35rem',
             textTransform: 'uppercase' as const,
           }}
@@ -1120,7 +1120,7 @@ function NoteKnowledgeCard({
               expanded
                 ? {
                     fontSize: '0.875rem',
-                    color: '#475569',
+                    color: 'var(--aisbp-text-secondary, #475569)',
                     lineHeight: 1.55,
                     whiteSpace: 'pre-wrap' as const,
                     maxHeight: 168,
@@ -1128,7 +1128,7 @@ function NoteKnowledgeCard({
                   }
                 : {
                     fontSize: '0.875rem',
-                    color: '#475569',
+                    color: 'var(--aisbp-text-secondary, #475569)',
                     lineHeight: 1.55,
                     whiteSpace: 'pre-wrap' as const,
                     display: '-webkit-box',
@@ -1141,7 +1141,7 @@ function NoteKnowledgeCard({
             {preview}
           </div>
         ) : (
-          <p style={{ fontSize: '0.8125rem', color: '#94a3b8', margin: 0 }}>No preview yet — use View / Edit to add text.</p>
+          <p style={{ fontSize: '0.8125rem', color: 'var(--aisbp-muted, #94a3b8)', margin: 0 }}>No preview yet — use View / Edit to add text.</p>
         )}
         {needsShowMore && !expanded ? (
           <button
@@ -1169,7 +1169,7 @@ function NoteKnowledgeCard({
               marginTop: 8,
               fontSize: '0.8125rem',
               fontWeight: 600,
-              color: '#64748b',
+              color: 'var(--aisbp-muted, #64748b)',
               background: 'none',
               border: 'none',
               cursor: 'pointer',
@@ -1188,10 +1188,10 @@ function NoteKnowledgeCard({
             gap: '12px 16px',
             marginTop: '1.1rem',
             paddingTop: '0.85rem',
-            borderTop: '1px solid rgba(241, 245, 249, 0.95)',
+            borderTop: '1px solid var(--aisbp-border, #e2e8f0)',
           }}
         >
-          <span style={{ fontSize: '0.68rem', fontWeight: 600, letterSpacing: '0.04em', color: '#94a3b8' }}>
+          <span style={{ fontSize: '0.68rem', fontWeight: 600, letterSpacing: '0.04em', color: 'var(--aisbp-muted, #94a3b8)' }}>
             {fmtKind(doc.documentKind ?? 'rich_text')} · {typeof doc.chunkCount === 'number' ? `${doc.chunkCount} chunk${doc.chunkCount === 1 ? '' : 's'}` : '—'}
           </span>
           {typeof doc.chunkCount === 'number' &&
@@ -1214,8 +1214,8 @@ function NoteKnowledgeCard({
               CHECK CHUNKING
             </span>
           ) : null}
-          <span style={{ fontSize: '0.68rem', color: '#cbd5e1' }}>·</span>
-          <span style={{ fontSize: '0.68rem', fontWeight: 600, letterSpacing: '0.04em', color: '#94a3b8' }}>
+          <span style={{ fontSize: '0.68rem', color: 'var(--aisbp-muted, #94a3b8)', opacity: 0.85 }}>·</span>
+          <span style={{ fontSize: '0.68rem', fontWeight: 600, letterSpacing: '0.04em', color: 'var(--aisbp-muted, #94a3b8)' }}>
             Updated {relativeTimeLabel(doc.updatedAt ?? doc.createdAt)}
           </span>
           <div style={{ marginLeft: 'auto', display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
@@ -1242,7 +1242,7 @@ function NoteKnowledgeCard({
               style={{
                 fontSize: '0.75rem',
                 fontWeight: 500,
-                color: '#94a3b8',
+                color: 'var(--aisbp-muted, #94a3b8)',
                 background: 'none',
                 border: 'none',
                 cursor: deleting ? 'wait' : 'pointer',
@@ -1294,15 +1294,15 @@ function NoteKnowledgeCard({
               gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))',
               gap: '0.65rem',
               fontSize: '0.8125rem',
-              color: '#475569',
+              color: 'var(--aisbp-text-secondary, #475569)',
             }}
           >
             <div>
-              <dt style={{ fontSize: '0.65rem', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', marginBottom: 4 }}>Status</dt>
+              <dt style={{ fontSize: '0.65rem', fontWeight: 700, color: 'var(--aisbp-muted, #94a3b8)', textTransform: 'uppercase', marginBottom: 4 }}>Status</dt>
               <dd style={{ margin: 0 }}>{faqListStatusLabel(doc.status)}</dd>
             </div>
             <div>
-              <dt style={{ fontSize: '0.65rem', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', marginBottom: 4 }}>Updated</dt>
+              <dt style={{ fontSize: '0.65rem', fontWeight: 700, color: 'var(--aisbp-muted, #94a3b8)', textTransform: 'uppercase', marginBottom: 4 }}>Updated</dt>
               <dd style={{ margin: 0 }}>
                 {(editorFacts?.updatedAt || doc.updatedAt)
                   ? new Date(editorFacts?.updatedAt || doc.updatedAt!).toLocaleString()
@@ -1311,7 +1311,7 @@ function NoteKnowledgeCard({
               </dd>
             </div>
             <div>
-              <dt style={{ fontSize: '0.65rem', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', marginBottom: 4 }}>Chunks</dt>
+              <dt style={{ fontSize: '0.65rem', fontWeight: 700, color: 'var(--aisbp-muted, #94a3b8)', textTransform: 'uppercase', marginBottom: 4 }}>Chunks</dt>
               <dd style={{ margin: 0 }}>
                 {typeof (editorFacts?.chunkCount ?? doc.chunkCount) === 'number'
                   ? String(editorFacts?.chunkCount ?? doc.chunkCount)
@@ -1349,7 +1349,7 @@ function NoteKnowledgeCard({
               spellCheck
             />
           </label>
-          {loadingModal ? <p style={{ fontSize: '0.75rem', color: '#64748b', margin: '0.65rem 0 0' }}>Loading note text…</p> : null}
+          {loadingModal ? <p style={{ fontSize: '0.75rem', color: 'var(--aisbp-muted, #64748b)', margin: '0.65rem 0 0' }}>Loading note text…</p> : null}
         </KbModal>
       ) : null}
     </>
@@ -1447,14 +1447,14 @@ function FileKnowledgeCard({
                 fontSize: '0.68rem',
                 fontWeight: 700,
                 letterSpacing: '0.08em',
-                color: '#94a3b8',
+                color: 'var(--aisbp-muted, #94a3b8)',
                 margin: '0 0 0.35rem',
                 textTransform: 'uppercase' as const,
               }}
             >
               File
             </p>
-            <h3 style={{ fontSize: '1.05rem', fontWeight: 700, margin: 0, color: '#0f172a', lineHeight: 1.4 }}>{doc.title}</h3>
+            <h3 style={{ fontSize: '1.05rem', fontWeight: 700, margin: 0, color: 'var(--aisbp-text-heading, #0f172a)', lineHeight: 1.4 }}>{doc.title}</h3>
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8, flexShrink: 0 }}>
             {!inVaultView ? <KbVaultPill name={doc.vaultName?.trim() || 'Unassigned'} /> : null}
@@ -1462,14 +1462,14 @@ function FileKnowledgeCard({
           </div>
         </div>
 
-        <p style={{ fontSize: '0.8125rem', color: '#64748b', margin: '0.85rem 0 0', lineHeight: 1.5 }}>
-          <strong style={{ color: '#475569' }}>{fileKindLabel(doc)}</strong>
+        <p style={{ fontSize: '0.8125rem', color: 'var(--aisbp-muted, #64748b)', margin: '0.85rem 0 0', lineHeight: 1.5 }}>
+          <strong style={{ color: 'var(--aisbp-text-secondary, #475569)' }}>{fileKindLabel(doc)}</strong>
           {' · '}
           {mimeLine}
           {' · '}
           {formatFileBytes(doc.sizeBytes)}
         </p>
-        <p style={{ fontSize: '0.75rem', color: '#94a3b8', margin: '0.35rem 0 0', lineHeight: 1.45 }}>
+        <p style={{ fontSize: '0.75rem', color: 'var(--aisbp-muted, #94a3b8)', margin: '0.35rem 0 0', lineHeight: 1.45 }}>
           Uploaded {doc.createdAt ? new Date(doc.createdAt).toLocaleString() : '—'}
           {' · '}
           Updated {relativeTimeLabel(doc.updatedAt ?? doc.createdAt)}
@@ -1495,7 +1495,7 @@ function FileKnowledgeCard({
             fontSize: '0.68rem',
             fontWeight: 700,
             letterSpacing: '0.08em',
-            color: '#94a3b8',
+            color: 'var(--aisbp-muted, #94a3b8)',
             margin: '1rem 0 0.35rem',
             textTransform: 'uppercase' as const,
           }}
@@ -1509,7 +1509,7 @@ function FileKnowledgeCard({
                 expanded
                   ? {
                       fontSize: '0.875rem',
-                      color: '#475569',
+                      color: 'var(--aisbp-text-secondary, #475569)',
                       lineHeight: 1.55,
                       whiteSpace: 'pre-wrap' as const,
                       maxHeight: 220,
@@ -1517,7 +1517,7 @@ function FileKnowledgeCard({
                     }
                   : {
                       fontSize: '0.875rem',
-                      color: '#475569',
+                      color: 'var(--aisbp-text-secondary, #475569)',
                       lineHeight: 1.55,
                       whiteSpace: 'pre-wrap' as const,
                       display: '-webkit-box',
@@ -1555,7 +1555,7 @@ function FileKnowledgeCard({
                   marginTop: 8,
                   fontSize: '0.8125rem',
                   fontWeight: 600,
-                  color: '#64748b',
+                  color: 'var(--aisbp-muted, #64748b)',
                   background: 'none',
                   border: 'none',
                   cursor: 'pointer',
@@ -1567,7 +1567,7 @@ function FileKnowledgeCard({
             ) : null}
           </>
         ) : (
-          <p style={{ fontSize: '0.8125rem', color: '#94a3b8', margin: 0 }}>No preview available.</p>
+          <p style={{ fontSize: '0.8125rem', color: 'var(--aisbp-muted, #94a3b8)', margin: 0 }}>No preview available.</p>
         )}
 
         {!canDownload ? (
@@ -1584,7 +1584,7 @@ function FileKnowledgeCard({
             gap: '0.5rem',
             marginTop: '1.05rem',
             paddingTop: '0.85rem',
-            borderTop: '1px solid rgba(241, 245, 249, 0.95)',
+            borderTop: '1px solid var(--aisbp-border, #e2e8f0)',
           }}
         >
           <button
@@ -1627,7 +1627,7 @@ function FileKnowledgeCard({
             style={{
               fontSize: '0.8125rem',
               fontWeight: 600,
-              color: canDownload ? PRIMARY : '#94a3b8',
+              color: canDownload ? PRIMARY : 'var(--aisbp-muted, #94a3b8)',
               background: canDownload ? 'rgba(15, 98, 254, 0.08)' : '#f1f5f9',
               border: `1px solid ${canDownload ? 'rgba(15, 98, 254, 0.25)' : '#e2e8f0'}`,
               borderRadius: 10,
@@ -1645,7 +1645,7 @@ function FileKnowledgeCard({
               marginLeft: 'auto',
               fontSize: '0.75rem',
               fontWeight: 500,
-              color: '#94a3b8',
+              color: 'var(--aisbp-muted, #94a3b8)',
               background: 'none',
               border: 'none',
               cursor: deleting ? 'wait' : 'pointer',
@@ -1662,37 +1662,37 @@ function FileKnowledgeCard({
         <KbModal title="File details" onClose={() => setDetailsOpen(false)}>
           <dl style={{ margin: 0, display: 'grid', gap: '0.65rem', fontSize: '0.875rem', color: '#334155' }}>
             <div>
-              <dt style={{ fontSize: '0.68rem', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', marginBottom: 4 }}>Filename</dt>
+              <dt style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--aisbp-muted, #94a3b8)', textTransform: 'uppercase', marginBottom: 4 }}>Filename</dt>
               <dd style={{ margin: 0 }}>{doc.title}</dd>
             </div>
             <div>
-              <dt style={{ fontSize: '0.68rem', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', marginBottom: 4 }}>Type</dt>
+              <dt style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--aisbp-muted, #94a3b8)', textTransform: 'uppercase', marginBottom: 4 }}>Type</dt>
               <dd style={{ margin: 0 }}>{fileKindLabel(doc)}</dd>
             </div>
             <div>
-              <dt style={{ fontSize: '0.68rem', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', marginBottom: 4 }}>MIME</dt>
+              <dt style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--aisbp-muted, #94a3b8)', textTransform: 'uppercase', marginBottom: 4 }}>MIME</dt>
               <dd style={{ margin: 0 }}>{mimeLine}</dd>
             </div>
             <div>
-              <dt style={{ fontSize: '0.68rem', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', marginBottom: 4 }}>
+              <dt style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--aisbp-muted, #94a3b8)', textTransform: 'uppercase', marginBottom: 4 }}>
                 Knowledge vault
               </dt>
               <dd style={{ margin: 0 }}>{doc.vaultName?.trim() || '—'}</dd>
             </div>
             <div>
-              <dt style={{ fontSize: '0.68rem', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', marginBottom: 4 }}>Size</dt>
+              <dt style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--aisbp-muted, #94a3b8)', textTransform: 'uppercase', marginBottom: 4 }}>Size</dt>
               <dd style={{ margin: 0 }}>{formatFileBytes(doc.sizeBytes)}</dd>
             </div>
             <div>
-              <dt style={{ fontSize: '0.68rem', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', marginBottom: 4 }}>Uploaded</dt>
+              <dt style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--aisbp-muted, #94a3b8)', textTransform: 'uppercase', marginBottom: 4 }}>Uploaded</dt>
               <dd style={{ margin: 0 }}>{doc.createdAt ? new Date(doc.createdAt).toLocaleString() : '—'}</dd>
             </div>
             <div>
-              <dt style={{ fontSize: '0.68rem', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', marginBottom: 4 }}>Status</dt>
+              <dt style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--aisbp-muted, #94a3b8)', textTransform: 'uppercase', marginBottom: 4 }}>Status</dt>
               <dd style={{ margin: 0 }}>{faqListStatusLabel(doc.status)}</dd>
             </div>
             <div>
-              <dt style={{ fontSize: '0.68rem', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', marginBottom: 4 }}>Chunks</dt>
+              <dt style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--aisbp-muted, #94a3b8)', textTransform: 'uppercase', marginBottom: 4 }}>Chunks</dt>
               <dd style={{ margin: 0 }}>{typeof doc.chunkCount === 'number' ? String(doc.chunkCount) : '—'}</dd>
             </div>
           </dl>

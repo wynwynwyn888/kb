@@ -6,8 +6,8 @@ import { postSubaccountBotTest, isApiHttpError, getApiBaseUrl } from '@/lib/api'
 import { useAuth } from '@/contexts/AuthContext';
 
 const PRIMARY = '#0F62FE';
-const SURFACE_CHAT = 'rgba(248, 250, 252, 0.65)';
-const BORDER_SOFT = 'rgba(226, 232, 240, 0.9)';
+const SURFACE_CHAT = 'var(--aisbp-surface-muted, rgba(248, 250, 252, 0.65))';
+const BORDER_SOFT = 'var(--aisbp-border, rgba(226, 232, 240, 0.9))';
 
 const BOT_TEST_MAX_HISTORY_MESSAGES = 12;
 
@@ -20,7 +20,7 @@ const shellDefault: React.CSSProperties = {
   minWidth: 0,
   borderRadius: 18,
   border: `1px solid ${BORDER_SOFT}`,
-  background: 'rgba(255, 255, 255, 0.72)',
+  background: 'var(--aisbp-surface-elevated, rgba(255, 255, 255, 0.72))',
   backdropFilter: 'blur(20px)',
   WebkitBackdropFilter: 'blur(20px)',
   boxShadow: '0 12px 40px rgba(15, 23, 42, 0.06)',
@@ -263,20 +263,30 @@ export function BotTestPanel(props: {
     <div style={embedded ? shellEmbedded : shellDefault}>
       <style
         dangerouslySetInnerHTML={{
-          __html: `@keyframes botTestTyping{0%,100%{opacity:0.35}50%{opacity:1}}`,
+          __html: `@keyframes botTestTyping{0%,100%{opacity:0.35}50%{opacity:1}}
+.aisbp-bot-test-input::placeholder{color:var(--aisbp-muted,#94a3b8);opacity:1}
+.aisbp-bot-test-input::-webkit-input-placeholder{color:var(--aisbp-muted,#94a3b8)}`,
         }}
       />
       <div
         style={{
           padding: '1.1rem 1.15rem',
           borderBottom: `1px solid ${BORDER_SOFT}`,
-          background: 'rgba(255,255,255,0.55)',
+          background: 'var(--aisbp-surface, rgba(255,255,255,0.55))',
         }}
       >
-        <h2 style={{ fontSize: embedded ? '1.05rem' : '1.2rem', fontWeight: 700, margin: 0, color: '#0f172a', letterSpacing: '-0.02em' }}>
+        <h2
+          style={{
+            fontSize: embedded ? '1.05rem' : '1.2rem',
+            fontWeight: 700,
+            margin: 0,
+            color: 'var(--aisbp-text-heading, #0f172a)',
+            letterSpacing: '-0.02em',
+          }}
+        >
           {embedded ? 'Preview bot reply' : 'Preview a reply'}
         </h2>
-        <p style={{ fontSize: '0.8125rem', color: '#64748b', margin: '0.35rem 0 0', lineHeight: 1.5 }}>
+        <p style={{ fontSize: '0.8125rem', color: 'var(--aisbp-muted, #64748b)', margin: '0.35rem 0 0', lineHeight: 1.5 }}>
           {embedded
             ? 'Uses this workspace’s prompt and assistant profile knowledge access.'
             : "Send a sample customer message to see how this assistant would respond using its current instructions, selected vaults, and this workspace's automation rules."}
@@ -290,9 +300,9 @@ export function BotTestPanel(props: {
             padding: '0.65rem 1.15rem',
             fontSize: '0.8125rem',
             lineHeight: 1.45,
-            color: '#9f1239',
-            background: '#fff1f2',
-            borderBottom: `1px solid #fecdd3`,
+            color: 'var(--aisbp-alert-error-fg, #9f1239)',
+            background: 'var(--aisbp-alert-error-bg, #fff1f2)',
+            borderBottom: `1px solid var(--aisbp-alert-error-border, #fecdd3)`,
           }}
         >
           {panelBanner}
@@ -302,7 +312,7 @@ export function BotTestPanel(props: {
         {msgs.length === 0 && !sending ? (
           <div
             style={{
-              color: '#64748b',
+              color: 'var(--aisbp-muted, #64748b)',
               fontSize: '0.875rem',
               lineHeight: 1.6,
               maxWidth: '20rem',
@@ -338,9 +348,20 @@ export function BotTestPanel(props: {
                 style={{
                   padding: '0.85rem 1rem',
                   borderRadius: m.role === 'user' ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
-                  background: m.role === 'user' ? PRIMARY : m.error ? '#fff1f2' : '#fff',
-                  color: m.role === 'user' ? '#fff' : m.error ? '#9f1239' : '#0f172a',
-                  border: m.role === 'user' ? 'none' : m.error ? '1px solid #fecdd3' : '1px solid #e2e8f0',
+                  background:
+                    m.role === 'user'
+                      ? PRIMARY
+                      : m.error
+                        ? 'var(--aisbp-alert-error-bg, #fff1f2)'
+                        : 'var(--aisbp-surface, #fff)',
+                  color:
+                    m.role === 'user' ? '#fff' : m.error ? 'var(--aisbp-alert-error-fg, #9f1239)' : 'var(--aisbp-text, #0f172a)',
+                  border:
+                    m.role === 'user'
+                      ? 'none'
+                      : m.error
+                        ? '1px solid var(--aisbp-alert-error-border, #fecdd3)'
+                        : '1px solid var(--aisbp-border, #e2e8f0)',
                   boxShadow: m.role === 'user' ? '0 2px 8px rgba(15, 98, 254, 0.2)' : '0 1px 2px rgba(15, 23, 42, 0.05)',
                   whiteSpace: 'pre-wrap' as const,
                   wordBreak: 'break-word' as const,
@@ -352,7 +373,7 @@ export function BotTestPanel(props: {
                 <div
                   style={{
                     fontSize: '0.6875rem',
-                    color: '#94a3b8',
+                    color: 'var(--aisbp-muted, #94a3b8)',
                     marginTop: '0.4rem',
                     paddingLeft: m.role === 'assistant' ? 2 : 0,
                     paddingRight: m.role === 'user' ? 2 : 0,
@@ -364,13 +385,13 @@ export function BotTestPanel(props: {
               ) : null}
               {showSupport && (m.supportMeta || m.supportDetail) ? (
                 <details style={{ marginTop: '0.4rem', maxWidth: '100%', alignSelf: 'flex-start' }}>
-                  <summary style={{ fontSize: '0.6875rem', color: '#94a3b8', cursor: 'pointer', fontWeight: 600 }}>
+                  <summary style={{ fontSize: '0.6875rem', color: 'var(--aisbp-muted, #94a3b8)', cursor: 'pointer', fontWeight: 600 }}>
                     Support details
                   </summary>
                   <pre
                     style={{
                       fontSize: '0.625rem',
-                      color: '#64748b',
+                      color: 'var(--aisbp-muted, #64748b)',
                       margin: '0.35rem 0 0',
                       whiteSpace: 'pre-wrap' as const,
                       maxWidth: '100%',
@@ -382,13 +403,13 @@ export function BotTestPanel(props: {
               ) : null}
               {m.error && m.rawDetail ? (
                 <details style={{ marginTop: '0.4rem', maxWidth: '100%', alignSelf: 'flex-start' }}>
-                  <summary style={{ fontSize: '0.6875rem', color: '#94a3b8', cursor: 'pointer', fontWeight: 600 }}>
+                  <summary style={{ fontSize: '0.6875rem', color: 'var(--aisbp-muted, #94a3b8)', cursor: 'pointer', fontWeight: 600 }}>
                     Response details
                   </summary>
                   <pre
                     style={{
                       fontSize: '0.625rem',
-                      color: '#64748b',
+                      color: 'var(--aisbp-muted, #64748b)',
                       margin: '0.35rem 0 0',
                       whiteSpace: 'pre-wrap' as const,
                       maxWidth: '100%',
@@ -418,8 +439,8 @@ export function BotTestPanel(props: {
                 maxWidth: 'min(85%, 26rem)',
                 padding: '0.65rem 0.95rem',
                 borderRadius: '16px 16px 16px 4px',
-                background: '#e2e8f0',
-                color: '#475569',
+                background: 'var(--aisbp-card-subtle, #e2e8f0)',
+                color: 'var(--aisbp-text-secondary, #475569)',
                 fontSize: '0.875rem',
                 lineHeight: 1.2,
               }}
@@ -438,7 +459,7 @@ export function BotTestPanel(props: {
         style={{
           padding: '0.65rem 1rem 0.85rem',
           borderTop: `1px solid ${BORDER_SOFT}`,
-          background: 'rgba(255,255,255,0.9)',
+          background: 'var(--aisbp-surface, rgba(255,255,255,0.9))',
         }}
       >
         <div
@@ -448,8 +469,8 @@ export function BotTestPanel(props: {
             gap: 8,
             padding: '4px 4px 4px 14px',
             borderRadius: 999,
-            background: '#f1f5f9',
-            border: '1px solid transparent',
+            background: 'var(--aisbp-card-subtle, #f1f5f9)',
+            border: '1px solid var(--aisbp-border, transparent)',
           }}
         >
           <form onSubmit={onSend} style={{ display: 'flex', flex: 1, alignItems: 'center', gap: 8, minWidth: 0 }}>
@@ -459,6 +480,7 @@ export function BotTestPanel(props: {
               disabled={sending}
               placeholder="Ask as a customer..."
               aria-label="Test message"
+              className="aisbp-bot-test-input"
               style={{
                 flex: 1,
                 minWidth: 0,
@@ -501,7 +523,7 @@ export function BotTestPanel(props: {
             </button>
           </form>
         </div>
-        <p style={{ fontSize: '0.65rem', color: '#94a3b8', margin: '10px 8px 0', textAlign: 'center', lineHeight: 1.4 }}>
+        <p style={{ fontSize: '0.65rem', color: 'var(--aisbp-muted, #94a3b8)', margin: '10px 8px 0', textAlign: 'center', lineHeight: 1.4 }}>
           Preview only. This message will not be sent to customers.
         </p>
       </div>

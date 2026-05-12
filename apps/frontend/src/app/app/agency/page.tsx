@@ -582,8 +582,9 @@ export default function AgencyHomePage() {
             style={{
               padding: '1.35rem 1rem',
               borderRadius: '12px',
-              background: 'linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%)',
-              border: '1px solid #e2e8f0',
+              background:
+                'linear-gradient(180deg, var(--aisbp-card-gradient-top, #f8fafc) 0%, var(--aisbp-card-gradient-bottom, #f1f5f9) 100%)',
+              border: '1px solid var(--aisbp-border, #e2e8f0)',
               textAlign: 'center',
             }}
           >

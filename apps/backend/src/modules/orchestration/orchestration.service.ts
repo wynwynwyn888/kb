@@ -74,6 +74,10 @@ import {
   shouldEmitPromptCompactTruncationWarn,
 } from '../../lib/prompt-compact-truncation-warn';
 import { promptFootprintDebugEnabled } from '../../lib/production-log-flags';
+import {
+  isTechnicalOperatorInput,
+  TECHNICAL_OPERATOR_DEFLECTION_REPLY,
+} from '../../lib/technical-operator-input';
 
 @Injectable()
 export class ConversationOrchestrationService {
@@ -141,6 +145,100 @@ export class ConversationOrchestrationService {
       const memory_load_ms = Math.round(performance.now() - memPerf0);
 
       const latestMsg = (input.incomingMessage.messageContent ?? '').trim();
+
+      if (isTechnicalOperatorInput(latestMsg)) {
+        const policyTopic = parseAisbpPolicyState(
+          input.conversation?.metadata as Record<string, unknown> | undefined,
+        ).activeTopic;
+        const conversationStatus =
+          typeof input.conversation?.status === 'string'
+            ? input.conversation.status.trim().toUpperCase()
+            : '';
+        const inHumanHandover =
+          conversationStatus === 'HANDOVER' ||
+          policyTopic === 'handover' ||
+          (await this.conversationsService.isInHandover(conversationId));
+
+        if (inHumanHandover) {
+          this.logger.log(
+            `technicalOperatorInputHandoverShortCircuit ${JSON.stringify({
+              conversationId,
+              tenantId: input.tenantId,
+            })}`,
+          );
+          const handoverGuardOutcome: GuardOutcome = {
+            final: 'SKIP_HANDOVER_ACTIVE',
+            guards: [
+              {
+                decision: 'SKIP_HANDOVER_ACTIVE',
+                guardName: 'technical_operator_input',
+                reason: 'Technical/server input during human handover',
+              },
+            ],
+          };
+          const logId = await this.persistOrchestrationLog(
+            input,
+            handoverGuardOutcome,
+            null,
+            null,
+            null,
+          );
+          return {
+            success: false,
+            outcome: 'SKIP_HANDOVER_ACTIVE',
+            conversationId,
+            webhookEventId,
+            guards: handoverGuardOutcome,
+            logId,
+            error: 'Technical operator input during handover',
+          };
+        }
+
+        this.logger.log(
+          `technicalOperatorInputDeflection ${JSON.stringify({
+            conversationId,
+            tenantId: input.tenantId,
+          })}`,
+        );
+        const deflectionPlan: ReplyDecision = {
+          planStatus: 'PLANNED',
+          responseMode: 'standard',
+          handoverRecommended: false,
+          confidence: 0.95,
+          rationale: 'technical_operator_input:unrelated_topic',
+          bubbles: [{ index: 0, text: TECHNICAL_OPERATOR_DEFLECTION_REPLY }],
+          suggestedActions: [],
+          draftProvenance: 'policy_reply',
+        };
+        const routingDeflection: RoutingResponse = {
+          recommendedModel: 'n/a',
+          responseMode: 'standard',
+          draftReply: null,
+          handoverRecommended: false,
+          bookingIntentDetected: false,
+          tagsSuggested: [],
+          confidence: 1,
+          reasoning: 'technical_operator_input_deflection',
+        };
+        const logId = await this.persistOrchestrationLog(
+          input,
+          guardOutcome,
+          routingDeflection,
+          null,
+          deflectionPlan,
+        );
+        return {
+          success: true,
+          outcome: 'PROCEED',
+          conversationId,
+          webhookEventId,
+          guards: guardOutcome,
+          routing: routingDeflection,
+          replyPlan: deflectionPlan,
+          logId,
+        };
+      }
+
       const batch =
         input.recentInboundBatch && input.recentInboundBatch.length > 0
           ? input.recentInboundBatch.map(m => String(m).trim()).filter(Boolean)

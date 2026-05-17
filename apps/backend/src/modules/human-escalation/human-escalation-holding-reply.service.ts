@@ -14,6 +14,7 @@ import {
 } from './human-escalation-handover-reply.service';
 import { ConversationMemoryLoader } from '../orchestration/conversation-memory-loader';
 import { parseAisbpPolicyState } from '../conversation-policy/conversation-policy-state';
+import { isTechnicalOperatorInput } from '../../lib/technical-operator-input';
 
 /** Base cooldown: do not send more than one holding reply within 2 minutes. */
 const HOLDING_REPLY_BASE_COOLDOWN_MS = 2 * 60 * 1000;
@@ -111,6 +112,21 @@ export class HumanEscalationHoldingReplyService {
           reason: 'acknowledgement_only',
         })}`,
       );
+      return;
+    }
+
+    if (isTechnicalOperatorInput(latestInboundText)) {
+      await this.enqueueDeterministicHoldingReply({
+        tenantId,
+        conversationId,
+        locationId,
+        ghlContactId,
+        botMode,
+        pipelineWallStartMs,
+        holdingReplyType: 'default',
+        replyText: this.handoverReply.getFallback('default'),
+        logReason: 'technical_operator_input',
+      });
       return;
     }
 
@@ -214,13 +230,61 @@ export class HumanEscalationHoldingReplyService {
       );
     }
 
+    await this.enqueueDeterministicHoldingReply({
+      tenantId,
+      conversationId,
+      locationId,
+      ghlContactId,
+      botMode,
+      pipelineWallStartMs,
+      holdingReplyType: selected,
+      replyText: text,
+      logReason: 'ai_classified',
+    });
+  }
+
+  private async enqueueDeterministicHoldingReply(params: {
+    tenantId: string;
+    conversationId: string;
+    locationId: string;
+    ghlContactId: string;
+    botMode?: string | null;
+    pipelineWallStartMs?: number | null;
+    holdingReplyType: HandoverActiveReplyType;
+    replyText: string;
+    logReason: string;
+  }): Promise<void> {
+    const {
+      tenantId,
+      conversationId,
+      locationId,
+      ghlContactId,
+      botMode,
+      pipelineWallStartMs,
+      holdingReplyType,
+      replyText,
+      logReason,
+    } = params;
+
+    if ((botMode ?? 'autopilot') === 'suggestive') {
+      this.logger.log(
+        `humanEscalationHoldingReplySuppressed ${JSON.stringify({
+          conversationId,
+          tenantId,
+          reason: 'suggestive_mode',
+          logReason,
+        })}`,
+      );
+      return;
+    }
+
     const plan: ReplyDecision = {
       planStatus: 'PLANNED',
       responseMode: 'handover',
       handoverRecommended: true,
       confidence: 0.95,
-      rationale: `human_escalation_holding_reply:${selected}`,
-      bubbles: [{ index: 0, text }],
+      rationale: `human_escalation_holding_reply:${holdingReplyType}`,
+      bubbles: [{ index: 0, text: replyText }],
       suggestedActions: [],
       draftProvenance: 'human_escalation',
     };
@@ -234,13 +298,14 @@ export class HumanEscalationHoldingReplyService {
       replyLatencyTrace: { pipelineWallStartMs: pipelineWallStartMs ?? Date.now() },
     });
 
-    await this.persistLastHoldingMeta(conversationId, selected, text);
+    await this.persistLastHoldingMeta(conversationId, holdingReplyType, replyText);
 
     this.logger.log(
       `humanEscalationHoldingReplySent ${JSON.stringify({
         conversationId,
         tenantId,
-        holdingReplyType: selected,
+        holdingReplyType,
+        logReason,
       })}`,
     );
   }

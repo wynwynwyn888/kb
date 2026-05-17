@@ -144,6 +144,21 @@ export class OrchestrationGuards {
       };
     }
 
+    const conversationStatus =
+      typeof input.conversation?.status === 'string'
+        ? input.conversation.status.trim().toUpperCase()
+        : '';
+    if (conversationStatus === 'HANDOVER') {
+      this.logger.debug(
+        `Guard SKIP_HANDOVER_ACTIVE for conversation=${input.conversationId} status=HANDOVER`,
+      );
+      return {
+        decision: 'SKIP_HANDOVER_ACTIVE',
+        guardName: 'handover_paused',
+        reason: 'Conversation status is HANDOVER',
+      };
+    }
+
     // Also check active handover event on the conversation
     if (input.conversationId) {
       const { data: activeHandover } = await this.supabase

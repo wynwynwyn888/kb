@@ -105,6 +105,22 @@ describe('OrchestrationGuards', () => {
       const result = await (guards as never)['checkHandoverPaused'](input);
       expect(result.decision).toBe('SKIP_HANDOVER_ACTIVE');
     });
+
+    it('returns SKIP_HANDOVER_ACTIVE when conversation status is HANDOVER', async () => {
+      const input = makeInput({
+        conversationId: 'conv_handover_status',
+        conversation: {
+          id: 'conv_handover_status',
+          ghlConversationId: 'gc',
+          contactId: 'ct',
+          channel: 'WHATSAPP',
+          status: 'HANDOVER',
+          metadata: {},
+        },
+      });
+      const result = await (guards as never)['checkHandoverPaused'](input);
+      expect(result.decision).toBe('SKIP_HANDOVER_ACTIVE');
+    });
   });
 
   describe('checkQuotaAvailable', () => {

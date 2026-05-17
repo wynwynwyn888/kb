@@ -221,6 +221,7 @@ export class HumanEscalationHandoverReplyService {
       '- Simple greetings or check-ins while waiting (e.g. “hello?”, “anyone there?”) → waiting_time.',
       '- Anger/frustration/rude complaints → frustration.',
       '- Use default only when LATEST_CUSTOMER_MESSAGE is vague or not materially useful (e.g. “ok”, “thanks”).',
+      '- If LATEST_CUSTOMER_MESSAGE is code, a terminal/shell command (docker/npm/git), SQL, or server/DevOps jargon → default only; never explain or run it.',
       '',
       `LATEST_CUSTOMER_MESSAGE:\n${latestTrimmed || '(empty)'}`,
       '',

@@ -23,6 +23,10 @@ describe('HumanEscalationHoldingReplyService', () => {
       aiReason: 'test',
       usedFallback: false,
     })),
+    getFallback: jestGlobal.fn(
+      () =>
+        'Your request has already been sent to the team. They’ll attend to you as soon as they’re available.',
+    ),
   };
 
   const memoryLoader = {
@@ -83,6 +87,39 @@ describe('HumanEscalationHoldingReplyService', () => {
         conversationId: 'c1',
         tenantId: 't1',
         replyPlanJson: expect.stringContaining('sent to the team'),
+      }),
+    );
+  });
+
+  it('docker logs command gets default holding reply without AI', async () => {
+    metadata = {
+      humanEscalationInternalAlertSentAt: new Date(Date.now() - 11 * 60 * 1000).toISOString(),
+    };
+    const svc = new HumanEscalationHoldingReplyService(
+      { add: sendBubbleAdd } as never,
+      runtime as never,
+      handoverReply as never,
+      memoryLoader as never,
+    );
+    await svc.tryEnqueueHoldingReply({
+      tenantId: 't1',
+      conversationId: 'c1',
+      locationId: 'loc',
+      ghlContactId: 'ct1',
+      latestInboundText: 'docker logs -f aisbp-backend-1',
+      botMode: 'autopilot',
+    });
+    expect(handoverReply.classifyAndCompose).not.toHaveBeenCalled();
+    expect(sendBubbleAdd).toHaveBeenCalledWith(
+      'send-bubble',
+      expect.objectContaining({
+        replyPlanJson: expect.stringContaining('sent to the team'),
+      }),
+    );
+    expect(sendBubbleAdd).toHaveBeenCalledWith(
+      'send-bubble',
+      expect.objectContaining({
+        replyPlanJson: expect.not.stringContaining('docker'),
       }),
     );
   });

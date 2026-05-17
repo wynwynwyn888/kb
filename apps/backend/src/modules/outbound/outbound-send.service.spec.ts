@@ -147,6 +147,11 @@ describe('OutboundSendService', () => {
           }
           if (table === 'conversations') {
             return {
+              select: () => ({
+                eq: () => ({
+                  maybeSingle: async () => ({ data: { metadata: {} }, error: null }),
+                }),
+              }),
               update: jestGlobal.fn(() => ({
                 eq: jestGlobal.fn(async () => ({ data: null, error: null })),
               })),
@@ -218,6 +223,11 @@ describe('OutboundSendService', () => {
           }
           if (table === 'conversations') {
             return {
+              select: () => ({
+                eq: () => ({
+                  maybeSingle: async () => ({ data: { metadata: {} }, error: null }),
+                }),
+              }),
               update: jestGlobal.fn(() => ({
                 eq: jestGlobal.fn(async () => ({ data: null, error: null })),
               })),
@@ -294,6 +304,11 @@ describe('OutboundSendService', () => {
           }
           if (table === 'conversations') {
             return {
+              select: () => ({
+                eq: () => ({
+                  maybeSingle: async () => ({ data: { metadata: {} }, error: null }),
+                }),
+              }),
               update: jestGlobal.fn(() => ({
                 eq: jestGlobal.fn(async () => ({ data: null, error: null })),
               })),
@@ -373,7 +388,7 @@ describe('OutboundSendService', () => {
                 maybeSingle: async () =>
                   ch == null
                     ? { data: null, error: { code: 'PGRST116' } }
-                    : { data: { channel: ch }, error: null },
+                    : { data: { channel: ch, metadata: {} }, error: null },
               }),
             }),
             update: jestGlobal.fn(() => ({

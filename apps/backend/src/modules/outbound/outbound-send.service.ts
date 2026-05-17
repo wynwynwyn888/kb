@@ -20,6 +20,7 @@ import {
   ghlOutboundExpandChannelAttempts,
   ghlOutboundFallbackChannels,
   isGhlMetaSiblingChannelRetryable,
+  metadataPatchForSuccessfulOutbound,
   resolveOutboundChannelForSend,
 } from '../../lib/ghl-channel-routing';
 import type { OutboundChannel } from '@aisbp/ghl-client';
@@ -28,6 +29,8 @@ export interface BubbleSendResult {
   index: number;
   text: string;
   success: boolean;
+  /** GHL channel that actually delivered the message (after fallback). */
+  ghlChannelUsed?: OutboundChannel;
   ghlMessageId?: string;
   error?: string;
 }
@@ -192,6 +195,9 @@ export class OutboundSendService {
 
       if (result.success) {
         succeeded++;
+        if (result.ghlChannelUsed) {
+          await this.persistConversationOutboundChannel(conversationId, result.ghlChannelUsed);
+        }
         await this.persistOutboundMessage({
           conversationId,
           tenantId,
@@ -349,6 +355,7 @@ export class OutboundSendService {
           text: bubble.text,
           success: true,
           ghlMessageId: response.messageId,
+          ghlChannelUsed: ch,
         };
       }
 
@@ -372,6 +379,46 @@ export class OutboundSendService {
       success: false,
       error: lastError,
     };
+  }
+
+  private async persistConversationOutboundChannel(
+    conversationId: string,
+    channelUsed: OutboundChannel,
+  ): Promise<void> {
+    const patch = metadataPatchForSuccessfulOutbound(channelUsed);
+    const { data, error } = await this.supabase
+      .from('conversations')
+      .select('metadata')
+      .eq('id', conversationId)
+      .maybeSingle();
+    if (error || !data) return;
+    const prev =
+      data.metadata && typeof data.metadata === 'object' && !Array.isArray(data.metadata)
+        ? (data.metadata as Record<string, unknown>)
+        : {};
+    const merged: Record<string, unknown> = {
+      ...prev,
+      ghlOutboundChannel: patch.ghlOutboundChannel,
+      channelIdentity: patch.channelIdentity,
+    };
+    const updateRow = {
+      metadata: merged,
+      channel: patch.dbChannel,
+      updated_at: new Date().toISOString(),
+    };
+    const { error: upErr } = await this.supabase
+      .from('conversations')
+      .update(updateRow)
+      .eq('id', conversationId);
+    if (upErr) {
+      this.logger.warn(
+        `persistConversationOutboundChannelFailed ${JSON.stringify({
+          conversationId,
+          channelUsed,
+          message: formatPostgrestError(upErr),
+        })}`,
+      );
+    }
   }
 
   private async loadGhlCredentials(

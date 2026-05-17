@@ -390,11 +390,35 @@ export function inferChannelFromGhlContactRecord(
   return inferFromContactSocialIds(null, { contact });
 }
 
+/** GHL Workflow payloads often put TYPE_FACEBOOK / TYPE_INSTAGRAM on nested `message`, not top-level `messageType`. */
+export function extractWorkflowGhlMessageType(
+  workflowFlatRaw?: Record<string, unknown> | null,
+): string | null {
+  if (!workflowFlatRaw) return null;
+  const scan = (row: Record<string, unknown> | null | undefined): string | null => {
+    if (!row) return null;
+    const mt = row['messageType'];
+    if (typeof mt === 'string' && mt.trim()) return mt.trim();
+    const msg = row['message'];
+    if (isPlainObject(msg) && typeof msg['messageType'] === 'string' && msg['messageType'].trim()) {
+      return msg['messageType'].trim();
+    }
+    return null;
+  };
+  return (
+    scan(workflowFlatRaw) ??
+    (isPlainObject(workflowFlatRaw['customData'])
+      ? scan(workflowFlatRaw['customData'] as Record<string, unknown>)
+      : null)
+  );
+}
+
 /**
  * Resolve inbound channel using messageType, meta, and channel field (in that priority).
  */
 export function resolveGhlInboundChannel(hints: GhlInboundChannelHints): NormalizedGhlChannel {
-  const fromMt = inferFromMessageType(hints.messageTypeRaw);
+  const workflowMessageType = extractWorkflowGhlMessageType(hints.workflowFlatRaw);
+  const fromMt = inferFromMessageType(workflowMessageType ?? hints.messageTypeRaw);
   if (fromMt) return fromMt;
 
   const fromMeta = inferFromPayloadMeta(hints.data, hints.workflowFlatRaw);
@@ -467,6 +491,21 @@ export function outboundChannelFromDbChannel(dbChannel: string | null | undefine
   if (u === 'CHAT') return 'FACEBOOK';
   if (u === 'EMAIL') return 'SMS';
   return 'SMS';
+}
+
+/** Persist on conversations after a successful GHL send (including Meta fallback). */
+export function metadataPatchForSuccessfulOutbound(channelUsed: OutboundChannel): {
+  ghlOutboundChannel: string;
+  channelIdentity: string;
+  dbChannel: ConversationDbChannel;
+} {
+  if (channelUsed === 'FACEBOOK') {
+    return { ghlOutboundChannel: 'FACEBOOK', channelIdentity: 'facebook', dbChannel: 'CHAT' };
+  }
+  if (channelUsed === 'INSTAGRAM') {
+    return { ghlOutboundChannel: 'INSTAGRAM', channelIdentity: 'instagram', dbChannel: 'CHAT' };
+  }
+  return { ghlOutboundChannel: 'SMS', channelIdentity: 'whatsapp', dbChannel: 'SMS' };
 }
 
 export function resolveOutboundChannelForSend(opts: {

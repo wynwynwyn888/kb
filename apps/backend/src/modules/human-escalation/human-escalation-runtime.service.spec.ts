@@ -100,7 +100,7 @@ describe('HumanEscalationRuntimeService', () => {
     );
   }
 
-  it('pauses handover and cancels follow-ups on first human intent', async () => {
+  it('does not pause handover when escalation is disabled in settings', async () => {
     conversations.isInHandover.mockResolvedValueOnce(false);
     escalationSettings.getSettings.mockResolvedValueOnce({
       enabled: false,
@@ -108,7 +108,7 @@ describe('HumanEscalationRuntimeService', () => {
       optionalMessagePrefix: null,
     });
 
-    await makeSvc().onHumanHandoverIntent({
+    const result = await makeSvc().onHumanHandoverIntent({
       tenantId: 't1',
       tenantDisplayName: 'Acme',
       conversationId: 'c1',
@@ -119,6 +119,33 @@ describe('HumanEscalationRuntimeService', () => {
       contactDisplayName: 'Sam',
     });
 
+    expect(result.escalated).toBe(false);
+    expect(conversations.pauseForHandover).not.toHaveBeenCalled();
+    expect(followUpEngine.cancelPendingJobsForHumanEscalation).not.toHaveBeenCalled();
+    expect(notify.sendInternalAlert).not.toHaveBeenCalled();
+    expect(tagContact).not.toHaveBeenCalled();
+  });
+
+  it('pauses handover and cancels follow-ups when escalation is enabled', async () => {
+    conversations.isInHandover.mockResolvedValueOnce(false);
+    escalationSettings.getSettings.mockResolvedValueOnce({
+      enabled: true,
+      teamNotificationNumber: '+6512345678',
+      optionalMessagePrefix: null,
+    });
+
+    const result = await makeSvc().onHumanHandoverIntent({
+      tenantId: 't1',
+      tenantDisplayName: 'Acme',
+      conversationId: 'c1',
+      contactId: 'ct1',
+      latestInboundMessage: 'I want to speak to a human',
+      memoryEntries: [],
+      contactPhone: '+10000000000',
+      contactDisplayName: 'Sam',
+    });
+
+    expect(result.escalated).toBe(true);
     expect(conversations.pauseForHandover).toHaveBeenCalledWith(
       'c1',
       'REQUEST',
@@ -129,7 +156,6 @@ describe('HumanEscalationRuntimeService', () => {
       tenantId: 't1',
       conversationId: 'c1',
     });
-    expect(notify.sendInternalAlert).not.toHaveBeenCalled();
     expect(tagContact).toHaveBeenCalledWith({
       contactId: 'ct1',
       tags: [AI_NEEDS_HUMAN_REVIEW_TAG],
@@ -254,7 +280,7 @@ describe('HumanEscalationRuntimeService', () => {
     });
 
     expect(conversations.pauseForHandover).not.toHaveBeenCalled();
-    expect(followUpEngine.cancelPendingJobsForHumanEscalation).toHaveBeenCalled();
+    expect(followUpEngine.cancelPendingJobsForHumanEscalation).not.toHaveBeenCalled();
     expect(tagContact).not.toHaveBeenCalled();
   });
 });

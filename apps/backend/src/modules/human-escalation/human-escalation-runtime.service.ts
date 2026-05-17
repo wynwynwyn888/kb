@@ -57,7 +57,7 @@ export class HumanEscalationRuntimeService {
     memoryEntries: MemoryEntry[];
     contactPhone?: string | null;
     contactDisplayName?: string | null;
-  }): Promise<{ alreadyInHandover: boolean }> {
+  }): Promise<{ escalated: boolean; alreadyInHandover: boolean }> {
     const {
       tenantId,
       conversationId,
@@ -68,6 +68,21 @@ export class HumanEscalationRuntimeService {
       contactDisplayName,
     } = params;
 
+    const settings = await this.escalationSettings.getSettings(tenantId);
+    const alreadyInHandover = await this.conversations.isInHandover(conversationId);
+
+    if (!settings.enabled) {
+      this.logger.log(
+        `humanEscalationSkipped ${JSON.stringify({
+          reason: 'human_escalation_disabled',
+          tenantId,
+          conversationId,
+          contactId: contactId ?? null,
+        })}`,
+      );
+      return { escalated: false, alreadyInHandover };
+    }
+
     this.logger.log(
       `humanEscalationDetected ${JSON.stringify({
         tenantId,
@@ -75,8 +90,6 @@ export class HumanEscalationRuntimeService {
         contactId: contactId ?? null,
       })}`,
     );
-
-    const alreadyInHandover = await this.conversations.isInHandover(conversationId);
     if (!alreadyInHandover) {
       try {
         await this.conversations.pauseForHandover(
@@ -98,17 +111,10 @@ export class HumanEscalationRuntimeService {
 
     await this.followUpEngine.cancelPendingJobsForHumanEscalation({ tenantId, conversationId });
 
-    const settings = await this.escalationSettings.getSettings(tenantId);
-
-    if (!settings.enabled) {
-      this.logger.log(`humanEscalationNotifySkipped ${JSON.stringify({ reason: 'human_escalation_disabled' })}`);
-      return { alreadyInHandover };
-    }
-
     const rawNum = settings.teamNotificationNumber?.trim();
     if (!rawNum) {
       this.logger.log(`humanEscalationSettingsMissing ${JSON.stringify({ reason: 'no_team_notification_number' })}`);
-      return { alreadyInHandover };
+      return { escalated: true, alreadyInHandover };
     }
 
     const lastSentIso = await this.readHumanEscalationAlertSentAt(conversationId);
@@ -124,7 +130,7 @@ export class HumanEscalationRuntimeService {
           lastSentIso,
         })}`,
       );
-      return { alreadyInHandover };
+      return { escalated: true, alreadyInHandover };
     }
 
     const crm = await this.resolveCrmContactForAlert(tenantId, contactId, contactDisplayName, contactPhone);
@@ -178,7 +184,7 @@ export class HumanEscalationRuntimeService {
       await this.persistHumanEscalationAlertSentAt(conversationId);
     }
 
-    return { alreadyInHandover };
+    return { escalated: true, alreadyInHandover };
   }
 
   /**

@@ -4,7 +4,7 @@ import type { OrchestrationInput } from './dto';
 
 describe('ConversationOrchestrationService — HUMAN_HANDOVER short circuit', () => {
   const humanEscalationRuntime = {
-    onHumanHandoverIntent: jestGlobal.fn(async () => ({ alreadyInHandover: false })),
+    onHumanHandoverIntent: jestGlobal.fn(async () => ({ escalated: true, alreadyInHandover: false })),
   };
 
   function makeInput(message: string): OrchestrationInput {

@@ -58,6 +58,18 @@ describe('ghl-channel-routing', () => {
     expect(n.identityChannel).toBe('instagram');
   });
 
+  it('infers FACEBOOK from nested workflow messageType', () => {
+    const n = resolveGhlInboundChannel({
+      channelRaw: 'SMS',
+      messageTypeRaw: 'TextMessage',
+      workflowFlatRaw: {
+        customData: { message: { messageType: 'TYPE_FACEBOOK' } },
+      },
+    });
+    expect(n.outboundChannel).toBe('FACEBOOK');
+    expect(n.source).toBe('messageType');
+  });
+
   it('infers INSTAGRAM from workflow messageSource hint', () => {
     const n = resolveGhlInboundChannel({
       channelRaw: 'SMS',

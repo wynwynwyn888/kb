@@ -320,8 +320,9 @@ export class ConversationOrchestrationService {
       }
 
       if (routingIntent === 'HUMAN_HANDOVER') {
+        let humanEscalationActive = false;
         try {
-          await this.humanEscalationRuntime.onHumanHandoverIntent({
+          const escalation = await this.humanEscalationRuntime.onHumanHandoverIntent({
             tenantId: input.tenantId,
             tenantDisplayName: input.tenant?.name,
             conversationId,
@@ -331,6 +332,7 @@ export class ConversationOrchestrationService {
             contactPhone: input.incomingMessage.contactPhone ?? null,
             contactDisplayName: input.incomingMessage.contactDisplayName ?? null,
           });
+          humanEscalationActive = escalation.escalated;
         } catch (e) {
           this.logger.warn(
             `humanEscalationRuntimeFailed ${JSON.stringify({
@@ -340,6 +342,7 @@ export class ConversationOrchestrationService {
           );
         }
 
+        if (humanEscalationActive) {
         const policyOutcomeHuman = this.conversationPolicy.evaluate({
           intent: routingIntent,
           incomingRaw: latestMsg,
@@ -408,6 +411,7 @@ export class ConversationOrchestrationService {
           replyPlan: humanReplyPlan,
           logId,
         };
+        }
       }
 
       const bookingHook = await this.bookingFlow.maybeHandleConversationBookingTurn({

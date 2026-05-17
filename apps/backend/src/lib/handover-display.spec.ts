@@ -14,6 +14,15 @@ describe('handover-display', () => {
     expect(formatHandoverChannelLabel({ dbChannel: 'SMS' })).toBe('WhatsApp');
   });
 
+  it('maps metadata ghlOutboundChannel INSTAGRAM to Instagram label', () => {
+    expect(
+      formatHandoverChannelLabel({
+        dbChannel: 'SMS',
+        metadata: { ghlOutboundChannel: 'INSTAGRAM', channelIdentity: 'instagram' },
+      }),
+    ).toBe('Instagram');
+  });
+
   it('maps CHAT + facebook metadata to Facebook Messenger', () => {
     expect(
       formatHandoverChannelLabel({

@@ -197,11 +197,13 @@ export class HandoverService {
 
     return Promise.all(
       rows.map(async row => {
+        const crm = await this.resolveContactForDisplay(tenantId, row.contactId);
         const channelLabel = formatHandoverChannelLabel({
           dbChannel: row.channel,
           metadata: row.metadata,
+          ghlConversationId: row.ghlConversationId,
+          contact: crm.contact,
         });
-        const crm = await this.resolveContactForDisplay(tenantId, row.contactId);
         const contactSummary = formatHandoverContactSummary({
           displayName: crm.displayName,
           phone: crm.phone,
@@ -231,19 +233,24 @@ export class HandoverService {
   private async resolveContactForDisplay(
     tenantId: string,
     contactId: string,
-  ): Promise<{ displayName: string | null; phone: string | null }> {
+  ): Promise<{
+    displayName: string | null;
+    phone: string | null;
+    contact: Record<string, unknown> | null;
+  }> {
     const cid = contactId?.trim();
-    if (!cid) return { displayName: null, phone: null };
+    if (!cid) return { displayName: null, phone: null, contact: null };
     try {
       const { client } = await this.ghlService.createGhlClientForConnectedTenantWorkerOrThrow(tenantId);
       const gc = await client.getContact(cid);
-      if (!gc.success || !gc.contact) return { displayName: null, phone: null };
+      if (!gc.success || !gc.contact) return { displayName: null, phone: null, contact: null };
       return {
         displayName: this.pickContactDisplayName(gc.contact),
         phone: this.pickContactPhone(gc.contact),
+        contact: gc.contact,
       };
     } catch {
-      return { displayName: null, phone: null };
+      return { displayName: null, phone: null, contact: null };
     }
   }
 

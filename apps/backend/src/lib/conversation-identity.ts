@@ -87,3 +87,12 @@ export function isDerivedConversationKey(value: string | null | undefined): bool
   if (!value) return false;
   return value.startsWith(`${DERIVED_PREFIX}:`);
 }
+
+/** Channel segment from `aisbp:conv:<channel>:<tenantId>:<contactId>`, when present. */
+export function channelFromDerivedConversationKey(value: string | null | undefined): string | null {
+  if (!isDerivedConversationKey(value)) return null;
+  const parts = value!.split(':');
+  if (parts.length < 4 || parts[0] !== 'aisbp' || parts[1] !== 'conv') return null;
+  const ch = parts[2]?.trim().toLowerCase();
+  return ch || null;
+}

@@ -1,5 +1,9 @@
 import { describe, it, expect } from '@jest/globals';
-import { deriveConversationIdentity, isDerivedConversationKey } from './conversation-identity';
+import {
+  channelFromDerivedConversationKey,
+  deriveConversationIdentity,
+  isDerivedConversationKey,
+} from './conversation-identity';
 
 describe('deriveConversationIdentity', () => {
   it('uses provider conversation id when present (no derivation)', () => {
@@ -45,6 +49,12 @@ describe('deriveConversationIdentity', () => {
     expect(isDerivedConversationKey(out.derivedConversationKey)).toBe(true);
     expect(isDerivedConversationKey('conv-from-ghl')).toBe(false);
     expect(isDerivedConversationKey(null)).toBe(false);
+  });
+
+  it('channelFromDerivedConversationKey reads identity segment', () => {
+    expect(channelFromDerivedConversationKey('aisbp:conv:instagram:t1:ct1')).toBe('instagram');
+    expect(channelFromDerivedConversationKey('aisbp:conv:facebook:t1:ct1')).toBe('facebook');
+    expect(channelFromDerivedConversationKey('conv-from-ghl')).toBeNull();
   });
 
   it('throws when tenant or contact id is missing', () => {

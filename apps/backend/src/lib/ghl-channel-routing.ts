@@ -382,6 +382,14 @@ export function normalizeGhlInboundChannel(raw: string | null | undefined): Norm
   };
 }
 
+/** Infer Meta vs WhatsApp from a GHL contact row (for display when metadata is stale). */
+export function inferChannelFromGhlContactRecord(
+  contact: Record<string, unknown> | null | undefined,
+): NormalizedGhlChannel | null {
+  if (!contact || !isPlainObject(contact)) return null;
+  return inferFromContactSocialIds(null, { contact });
+}
+
 /**
  * Resolve inbound channel using messageType, meta, and channel field (in that priority).
  */

@@ -10,7 +10,7 @@ describe('handover-display', () => {
     expect(formatHandoverTypeLabel('REQUEST')).toBe('Human request');
   });
 
-  it('maps SMS channel to WhatsApp label', () => {
+  it('maps SMS channel to WhatsApp when no Meta signals', () => {
     expect(formatHandoverChannelLabel({ dbChannel: 'SMS' })).toBe('WhatsApp');
   });
 
@@ -19,6 +19,33 @@ describe('handover-display', () => {
       formatHandoverChannelLabel({
         dbChannel: 'CHAT',
         metadata: { ghlOutboundChannel: 'FACEBOOK' },
+      }),
+    ).toBe('Facebook Messenger');
+  });
+
+  it('uses derived conversation key for Instagram', () => {
+    expect(
+      formatHandoverChannelLabel({
+        dbChannel: 'SMS',
+        ghlConversationId: 'aisbp:conv:instagram:tenant-1:contact-abc',
+      }),
+    ).toBe('Instagram');
+  });
+
+  it('infers Instagram from GHL contact when channel is SMS', () => {
+    expect(
+      formatHandoverChannelLabel({
+        dbChannel: 'SMS',
+        contact: { instagramId: 'ig-user-123', firstName: 'Daphne' },
+      }),
+    ).toBe('Instagram');
+  });
+
+  it('infers Facebook from GHL contact when channel is SMS', () => {
+    expect(
+      formatHandoverChannelLabel({
+        dbChannel: 'SMS',
+        contact: { facebookId: 'fb-user-456', firstName: 'Daphne' },
       }),
     ).toBe('Facebook Messenger');
   });

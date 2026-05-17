@@ -2,12 +2,39 @@
  * Staff-facing labels for active human escalation / handover rows.
  */
 
+import { channelFromDerivedConversationKey } from './conversation-identity';
+import {
+  inferChannelFromGhlContactRecord,
+  type NormalizedGhlChannel,
+} from './ghl-channel-routing';
+
 export interface HandoverChannelLabelInput {
   dbChannel: string | null | undefined;
   metadata?: Record<string, unknown> | null;
+  ghlConversationId?: string | null;
+  contact?: Record<string, unknown> | null;
 }
 
 const META_CHANNEL_LABELS = new Set(['Facebook Messenger', 'Instagram']);
+
+function labelFromNormalized(norm: NormalizedGhlChannel): string {
+  const outbound = norm.outboundChannel.toUpperCase();
+  if (outbound === 'FACEBOOK') return 'Facebook Messenger';
+  if (outbound === 'INSTAGRAM') return 'Instagram';
+  if (norm.identityChannel === 'whatsapp' || outbound === 'SMS') return 'WhatsApp';
+  if (norm.dbChannel === 'EMAIL') return 'Email';
+  if (norm.dbChannel === 'CHAT') return 'Chat';
+  return 'Message';
+}
+
+function labelFromIdentityChannel(identity: string): string | null {
+  const id = identity.trim().toLowerCase();
+  if (id === 'facebook' || id === 'fb' || id === 'messenger') return 'Facebook Messenger';
+  if (id === 'instagram' || id === 'ig') return 'Instagram';
+  if (id === 'whatsapp' || id === 'wa' || id === 'sms') return 'WhatsApp';
+  if (id === 'email') return 'Email';
+  return null;
+}
 
 export function formatHandoverTypeLabel(type: string | null | undefined): string {
   const t = (type ?? '').trim().toUpperCase();
@@ -27,10 +54,9 @@ export function formatHandoverReasonLabel(note: string | null | undefined): stri
 
 /**
  * Channel labels for workspace UI.
- * Rule: DB `SMS` is shown as WhatsApp (GHL often labels WhatsApp threads as SMS).
+ * Rule: DB `SMS` is WhatsApp only when the thread is not Facebook/Instagram (GHL often labels all DMs as SMS).
  */
 export function formatHandoverChannelLabel(input: HandoverChannelLabelInput): string {
-  const ch = (input.dbChannel ?? '').trim().toUpperCase();
   const meta =
     input.metadata && typeof input.metadata === 'object' && !Array.isArray(input.metadata)
       ? input.metadata
@@ -41,9 +67,21 @@ export function formatHandoverChannelLabel(input: HandoverChannelLabelInput): st
 
   if (outbound === 'FACEBOOK' || identity === 'facebook') return 'Facebook Messenger';
   if (outbound === 'INSTAGRAM' || identity === 'instagram') return 'Instagram';
-  if (ch === 'WHATSAPP' || ch === 'SMS') return 'WhatsApp';
+
+  const derivedIdentity = channelFromDerivedConversationKey(input.ghlConversationId);
+  if (derivedIdentity) {
+    const fromDerived = labelFromIdentityChannel(derivedIdentity);
+    if (fromDerived) return fromDerived;
+  }
+
+  const fromContact = inferChannelFromGhlContactRecord(input.contact ?? null);
+  if (fromContact) return labelFromNormalized(fromContact);
+
+  const ch = (input.dbChannel ?? '').trim().toUpperCase();
+  if (ch === 'WHATSAPP') return 'WhatsApp';
   if (ch === 'EMAIL') return 'Email';
   if (ch === 'CHAT') return 'Chat';
+  if (ch === 'SMS') return 'WhatsApp';
   return ch || 'Message';
 }
 

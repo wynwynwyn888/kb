@@ -11,6 +11,7 @@ import { ActionGatingService } from '../../modules/action-gating/action-gating.s
 import { ActionIntentExecutorService } from '../../modules/action-execution/action-intent-executor.service';
 import { OutboundSafetyGovernorService } from '../../modules/outbound/outbound-safety-governor.service';
 import { FollowUpEngineService } from '../../modules/follow-up-engine/follow-up-engine.service';
+import { HumanEscalationRuntimeService } from '../../modules/human-escalation/human-escalation-runtime.service';
 
 export interface SendBubbleJobData {
   conversationId: string;
@@ -34,6 +35,7 @@ export class SendBubbleProcessor extends WorkerHost {
     private readonly actionExecutor: ActionIntentExecutorService,
     private readonly outboundSafetyGovernor: OutboundSafetyGovernorService,
     private readonly followUpEngine: FollowUpEngineService,
+    private readonly humanEscalationRuntime: HumanEscalationRuntimeService,
   ) {
     super();
   }
@@ -84,6 +86,26 @@ export class SendBubbleProcessor extends WorkerHost {
       `sendBubbleLatency: conversationId=${conversationId} safety_governor_ms=${safety_governor_ms} ` +
         `outbound_send_ms=${outbound_send_ms} total_backend_reply_ms=${total_backend_reply_ms ?? 'na'}`,
     );
+
+    const isHumanEscalationCustomerAck =
+      replyPlan?.draftProvenance === 'human_escalation' || replyPlan?.responseMode === 'handover';
+    if (isHumanEscalationCustomerAck) {
+      const channelUsed = summary.bubbleResults.find(b => b.success && b.ghlChannelUsed)?.ghlChannelUsed;
+      try {
+        await this.humanEscalationRuntime.flushPendingInternalAlert(
+          tenantId,
+          conversationId,
+          channelUsed ?? null,
+        );
+      } catch (e) {
+        this.logger.warn(
+          `humanEscalationFlushPendingAlertFailed ${JSON.stringify({
+            conversationId,
+            message: e instanceof Error ? e.message : String(e),
+          })}`,
+        );
+      }
+    }
 
     // Step 2: Persist handover state if reply plan is HANDOVER
     // Guard already blocks future inbound while an active HandoverEvent exists.

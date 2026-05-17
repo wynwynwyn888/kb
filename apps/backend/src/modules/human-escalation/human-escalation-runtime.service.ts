@@ -6,7 +6,10 @@ import {
   formatHandoverChannelLabel,
   formatInternalEscalationCustomerLines,
   internalAlertChannelSlugFromLabel,
+  internalAlertChannelSlugFromOutbound,
+  type InternalAlertChannelSlug,
 } from '../../lib/handover-display';
+import type { OutboundChannel } from '@aisbp/ghl-client';
 import type { MemoryEntry } from '../orchestration/dto/memory-entry';
 import { ConversationsService } from '../conversations/conversations.service';
 import { FollowUpEngineService } from '../follow-up-engine/follow-up-engine.service';
@@ -17,6 +20,15 @@ import { GenerationService } from '../generation/generation.service';
 
 const HUMAN_ALERT_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 export const AI_NEEDS_HUMAN_REVIEW_TAG = 'ai_needs_human_review';
+
+/** Staged on conversation metadata until first successful customer ack outbound (channel known). */
+export interface PendingHumanEscalationInternalAlert {
+  latestInboundMessage: string;
+  summary: string;
+  customerName: string;
+  phoneForAlert: string | null;
+  contactId: string | null;
+}
 
 function pickContactDisplayName(contact: Record<string, unknown>): string | null {
   const fn = typeof contact['firstName'] === 'string' ? contact['firstName'].trim() : '';
@@ -139,12 +151,6 @@ export class HumanEscalationRuntimeService {
     }
 
     const crm = await this.resolveCrmContactForAlert(tenantId, contactId, contactDisplayName, contactPhone);
-    const channelSlug = await this.resolveInternalAlertChannelSlug(
-      conversationId,
-      tenantId,
-      contactId,
-      crm.contact,
-    );
 
     let summary: string;
     const aiSummary = await this.tryAiInternalSummary(tenantId, latestInboundMessage, memoryEntries);
@@ -166,27 +172,77 @@ export class HumanEscalationRuntimeService {
 
     const customerName = crm.displayName?.trim() || 'Unknown customer';
     const phoneForAlert = crm.phone?.trim() || contactPhone?.trim() || null;
-    const customerBlock = formatInternalEscalationCustomerLines({
+
+    await this.persistPendingInternalAlert(conversationId, {
+      latestInboundMessage,
+      summary,
       customerName,
-      phone: phoneForAlert,
+      phoneForAlert,
+      contactId: contactId?.trim() || null,
+    });
+
+    this.logger.log(
+      `humanEscalationInternalAlertDeferred ${JSON.stringify({
+        conversationId,
+        tenantId,
+        reason: 'await_outbound_channel',
+      })}`,
+    );
+
+    return { escalated: true, alreadyInHandover };
+  }
+
+  /**
+   * Send staged team SMS after customer ack outbound (GHL channel is known).
+   * Call from send-bubble worker when draftProvenance is human_escalation.
+   */
+  async flushPendingInternalAlert(
+    tenantId: string,
+    conversationId: string,
+    channelHint?: OutboundChannel | null,
+  ): Promise<'sent' | 'skipped_no_pending' | 'skipped_disabled' | 'skipped_duplicate' | 'failed'> {
+    const settings = await this.escalationSettings.getSettings(tenantId);
+    if (!settings.enabled || !settings.teamNotificationNumber?.trim()) {
+      return 'skipped_disabled';
+    }
+
+    const pending = await this.readPendingInternalAlert(conversationId);
+    if (!pending) return 'skipped_no_pending';
+
+    const lastSentIso = await this.readHumanEscalationAlertSentAt(conversationId);
+    if (typeof lastSentIso === 'string' && Date.now() - Date.parse(lastSentIso) < HUMAN_ALERT_COOLDOWN_MS) {
+      await this.clearPendingInternalAlert(conversationId);
+      return 'skipped_duplicate';
+    }
+
+    const channelSlug = await this.resolveChannelSlugForInternalAlert(
+      conversationId,
+      tenantId,
+      pending.contactId,
+      channelHint,
+    );
+
+    const customerBlock = formatInternalEscalationCustomerLines({
+      customerName: pending.customerName,
+      phone: pending.phoneForAlert,
       channelSlug,
     });
 
     const includeTechnicalFallback =
-      customerName === 'Unknown customer' &&
+      pending.customerName === 'Unknown customer' &&
       channelSlug === 'whatsapp' &&
-      !(phoneForAlert?.trim());
+      !(pending.phoneForAlert?.trim());
 
     const messageBody =
       `Human escalation requested\n\n` +
       `${customerBlock}\n` +
       (includeTechnicalFallback
         ? `Reference (internal): conversation ${conversationId}` +
-          (contactId?.trim() ? `, contact ${contactId.trim()}` : '') +
+          (pending.contactId ? `, contact ${pending.contactId}` : '') +
           `\n\n`
         : `\n`) +
-      `Summary:\n${summary}\n\n` +
-      `Latest message:\n"${latestInboundMessage.trim().slice(0, 2000)}"\n\n` +
+      `Summary:\n${pending.summary}\n\n` +
+      `Latest message:\n"${pending.latestInboundMessage.trim().slice(0, 2000)}"\n\n` +
       `Please review and reply manually in CRM.`;
 
     const outcome = await this.notify.sendInternalAlert({
@@ -195,14 +251,24 @@ export class HumanEscalationRuntimeService {
       teamNotificationNumber: settings.teamNotificationNumber,
       optionalMessagePrefix: settings.optionalMessagePrefix,
       messageBody,
-      customerPhoneForDuplicateCheck: contactPhone ?? crm.phone ?? null,
+      customerPhoneForDuplicateCheck: pending.phoneForAlert,
     });
+
+    await this.clearPendingInternalAlert(conversationId);
 
     if (outcome === 'sent') {
       await this.persistHumanEscalationAlertSentAt(conversationId);
+      this.logger.log(
+        `humanEscalationInternalAlertSent ${JSON.stringify({
+          conversationId,
+          tenantId,
+          channelSlug,
+        })}`,
+      );
+      return 'sent';
     }
 
-    return { escalated: true, alreadyInHandover };
+    return outcome === 'skipped_disabled' ? 'skipped_disabled' : 'failed';
   }
 
   /**
@@ -225,11 +291,11 @@ export class HumanEscalationRuntimeService {
 
     try {
       const crm = await this.resolveCrmContactForAlert(tenantId, contactId, contactDisplayName, contactPhone);
-      const channelSlug = await this.resolveInternalAlertChannelSlug(
+      const channelSlug = await this.resolveChannelSlugForInternalAlert(
         conversationId,
         tenantId,
         contactId,
-        crm.contact,
+        null,
       );
       const customerName = crm.displayName?.trim() || 'Unknown customer';
       const customerBlock = formatInternalEscalationCustomerLines({
@@ -356,12 +422,16 @@ export class HumanEscalationRuntimeService {
     }
   }
 
-  private async resolveInternalAlertChannelSlug(
+  private async resolveChannelSlugForInternalAlert(
     conversationId: string,
     tenantId: string,
     contactId: string | null | undefined,
-    contact: Record<string, unknown> | null,
-  ): Promise<'whatsapp' | 'facebook' | 'instagram'> {
+    channelHint: OutboundChannel | null | undefined,
+  ): Promise<InternalAlertChannelSlug> {
+    if (channelHint) {
+      return internalAlertChannelSlugFromOutbound(channelHint);
+    }
+
     let dbChannel: string | null = null;
     let metadata: Record<string, unknown> | null = null;
     let ghlConversationId: string | null = null;
@@ -381,8 +451,13 @@ export class HumanEscalationRuntimeService {
           : null;
     }
 
-    let contactRecord = contact;
-    if (!contactRecord && contactId?.trim()) {
+    const metaOutbound = metadata?.['ghlOutboundChannel'];
+    if (typeof metaOutbound === 'string' && metaOutbound.trim()) {
+      return internalAlertChannelSlugFromOutbound(metaOutbound);
+    }
+
+    let contactRecord: Record<string, unknown> | null = null;
+    if (contactId?.trim()) {
       const crm = await this.resolveCrmContactForAlert(tenantId, contactId, null, null);
       contactRecord = crm.contact;
     }
@@ -394,6 +469,98 @@ export class HumanEscalationRuntimeService {
       contact: contactRecord,
     });
     return internalAlertChannelSlugFromLabel(channelLabel);
+  }
+
+  private async persistPendingInternalAlert(
+    conversationId: string,
+    pending: PendingHumanEscalationInternalAlert,
+  ): Promise<void> {
+    const { data, error } = await this.supabase
+      .from('conversations')
+      .select('metadata')
+      .eq('id', conversationId)
+      .maybeSingle();
+    if (error || !data) return;
+    const prev =
+      data.metadata && typeof data.metadata === 'object' && !Array.isArray(data.metadata)
+        ? (data.metadata as Record<string, unknown>)
+        : {};
+    const merged = {
+      ...prev,
+      humanEscalationPendingInternalAlert: pending,
+    };
+    const { error: upErr } = await this.supabase
+      .from('conversations')
+      .update({ metadata: merged, updated_at: new Date().toISOString() })
+      .eq('id', conversationId);
+    if (upErr) {
+      this.logger.warn(
+        `humanEscalationPendingAlertPersistFailed ${JSON.stringify({
+          conversationId,
+          message: formatPostgrestError(upErr),
+        })}`,
+      );
+    }
+  }
+
+  private async readPendingInternalAlert(
+    conversationId: string,
+  ): Promise<PendingHumanEscalationInternalAlert | null> {
+    const { data, error } = await this.supabase
+      .from('conversations')
+      .select('metadata')
+      .eq('id', conversationId)
+      .maybeSingle();
+    if (error || !data?.metadata || typeof data.metadata !== 'object' || Array.isArray(data.metadata)) {
+      return null;
+    }
+    const raw = (data.metadata as Record<string, unknown>)['humanEscalationPendingInternalAlert'];
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    const o = raw as Record<string, unknown>;
+    const latestInboundMessage =
+      typeof o['latestInboundMessage'] === 'string' ? o['latestInboundMessage'] : '';
+    const summary = typeof o['summary'] === 'string' ? o['summary'] : '';
+    if (!latestInboundMessage.trim() || !summary.trim()) return null;
+    return {
+      latestInboundMessage,
+      summary,
+      customerName:
+        typeof o['customerName'] === 'string' && o['customerName'].trim()
+          ? o['customerName'].trim()
+          : 'Unknown customer',
+      phoneForAlert:
+        typeof o['phoneForAlert'] === 'string' && o['phoneForAlert'].trim()
+          ? o['phoneForAlert'].trim()
+          : null,
+      contactId:
+        typeof o['contactId'] === 'string' && o['contactId'].trim() ? o['contactId'].trim() : null,
+    };
+  }
+
+  private async clearPendingInternalAlert(conversationId: string): Promise<void> {
+    const { data, error } = await this.supabase
+      .from('conversations')
+      .select('metadata')
+      .eq('id', conversationId)
+      .maybeSingle();
+    if (error || !data) return;
+    const prev =
+      data.metadata && typeof data.metadata === 'object' && !Array.isArray(data.metadata)
+        ? (data.metadata as Record<string, unknown>)
+        : {};
+    const { humanEscalationPendingInternalAlert: _removed, ...rest } = prev;
+    const { error: upErr } = await this.supabase
+      .from('conversations')
+      .update({ metadata: rest, updated_at: new Date().toISOString() })
+      .eq('id', conversationId);
+    if (upErr) {
+      this.logger.warn(
+        `humanEscalationPendingAlertClearFailed ${JSON.stringify({
+          conversationId,
+          message: formatPostgrestError(upErr),
+        })}`,
+      );
+    }
   }
 
   private async tryAiInternalSummary(

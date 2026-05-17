@@ -11,6 +11,8 @@ jestGlobal.mock('../../lib/supabase', () => ({
 import { HumanEscalationRuntimeService, AI_NEEDS_HUMAN_REVIEW_TAG } from './human-escalation-runtime.service';
 
 describe('HumanEscalationRuntimeService', () => {
+  let conversationMetadata: Record<string, unknown> = {};
+
   const conversations = {
     isInHandover: jestGlobal.fn(async () => false),
     pauseForHandover: jestGlobal.fn(async () => 'he_1'),
@@ -65,7 +67,10 @@ describe('HumanEscalationRuntimeService', () => {
         eq: () => ({
           maybeSingle: async () => ({
             data: {
-              metadata: channelRow?.metadata ?? {},
+              metadata: {
+                ...(channelRow?.metadata ?? {}),
+                ...conversationMetadata,
+              },
               channel: channelRow?.channel ?? 'SMS',
               ghl_conversation_id: channelRow?.ghl_conversation_id ?? 'aisbp:conv:whatsapp:t1:c1',
             },
@@ -73,14 +78,20 @@ describe('HumanEscalationRuntimeService', () => {
           }),
         }),
       }),
-      update: () => ({
-        eq: async () => ({ error: null }),
-      }),
+      update: jestGlobal.fn((payload: { metadata?: Record<string, unknown> }) => ({
+        eq: async () => {
+          if (payload.metadata && typeof payload.metadata === 'object') {
+            conversationMetadata = payload.metadata;
+          }
+          return { error: null };
+        },
+      })),
     };
   }
 
   beforeEach(() => {
     jestGlobal.clearAllMocks();
+    conversationMetadata = {};
     listTags.mockResolvedValue({
       error: null as const,
       tags: [{ name: AI_NEEDS_HUMAN_REVIEW_TAG }],
@@ -171,13 +182,13 @@ describe('HumanEscalationRuntimeService', () => {
   });
 
   it('internal alert for Instagram omits phone and shows channel instagram', async () => {
-    conversations.isInHandover.mockResolvedValueOnce(false);
-    escalationSettings.getSettings.mockResolvedValueOnce({
+    conversations.isInHandover.mockResolvedValue(false);
+    escalationSettings.getSettings.mockResolvedValue({
       enabled: true,
       teamNotificationNumber: '+6512345678',
       optionalMessagePrefix: null,
     });
-    notify.sendInternalAlert.mockResolvedValueOnce('sent');
+    notify.sendInternalAlert.mockResolvedValue('sent');
     mockSupabaseFrom.mockImplementation((table: string) => {
       if (table === 'conversations') {
         return makeDefaultConversationsTableMock({
@@ -203,19 +214,23 @@ describe('HumanEscalationRuntimeService', () => {
       contactDisplayName: 'Daphne Wong',
     });
 
+    expect(notify.sendInternalAlert).not.toHaveBeenCalled();
+
+    await makeSvc().flushPendingInternalAlert('t1', 'c1', 'INSTAGRAM');
+
     const body = String(notify.sendInternalAlert.mock.calls[0]![0].messageBody);
     expect(body).toContain('Channel: instagram');
     expect(body).not.toContain('Phone:');
   });
 
   it('when escalation enabled with number, sends internal alert with CRM-style body', async () => {
-    conversations.isInHandover.mockResolvedValueOnce(false);
-    escalationSettings.getSettings.mockResolvedValueOnce({
+    conversations.isInHandover.mockResolvedValue(false);
+    escalationSettings.getSettings.mockResolvedValue({
       enabled: true,
       teamNotificationNumber: '+6512345678',
       optionalMessagePrefix: '[Test]',
     });
-    notify.sendInternalAlert.mockResolvedValueOnce('sent');
+    notify.sendInternalAlert.mockResolvedValue('sent');
     getContact.mockResolvedValueOnce({
       success: true as const,
       contact: { firstName: 'Jane', lastName: 'Doe', phone: '+19991112222' },
@@ -240,6 +255,8 @@ describe('HumanEscalationRuntimeService', () => {
       contactDisplayName: null,
     });
 
+    await makeSvc().flushPendingInternalAlert('t1', 'c1', 'SMS');
+
     expect(notify.sendInternalAlert).toHaveBeenCalled();
     const arg = notify.sendInternalAlert.mock.calls[0]![0];
     expect(arg.enabled).toBe(true);
@@ -255,13 +272,13 @@ describe('HumanEscalationRuntimeService', () => {
   });
 
   it('when AI summary fails, uses readable fallback and still sends alert', async () => {
-    conversations.isInHandover.mockResolvedValueOnce(false);
-    escalationSettings.getSettings.mockResolvedValueOnce({
+    conversations.isInHandover.mockResolvedValue(false);
+    escalationSettings.getSettings.mockResolvedValue({
       enabled: true,
       teamNotificationNumber: '+6512345678',
       optionalMessagePrefix: null,
     });
-    notify.sendInternalAlert.mockResolvedValueOnce('sent');
+    notify.sendInternalAlert.mockResolvedValue('sent');
     generation.generateDraft.mockRejectedValueOnce(new Error('no provider'));
 
     await makeSvc().onHumanHandoverIntent({
@@ -281,6 +298,8 @@ describe('HumanEscalationRuntimeService', () => {
       contactPhone: '+15550001111',
       contactDisplayName: 'Pat',
     });
+
+    await makeSvc().flushPendingInternalAlert('t1', 'c1', 'SMS');
 
     const arg = notify.sendInternalAlert.mock.calls[0]![0];
     expect(String(arg.messageBody)).toMatch(/Summary:\s*\n.*human assistance/i);

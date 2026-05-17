@@ -3,6 +3,7 @@
  */
 
 import { channelFromDerivedConversationKey } from './conversation-identity';
+import type { OutboundChannel } from '@aisbp/ghl-client';
 import {
   inferChannelFromGhlContactRecord,
   type NormalizedGhlChannel,
@@ -109,6 +110,16 @@ export type InternalAlertChannelSlug = 'whatsapp' | 'facebook' | 'instagram';
 export function internalAlertChannelSlugFromLabel(channelLabel: string): InternalAlertChannelSlug {
   if (channelLabel === 'Instagram') return 'instagram';
   if (channelLabel === 'Facebook Messenger') return 'facebook';
+  return 'whatsapp';
+}
+
+/** After a successful GHL send (including SMS→Meta fallback). */
+export function internalAlertChannelSlugFromOutbound(
+  channel: OutboundChannel | string | null | undefined,
+): InternalAlertChannelSlug {
+  const u = String(channel ?? '').trim().toUpperCase();
+  if (u === 'FACEBOOK') return 'facebook';
+  if (u === 'INSTAGRAM') return 'instagram';
   return 'whatsapp';
 }
 

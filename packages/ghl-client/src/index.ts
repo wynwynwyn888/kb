@@ -190,9 +190,9 @@ export interface GhlApiError {
 //
 // Channel mapping — all channels MUST be live-verified before use:
 //   SMS      — VERIFIED LIVE (live browser capture)
-//   WHATSAPP — TODO: unverified, do not use
-//   FACEBOOK — TODO: unverified, do not use
-//   INSTAGRAM— TODO: unverified, do not use
+//   WHATSAPP — mapped per GHL "Send a new message" type `WhatsApp` (2026-05; verify per location)
+//   FACEBOOK — mapped per GHL type `FB`
+//   INSTAGRAM — mapped per GHL type `IG`
 //   TIKTOK   — TODO: unverified, do not use
 //
 // GHL API outbound payload per channel (this client uses one shape for all mapped channels):
@@ -229,10 +229,24 @@ const CHANNEL_MAP: Record<OutboundChannel, OutboundChannelConfig | null> = {
     fromOneToOneConversation: true,
     attachments: [],
   },
-  /** null until `type`/`channel` for WhatsApp are proven for this client's body shape — see file header. */
-  WHATSAPP: null,
-  FACEBOOK: null,
-  INSTAGRAM: null,
+  WHATSAPP: {
+    type: 'WhatsApp',
+    channel: 'whatsapp',
+    fromOneToOneConversation: true,
+    attachments: [],
+  },
+  FACEBOOK: {
+    type: 'FB',
+    channel: 'facebook',
+    fromOneToOneConversation: true,
+    attachments: [],
+  },
+  INSTAGRAM: {
+    type: 'IG',
+    channel: 'instagram',
+    fromOneToOneConversation: true,
+    attachments: [],
+  },
   TIKTOK: null,
 };
 

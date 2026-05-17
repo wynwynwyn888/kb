@@ -493,6 +493,7 @@ export class WebhooksService {
       voiceInboundPlaceholderRawBody: payload.voiceInboundPlaceholderRawBody,
       voiceInboundPlaceholderKind: payload.voiceInboundPlaceholderKind,
       ghlInboundMessageId: payload.ghlInboundMessageId,
+      channelRaw: payload.channelRaw ?? undefined,
     };
 
     await this.inboundQueue.add('persist', jobData, {

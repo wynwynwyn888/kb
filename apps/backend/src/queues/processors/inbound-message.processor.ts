@@ -15,6 +15,7 @@ import type { NormalizedWebhookPayload } from '../../modules/webhooks/dto/ghl-we
 import { bumpInboundDebounceMeta, shouldSkipStaleDebounceJob } from '../../lib/inbound-debounce';
 import { classifyConversationIntent } from '../../modules/conversation-policy/conversation-intent';
 import { deriveConversationIdentity } from '../../lib/conversation-identity';
+import { normalizeGhlInboundChannel } from '../../lib/ghl-channel-routing';
 import {
   filterInboundRowsToBurstWindow,
   resolveInboundDebounceMs,
@@ -66,6 +67,8 @@ export interface InboundMessageJobData {
   webhookTimestampIso?: string;
   /** Set by WebhooksService when tenant was resolved at ingress (canonical routing). */
   resolvedTenantId?: string;
+  /** GHL `data.channel` from webhook (facebook, instagram, whatsapp, sms, …). */
+  channelRaw?: string;
 }
 
 export interface OrchestrateDebouncedJobData {
@@ -86,6 +89,8 @@ export interface OrchestrateDebouncedJobData {
   debounceConfiguredMs?: number;
   /** `Date.now()` when the inbound worker enqueued this debounced orchestrate job. */
   orchestrateEnqueuedAtMs?: number;
+  /** GHL inbound channel at debounce schedule time (facebook, instagram, whatsapp, …). */
+  channelRaw?: string;
 }
 
 @Processor(QUEUES.INBOUND_MESSAGE_PROCESSOR)
@@ -139,10 +144,11 @@ export class InboundMessageProcessor extends WorkerHost {
       voiceInboundPlaceholderKind,
       ghlInboundMessageId,
       resolvedTenantId,
+      channelRaw,
     } = job.data;
 
     this.logger.log(
-      `Inbound persist: conversationGhlId=${ghlConversationId}, type=${messageType}, smokeImmediate=${Boolean(smokeImmediate)}, voiceInboundNeedsTranscribe=${Boolean(voiceInboundNeedsTranscribe)}`,
+      `Inbound persist: conversationGhlId=${ghlConversationId}, type=${messageType}, channelRaw=${channelRaw ?? 'null'}, smokeImmediate=${Boolean(smokeImmediate)}, voiceInboundNeedsTranscribe=${Boolean(voiceInboundNeedsTranscribe)}`,
     );
 
     if (webhookEventId) {
@@ -170,7 +176,9 @@ export class InboundMessageProcessor extends WorkerHost {
         ghlContactId,
         timestamp,
         locationId,
+        channelRaw,
       );
+      await this.refreshConversationChannel(conversation.id, channelRaw, locationId);
 
       const resolved = await this.resolveVoiceInboundContent(
         {
@@ -279,6 +287,7 @@ export class InboundMessageProcessor extends WorkerHost {
           pipelineWallStartMs: Date.now(),
           orchestrateQueueWaitMs: null,
           debounceConfiguredMs: 0,
+          channelRaw,
         });
         if (webhookEventId) await this.updateWebhookEventStatus(webhookEventId, 'COMPLETED');
         return;
@@ -318,6 +327,7 @@ export class InboundMessageProcessor extends WorkerHost {
           inboundWebhookReceivedAtIso: timestamp,
           debounceConfiguredMs: debounceMs,
           orchestrateEnqueuedAtMs,
+          channelRaw,
         } satisfies OrchestrateDebouncedJobData,
         {
           delay: debounceMs,
@@ -977,6 +987,7 @@ export class InboundMessageProcessor extends WorkerHost {
       pipelineWallStartMs,
       orchestrateQueueWaitMs,
       debounceConfiguredMs: debounceConfiguredMs ?? null,
+      channelRaw: job.data.channelRaw,
     });
   }
 
@@ -998,6 +1009,7 @@ export class InboundMessageProcessor extends WorkerHost {
     pipelineWallStartMs?: number;
     orchestrateQueueWaitMs?: number | null;
     debounceConfiguredMs?: number | null;
+    channelRaw?: string;
   }): Promise<void> {
     const {
       tenantId,
@@ -1016,6 +1028,7 @@ export class InboundMessageProcessor extends WorkerHost {
       pipelineWallStartMs,
       orchestrateQueueWaitMs,
       debounceConfiguredMs,
+      channelRaw,
     } = ctx;
 
     if (
@@ -1071,7 +1084,7 @@ export class InboundMessageProcessor extends WorkerHost {
       externalEventId: webhookEventId ?? `local:${conversationId}:${Date.now()}`,
       eventType: 'inbound_message',
       dedupeKey: `orch:${conversationId}:${Date.now()}`,
-      channelRaw: null,
+      channelRaw: channelRaw ?? null,
       contactDisplayName: contactDisplayName?.trim() || null,
       contactPhone: contactPhone?.trim() || null,
       contactEmail: contactEmail?.trim() || null,
@@ -1258,16 +1271,55 @@ export class InboundMessageProcessor extends WorkerHost {
    * One stable internal conversation per contact per channel — debounce, option memory, booking
    * state and all downstream policy logic depend on this.
    */
+  private async refreshConversationChannel(
+    conversationId: string,
+    channelRaw: string | undefined,
+    locationId: string,
+  ): Promise<void> {
+    const norm = normalizeGhlInboundChannel(channelRaw);
+    const { data: row } = await this.supabase
+      .from('conversations')
+      .select('metadata')
+      .eq('id', conversationId)
+      .maybeSingle();
+    const prevMeta =
+      row?.metadata && typeof row.metadata === 'object' && !Array.isArray(row.metadata)
+        ? (row.metadata as Record<string, unknown>)
+        : {};
+    const merged: Record<string, unknown> = {
+      ...prevMeta,
+      ghlChannelRaw: norm.raw,
+      ghlOutboundChannel: norm.outboundChannel,
+      channelIdentity: norm.identityChannel,
+      locationId,
+    };
+    const { error } = await this.supabase
+      .from('conversations')
+      .update({
+        channel: norm.dbChannel,
+        metadata: merged,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', conversationId);
+    if (error) {
+      this.logger.warn(
+        `Failed to refresh conversation channel ${conversationId}: ${formatPostgrestError(error)}`,
+      );
+    }
+  }
+
   private async getOrCreateConversation(
     tenantId: string,
     ghlConversationId: string,
     contactId: string,
     timestamp: string,
     locationId: string,
+    channelRaw?: string,
   ): Promise<{ id: string; reused: boolean; derivedKeyHash: string }> {
+    const norm = normalizeGhlInboundChannel(channelRaw);
     const identity = deriveConversationIdentity({
       tenantId,
-      channel: 'WHATSAPP',
+      channel: norm.identityChannel,
       externalContactId: contactId,
       externalConversationId: ghlConversationId,
     });
@@ -1317,7 +1369,7 @@ export class InboundMessageProcessor extends WorkerHost {
       .select('id, ghl_conversation_id, last_message_at, metadata')
       .eq('tenant_id', tenantId)
       .eq('contact_id', contactId)
-      .eq('channel', 'WHATSAPP')
+      .eq('channel', norm.dbChannel)
       .order('last_message_at', { ascending: false })
       .limit(1);
     const legacy = Array.isArray(legacyMatches) ? legacyMatches[0] : null;
@@ -1331,6 +1383,8 @@ export class InboundMessageProcessor extends WorkerHost {
         derivedConversationKey: identity.derivedConversationKey,
         externalContactId: contactId,
         channel: identity.channel,
+        ghlChannelRaw: norm.raw,
+        ghlOutboundChannel: norm.outboundChannel,
         locationId,
         ...(identity.externalConversationId
           ? { externalConversationId: identity.externalConversationId }
@@ -1341,6 +1395,7 @@ export class InboundMessageProcessor extends WorkerHost {
         .from('conversations')
         .update({
           ghl_conversation_id: ghlIdToWrite,
+          channel: norm.dbChannel,
           metadata: merged,
           updated_at: new Date().toISOString(),
         })
@@ -1362,6 +1417,8 @@ export class InboundMessageProcessor extends WorkerHost {
       derivedConversationKey: identity.derivedConversationKey,
       externalContactId: contactId,
       channel: identity.channel,
+      ghlChannelRaw: norm.raw,
+      ghlOutboundChannel: norm.outboundChannel,
       locationId,
       createdFromTimestamp: timestamp,
       ...(identity.externalConversationId
@@ -1376,7 +1433,7 @@ export class InboundMessageProcessor extends WorkerHost {
         tenant_id: tenantId,
         ghl_conversation_id: ghlIdToWrite,
         contact_id: contactId,
-        channel: 'WHATSAPP',
+        channel: norm.dbChannel,
         status: 'ACTIVE',
         last_message_at: now,
         updated_at: now,

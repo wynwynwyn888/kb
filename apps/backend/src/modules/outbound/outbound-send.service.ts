@@ -1,9 +1,8 @@
 // Outbound Send Service — sends reply bubbles through GHL and tracks results.
 // Does NOT make routing/AI decisions — only executes the send plan.
 // Expects `ReplyDecision.bubbles` as produced by orchestration (ReplyPlannerService formatting
-// is already applied). Outbound channel is fixed to SMS in sendSingleBubble until GHL mapping
-// for other channels is verified (see @aisbp/ghl-client CHANNEL_MAP) — not derived from
-// conversation context in this service.
+// is already applied). Outbound GHL send type is chosen from conversation metadata /
+// `conversations.channel` (see `ghl-channel-routing` + @aisbp/ghl-client CHANNEL_MAP).
 
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { randomUUID } from 'crypto';
@@ -17,6 +16,8 @@ import { decrypt } from '../../lib/encryption';
 import { isProductionEnv, safeTextPreviewForLog } from '../../lib/safe-text-preview-for-log';
 import type { ReplyDecision, ReplyBubbleDraft } from '../reply-planning/dto';
 import { CreditWarningsService } from '../credit-warnings/credit-warnings.service';
+import { resolveOutboundChannelForSend } from '../../lib/ghl-channel-routing';
+import type { OutboundChannel } from '@aisbp/ghl-client';
 
 export interface BubbleSendResult {
   index: number;
@@ -93,7 +94,12 @@ export class OutboundSendService {
       index: b.index,
       text: sanitizeOutboundCustomerText(b.text),
     }));
-    const conversationChannel = await this.loadConversationChannelForCoalesce(conversationId);
+    const conversationRow = await this.loadConversationForOutbound(conversationId);
+    const conversationChannel = conversationRow?.channel ?? null;
+    const outboundGhlChannel = resolveOutboundChannelForSend({
+      dbChannel: conversationChannel,
+      metadata: conversationRow?.metadata ?? null,
+    });
     const whatsappCoalesceEnabled = process.env['WHATSAPP_COALESCE_BUBBLES'] === 'true';
     const skipCoalesceForWhatsApp =
       conversationChannel === 'WHATSAPP' && !whatsappCoalesceEnabled;
@@ -155,6 +161,7 @@ export class OutboundSendService {
     this.logger.log(
       `liveOutboundWhitespace: logicalBubbleCount=${logicalBubbleCount} physicalOutboundBubbleCount=${physicalBubbles.length} ` +
         `outboundCoalesced=${coalesced} conversationChannel=${conversationChannel ?? 'unknown'} ` +
+        `ghlOutboundChannel=${outboundGhlChannel} ` +
         `whatsappCoalesceBubbles=${whatsappCoalesceEnabled} outboundPayloadNewlines=${payM.newlineCount} outboundPayloadDoubleNl=${payM.doubleNewlineSeqCount} ` +
         `finalOutboundPreview=${JSON.stringify(safePayload)}` +
         (isProductionEnv() ? '' : ` finalOutboundWhitespacePreview=${JSON.stringify(preview)}`) +
@@ -172,6 +179,7 @@ export class OutboundSendService {
       const result = await this.sendSingleBubble(ghlClient, {
         locationId: ghlLocationId,
         contactId,
+        ghlChannel: outboundGhlChannel,
         bubble: { index: bubble.index, text: outboundText },
       });
 
@@ -277,16 +285,23 @@ export class OutboundSendService {
    * - Other channels: keep `maybeCoalesceOutboundBubbles` (e.g. SMS) unless extended later.
    * When the row is missing or `select` fails, treat as unknown → allow coalesce (legacy behaviour).
    */
-  private async loadConversationChannelForCoalesce(conversationId: string): Promise<string | null> {
+  private async loadConversationForOutbound(
+    conversationId: string,
+  ): Promise<{ channel: string | null; metadata: Record<string, unknown> | null } | null> {
     try {
       const { data, error } = await this.supabase
         .from('conversations')
-        .select('channel')
+        .select('channel, metadata')
         .eq('id', conversationId)
         .maybeSingle();
       if (error || !data) return null;
-      const ch = (data as { channel?: string }).channel;
-      return typeof ch === 'string' && ch.trim() ? ch.trim().toUpperCase() : null;
+      const row = data as { channel?: string; metadata?: unknown };
+      const ch = typeof row.channel === 'string' && row.channel.trim() ? row.channel.trim().toUpperCase() : null;
+      const meta =
+        row.metadata && typeof row.metadata === 'object' && !Array.isArray(row.metadata)
+          ? (row.metadata as Record<string, unknown>)
+          : null;
+      return { channel: ch, metadata: meta };
     } catch {
       return null;
     }
@@ -297,17 +312,17 @@ export class OutboundSendService {
     params: {
       locationId: string;
       contactId: string;
+      ghlChannel: OutboundChannel;
       bubble: ReplyBubbleDraft;
     },
   ): Promise<BubbleSendResult> {
-    const { locationId, contactId, bubble } = params;
+    const { locationId, contactId, bubble, ghlChannel } = params;
 
-    // SMS is the only verified outbound channel in ghl-client today; do not switch here until verified.
     const response = await ghlClient.sendMessage({
       locationId,
       contactId,
       message: bubble.text,
-      channel: 'SMS',
+      channel: ghlChannel,
     });
 
     if (response.success && response.messageId) {

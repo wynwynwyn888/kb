@@ -157,10 +157,16 @@ describe('OrchestrationGuards', () => {
       expect(result.decision).toBe('PROCEED');
     });
 
-    it('returns SKIP_UNSUPPORTED_CHANNEL for SMS', async () => {
+    it('returns PROCEED for SMS (outbound routing selects GHL send type)', async () => {
       const input = makeInput({ conversation: { channel: 'SMS' } });
       const result = await (guards as never)['checkChannel'](input);
-      expect(result.decision).toBe('SKIP_UNSUPPORTED_CHANNEL');
+      expect(result.decision).toBe('PROCEED');
+    });
+
+    it('returns PROCEED for CHAT (Facebook / Instagram stored as CHAT)', async () => {
+      const input = makeInput({ conversation: { channel: 'CHAT' } });
+      const result = await (guards as never)['checkChannel'](input);
+      expect(result.decision).toBe('PROCEED');
     });
   });
 

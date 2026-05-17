@@ -226,18 +226,14 @@ export class OrchestrationGuards {
   }
 
   private async checkChannel(input: OrchestrationInput): Promise<GuardResult> {
-    // Whitelist of channels we support at the orchestration layer
-    // Others (sms, chat, email) may be supported later by different handlers
-    const supported = ['WHATSAPP', 'whatsapp'];
-    const channel = input.conversation?.channel?.toUpperCase();
-    if (!channel || !supported.includes(channel)) {
-      this.logger.debug(
-        `Guard SKIP_UNSUPPORTED_CHANNEL for channel=${channel ?? 'null'}`,
-      );
+    // Reply on any conversation channel that has a stored label — outbound routing picks the GHL send type.
+    const channel = input.conversation?.channel?.trim();
+    if (!channel) {
+      this.logger.debug(`Guard SKIP_UNSUPPORTED_CHANNEL for channel=null`);
       return {
         decision: 'SKIP_UNSUPPORTED_CHANNEL',
         guardName: 'channel',
-        reason: `Channel '${channel ?? 'null'}' is not yet supported`,
+        reason: `Channel 'null' is not yet supported`,
       };
     }
     return { decision: 'PROCEED', guardName: 'channel' };

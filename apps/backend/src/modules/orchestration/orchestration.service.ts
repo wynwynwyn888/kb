@@ -265,11 +265,7 @@ export class ConversationOrchestrationService {
           updatedAt: new Date().toISOString(),
         };
 
-        await this.persistConversationPolicyMetadata(
-          conversationId,
-          (input.conversation?.metadata as Record<string, unknown>) ?? {},
-          complaintPolicyState,
-        );
+        await this.persistConversationPolicyMetadata(conversationId, complaintPolicyState);
 
         const complaintReplyPlan: ReplyDecision = {
           planStatus: 'PLANNED',
@@ -357,7 +353,6 @@ export class ConversationOrchestrationService {
 
         await this.persistConversationPolicyMetadata(
           conversationId,
-          (input.conversation?.metadata as Record<string, unknown>) ?? {},
           policyOutcomeHuman.nextPolicyState,
         );
 
@@ -697,11 +692,7 @@ export class ConversationOrchestrationService {
         );
       }
 
-      await this.persistConversationPolicyMetadata(
-        conversationId,
-        (input.conversation?.metadata as Record<string, unknown> | undefined) ?? {},
-        stateAfterOptions,
-      );
+      await this.persistConversationPolicyMetadata(conversationId, stateAfterOptions);
 
       this.logger.log(
         `Orchestration completed: conversationId=${conversationId}, ` +
@@ -928,10 +919,24 @@ export class ConversationOrchestrationService {
 
   private async persistConversationPolicyMetadata(
     conversationId: string,
-    prevMetadata: Record<string, unknown>,
     policyState: AisbpPolicyStateV1,
   ): Promise<void> {
-    const merged = mergePolicyIntoConversationMetadata(prevMetadata, policyState);
+    const { data, error: readError } = await this.supabase
+      .from('conversations')
+      .select('metadata')
+      .eq('id', conversationId)
+      .maybeSingle();
+    if (readError) {
+      this.logger.warn(
+        `Failed to load conversation metadata for policy persist: conversationId=${conversationId} ${formatPostgrestError(readError)}`,
+      );
+      return;
+    }
+    const prev =
+      data?.metadata && typeof data.metadata === 'object' && !Array.isArray(data.metadata)
+        ? (data.metadata as Record<string, unknown>)
+        : {};
+    const merged = mergePolicyIntoConversationMetadata(prev, policyState);
     const { error } = await this.supabase
       .from('conversations')
       .update({ metadata: merged, updated_at: new Date().toISOString() })

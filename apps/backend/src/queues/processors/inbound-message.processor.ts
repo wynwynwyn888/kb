@@ -71,7 +71,6 @@ export interface InboundMessageJobData {
   channelRaw?: string;
   /** Raw GHL `data.messageType` (e.g. TYPE_FACEBOOK). */
   ghlMessageTypeRaw?: string;
-  contactPhone?: string;
 }
 
 export interface OrchestrateDebouncedJobData {
@@ -149,7 +148,6 @@ export class InboundMessageProcessor extends WorkerHost {
       resolvedTenantId,
       channelRaw,
       ghlMessageTypeRaw,
-      contactPhone,
     } = job.data;
 
     const channelNorm = resolveGhlInboundChannel({
@@ -303,8 +301,6 @@ export class InboundMessageProcessor extends WorkerHost {
           orchestrateQueueWaitMs: null,
           debounceConfiguredMs: 0,
           channelRaw,
-          ghlMessageTypeRaw,
-          contactPhone,
         });
         if (webhookEventId) await this.updateWebhookEventStatus(webhookEventId, 'COMPLETED');
         return;

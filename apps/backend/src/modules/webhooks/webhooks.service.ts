@@ -496,7 +496,6 @@ export class WebhooksService {
       ghlInboundMessageId: payload.ghlInboundMessageId,
       channelRaw: payload.channelRaw ?? undefined,
       ghlMessageTypeRaw: payload.ghlMessageTypeRaw ?? undefined,
-      contactPhone: payload.contactPhone ?? undefined,
     };
 
     await this.inboundQueue.add('persist', jobData, {

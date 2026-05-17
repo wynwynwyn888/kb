@@ -55,12 +55,20 @@ describe('HumanEscalationRuntimeService', () => {
     })),
   };
 
-  function makeDefaultConversationsTableMock() {
+  function makeDefaultConversationsTableMock(channelRow?: {
+    channel?: string;
+    metadata?: Record<string, unknown>;
+    ghl_conversation_id?: string;
+  }) {
     return {
       select: () => ({
         eq: () => ({
           maybeSingle: async () => ({
-            data: { metadata: {} },
+            data: {
+              metadata: channelRow?.metadata ?? {},
+              channel: channelRow?.channel ?? 'SMS',
+              ghl_conversation_id: channelRow?.ghl_conversation_id ?? 'aisbp:conv:whatsapp:t1:c1',
+            },
             error: null,
           }),
         }),
@@ -162,6 +170,44 @@ describe('HumanEscalationRuntimeService', () => {
     });
   });
 
+  it('internal alert for Instagram omits phone and shows channel instagram', async () => {
+    conversations.isInHandover.mockResolvedValueOnce(false);
+    escalationSettings.getSettings.mockResolvedValueOnce({
+      enabled: true,
+      teamNotificationNumber: '+6512345678',
+      optionalMessagePrefix: null,
+    });
+    notify.sendInternalAlert.mockResolvedValueOnce('sent');
+    mockSupabaseFrom.mockImplementation((table: string) => {
+      if (table === 'conversations') {
+        return makeDefaultConversationsTableMock({
+          channel: 'CHAT',
+          metadata: { ghlOutboundChannel: 'INSTAGRAM', channelIdentity: 'instagram' },
+          ghl_conversation_id: 'aisbp:conv:instagram:t1:c1',
+        });
+      }
+      return {};
+    });
+    getContact.mockResolvedValueOnce({
+      success: true as const,
+      contact: { firstName: 'Daphne', lastName: 'Wong' },
+    });
+
+    await makeSvc().onHumanHandoverIntent({
+      tenantId: 't1',
+      conversationId: 'c1',
+      contactId: 'ct1',
+      latestInboundMessage: 'can i speak to human pls',
+      memoryEntries: [],
+      contactPhone: null,
+      contactDisplayName: 'Daphne Wong',
+    });
+
+    const body = String(notify.sendInternalAlert.mock.calls[0]![0].messageBody);
+    expect(body).toContain('Channel: instagram');
+    expect(body).not.toContain('Phone:');
+  });
+
   it('when escalation enabled with number, sends internal alert with CRM-style body', async () => {
     conversations.isInHandover.mockResolvedValueOnce(false);
     escalationSettings.getSettings.mockResolvedValueOnce({
@@ -201,6 +247,7 @@ describe('HumanEscalationRuntimeService', () => {
     expect(String(arg.messageBody)).toContain('Human please');
     expect(String(arg.messageBody)).toContain('Customer: Jane Doe');
     expect(String(arg.messageBody)).toContain('Phone: +19991112222');
+    expect(String(arg.messageBody)).toContain('Channel: whatsapp');
     expect(String(arg.messageBody)).not.toMatch(/conversation\s+c1/i);
     expect(String(arg.messageBody)).not.toContain('contact ct1');
     expect(String(arg.messageBody)).toMatch(/Summary:\s*\nThe customer asked to speak with a human/i);

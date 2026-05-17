@@ -102,3 +102,26 @@ export function formatHandoverContactSummary(opts: {
   if (phone) return `${name} · ${phone}`;
   return name;
 }
+
+/** Lowercase channel slug for staff SMS / internal alerts. */
+export type InternalAlertChannelSlug = 'whatsapp' | 'facebook' | 'instagram';
+
+export function internalAlertChannelSlugFromLabel(channelLabel: string): InternalAlertChannelSlug {
+  if (channelLabel === 'Instagram') return 'instagram';
+  if (channelLabel === 'Facebook Messenger') return 'facebook';
+  return 'whatsapp';
+}
+
+/** Customer + channel lines for internal human-escalation alerts. */
+export function formatInternalEscalationCustomerLines(opts: {
+  customerName: string;
+  phone: string | null | undefined;
+  channelSlug: InternalAlertChannelSlug;
+}): string {
+  const name = opts.customerName.trim() || 'Unknown customer';
+  if (opts.channelSlug === 'whatsapp') {
+    const phone = (opts.phone ?? '').trim() || 'Unknown phone';
+    return `Customer: ${name}\nPhone: ${phone}\nChannel: whatsapp`;
+  }
+  return `Customer: ${name}\nChannel: ${opts.channelSlug}`;
+}

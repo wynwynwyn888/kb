@@ -2,6 +2,11 @@ import { Injectable, Logger } from '@nestjs/common';
 import { getSupabaseService } from '../../lib/supabase';
 import { formatPostgrestError } from '../../lib/format-postgrest-error';
 import { buildReadableFallbackInternalSummary } from '../../lib/human-escalation-summary';
+import {
+  formatHandoverChannelLabel,
+  formatInternalEscalationCustomerLines,
+  internalAlertChannelSlugFromLabel,
+} from '../../lib/handover-display';
 import type { MemoryEntry } from '../orchestration/dto/memory-entry';
 import { ConversationsService } from '../conversations/conversations.service';
 import { FollowUpEngineService } from '../follow-up-engine/follow-up-engine.service';
@@ -134,6 +139,12 @@ export class HumanEscalationRuntimeService {
     }
 
     const crm = await this.resolveCrmContactForAlert(tenantId, contactId, contactDisplayName, contactPhone);
+    const channelSlug = await this.resolveInternalAlertChannelSlug(
+      conversationId,
+      tenantId,
+      contactId,
+      crm.contact,
+    );
 
     let summary: string;
     const aiSummary = await this.tryAiInternalSummary(tenantId, latestInboundMessage, memoryEntries);
@@ -154,14 +165,21 @@ export class HumanEscalationRuntimeService {
     }
 
     const customerName = crm.displayName?.trim() || 'Unknown customer';
-    const phoneLine = crm.phone?.trim() || contactPhone?.trim() || 'Unknown phone';
+    const phoneForAlert = crm.phone?.trim() || contactPhone?.trim() || null;
+    const customerBlock = formatInternalEscalationCustomerLines({
+      customerName,
+      phone: phoneForAlert,
+      channelSlug,
+    });
 
-    const includeTechnicalFallback = customerName === 'Unknown customer' && phoneLine === 'Unknown phone';
+    const includeTechnicalFallback =
+      customerName === 'Unknown customer' &&
+      channelSlug === 'whatsapp' &&
+      !(phoneForAlert?.trim());
 
     const messageBody =
       `Human escalation requested\n\n` +
-      `Customer: ${customerName}\n` +
-      `Phone: ${phoneLine}\n` +
+      `${customerBlock}\n` +
       (includeTechnicalFallback
         ? `Reference (internal): conversation ${conversationId}` +
           (contactId?.trim() ? `, contact ${contactId.trim()}` : '') +
@@ -207,13 +225,22 @@ export class HumanEscalationRuntimeService {
 
     try {
       const crm = await this.resolveCrmContactForAlert(tenantId, contactId, contactDisplayName, contactPhone);
+      const channelSlug = await this.resolveInternalAlertChannelSlug(
+        conversationId,
+        tenantId,
+        contactId,
+        crm.contact,
+      );
       const customerName = crm.displayName?.trim() || 'Unknown customer';
-      const phoneLine = crm.phone?.trim() || contactPhone?.trim() || 'Unknown phone';
+      const customerBlock = formatInternalEscalationCustomerLines({
+        customerName,
+        phone: crm.phone?.trim() || contactPhone?.trim() || null,
+        channelSlug,
+      });
 
       const messageBody =
         `Human escalation update\n\n` +
-        `Customer: ${customerName}\n` +
-        `Phone: ${phoneLine}\n\n` +
+        `${customerBlock}\n\n` +
         `Latest message:\n"${latestInboundMessage.trim().slice(0, 2000)}"\n\n` +
         `Customer is still waiting for human assistance.`;
 
@@ -291,12 +318,17 @@ export class HumanEscalationRuntimeService {
     contactId: string | null | undefined,
     webhookDisplayName: string | null | undefined,
     webhookPhone: string | null | undefined,
-  ): Promise<{ displayName: string | null; phone: string | null }> {
+  ): Promise<{
+    displayName: string | null;
+    phone: string | null;
+    contact: Record<string, unknown> | null;
+  }> {
     const cid = contactId?.trim();
     if (!cid) {
       return {
         displayName: webhookDisplayName?.trim() || null,
         phone: webhookPhone?.trim() || null,
+        contact: null,
       };
     }
     try {
@@ -306,19 +338,62 @@ export class HumanEscalationRuntimeService {
         return {
           displayName: webhookDisplayName?.trim() || null,
           phone: webhookPhone?.trim() || null,
+          contact: null,
         };
       }
       const c = gc.contact;
       return {
         displayName: pickContactDisplayName(c) || webhookDisplayName?.trim() || null,
         phone: pickContactPhone(c) || webhookPhone?.trim() || null,
+        contact: c,
       };
     } catch {
       return {
         displayName: webhookDisplayName?.trim() || null,
         phone: webhookPhone?.trim() || null,
+        contact: null,
       };
     }
+  }
+
+  private async resolveInternalAlertChannelSlug(
+    conversationId: string,
+    tenantId: string,
+    contactId: string | null | undefined,
+    contact: Record<string, unknown> | null,
+  ): Promise<'whatsapp' | 'facebook' | 'instagram'> {
+    let dbChannel: string | null = null;
+    let metadata: Record<string, unknown> | null = null;
+    let ghlConversationId: string | null = null;
+
+    const { data, error } = await this.supabase
+      .from('conversations')
+      .select('channel, metadata, ghl_conversation_id')
+      .eq('id', conversationId)
+      .maybeSingle();
+    if (!error && data) {
+      dbChannel = typeof data.channel === 'string' ? data.channel : null;
+      ghlConversationId =
+        typeof data.ghl_conversation_id === 'string' ? data.ghl_conversation_id : null;
+      metadata =
+        data.metadata && typeof data.metadata === 'object' && !Array.isArray(data.metadata)
+          ? (data.metadata as Record<string, unknown>)
+          : null;
+    }
+
+    let contactRecord = contact;
+    if (!contactRecord && contactId?.trim()) {
+      const crm = await this.resolveCrmContactForAlert(tenantId, contactId, null, null);
+      contactRecord = crm.contact;
+    }
+
+    const channelLabel = formatHandoverChannelLabel({
+      dbChannel,
+      metadata,
+      ghlConversationId,
+      contact: contactRecord,
+    });
+    return internalAlertChannelSlugFromLabel(channelLabel);
   }
 
   private async tryAiInternalSummary(

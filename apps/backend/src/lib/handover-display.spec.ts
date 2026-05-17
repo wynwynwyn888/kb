@@ -1,6 +1,7 @@
 import {
   formatHandoverChannelLabel,
   formatHandoverContactSummary,
+  formatInternalEscalationCustomerLines,
   formatHandoverReasonLabel,
   formatHandoverTypeLabel,
 } from './handover-display';
@@ -81,5 +82,25 @@ describe('handover-display', () => {
 
   it('replaces human_intent note with Human escalation', () => {
     expect(formatHandoverReasonLabel('human_intent:HUMAN_HANDOVER')).toBe('Human escalation');
+  });
+
+  it('formats WhatsApp internal alert with phone and channel', () => {
+    expect(
+      formatInternalEscalationCustomerLines({
+        customerName: 'Sam',
+        phone: '+6512345678',
+        channelSlug: 'whatsapp',
+      }),
+    ).toBe('Customer: Sam\nPhone: +6512345678\nChannel: whatsapp');
+  });
+
+  it('formats Facebook internal alert without phone line', () => {
+    expect(
+      formatInternalEscalationCustomerLines({
+        customerName: 'Daphne Wong',
+        phone: null,
+        channelSlug: 'facebook',
+      }),
+    ).toBe('Customer: Daphne Wong\nChannel: facebook');
   });
 });

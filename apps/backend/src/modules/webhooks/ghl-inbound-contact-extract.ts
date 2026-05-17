@@ -1,8 +1,34 @@
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return v !== null && typeof v === 'object' && !Array.isArray(v);
+}
+
+function pickPhoneFromRow(row: Record<string, unknown>): string {
+  const keys = [
+    'phoneNumber',
+    'phone',
+    'primaryPhone',
+    'phone_number',
+    'mobile',
+    'cellPhone',
+  ];
+  for (const k of keys) {
+    const v = row[k];
+    if (typeof v === 'string') {
+      const t = v.trim();
+      if (t) return t;
+    }
+  }
+  return '';
+}
+
 /**
  * Read contact identity fields from GHL inbound webhook `data` objects.
  * Handles camelCase and snake_case keys seen in production payloads.
  */
-export function extractInboundContactFields(data: Record<string, unknown>): {
+export function extractInboundContactFields(
+  data: Record<string, unknown>,
+  workflowFlatRaw?: Record<string, unknown>,
+): {
   displayName: string | null;
   phone: string | null;
   email: string | null;
@@ -30,7 +56,22 @@ export function extractInboundContactFields(data: Record<string, unknown>): {
 
   const phoneNumber = pick('phoneNumber');
   const phoneAlt = pick('phone', 'primaryPhone');
-  const phone = phoneNumber || phoneAlt;
+  let phone = phoneNumber || phoneAlt;
+
+  if (!phone && workflowFlatRaw) {
+    const contact = workflowFlatRaw['contact'];
+    if (isPlainObject(contact)) {
+      phone = pickPhoneFromRow(contact) || phone;
+    }
+    const cd = workflowFlatRaw['customData'];
+    if (isPlainObject(cd)) {
+      phone = pickPhoneFromRow(cd) || phone;
+      const nested = cd['contact'];
+      if (isPlainObject(nested)) {
+        phone = pickPhoneFromRow(nested) || phone;
+      }
+    }
+  }
 
   const email = pick('email');
 

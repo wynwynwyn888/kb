@@ -398,21 +398,7 @@ export function resolveGhlInboundChannel(hints: GhlInboundChannelHints): Normali
   const fromScattered = inferFromScatteredChannelHints(hints.data, hints.workflowFlatRaw);
   if (fromScattered) return fromScattered;
 
-  const fromChannel = normalizeGhlInboundChannel(hints.channelRaw);
-
-  // GHL Workflow InboundMessage often sets channel=SMS for Meta DMs with no phone on the contact.
-  const phone = (hints.contactPhone ?? '').trim();
-  if (fromChannel.outboundChannel === 'SMS' && !phone && compact(hints.channelRaw) === 'sms') {
-    return {
-      raw: hints.channelRaw?.trim() ?? null,
-      identityChannel: 'facebook',
-      dbChannel: 'CHAT',
-      outboundChannel: 'FACEBOOK',
-      source: 'sms_channel_no_phone',
-    };
-  }
-
-  return fromChannel;
+  return normalizeGhlInboundChannel(hints.channelRaw);
 }
 
 export function isGhlMissingPhoneSendError(error: string | null | undefined): boolean {
@@ -424,16 +410,46 @@ export function isGhlMissingMetaChannelIdError(error: string | null | undefined)
   return /no facebook id|no instagram id/i.test(error ?? '');
 }
 
-export function isGhlOutboundChannelRetryable(error: string | null | undefined): boolean {
-  return isGhlMissingPhoneSendError(error) || isGhlMissingMetaChannelIdError(error);
+/** Retry to sibling Meta channel when the contact lacks the other network's id. */
+export function isGhlMetaSiblingChannelRetryable(error: string | null | undefined): boolean {
+  return isGhlMissingMetaChannelIdError(error);
 }
 
-/** When SMS send fails without a phone, try Meta channels (GHL mislabels Messenger as SMS). */
+/** Initial send attempts per resolved outbound channel (SMS does not auto-try Meta). */
 export function ghlOutboundFallbackChannels(primary: OutboundChannel): OutboundChannel[] {
-  if (primary === 'SMS') return ['SMS', 'FACEBOOK', 'INSTAGRAM'];
+  if (primary === 'SMS') return ['SMS'];
   if (primary === 'FACEBOOK') return ['FACEBOOK', 'INSTAGRAM'];
   if (primary === 'INSTAGRAM') return ['INSTAGRAM', 'FACEBOOK'];
   return [primary];
+}
+
+/**
+ * Expand attempts after a failed send. SMS only escalates to Meta on missing-phone errors
+ * (GHL sometimes labels Messenger/Instagram inbound as SMS).
+ */
+export function ghlOutboundExpandChannelAttempts(
+  primary: OutboundChannel,
+  failedChannel: OutboundChannel,
+  error: string | null | undefined,
+  queue: OutboundChannel[],
+): void {
+  if (
+    primary === 'SMS' &&
+    failedChannel === 'SMS' &&
+    isGhlMissingPhoneSendError(error)
+  ) {
+    for (const ch of ['FACEBOOK', 'INSTAGRAM'] as const) {
+      if (!queue.includes(ch)) queue.push(ch);
+    }
+    return;
+  }
+  if (failedChannel === 'FACEBOOK' && isGhlMissingMetaChannelIdError(error)) {
+    if (!queue.includes('INSTAGRAM')) queue.push('INSTAGRAM');
+    return;
+  }
+  if (failedChannel === 'INSTAGRAM' && isGhlMissingMetaChannelIdError(error)) {
+    if (!queue.includes('FACEBOOK')) queue.push('FACEBOOK');
+  }
 }
 
 export function outboundChannelFromDbChannel(dbChannel: string | null | undefined): OutboundChannel {

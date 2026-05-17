@@ -174,7 +174,7 @@ export class WebhooksService {
     workflowFlatRaw?: Record<string, unknown>,
   ): NormalizedWebhookPayload {
     const data = (payload.data || {}) as unknown as Record<string, unknown>;
-    const extracted = extractInboundContactFields(data);
+    const extracted = extractInboundContactFields(data, workflowFlatRaw);
     const envelope = payload as unknown as Record<string, unknown>;
 
     const rawMessageBody =

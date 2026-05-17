@@ -21,4 +21,12 @@ describe('extractInboundContactFields', () => {
     expect(r.phone).toBe('+1000');
     expect(r.fromExtendedWebhookKeys).toBe(false);
   });
+
+  it('reads phone from workflow-flat contact when data lacks it', () => {
+    const r = extractInboundContactFields(
+      { contactId: 'c1' },
+      { contact: { phone: '+6598765432' } },
+    );
+    expect(r.phone).toBe('+6598765432');
+  });
 });

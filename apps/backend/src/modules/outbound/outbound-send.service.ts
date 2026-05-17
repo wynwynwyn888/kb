@@ -17,8 +17,9 @@ import { isProductionEnv, safeTextPreviewForLog } from '../../lib/safe-text-prev
 import type { ReplyDecision, ReplyBubbleDraft } from '../reply-planning/dto';
 import { CreditWarningsService } from '../credit-warnings/credit-warnings.service';
 import {
+  ghlOutboundExpandChannelAttempts,
   ghlOutboundFallbackChannels,
-  isGhlOutboundChannelRetryable,
+  isGhlMetaSiblingChannelRetryable,
   resolveOutboundChannelForSend,
 } from '../../lib/ghl-channel-routing';
 import type { OutboundChannel } from '@aisbp/ghl-client';
@@ -322,11 +323,14 @@ export class OutboundSendService {
   ): Promise<BubbleSendResult> {
     const { locationId, contactId, bubble, ghlChannel } = params;
 
-    const tryChannels = ghlOutboundFallbackChannels(ghlChannel);
+    const tryChannels: OutboundChannel[] = [...ghlOutboundFallbackChannels(ghlChannel)];
     let lastError = 'Unknown send error';
+    let attemptIndex = 0;
 
-    for (let i = 0; i < tryChannels.length; i++) {
-      const ch = tryChannels[i]!;
+    while (attemptIndex < tryChannels.length) {
+      const ch = tryChannels[attemptIndex]!;
+      attemptIndex += 1;
+
       const response = await ghlClient.sendMessage({
         locationId,
         contactId,
@@ -349,8 +353,14 @@ export class OutboundSendService {
       }
 
       lastError = response.error ?? 'Unknown send error';
-      const hasMore = i < tryChannels.length - 1;
-      if (hasMore && isGhlOutboundChannelRetryable(lastError)) {
+      const hasMoreQueued = attemptIndex < tryChannels.length;
+      if (hasMoreQueued && isGhlMetaSiblingChannelRetryable(lastError)) {
+        continue;
+      }
+
+      const queueLenBefore = tryChannels.length;
+      ghlOutboundExpandChannelAttempts(ghlChannel, ch, lastError, tryChannels);
+      if (tryChannels.length > queueLenBefore) {
         continue;
       }
       break;

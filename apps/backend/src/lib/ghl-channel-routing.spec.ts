@@ -1,12 +1,13 @@
 import {
+  ghlOutboundExpandChannelAttempts,
   ghlOutboundFallbackChannels,
   isGhlMissingMetaChannelIdError,
   isGhlMissingPhoneSendError,
-  isGhlOutboundChannelRetryable,
   normalizeGhlInboundChannel,
   resolveGhlInboundChannel,
   resolveOutboundChannelForSend,
 } from './ghl-channel-routing';
+import type { OutboundChannel } from '@aisbp/ghl-client';
 
 describe('ghl-channel-routing', () => {
   it('maps facebook messenger inbound to FACEBOOK outbound', () => {
@@ -20,6 +21,18 @@ describe('ghl-channel-routing', () => {
     const n = normalizeGhlInboundChannel('instagram');
     expect(n.dbChannel).toBe('CHAT');
     expect(n.outboundChannel).toBe('INSTAGRAM');
+  });
+
+  it('keeps true SMS when channel is SMS and no Meta hints (even without webhook phone)', () => {
+    const n = resolveGhlInboundChannel({
+      channelRaw: 'SMS',
+      messageTypeRaw: 'TextMessage',
+      contactPhone: '',
+    });
+    expect(n.outboundChannel).toBe('SMS');
+    expect(n.dbChannel).toBe('SMS');
+    expect(n.identityChannel).toBe('sms');
+    expect(n.source).toBe('channel_field');
   });
 
   it('infers FACEBOOK from TYPE_FACEBOOK messageType even when channel is SMS', () => {
@@ -58,16 +71,6 @@ describe('ghl-channel-routing', () => {
     expect(n.source).toBe('workflow_channel_hint_ig');
   });
 
-  it('infers FACEBOOK when GHL sends channel SMS with no contact phone and no IG hints', () => {
-    const n = resolveGhlInboundChannel({
-      channelRaw: 'SMS',
-      messageTypeRaw: 'text',
-      contactPhone: '',
-    });
-    expect(n.outboundChannel).toBe('FACEBOOK');
-    expect(n.source).toBe('sms_channel_no_phone');
-  });
-
   it('prefers metadata ghlOutboundChannel for send', () => {
     expect(
       resolveOutboundChannelForSend({
@@ -83,11 +86,16 @@ describe('ghl-channel-routing', () => {
 
   it('detects missing Meta channel id GHL errors', () => {
     expect(isGhlMissingMetaChannelIdError('Contact has no Facebook id, skipping')).toBe(true);
-    expect(isGhlOutboundChannelRetryable('Contact has no Facebook id, skipping')).toBe(true);
   });
 
-  it('lists Meta fallbacks after SMS and cross-fallback FB/IG', () => {
-    expect(ghlOutboundFallbackChannels('SMS')).toEqual(['SMS', 'FACEBOOK', 'INSTAGRAM']);
+  it('SMS outbound attempts only SMS until missing-phone expansion', () => {
+    expect(ghlOutboundFallbackChannels('SMS')).toEqual(['SMS']);
+    const queue: OutboundChannel[] = ['SMS'];
+    ghlOutboundExpandChannelAttempts('SMS', 'SMS', 'Missing phone number', queue);
+    expect(queue).toEqual(['SMS', 'FACEBOOK', 'INSTAGRAM']);
+  });
+
+  it('cross-fallback FB/IG for Meta primaries', () => {
     expect(ghlOutboundFallbackChannels('FACEBOOK')).toEqual(['FACEBOOK', 'INSTAGRAM']);
     expect(ghlOutboundFallbackChannels('INSTAGRAM')).toEqual(['INSTAGRAM', 'FACEBOOK']);
   });

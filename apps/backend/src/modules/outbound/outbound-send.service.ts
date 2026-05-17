@@ -16,7 +16,11 @@ import { decrypt } from '../../lib/encryption';
 import { isProductionEnv, safeTextPreviewForLog } from '../../lib/safe-text-preview-for-log';
 import type { ReplyDecision, ReplyBubbleDraft } from '../reply-planning/dto';
 import { CreditWarningsService } from '../credit-warnings/credit-warnings.service';
-import { resolveOutboundChannelForSend } from '../../lib/ghl-channel-routing';
+import {
+  ghlOutboundFallbackChannels,
+  isGhlMissingPhoneSendError,
+  resolveOutboundChannelForSend,
+} from '../../lib/ghl-channel-routing';
 import type { OutboundChannel } from '@aisbp/ghl-client';
 
 export interface BubbleSendResult {
@@ -318,27 +322,43 @@ export class OutboundSendService {
   ): Promise<BubbleSendResult> {
     const { locationId, contactId, bubble, ghlChannel } = params;
 
-    const response = await ghlClient.sendMessage({
-      locationId,
-      contactId,
-      message: bubble.text,
-      channel: ghlChannel,
-    });
+    const tryChannels = ghlOutboundFallbackChannels(ghlChannel);
+    let lastError = 'Unknown send error';
 
-    if (response.success && response.messageId) {
-      return {
-        index: bubble.index,
-        text: bubble.text,
-        success: true,
-        ghlMessageId: response.messageId,
-      };
+    for (const ch of tryChannels) {
+      const response = await ghlClient.sendMessage({
+        locationId,
+        contactId,
+        message: bubble.text,
+        channel: ch,
+      });
+
+      if (response.success && response.messageId) {
+        if (ch !== ghlChannel) {
+          this.logger.log(
+            `ghlOutboundChannelFallback: primary=${ghlChannel} used=${ch} contactId=${contactId}`,
+          );
+        }
+        return {
+          index: bubble.index,
+          text: bubble.text,
+          success: true,
+          ghlMessageId: response.messageId,
+        };
+      }
+
+      lastError = response.error ?? 'Unknown send error';
+      if (ch === ghlChannel && isGhlMissingPhoneSendError(lastError)) {
+        continue;
+      }
+      break;
     }
 
     return {
       index: bubble.index,
       text: bubble.text,
       success: false,
-      error: response.error ?? 'Unknown send error',
+      error: lastError,
     };
   }
 

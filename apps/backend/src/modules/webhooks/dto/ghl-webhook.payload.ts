@@ -31,6 +31,8 @@ export interface NormalizedWebhookPayload {
   eventType: string;
   dedupeKey: string;
   channelRaw: string | null;
+  /** Raw GHL `data.messageType` (e.g. TYPE_FACEBOOK) — used for channel inference. */
+  ghlMessageTypeRaw?: string | null;
   /** HTTP(S) URL for inbound voice/audio media when GHL sends attachments instead of plain text. */
   audioMediaUrl?: string | null;
   /** When true, the inbound worker should transcribe before persisting text for orchestration. */

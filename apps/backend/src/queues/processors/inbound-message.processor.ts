@@ -15,7 +15,7 @@ import type { NormalizedWebhookPayload } from '../../modules/webhooks/dto/ghl-we
 import { bumpInboundDebounceMeta, shouldSkipStaleDebounceJob } from '../../lib/inbound-debounce';
 import { classifyConversationIntent } from '../../modules/conversation-policy/conversation-intent';
 import { deriveConversationIdentity } from '../../lib/conversation-identity';
-import { normalizeGhlInboundChannel } from '../../lib/ghl-channel-routing';
+import { resolveGhlInboundChannel } from '../../lib/ghl-channel-routing';
 import {
   filterInboundRowsToBurstWindow,
   resolveInboundDebounceMs,
@@ -69,6 +69,9 @@ export interface InboundMessageJobData {
   resolvedTenantId?: string;
   /** GHL `data.channel` from webhook (facebook, instagram, whatsapp, sms, …). */
   channelRaw?: string;
+  /** Raw GHL `data.messageType` (e.g. TYPE_FACEBOOK). */
+  ghlMessageTypeRaw?: string;
+  contactPhone?: string;
 }
 
 export interface OrchestrateDebouncedJobData {
@@ -145,10 +148,18 @@ export class InboundMessageProcessor extends WorkerHost {
       ghlInboundMessageId,
       resolvedTenantId,
       channelRaw,
+      ghlMessageTypeRaw,
+      contactPhone,
     } = job.data;
 
+    const channelNorm = resolveGhlInboundChannel({
+      channelRaw,
+      messageTypeRaw: ghlMessageTypeRaw,
+      contactPhone,
+    });
+
     this.logger.log(
-      `Inbound persist: conversationGhlId=${ghlConversationId}, type=${messageType}, channelRaw=${channelRaw ?? 'null'}, smokeImmediate=${Boolean(smokeImmediate)}, voiceInboundNeedsTranscribe=${Boolean(voiceInboundNeedsTranscribe)}`,
+      `Inbound persist: conversationGhlId=${ghlConversationId}, type=${messageType}, channelRaw=${channelRaw ?? 'null'}, ghlMessageTypeRaw=${ghlMessageTypeRaw ?? 'null'}, resolvedOutbound=${channelNorm.outboundChannel}, channelSource=${channelNorm.source}, smokeImmediate=${Boolean(smokeImmediate)}, voiceInboundNeedsTranscribe=${Boolean(voiceInboundNeedsTranscribe)}`,
     );
 
     if (webhookEventId) {
@@ -176,9 +187,13 @@ export class InboundMessageProcessor extends WorkerHost {
         ghlContactId,
         timestamp,
         locationId,
-        channelRaw,
+        {
+          channelRaw,
+          ghlMessageTypeRaw,
+          contactPhone,
+        },
       );
-      await this.refreshConversationChannel(conversation.id, channelRaw, locationId);
+      await this.refreshConversationChannel(conversation.id, channelNorm, locationId);
 
       const resolved = await this.resolveVoiceInboundContent(
         {
@@ -288,6 +303,8 @@ export class InboundMessageProcessor extends WorkerHost {
           orchestrateQueueWaitMs: null,
           debounceConfiguredMs: 0,
           channelRaw,
+          ghlMessageTypeRaw,
+          contactPhone,
         });
         if (webhookEventId) await this.updateWebhookEventStatus(webhookEventId, 'COMPLETED');
         return;
@@ -1273,10 +1290,9 @@ export class InboundMessageProcessor extends WorkerHost {
    */
   private async refreshConversationChannel(
     conversationId: string,
-    channelRaw: string | undefined,
+    norm: ReturnType<typeof resolveGhlInboundChannel>,
     locationId: string,
   ): Promise<void> {
-    const norm = normalizeGhlInboundChannel(channelRaw);
     const { data: row } = await this.supabase
       .from('conversations')
       .select('metadata')
@@ -1290,6 +1306,7 @@ export class InboundMessageProcessor extends WorkerHost {
       ...prevMeta,
       ghlChannelRaw: norm.raw,
       ghlOutboundChannel: norm.outboundChannel,
+      ghlChannelSource: norm.source,
       channelIdentity: norm.identityChannel,
       locationId,
     };
@@ -1314,9 +1331,17 @@ export class InboundMessageProcessor extends WorkerHost {
     contactId: string,
     timestamp: string,
     locationId: string,
-    channelRaw?: string,
+    channelHints?: {
+      channelRaw?: string;
+      ghlMessageTypeRaw?: string;
+      contactPhone?: string;
+    },
   ): Promise<{ id: string; reused: boolean; derivedKeyHash: string }> {
-    const norm = normalizeGhlInboundChannel(channelRaw);
+    const norm = resolveGhlInboundChannel({
+      channelRaw: channelHints?.channelRaw,
+      messageTypeRaw: channelHints?.ghlMessageTypeRaw,
+      contactPhone: channelHints?.contactPhone,
+    });
     const identity = deriveConversationIdentity({
       tenantId,
       channel: norm.identityChannel,

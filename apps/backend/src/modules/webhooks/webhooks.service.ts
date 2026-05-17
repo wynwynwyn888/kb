@@ -269,6 +269,7 @@ export class WebhooksService {
       eventType: payload.event,
       dedupeKey,
       channelRaw: (typeof data['channel'] === 'string' && data['channel']) || null,
+      ghlMessageTypeRaw: rawMessageType ?? null,
       contactFieldsFromExtendedWebhook: extracted.fromExtendedWebhookKeys,
       contactDisplayName: extracted.displayName,
       contactPhone: extracted.phone,
@@ -494,6 +495,8 @@ export class WebhooksService {
       voiceInboundPlaceholderKind: payload.voiceInboundPlaceholderKind,
       ghlInboundMessageId: payload.ghlInboundMessageId,
       channelRaw: payload.channelRaw ?? undefined,
+      ghlMessageTypeRaw: payload.ghlMessageTypeRaw ?? undefined,
+      contactPhone: payload.contactPhone ?? undefined,
     };
 
     await this.inboundQueue.add('persist', jobData, {

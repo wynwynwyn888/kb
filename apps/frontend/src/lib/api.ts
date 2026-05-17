@@ -1015,6 +1015,12 @@ export interface ActiveHandoverRow {
   initiatedBy: string;
   note: string | null;
   createdAt: string;
+  contactDisplayName: string;
+  contactPhone: string | null;
+  contactSummary: string;
+  channelLabel: string;
+  handoverTypeLabel: string;
+  reasonLabel: string;
 }
 
 export async function getActiveHandovers(token: string, tenantId: string) {

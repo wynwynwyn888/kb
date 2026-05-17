@@ -340,17 +340,17 @@ function HandoverMeta({ handover }: { handover: ActiveHandoverRow }) {
   return (
     <div style={{ flex: '1 1 12rem', minWidth: 0 }}>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', marginBottom: '0.35rem' }}>
-        <StatusPill label={handover.handoverType} tone="warn" />
-        <StatusPill label={handover.channel} tone="neutral" />
+        <StatusPill label={handover.handoverTypeLabel || 'Human request'} tone="warn" />
+        <StatusPill label={handover.channelLabel || handover.channel} tone="neutral" />
       </div>
-      <p style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted)', margin: 0 }}>
-        Contact {handover.contactId.slice(0, 12)}… · started {formatDateTime(handover.createdAt)}
+      <p style={{ fontSize: '0.85rem', color: 'var(--aisbp-text)', margin: '0 0 0.2rem', fontWeight: 600 }}>
+        {handover.contactSummary?.trim() ||
+          [handover.contactDisplayName, handover.contactPhone].filter(Boolean).join(' · ') ||
+          'Unknown contact'}
       </p>
-      {handover.note?.trim() ? (
-        <p style={{ fontSize: '0.78rem', color: 'var(--aisbp-text-secondary)', margin: '0.35rem 0 0' }}>
-          {handover.note.trim()}
-        </p>
-      ) : null}
+      <p style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted)', margin: 0 }}>
+        {handover.reasonLabel?.trim() || 'Human escalation'} · started {formatDateTime(handover.createdAt)}
+      </p>
     </div>
   );
 }

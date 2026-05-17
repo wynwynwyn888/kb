@@ -7,6 +7,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { stripModelThinking } from '@aisbp/formatter';
 import {
   getActiveHandovers,
+  type ActiveHandoverRow,
   probeAiRouterRoute,
   type AiRouterRouteResult,
 } from '@/lib/api';
@@ -20,18 +21,6 @@ import {
   StatusPill,
   formatDateTime,
 } from '@/components/app/mvp-ui';
-
-type ActiveHandoverRow = {
-  conversationId: string;
-  ghlConversationId: string;
-  contactId: string;
-  channel: string;
-  handoverId: string;
-  handoverType: string;
-  initiatedBy: string;
-  note: string | null;
-  createdAt: string;
-};
 
 function previewDraftReply(value: unknown): string {
   if (value === null || value === undefined) return 'None (normal for this probe)';
@@ -309,8 +298,8 @@ export default function TenantDiagnosticsPage() {
                 }}
               >
                 <div style={{ marginBottom: '0.5rem', display: 'flex', flexWrap: 'wrap', gap: '0.35rem', alignItems: 'center' }}>
-                  <StatusPill label={h.handoverType} tone="warn" />
-                  <StatusPill label={h.channel} tone="neutral" />
+                  <StatusPill label={h.handoverTypeLabel || 'Human request'} tone="warn" />
+                  <StatusPill label={h.channelLabel || h.channel} tone="neutral" />
                 </div>
                 <KeyValueRows
                   rows={[
@@ -327,12 +316,13 @@ export default function TenantDiagnosticsPage() {
                     },
                     { label: 'Conversation ID', value: h.conversationId, mono: true },
                     { label: 'CRM conversation ID', value: h.ghlConversationId, mono: true },
-                    { label: 'Contact', value: h.contactId, mono: true },
+                    { label: 'Contact', value: h.contactSummary || h.contactDisplayName || h.contactId },
+                    ...(h.contactPhone ? [{ label: 'Phone', value: h.contactPhone }] : []),
                     { label: 'Initiated by', value: h.initiatedBy, mono: true },
                     { label: 'Started', value: formatDateTime(h.createdAt) },
                     {
-                      label: 'Note',
-                      value: h.note?.trim() ? h.note : '—',
+                      label: 'Reason',
+                      value: h.reasonLabel?.trim() || 'Human escalation',
                     },
                   ]}
                 />

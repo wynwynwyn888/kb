@@ -3,6 +3,10 @@ import { jest as jestGlobal } from '@jest/globals';
 import { HandoverService } from './handover.service';
 import { createMockSupabase } from '../../test/mock-supabase';
 
+const mockGhlService = {
+  createGhlClientForConnectedTenantWorkerOrThrow: jestGlobal.fn(),
+};
+
 const mockSupabase = createMockSupabase();
 jestGlobal.mock('../../lib/supabase', () => ({
   getSupabaseService: () => mockSupabase,
@@ -18,7 +22,7 @@ describe('HandoverService', () => {
 
   beforeEach(() => {
     jestGlobal.clearAllMocks();
-    service = new HandoverService({} as never);
+    service = new HandoverService({} as never, mockGhlService as never);
   });
 
   describe('initiate', () => {

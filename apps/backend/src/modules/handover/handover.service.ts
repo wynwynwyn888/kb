@@ -5,7 +5,32 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { randomUUID } from 'crypto';
 import { getSupabaseService } from '../../lib/supabase';
+import {
+  formatHandoverChannelLabel,
+  formatHandoverContactSummary,
+  formatHandoverReasonLabel,
+  formatHandoverTypeLabel,
+} from '../../lib/handover-display';
 import { QUEUES } from '../../queues/queue.constants';
+import { GhlService } from '../ghl/ghl.service';
+
+export interface ActiveHandoverListItem {
+  conversationId: string;
+  ghlConversationId: string;
+  contactId: string;
+  channel: string;
+  handoverId: string;
+  handoverType: string;
+  initiatedBy: string;
+  note: string | null;
+  createdAt: string;
+  contactDisplayName: string;
+  contactPhone: string | null;
+  contactSummary: string;
+  channelLabel: string;
+  handoverTypeLabel: string;
+  reasonLabel: string;
+}
 
 @Injectable()
 export class HandoverService {
@@ -14,6 +39,7 @@ export class HandoverService {
 
   constructor(
     @InjectQueue(QUEUES.HANDOVER_NOTIFY) private readonly handoverQueue: Queue,
+    private readonly ghlService: GhlService,
   ) {}
 
   async initiate(
@@ -122,17 +148,7 @@ export class HandoverService {
     };
   }
 
-  async getActiveHandoverEvents(tenantId: string): Promise<{
-    conversationId: string;
-    ghlConversationId: string;
-    contactId: string;
-    channel: string;
-    handoverId: string;
-    handoverType: string;
-    initiatedBy: string;
-    note: string | null;
-    createdAt: string;
-  }[]> {
+  async getActiveHandoverEvents(tenantId: string): Promise<ActiveHandoverListItem[]> {
     const { data, error } = await this.supabase
       .from('handover_events')
       .select(`
@@ -146,7 +162,8 @@ export class HandoverService {
           id,
           ghl_conversation_id,
           contact_id,
-          channel
+          channel,
+          metadata
         )
       `)
       .eq('conversation.tenant_id', tenantId)
@@ -158,13 +175,18 @@ export class HandoverService {
       return [];
     }
 
-    return (data ?? []).map((row: Record<string, unknown>) => {
+    const rows = (data ?? []).map((row: Record<string, unknown>) => {
       const conv = row['conversation'] as Record<string, unknown>;
+      const metadata =
+        conv['metadata'] && typeof conv['metadata'] === 'object' && !Array.isArray(conv['metadata'])
+          ? (conv['metadata'] as Record<string, unknown>)
+          : null;
       return {
         conversationId: conv['id'] as string,
         ghlConversationId: conv['ghl_conversation_id'] as string,
         contactId: conv['contact_id'] as string,
         channel: conv['channel'] as string,
+        metadata,
         handoverId: row['id'] as string,
         handoverType: row['type'] as string,
         initiatedBy: row['initiated_by'] as string,
@@ -172,6 +194,74 @@ export class HandoverService {
         createdAt: row['created_at'] as string,
       };
     });
+
+    return Promise.all(
+      rows.map(async row => {
+        const channelLabel = formatHandoverChannelLabel({
+          dbChannel: row.channel,
+          metadata: row.metadata,
+        });
+        const crm = await this.resolveContactForDisplay(tenantId, row.contactId);
+        const contactSummary = formatHandoverContactSummary({
+          displayName: crm.displayName,
+          phone: crm.phone,
+          channelLabel,
+        });
+        return {
+          conversationId: row.conversationId,
+          ghlConversationId: row.ghlConversationId,
+          contactId: row.contactId,
+          channel: row.channel,
+          handoverId: row.handoverId,
+          handoverType: row.handoverType,
+          initiatedBy: row.initiatedBy,
+          note: row.note,
+          createdAt: row.createdAt,
+          contactDisplayName: crm.displayName ?? 'Unknown contact',
+          contactPhone: crm.phone,
+          contactSummary,
+          channelLabel,
+          handoverTypeLabel: formatHandoverTypeLabel(row.handoverType),
+          reasonLabel: formatHandoverReasonLabel(row.note),
+        };
+      }),
+    );
+  }
+
+  private async resolveContactForDisplay(
+    tenantId: string,
+    contactId: string,
+  ): Promise<{ displayName: string | null; phone: string | null }> {
+    const cid = contactId?.trim();
+    if (!cid) return { displayName: null, phone: null };
+    try {
+      const { client } = await this.ghlService.createGhlClientForConnectedTenantWorkerOrThrow(tenantId);
+      const gc = await client.getContact(cid);
+      if (!gc.success || !gc.contact) return { displayName: null, phone: null };
+      return {
+        displayName: this.pickContactDisplayName(gc.contact),
+        phone: this.pickContactPhone(gc.contact),
+      };
+    } catch {
+      return { displayName: null, phone: null };
+    }
+  }
+
+  private pickContactDisplayName(contact: Record<string, unknown>): string | null {
+    const fn = typeof contact['firstName'] === 'string' ? contact['firstName'].trim() : '';
+    const ln = typeof contact['lastName'] === 'string' ? contact['lastName'].trim() : '';
+    const combined = [fn, ln].filter(Boolean).join(' ').trim();
+    if (combined) return combined;
+    const name = typeof contact['name'] === 'string' ? contact['name'].trim() : '';
+    return name || null;
+  }
+
+  private pickContactPhone(contact: Record<string, unknown>): string | null {
+    for (const k of ['phone', 'phoneNumber', 'primaryPhone', 'mobile']) {
+      const v = contact[k];
+      if (typeof v === 'string' && v.trim()) return v.trim();
+    }
+    return null;
   }
 
   async getHandoverHistory(conversationId: string): Promise<{

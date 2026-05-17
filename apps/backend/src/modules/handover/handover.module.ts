@@ -6,9 +6,10 @@ import { HandoverController } from './handover.controller';
 import { HandoverService } from './handover.service';
 import { QueuesModule } from '../../queues/queues.module';
 import { AuthModule } from '../auth/auth.module';
+import { GhlModule } from '../ghl/ghl.module';
 
 @Module({
-  imports: [QueuesModule, AuthModule],
+  imports: [QueuesModule, AuthModule, GhlModule],
   controllers: [HandoverController],
   providers: [HandoverService],
   exports: [HandoverService],

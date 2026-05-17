@@ -1005,8 +1005,20 @@ export async function resetConversationBotState(
 }
 
 // Handover
+export interface ActiveHandoverRow {
+  conversationId: string;
+  ghlConversationId: string;
+  contactId: string;
+  channel: string;
+  handoverId: string;
+  handoverType: string;
+  initiatedBy: string;
+  note: string | null;
+  createdAt: string;
+}
+
 export async function getActiveHandovers(token: string, tenantId: string) {
-  return apiRequest<unknown[]>(`/handover/active?tenantId=${tenantId}`, { token });
+  return apiRequest<ActiveHandoverRow[]>(`/handover/active?tenantId=${tenantId}`, { token });
 }
 
 export async function resumeHandover(token: string, conversationId: string) {

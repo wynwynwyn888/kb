@@ -88,14 +88,25 @@ export class SendBubbleProcessor extends WorkerHost {
     );
 
     const isHumanEscalationCustomerAck =
-      replyPlan?.draftProvenance === 'human_escalation' || replyPlan?.responseMode === 'handover';
+      replyPlan?.draftProvenance === 'human_escalation' ||
+      replyPlan?.responseMode === 'handover' ||
+      (replyPlan?.handoverRecommended === true &&
+        typeof replyPlan?.rationale === 'string' &&
+        replyPlan.rationale.includes('human_request'));
     if (isHumanEscalationCustomerAck) {
       const channelUsed = summary.bubbleResults.find(b => b.success && b.ghlChannelUsed)?.ghlChannelUsed;
       try {
-        await this.humanEscalationRuntime.flushPendingInternalAlert(
+        const flushResult = await this.humanEscalationRuntime.flushPendingInternalAlert(
           tenantId,
           conversationId,
           channelUsed ?? null,
+        );
+        this.logger.log(
+          `humanEscalationFlushPendingAlert ${JSON.stringify({
+            conversationId,
+            flushResult,
+            channelUsed: channelUsed ?? null,
+          })}`,
         );
       } catch (e) {
         this.logger.warn(

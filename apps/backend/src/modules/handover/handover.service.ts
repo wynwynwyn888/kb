@@ -107,9 +107,33 @@ export class HandoverService {
       }
     }
 
+    const { data: convRow, error: convReadErr } = await this.supabase
+      .from('conversations')
+      .select('metadata')
+      .eq('id', conversationId)
+      .maybeSingle();
+
+    if (convReadErr) {
+      throw new Error(`Failed to read conversation for resume: ${convReadErr.message}`);
+    }
+
+    const prevMeta =
+      convRow?.metadata && typeof convRow.metadata === 'object' && !Array.isArray(convRow.metadata)
+        ? (convRow.metadata as Record<string, unknown>)
+        : {};
+    const {
+      humanEscalationInternalAlertSentAt: _sentAt,
+      humanEscalationPendingInternalAlert: _pending,
+      ...metaAfterResume
+    } = prevMeta;
+
     const { error: convError } = await this.supabase
       .from('conversations')
-      .update({ status: 'ACTIVE' })
+      .update({
+        status: 'ACTIVE',
+        metadata: metaAfterResume,
+        updated_at: new Date().toISOString(),
+      })
       .eq('id', conversationId);
 
     if (convError) {

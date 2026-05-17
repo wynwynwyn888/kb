@@ -207,12 +207,14 @@ export class HumanEscalationRuntimeService {
     }
 
     const pending = await this.readPendingInternalAlert(conversationId);
-    if (!pending) return 'skipped_no_pending';
-
-    const lastSentIso = await this.readHumanEscalationAlertSentAt(conversationId);
-    if (typeof lastSentIso === 'string' && Date.now() - Date.parse(lastSentIso) < HUMAN_ALERT_COOLDOWN_MS) {
-      await this.clearPendingInternalAlert(conversationId);
-      return 'skipped_duplicate';
+    if (!pending) {
+      this.logger.log(
+        `humanEscalationFlushSkipped ${JSON.stringify({
+          conversationId,
+          reason: 'no_pending_alert',
+        })}`,
+      );
+      return 'skipped_no_pending';
     }
 
     const channelSlug = await this.resolveChannelSlugForInternalAlert(

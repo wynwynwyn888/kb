@@ -16,6 +16,7 @@ import { decrypt } from '../../lib/encryption';
 import { isProductionEnv, safeTextPreviewForLog } from '../../lib/safe-text-preview-for-log';
 import type { ReplyDecision, ReplyBubbleDraft } from '../reply-planning/dto';
 import { CreditWarningsService } from '../credit-warnings/credit-warnings.service';
+import { HumanEscalationRuntimeService } from '../human-escalation/human-escalation-runtime.service';
 import {
   ghlOutboundExpandChannelAttempts,
   ghlOutboundFallbackChannels,
@@ -62,7 +63,10 @@ export class OutboundSendService {
 
   // Optional so existing tests that `new OutboundSendService()` continue to pass without
   // wiring the warning service; production wires it via Nest DI from OutboundModule.
-  constructor(@Optional() private readonly creditWarnings?: CreditWarningsService) {}
+  constructor(
+    @Optional() private readonly creditWarnings?: CreditWarningsService,
+    @Optional() private readonly humanEscalationRuntime?: HumanEscalationRuntimeService,
+  ) {}
 
   /**
    * Send all bubbles for a ReplyDecision to GHL.
@@ -388,7 +392,7 @@ export class OutboundSendService {
     const patch = metadataPatchForSuccessfulOutbound(channelUsed);
     const { data, error } = await this.supabase
       .from('conversations')
-      .select('metadata')
+      .select('metadata, tenant_id')
       .eq('id', conversationId)
       .maybeSingle();
     if (error || !data) return;
@@ -418,6 +422,34 @@ export class OutboundSendService {
           message: formatPostgrestError(upErr),
         })}`,
       );
+      return;
+    }
+
+    const tenantId = typeof data.tenant_id === 'string' ? data.tenant_id : null;
+    if (this.humanEscalationRuntime && tenantId) {
+      try {
+        const flushResult = await this.humanEscalationRuntime.flushPendingInternalAlert(
+          tenantId,
+          conversationId,
+          channelUsed,
+        );
+        if (flushResult !== 'skipped_no_pending') {
+          this.logger.log(
+            `humanEscalationFlushAfterOutbound ${JSON.stringify({
+              conversationId,
+              channelUsed,
+              flushResult,
+            })}`,
+          );
+        }
+      } catch (e) {
+        this.logger.warn(
+          `humanEscalationFlushAfterOutboundFailed ${JSON.stringify({
+            conversationId,
+            message: e instanceof Error ? e.message : String(e),
+          })}`,
+        );
+      }
     }
   }
 

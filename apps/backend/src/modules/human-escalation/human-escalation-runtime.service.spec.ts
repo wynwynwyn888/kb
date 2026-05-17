@@ -181,6 +181,32 @@ describe('HumanEscalationRuntimeService', () => {
     });
   });
 
+  it('flush sends alert even when a prior alert was sent within 24h (new escalation cycle)', async () => {
+    conversations.isInHandover.mockResolvedValue(false);
+    escalationSettings.getSettings.mockResolvedValue({
+      enabled: true,
+      teamNotificationNumber: '+6512345678',
+      optionalMessagePrefix: null,
+    });
+    notify.sendInternalAlert.mockResolvedValue('sent');
+    conversationMetadata = {
+      humanEscalationInternalAlertSentAt: new Date().toISOString(),
+      humanEscalationPendingInternalAlert: {
+        latestInboundMessage: 'human please',
+        summary: 'Wants a human.',
+        customerName: 'Sam',
+        phoneForAlert: '+6511111111',
+        contactId: 'ct1',
+      },
+    };
+
+    const result = await makeSvc().flushPendingInternalAlert('t1', 'c1', 'FACEBOOK');
+
+    expect(result).toBe('sent');
+    expect(notify.sendInternalAlert).toHaveBeenCalled();
+    expect(String(notify.sendInternalAlert.mock.calls[0]![0].messageBody)).toContain('Channel: facebook');
+  });
+
   it('internal alert for Instagram omits phone and shows channel instagram', async () => {
     conversations.isInHandover.mockResolvedValue(false);
     escalationSettings.getSettings.mockResolvedValue({

@@ -78,6 +78,18 @@ describe('HandoverService', () => {
         }
         if (table === 'conversations') {
           return {
+            select: () => ({
+              eq: () => ({
+                maybeSingle: async () => ({
+                  data: {
+                    metadata: {
+                      humanEscalationInternalAlertSentAt: '2026-05-17T11:00:00.000Z',
+                    },
+                  },
+                  error: null,
+                }),
+              }),
+            }),
             update: jestGlobal.fn(() => ({
               eq: jestGlobal.fn(async () => {
                 updateConvCalled = true;
@@ -110,6 +122,11 @@ describe('HandoverService', () => {
         }
         if (table === 'conversations') {
           return {
+            select: () => ({
+              eq: () => ({
+                maybeSingle: async () => ({ data: { metadata: {} }, error: null }),
+              }),
+            }),
             update: jestGlobal.fn(() => ({
               eq: jestGlobal.fn(async () => {
                 updateConvCalled = true;

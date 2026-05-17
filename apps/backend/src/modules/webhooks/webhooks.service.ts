@@ -137,6 +137,7 @@ export class WebhooksService {
     await this.enqueueInboundMessage(normalizedPayload, webhookEvent.id, {
       smokeImmediate: Boolean(opts?.smokeImmediate),
       resolvedTenantId: route.tenantId,
+      workflowFlatRaw: opts?.workflowFlatRaw,
     });
 
     this.logger.log(
@@ -470,7 +471,11 @@ export class WebhooksService {
   async enqueueInboundMessage(
     payload: NormalizedWebhookPayload,
     webhookEventId?: string,
-    opts?: { smokeImmediate?: boolean; resolvedTenantId?: string },
+    opts?: {
+      smokeImmediate?: boolean;
+      resolvedTenantId?: string;
+      workflowFlatRaw?: Record<string, unknown>;
+    },
   ): Promise<void> {
     const jobData: InboundMessageJobData = {
       resolvedTenantId: opts?.resolvedTenantId,
@@ -496,6 +501,7 @@ export class WebhooksService {
       ghlInboundMessageId: payload.ghlInboundMessageId,
       channelRaw: payload.channelRaw ?? undefined,
       ghlMessageTypeRaw: payload.ghlMessageTypeRaw ?? undefined,
+      workflowFlatRaw: opts?.workflowFlatRaw,
     };
 
     await this.inboundQueue.add('persist', jobData, {

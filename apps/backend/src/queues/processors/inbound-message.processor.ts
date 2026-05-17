@@ -71,6 +71,8 @@ export interface InboundMessageJobData {
   channelRaw?: string;
   /** Raw GHL `data.messageType` (e.g. TYPE_FACEBOOK). */
   ghlMessageTypeRaw?: string;
+  /** Original workflow-flat webhook body for Meta channel inference (contact/message/customData). */
+  workflowFlatRaw?: Record<string, unknown>;
 }
 
 export interface OrchestrateDebouncedJobData {
@@ -148,12 +150,14 @@ export class InboundMessageProcessor extends WorkerHost {
       resolvedTenantId,
       channelRaw,
       ghlMessageTypeRaw,
+      workflowFlatRaw,
     } = job.data;
 
     const channelNorm = resolveGhlInboundChannel({
       channelRaw,
       messageTypeRaw: ghlMessageTypeRaw,
       contactPhone,
+      workflowFlatRaw,
     });
 
     this.logger.log(
@@ -189,6 +193,7 @@ export class InboundMessageProcessor extends WorkerHost {
           channelRaw,
           ghlMessageTypeRaw,
           contactPhone,
+          workflowFlatRaw,
         },
       );
       await this.refreshConversationChannel(conversation.id, channelNorm, locationId);
@@ -1331,12 +1336,14 @@ export class InboundMessageProcessor extends WorkerHost {
       channelRaw?: string;
       ghlMessageTypeRaw?: string;
       contactPhone?: string;
+      workflowFlatRaw?: Record<string, unknown>;
     },
   ): Promise<{ id: string; reused: boolean; derivedKeyHash: string }> {
     const norm = resolveGhlInboundChannel({
       channelRaw: channelHints?.channelRaw,
       messageTypeRaw: channelHints?.ghlMessageTypeRaw,
       contactPhone: channelHints?.contactPhone,
+      workflowFlatRaw: channelHints?.workflowFlatRaw,
     });
     const identity = deriveConversationIdentity({
       tenantId,

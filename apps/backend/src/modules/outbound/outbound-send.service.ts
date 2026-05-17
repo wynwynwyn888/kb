@@ -18,7 +18,7 @@ import type { ReplyDecision, ReplyBubbleDraft } from '../reply-planning/dto';
 import { CreditWarningsService } from '../credit-warnings/credit-warnings.service';
 import {
   ghlOutboundFallbackChannels,
-  isGhlMissingPhoneSendError,
+  isGhlOutboundChannelRetryable,
   resolveOutboundChannelForSend,
 } from '../../lib/ghl-channel-routing';
 import type { OutboundChannel } from '@aisbp/ghl-client';
@@ -325,7 +325,8 @@ export class OutboundSendService {
     const tryChannels = ghlOutboundFallbackChannels(ghlChannel);
     let lastError = 'Unknown send error';
 
-    for (const ch of tryChannels) {
+    for (let i = 0; i < tryChannels.length; i++) {
+      const ch = tryChannels[i]!;
       const response = await ghlClient.sendMessage({
         locationId,
         contactId,
@@ -348,7 +349,8 @@ export class OutboundSendService {
       }
 
       lastError = response.error ?? 'Unknown send error';
-      if (ch === ghlChannel && isGhlMissingPhoneSendError(lastError)) {
+      const hasMore = i < tryChannels.length - 1;
+      if (hasMore && isGhlOutboundChannelRetryable(lastError)) {
         continue;
       }
       break;

@@ -1,6 +1,8 @@
 import {
   ghlOutboundFallbackChannels,
+  isGhlMissingMetaChannelIdError,
   isGhlMissingPhoneSendError,
+  isGhlOutboundChannelRetryable,
   normalizeGhlInboundChannel,
   resolveGhlInboundChannel,
   resolveOutboundChannelForSend,
@@ -29,7 +31,34 @@ describe('ghl-channel-routing', () => {
     expect(n.source).toBe('messageType');
   });
 
-  it('infers FACEBOOK when GHL sends channel SMS with no contact phone', () => {
+  it('infers INSTAGRAM from contact instagramId when channel is SMS', () => {
+    const n = resolveGhlInboundChannel({
+      channelRaw: 'SMS',
+      messageTypeRaw: 'TextMessage',
+      contactPhone: '',
+      workflowFlatRaw: {
+        contact: { instagramId: 'ig-user-123' },
+      },
+    });
+    expect(n.outboundChannel).toBe('INSTAGRAM');
+    expect(n.source).toBe('contact_instagram_id');
+    expect(n.identityChannel).toBe('instagram');
+  });
+
+  it('infers INSTAGRAM from workflow messageSource hint', () => {
+    const n = resolveGhlInboundChannel({
+      channelRaw: 'SMS',
+      messageTypeRaw: 'TextMessage',
+      contactPhone: '',
+      workflowFlatRaw: {
+        message: { messageSource: 'instagram' },
+      },
+    });
+    expect(n.outboundChannel).toBe('INSTAGRAM');
+    expect(n.source).toBe('workflow_channel_hint_ig');
+  });
+
+  it('infers FACEBOOK when GHL sends channel SMS with no contact phone and no IG hints', () => {
     const n = resolveGhlInboundChannel({
       channelRaw: 'SMS',
       messageTypeRaw: 'text',
@@ -52,7 +81,14 @@ describe('ghl-channel-routing', () => {
     expect(isGhlMissingPhoneSendError('Missing phone number')).toBe(true);
   });
 
-  it('lists Meta fallbacks after SMS', () => {
+  it('detects missing Meta channel id GHL errors', () => {
+    expect(isGhlMissingMetaChannelIdError('Contact has no Facebook id, skipping')).toBe(true);
+    expect(isGhlOutboundChannelRetryable('Contact has no Facebook id, skipping')).toBe(true);
+  });
+
+  it('lists Meta fallbacks after SMS and cross-fallback FB/IG', () => {
     expect(ghlOutboundFallbackChannels('SMS')).toEqual(['SMS', 'FACEBOOK', 'INSTAGRAM']);
+    expect(ghlOutboundFallbackChannels('FACEBOOK')).toEqual(['FACEBOOK', 'INSTAGRAM']);
+    expect(ghlOutboundFallbackChannels('INSTAGRAM')).toEqual(['INSTAGRAM', 'FACEBOOK']);
   });
 });

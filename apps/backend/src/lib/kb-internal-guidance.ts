@@ -61,7 +61,19 @@ function stripLeadingBrandCapsNoise(text: string): string {
     }
     break;
   }
-  return lines.slice(i).join('\n').trimStart();
+  const remainder = lines.slice(i).join('\n').trimStart();
+  if (remainder.length > 0) return remainder;
+
+  const originalTrimmed = text.trim();
+  if (!originalTrimmed) return '';
+
+  // Leading venue-title stripping must not delete the entire outbound (e.g. short ALL-CAPS SMS replies).
+  const isSingleLine = !originalTrimmed.includes('\n');
+  if (isSingleLine && originalTrimmed.length <= 280) {
+    return originalTrimmed;
+  }
+
+  return remainder;
 }
 
 /**

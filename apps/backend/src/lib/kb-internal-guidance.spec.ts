@@ -19,4 +19,9 @@ describe('kb-internal-guidance', () => {
     expect(out).toMatch(/Charred Wagyu/i);
     expect(out).toMatch(/RESTAURANT MENU/i);
   });
+
+  it('preserves short single-line ALL-CAPS customer replies', () => {
+    expect(stripInternalGuidanceFromText("YOU'RE WELCOME!")).toBe("YOU'RE WELCOME!");
+    expect(stripInternalGuidanceFromText('HOW CAN I HELP?')).toBe('HOW CAN I HELP?');
+  });
 });

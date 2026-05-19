@@ -14,4 +14,9 @@ describe('outbound-internal-kb-sanitizer', () => {
     expect(out.length).toBeLessThan(body.length);
     expect(out).toMatch(/\?$/m);
   });
+
+  it('does not empty short ALL-CAPS live replies after sanitization', () => {
+    const out = sanitizeOutboundInternalKbLeak("YOU'RE WELCOME!", 'UNKNOWN');
+    expect(out).toBe("YOU'RE WELCOME!");
+  });
 });

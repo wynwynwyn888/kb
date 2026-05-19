@@ -124,5 +124,10 @@ export function sanitizeOutboundInternalKbLeak(
     );
   }
 
+  const originalTrimmed = text.trim();
+  if (!t.trim() && originalTrimmed && !blocked) {
+    return originalTrimmed.length >= 12 ? originalTrimmed : 'How can I help you today?';
+  }
+
   return t;
 }

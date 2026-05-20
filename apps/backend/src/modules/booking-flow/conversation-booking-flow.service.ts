@@ -1922,8 +1922,8 @@ export class ConversationBookingFlowService {
   }
 
   private clarifyBatchDetailsAsk(fields: Array<{ label: string }>): string {
-    const list = fields.map(f => `• ${f.label}`).join('\n');
-    return `Please share the following in one message:\n${list}`;
+    const list = fields.map(f => `- ${f.label}`).join('\n');
+    return `Please share the following in one message:\n\n${list}`;
   }
 
   private requiredFieldSkipRefusalCopy(
@@ -2343,6 +2343,9 @@ export class ConversationBookingFlowService {
     userFrustrated: boolean;
     businessName?: string;
   }): Promise<string> {
+    if (p.nextStep.fieldId === BATCH_DETAILS_PENDING_ID) {
+      return p.nextStep.safeBaseMessage;
+    }
     if (!this.bookingReplyComposer) return p.nextStep.safeBaseMessage;
     return this.bookingReplyComposer.compose({
       tenantId: p.tenantId,

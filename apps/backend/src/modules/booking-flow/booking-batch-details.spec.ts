@@ -20,19 +20,22 @@ describe('booking batch details', () => {
     expect(isSchedulingTimeLocked(booking)).toBe(true);
   });
 
-  it('buildBatchBookingDetailsAsk lists fields in one message', () => {
+  it('buildBatchBookingDetailsAsk lists fields as hyphen bullets on separate lines', () => {
     const msg = buildBatchBookingDetailsAsk({
       humanDate: '26 May',
       timeLabel: '3:00 PM',
       fields: [
-        { id: 'name', label: 'Contact name', required: true },
+        { id: 'name', label: 'Your contact name', required: true },
         { id: 'phone', label: 'Mobile number', required: true },
+        { id: 'first_visit', label: 'Is this your first visit?', required: false },
       ],
     });
     expect(msg).toContain('26 May');
     expect(msg).toContain('3:00 PM');
-    expect(msg).toContain('Contact name');
-    expect(msg).toContain('Mobile number');
+    expect(msg).toMatch(/once you provide:\n\n-/);
+    expect(msg).toContain('- Your contact name');
+    expect(msg).toContain('- Mobile number');
+    expect(msg).toContain('- Is this your first visit?');
     expect(msg.toLowerCase()).not.toContain('skip');
   });
 

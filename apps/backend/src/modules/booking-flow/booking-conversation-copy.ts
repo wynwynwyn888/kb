@@ -403,16 +403,20 @@ export function labelForBatchBookingDetailField(
   }
   switch (fieldId) {
     case 'name':
-      return 'Contact name';
+      return 'Your contact name';
     case 'phone':
       return 'Mobile number';
     case 'email':
       return 'Email';
     case 'first_visit':
-      return 'First visit (yes or no)';
+      return 'Is this your first visit?';
     default:
       return 'Booking detail';
   }
+}
+
+function formatBatchBookingBulletList(fields: BatchBookingDetailField[]): string {
+  return fields.map(f => `- ${f.label}`).join('\n');
 }
 
 /** One-shot ask for contact / intake fields after preferred time is known. */
@@ -421,15 +425,16 @@ export function buildBatchBookingDetailsAsk(p: {
   timeLabel?: string;
   fields: BatchBookingDetailField[];
 }): string {
-  const lines = p.fields.map(f => `• ${f.label}`);
-  const list = lines.join('\n');
+  const list = formatBatchBookingBulletList(p.fields);
   const date = (p.humanDate ?? '').trim();
   const time = (p.timeLabel ?? '').trim();
+  let intro: string;
   if (date && time) {
-    return collapseWhitespace(`I can finalise the ${date}, ${time} slot once you provide:\n${list}`);
+    intro = `I can finalise the ${date}, ${time} slot once you provide:`;
+  } else if (time) {
+    intro = `To lock in ${time}, please share:`;
+  } else {
+    intro = 'To finish your booking, please share:';
   }
-  if (time) {
-    return collapseWhitespace(`To lock in ${time}, please share:\n${list}`);
-  }
-  return collapseWhitespace(`To finish your booking, please share:\n${list}`);
+  return `${intro}\n\n${list}`;
 }

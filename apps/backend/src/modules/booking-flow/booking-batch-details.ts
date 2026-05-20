@@ -167,8 +167,27 @@ export function applyBatchDetailsFromInbound(params: {
   const line = latest.trim();
   let parsedAny = false;
 
+  /** Comma-separated batch replies (e.g. "Jane Doe, 9123 4567, first time, …") exceed parsePlainNameAnswerLine's word cap on the full line. */
+  const commaSegments = (): string[] => {
+    if (!line.includes(',')) return [line];
+    const parts = line
+      .split(',')
+      .map(s => s.trim())
+      .filter(s => s.length > 0);
+    const uniq: string[] = [];
+    for (const p of [line, ...parts]) {
+      if (!uniq.includes(p)) uniq.push(p);
+    }
+    return uniq;
+  };
+
   if (pendingFieldIds.includes('name') && !booking.customerName?.trim()) {
-    const n = parsePlainNameAnswerLine(line) ?? extractNameGuess(line) ?? extractNameGuess(text);
+    let n: string | undefined;
+    for (const seg of commaSegments()) {
+      n = parsePlainNameAnswerLine(seg) ?? extractNameGuess(seg);
+      if (n) break;
+    }
+    if (!n) n = extractNameGuess(text);
     if (n) {
       booking.customerName = n;
       parsedAny = true;
@@ -213,7 +232,12 @@ export function applyBatchDetailsFromInbound(params: {
         parsedAny = true;
       }
     } else if (line.length > 0 && !isOptionalSkipIntent(line)) {
-      booking.customAnswers = { ...(booking.customAnswers ?? {}), [cfId]: line };
+      const parts = line
+        .split(',')
+        .map(s => s.trim())
+        .filter(s => s.length > 0);
+      const value = parts.length > 1 ? parts[parts.length - 1]! : line;
+      booking.customAnswers = { ...(booking.customAnswers ?? {}), [cfId]: value };
       parsedAny = true;
     }
   }

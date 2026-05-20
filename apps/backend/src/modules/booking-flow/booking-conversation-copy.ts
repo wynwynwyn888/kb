@@ -430,9 +430,9 @@ export function buildBatchBookingDetailsAsk(p: {
   const time = (p.timeLabel ?? '').trim();
   let intro: string;
   if (date && time) {
-    intro = `I can finalise the ${date}, ${time} slot once you provide:`;
+    intro = `To check availability for ${date}, ${time}, please provide:`;
   } else if (time) {
-    intro = `To lock in ${time}, please share:`;
+    intro = `To check availability for ${time}, please share:`;
   } else {
     intro = 'To finish your booking, please share:';
   }

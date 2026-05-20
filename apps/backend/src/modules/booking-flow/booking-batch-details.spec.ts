@@ -1,6 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 import { buildBatchBookingDetailsAsk } from './booking-conversation-copy';
 import {
+  applyBatchDetailsFromInbound,
   canCollectContactDetailsInBatch,
   isSchedulingTimeLocked,
   listBatchDetailsMissingFieldIds,
@@ -32,7 +33,7 @@ describe('booking batch details', () => {
     });
     expect(msg).toContain('26 May');
     expect(msg).toContain('3:00 PM');
-    expect(msg).toMatch(/once you provide:\n\n-/);
+    expect(msg).toMatch(/To check availability for 26 May, 3:00 PM, please provide:\n\n-/);
     expect(msg).toContain('- Your contact name');
     expect(msg).toContain('- Mobile number');
     expect(msg).toContain('- Is this your first visit?');
@@ -84,5 +85,53 @@ describe('booking batch details', () => {
     expect(listBatchDetailsMissingFieldIds(settings, booking)).toEqual([]);
     booking.preferredTime = '15:00';
     expect(listBatchDetailsMissingFieldIds(settings, booking)).toEqual(['name', 'phone']);
+  });
+
+  it('applyBatchDetailsFromInbound parses name from first comma segment of a batch line', () => {
+    const booking = {
+      status: 'collecting_details',
+      version: 1,
+      calendarId: 'cal',
+    } as AisbpBookingStateV1;
+    const r = applyBatchDetailsFromInbound({
+      booking,
+      latest: 'chee hua hua, 0192301923, first time, used before already',
+      combinedHint: '',
+      settings: { customFieldsJson: [], serviceMenuOptions: [] },
+      pendingFieldIds: ['name', 'phone', 'first_visit'],
+    });
+    expect(r.parsedAny).toBe(true);
+    expect(booking.customerName).toBe('Chee Hua Hua');
+    expect(booking.phone).toBeTruthy();
+    expect(booking.firstVisit).toBeTruthy();
+  });
+
+  it('applyBatchDetailsFromInbound uses last comma segment for free-text custom when line has commas', () => {
+    const cfId = '5debb113-ac7f-41be-a225-9684e105e9b1';
+    const booking = {
+      status: 'collecting_details',
+      version: 1,
+      calendarId: 'cal',
+    } as AisbpBookingStateV1;
+    applyBatchDetailsFromInbound({
+      booking,
+      latest: 'chee hua hua, 0192301923, first time, used before already',
+      combinedHint: '',
+      settings: {
+        customFieldsJson: [
+          {
+            id: cfId,
+            label: 'AI bot',
+            fieldType: 'short_text',
+            required: false,
+            enabled: true,
+            displayOrder: 0,
+          },
+        ],
+        serviceMenuOptions: [],
+      },
+      pendingFieldIds: ['name', 'phone', 'first_visit', `custom:${cfId}`],
+    });
+    expect(booking.customAnswers?.[cfId]).toBe('used before already');
   });
 });

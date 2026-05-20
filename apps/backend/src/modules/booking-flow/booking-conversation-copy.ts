@@ -53,7 +53,7 @@ export function copyAskPreferredTime(): string {
 }
 
 export function copyAskFirstVisit(): string {
-  return 'Is this your first visit with us? You can skip this if you prefer.';
+  return 'Is this your first visit with us?';
 }
 
 export function copyAskEmail(): string {
@@ -299,7 +299,7 @@ function sentenceCaseFromLabel(label: string): string {
 export function formatCustomFieldBookingQuestion(cf: CustomBookingFieldDto, optionalHint: boolean): string {
   const raw = stripQuickOne(cf.label);
   const base = dedupeQuestionMarks(raw.replace(/[.!…]+$/g, '').trim());
-  const suffix = optionalHint ? ' You can skip this if you prefer.' : '';
+  const suffix = '';
 
   const optLine =
     (cf.fieldType === 'single_select' || cf.fieldType === 'single_choice') && cf.options?.length
@@ -384,4 +384,52 @@ export function formatHumanDateFromYmd(ymd: string): string {
   const mo = parseInt(m[2]!, 10);
   const name = MO_FULL[mo - 1];
   return name ? `${day} ${name}` : ymd.trim();
+}
+
+export type BatchBookingDetailField = {
+  id: string;
+  label: string;
+  required: boolean;
+};
+
+export function labelForBatchBookingDetailField(
+  fieldId: string,
+  customFieldsJson: CustomBookingFieldDto[],
+): string {
+  if (fieldId.startsWith('custom:')) {
+    const id = fieldId.slice('custom:'.length);
+    const cf = customFieldsJson.find(c => c.id === id);
+    return cf?.label?.trim() || 'Additional detail';
+  }
+  switch (fieldId) {
+    case 'name':
+      return 'Contact name';
+    case 'phone':
+      return 'Mobile number';
+    case 'email':
+      return 'Email';
+    case 'first_visit':
+      return 'First visit (yes or no)';
+    default:
+      return 'Booking detail';
+  }
+}
+
+/** One-shot ask for contact / intake fields after preferred time is known. */
+export function buildBatchBookingDetailsAsk(p: {
+  humanDate?: string;
+  timeLabel?: string;
+  fields: BatchBookingDetailField[];
+}): string {
+  const lines = p.fields.map(f => `• ${f.label}`);
+  const list = lines.join('\n');
+  const date = (p.humanDate ?? '').trim();
+  const time = (p.timeLabel ?? '').trim();
+  if (date && time) {
+    return collapseWhitespace(`I can finalise the ${date}, ${time} slot once you provide:\n${list}`);
+  }
+  if (time) {
+    return collapseWhitespace(`To lock in ${time}, please share:\n${list}`);
+  }
+  return collapseWhitespace(`To finish your booking, please share:\n${list}`);
 }

@@ -93,15 +93,34 @@ function InviteAcceptInner() {
   }
 
   if (!loading && !token) {
+    const setupHref =
+      inviteId && (scope === 'agency' || scope === 'workspace')
+        ? `/auth/reset-password?invite_id=${encodeURIComponent(inviteId)}&scope=${encodeURIComponent(scope)}`
+        : null;
     return (
       <div style={{ maxWidth: 480, lineHeight: 1.55 }}>
         <p style={{ fontSize: '0.95rem', color: 'var(--aisbp-text-secondary, #334155)', margin: '0 0 0.75rem' }}>
-          Sign in with the email address that received the invite, then open this page again (or complete the steps from the
-          invite link you were sent first).
+          Open the invite link from your email to create your password first. After that, we will attach your access
+          automatically.
         </p>
-        <Link href="/login" style={{ ...mvpPrimaryButtonStyle, display: 'inline-block', textDecoration: 'none' }}>
-          Go to sign in
-        </Link>
+        {setupHref ? (
+          <p style={{ fontSize: '0.85rem', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 0.75rem' }}>
+            If you already set a password,{' '}
+            <Link href="/login" style={{ fontWeight: 650, color: 'var(--aisbp-accent, #2563eb)' }}>
+              sign in
+            </Link>{' '}
+            and return to this page.
+          </p>
+        ) : null}
+        {setupHref ? (
+          <Link href={setupHref} style={{ ...mvpPrimaryButtonStyle, display: 'inline-block', textDecoration: 'none' }}>
+            Create your password
+          </Link>
+        ) : (
+          <Link href="/login" style={{ ...mvpPrimaryButtonStyle, display: 'inline-block', textDecoration: 'none' }}>
+            Go to sign in
+          </Link>
+        )}
       </div>
     );
   }
@@ -148,7 +167,7 @@ export default function InviteAcceptPage() {
     <div style={{ minHeight: '60vh', padding: '2rem 1.25rem', maxWidth: 640, margin: '0 auto' }}>
       <h1 style={{ fontSize: '1.35rem', margin: '0 0 0.5rem' }}>Accept invite</h1>
       <p style={{ fontSize: '0.88rem', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 1.25rem' }}>
-        We attach your account to the agency or workspace after you are signed in.
+        After you create your password from the invite email, we attach your account to the agency or workspace.
       </p>
       <Suspense fallback={<LoadingBlock message="Loading…" />}>
         <InviteAcceptInner />

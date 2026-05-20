@@ -15,9 +15,12 @@ import {
   updateSubaccountWalletPlan,
   getAgencyLowCreditWarningSettings,
   saveAgencyLowCreditWarningSettings,
+  getAgencyCreditResetReminderSettings,
+  saveAgencyCreditResetReminderSettings,
   getGhlConnection,
   type CreditDeductionMethod,
   type AgencyLowCreditWarningSettings,
+  type AgencyCreditResetReminderSettings,
 } from '@/lib/api';
 import {
   ErrorBanner,
@@ -55,9 +58,20 @@ const tableTd: CSSProperties = {
 };
 
 type ManageTab = 'add' | 'adjust' | 'rules' | 'plan';
-type SettingsTab = 'defaults' | 'warnings';
+type SettingsTab = 'defaults' | 'warnings' | 'resetReminders';
+type WalletSortKey = 'workspace' | 'remaining' | 'usedToday' | 'usedThisYear' | 'resetDate';
+type SortDir = 'asc' | 'desc';
+
+const SORTABLE_WALLET_COLUMNS: ReadonlyArray<{ key: WalletSortKey; label: string }> = [
+  { key: 'workspace', label: 'Workspace' },
+  { key: 'remaining', label: 'Remaining' },
+  { key: 'usedToday', label: 'Used today' },
+  { key: 'usedThisYear', label: 'Used this year' },
+  { key: 'resetDate', label: 'Next reset date' },
+];
 
 const ALLOWED_WARNING_THRESHOLDS = [2000, 1000, 500, 200] as const;
+const ALLOWED_RESET_REMINDER_DAYS = [30, 14, 7, 3, 1] as const;
 
 function formatResetDate(iso: string | null | undefined): string {
   if (!iso) return 'Not configured';
@@ -168,6 +182,16 @@ export default function AgencyQuotasPage() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>('defaults');
 
+  const [walletSortKey, setWalletSortKey] = useState<WalletSortKey>('workspace');
+  const [walletSortDir, setWalletSortDir] = useState<SortDir>('asc');
+
+  const [resetReminderSettings, setResetReminderSettings] = useState<AgencyCreditResetReminderSettings | null>(null);
+  const [resetReminderEnabled, setResetReminderEnabled] = useState(false);
+  const [resetReminderDays, setResetReminderDays] = useState<number[]>([]);
+  const [resetReminderTemplate, setResetReminderTemplate] = useState('');
+  const [resetReminderSendViaAgency, setResetReminderSendViaAgency] = useState(true);
+  const [savingResetReminder, setSavingResetReminder] = useState(false);
+
   const selectedWallet = useMemo(
     () => wallets.find(w => w.tenantId === manageTenantId) ?? null,
     [wallets, manageTenantId],
@@ -194,10 +218,11 @@ export default function AgencyQuotasPage() {
         setErr('No agency on this session.');
         return;
       }
-      const [settings, w, warn] = await Promise.all([
+      const [settings, w, warn, resetRem] = await Promise.all([
         getQuotaAgencySettings(token),
         listAgencyCreditWallets(token),
         getAgencyLowCreditWarningSettings(token).catch(() => null),
+        getAgencyCreditResetReminderSettings(token).catch(() => null),
       ]);
       setDefaultQuota(settings.defaultSubaccountQuota);
       setDefaultInput(String(settings.defaultSubaccountQuota ?? 0));
@@ -213,6 +238,13 @@ export default function AgencyQuotasPage() {
         setWarnThresholds(Array.isArray(warn.thresholds) ? warn.thresholds : []);
         setWarnTemplate(typeof warn.messageTemplate === 'string' ? warn.messageTemplate : '');
         setWarnSendViaAgency(Boolean(warn.sendViaAgencyWorkspace));
+      }
+      if (resetRem) {
+        setResetReminderSettings(resetRem);
+        setResetReminderEnabled(Boolean(resetRem.enabled));
+        setResetReminderDays(Array.isArray(resetRem.daysBefore) ? resetRem.daysBefore : []);
+        setResetReminderTemplate(typeof resetRem.messageTemplate === 'string' ? resetRem.messageTemplate : '');
+        setResetReminderSendViaAgency(Boolean(resetRem.sendViaAgencyWorkspace));
       }
       try {
         const agencyWorkspace = w.find(x => x.isAgencyWorkspace);
@@ -435,6 +467,35 @@ export default function AgencyQuotasPage() {
     });
   };
 
+  const toggleResetReminderDay = (n: number) => {
+    setResetReminderDays(prev => {
+      if (prev.includes(n)) return prev.filter(x => x !== n);
+      return [...prev, n].sort((a, b) => b - a);
+    });
+  };
+
+  const onSaveResetReminders = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!token) return;
+    setSavingResetReminder(true);
+    setErr('');
+    setOk('');
+    try {
+      const r = await saveAgencyCreditResetReminderSettings(token, {
+        enabled: resetReminderEnabled,
+        daysBefore: resetReminderDays,
+        messageTemplate: resetReminderTemplate,
+        sendViaAgencyWorkspace: resetReminderSendViaAgency,
+      });
+      setResetReminderSettings(r);
+      setOk('Reset date reminder settings saved.');
+    } catch (e2) {
+      setErr(e2 instanceof Error ? e2.message : 'Could not save reset reminder settings.');
+    } finally {
+      setSavingResetReminder(false);
+    }
+  };
+
   const onSaveWarnings = async (e: FormEvent) => {
     e.preventDefault();
     if (!token) return;
@@ -476,8 +537,66 @@ export default function AgencyQuotasPage() {
       .replace(/\{\{\s*resetDate\s*\}\}/gi, sample.resetDate);
   }, [warnTemplate, selectedWallet]);
 
+  const resetReminderPreview = useMemo(() => {
+    const tpl = resetReminderTemplate || '';
+    const sample = {
+      clientName: 'Alex',
+      workspaceName: selectedWallet?.workspaceName || 'Acme HQ',
+      remainingCredits: '450',
+      agencyName: 'Your Agency',
+      resetDate: '10 May 2027',
+      daysBefore: '7',
+    };
+    return tpl
+      .replace(/\{\{\s*clientName\s*\}\}/gi, sample.clientName)
+      .replace(/\{\{\s*workspaceName\s*\}\}/gi, sample.workspaceName)
+      .replace(/\{\{\s*remainingCredits\s*\}\}/gi, sample.remainingCredits)
+      .replace(/\{\{\s*agencyName\s*\}\}/gi, sample.agencyName)
+      .replace(/\{\{\s*resetDate\s*\}\}/gi, sample.resetDate)
+      .replace(/\{\{\s*daysBefore\s*\}\}/gi, sample.daysBefore);
+  }, [resetReminderTemplate, selectedWallet]);
+
   // Excludes the agency workspace from totals — it has unlimited credits and is not a billable client.
   const clientWallets = useMemo(() => wallets.filter(w => !w.isAgencyWorkspace), [wallets]);
+  const toggleWalletSort = (key: WalletSortKey) => {
+    if (walletSortKey === key) {
+      setWalletSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setWalletSortKey(key);
+      setWalletSortDir(key === 'workspace' ? 'asc' : 'desc');
+    }
+  };
+  const sortedClientWallets = useMemo(() => {
+    const dir = walletSortDir === 'asc' ? 1 : -1;
+    const cmpStr = (a: string, b: string) => a.localeCompare(b, undefined, { sensitivity: 'base' }) * dir;
+    const cmpNum = (a: number, b: number) => (a === b ? 0 : a < b ? -1 : 1) * dir;
+    const cmpDate = (a: string | null, b: string | null) => {
+      const ta = a ? Date.parse(a) : NaN;
+      const tb = b ? Date.parse(b) : NaN;
+      const va = Number.isNaN(ta) ? Number.POSITIVE_INFINITY : ta;
+      const vb = Number.isNaN(tb) ? Number.POSITIVE_INFINITY : tb;
+      return cmpNum(va, vb);
+    };
+    return [...clientWallets].sort((a, b) => {
+      switch (walletSortKey) {
+        case 'workspace':
+          return cmpStr(
+            formatWorkspaceDisplayName({ name: a.workspaceName, id: a.tenantId, isAgencyWorkspace: false }),
+            formatWorkspaceDisplayName({ name: b.workspaceName, id: b.tenantId, isAgencyWorkspace: false }),
+          );
+        case 'remaining':
+          return cmpNum(a.balance ?? 0, b.balance ?? 0);
+        case 'usedToday':
+          return cmpNum(a.usedToday ?? 0, b.usedToday ?? 0);
+        case 'usedThisYear':
+          return cmpNum(a.usedThisYear ?? 0, b.usedThisYear ?? 0);
+        case 'resetDate':
+          return cmpDate(a.periodEnd, b.periodEnd);
+        default:
+          return 0;
+      }
+    });
+  }, [clientWallets, walletSortKey, walletSortDir]);
   const agencyWalletRow = useMemo(() => wallets.find(w => w.isAgencyWorkspace) ?? null, [wallets]);
   const agencyWorkspacePresent = agencyWalletRow !== null;
 
@@ -539,6 +658,15 @@ export default function AgencyQuotasPage() {
         .map(t => t.toLocaleString())
         .join(', ')
     : '—';
+
+  const resetReminderSummaryDaysLabel =
+    resetReminderDays.length > 0
+      ? resetReminderDays
+          .slice()
+          .sort((a, b) => b - a)
+          .map(d => `${d}d`)
+          .join(', ')
+      : '—';
 
   return (
     <div>
@@ -642,7 +770,35 @@ export default function AgencyQuotasPage() {
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.84rem' }}>
               <thead>
                 <tr>
-                  {(['Workspace', 'Remaining', 'Used today', 'Used this year', 'Next reset date', 'Status', 'Actions'] as const).map(h => (
+                  {SORTABLE_WALLET_COLUMNS.map(col => (
+                    <th key={col.key} style={tableTh}>
+                      <button
+                        type="button"
+                        onClick={() => toggleWalletSort(col.key)}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.25rem',
+                          padding: 0,
+                          border: 'none',
+                          background: 'transparent',
+                          color: 'inherit',
+                          font: 'inherit',
+                          fontWeight: 'inherit',
+                          letterSpacing: 'inherit',
+                          textTransform: 'inherit',
+                          cursor: 'pointer',
+                        }}
+                        aria-sort={walletSortKey === col.key ? (walletSortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
+                      >
+                        {col.label}
+                        <span aria-hidden style={{ fontSize: '0.7rem', opacity: walletSortKey === col.key ? 1 : 0.35 }}>
+                          {walletSortKey === col.key ? (walletSortDir === 'asc' ? '↑' : '↓') : '↕'}
+                        </span>
+                      </button>
+                    </th>
+                  ))}
+                  {(['Status', 'Actions'] as const).map(h => (
                     <th key={h} style={tableTh}>
                       {h}
                     </th>
@@ -650,7 +806,7 @@ export default function AgencyQuotasPage() {
                 </tr>
               </thead>
               <tbody>
-                {clientWallets.map(w => (
+                {sortedClientWallets.map(w => (
                   <tr key={w.tenantId} style={{ background: 'var(--aisbp-table-row-bg, transparent)' }}>
                     <td style={{ ...tableTd, fontWeight: 700, color: 'var(--aisbp-text-heading, #0f172a)' }}>
                       {formatWorkspaceDisplayName({
@@ -943,7 +1099,7 @@ export default function AgencyQuotasPage() {
       {/* 4. Agency credit settings — collapsed by default. Expands to two tabs. */}
       <SectionCard
         title="Agency credit settings"
-        subtitle="Defaults for new workspaces and the low-credit warning automation. Collapsed by default."
+        subtitle="Defaults for new workspaces, low-credit warnings, and reset-date reminders. Collapsed by default."
         accent="muted"
       >
         <div
@@ -979,6 +1135,16 @@ export default function AgencyQuotasPage() {
                   {' · '}
                 </span>
                 <StatusPill label={warningSenderStatus.label} tone={warningSenderStatus.tone} />
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.45rem' }}>
+                <span style={{ color: 'var(--aisbp-muted, #64748b)' }}>Reset date reminder SMS: </span>
+                <strong style={{ color: 'var(--aisbp-text-heading, #0f172a)' }}>
+                  {resetReminderEnabled ? 'Enabled' : 'Disabled'}
+                </strong>
+                <span style={{ color: 'var(--aisbp-muted, #64748b)' }}>
+                  {' · Triggers: '}
+                  {resetReminderSummaryDaysLabel} before reset
+                </span>
               </div>
             </div>
           </div>
@@ -1025,6 +1191,15 @@ export default function AgencyQuotasPage() {
                 style={tabBtnStyle(settingsTab === 'warnings')}
               >
                 Low-credit warning automation
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={settingsTab === 'resetReminders'}
+                onClick={() => setSettingsTab('resetReminders')}
+                style={tabBtnStyle(settingsTab === 'resetReminders')}
+              >
+                Reset date reminders
               </button>
             </div>
 
@@ -1249,6 +1424,108 @@ export default function AgencyQuotasPage() {
                     style={{ ...mvpPrimaryButtonStyle, width: 'fit-content', opacity: savingWarn ? 0.75 : 1 }}
                   >
                     {savingWarn ? 'Saving…' : 'Save warning settings'}
+                  </button>
+                </form>
+              ) : null}
+
+              {settingsTab === 'resetReminders' ? (
+                <form onSubmit={onSaveResetReminders} style={{ display: 'grid', gap: '1rem' }}>
+                  <label style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', fontSize: '0.88rem', cursor: 'pointer' }}>
+                    <input
+                      type="checkbox"
+                      checked={resetReminderEnabled}
+                      onChange={e => setResetReminderEnabled(e.target.checked)}
+                    />
+                    Enable reset date reminder SMS
+                  </label>
+
+                  <div>
+                    <p style={sectionLabel}>Sender</p>
+                    <label style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', fontSize: '0.88rem' }}>
+                      <input
+                        type="radio"
+                        checked={resetReminderSendViaAgency}
+                        onChange={() => setResetReminderSendViaAgency(true)}
+                      />
+                      Agency workspace
+                    </label>
+                  </div>
+
+                  <div>
+                    <p style={sectionLabel}>Remind before next reset date</p>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '0.4rem', maxWidth: '32rem' }}>
+                      {(resetReminderSettings?.allowedDaysBefore?.length
+                        ? resetReminderSettings.allowedDaysBefore
+                        : ALLOWED_RESET_REMINDER_DAYS
+                      ).map(d => (
+                        <label
+                          key={d}
+                          style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', fontSize: '0.86rem', cursor: 'pointer' }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={resetReminderDays.includes(d)}
+                            onChange={() => toggleResetReminderDay(d)}
+                          />
+                          {d} day{d === 1 ? '' : 's'} before
+                        </label>
+                      ))}
+                    </div>
+                    <p style={{ margin: '0.45rem 0 0', fontSize: '0.76rem', color: 'var(--aisbp-muted, #94a3b8)', lineHeight: 1.45 }}>
+                      One reminder per trigger per workspace per billing period.
+                    </p>
+                  </div>
+
+                  <div>
+                    <p style={sectionLabel}>Reminder message</p>
+                    <textarea
+                      value={resetReminderTemplate}
+                      onChange={e => setResetReminderTemplate(e.target.value)}
+                      placeholder="Hi {{clientName}}, your workspace credit plan resets on {{resetDate}}."
+                      rows={5}
+                      style={{
+                        ...mvpInputStyle,
+                        width: '100%',
+                        maxWidth: '40rem',
+                        minHeight: '6rem',
+                        fontFamily: 'inherit',
+                        lineHeight: 1.5,
+                        resize: 'vertical',
+                      }}
+                    />
+                    <p style={{ margin: '0.4rem 0 0', fontSize: '0.74rem', color: 'var(--aisbp-muted, #94a3b8)', lineHeight: 1.5 }}>
+                      Variables: <code>{'{{clientName}}'}</code>, <code>{'{{workspaceName}}'}</code>, <code>{'{{remainingCredits}}'}</code>,{' '}
+                      <code>{'{{resetDate}}'}</code>, <code>{'{{daysBefore}}'}</code>, <code>{'{{agencyName}}'}</code>.
+                    </p>
+                  </div>
+
+                  <div>
+                    <p style={sectionLabel}>Preview</p>
+                    <pre
+                      style={{
+                        margin: 0,
+                        padding: '0.7rem 0.85rem',
+                        borderRadius: 10,
+                        border: '1px solid var(--aisbp-border, #e2e8f0)',
+                        background: 'var(--aisbp-surface-muted, #f8fafc)',
+                        color: 'var(--aisbp-text, #0f172a)',
+                        fontSize: '0.82rem',
+                        lineHeight: 1.5,
+                        whiteSpace: 'pre-wrap',
+                        fontFamily: 'inherit',
+                        maxWidth: '40rem',
+                      }}
+                    >
+                      {resetReminderPreview || '(Add a message above to see a preview.)'}
+                    </pre>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={savingResetReminder}
+                    style={{ ...mvpPrimaryButtonStyle, width: 'fit-content', opacity: savingResetReminder ? 0.75 : 1 }}
+                  >
+                    {savingResetReminder ? 'Saving…' : 'Save reminder settings'}
                   </button>
                 </form>
               ) : null}

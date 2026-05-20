@@ -669,7 +669,7 @@ export class InvitationsService {
    * swallow real send errors.
    */
   private async sendAgencyInviteEmail(email: string, inviteId: string): Promise<{ emailSent: boolean; actionLink: string | null }> {
-    const redirectTo = `${inviteAppBaseUrl()}/auth/invite?invite_id=${encodeURIComponent(inviteId)}&scope=agency`;
+    const redirectTo = `${inviteAppBaseUrl()}/auth/reset-password?invite_id=${encodeURIComponent(inviteId)}&scope=agency`;
     return this.sendInviteEmail(email, redirectTo, { invite_id: inviteId, scope: 'agency' });
   }
 
@@ -679,7 +679,7 @@ export class InvitationsService {
     inviteId: string,
     tenantId: string,
   ): Promise<{ emailSent: boolean; actionLink: string | null }> {
-    const redirectTo = `${inviteAppBaseUrl()}/auth/invite?invite_id=${encodeURIComponent(inviteId)}&scope=workspace`;
+    const redirectTo = `${inviteAppBaseUrl()}/auth/reset-password?invite_id=${encodeURIComponent(inviteId)}&scope=workspace`;
     return this.sendInviteEmail(email, redirectTo, { invite_id: inviteId, scope: 'workspace', tenant_id: tenantId });
   }
 

@@ -63,6 +63,14 @@ import {
   buildOfferSlotsComposerStep,
 } from './booking-reply-composer-step';
 import { applyPendingFieldAnswer, isOptionalSkipIntent } from './booking-pending-field';
+import {
+  BATCH_DETAILS_PENDING_ID,
+  PRE_SCHEDULING_ASK_PRIORITY,
+  canCollectContactDetailsInBatch,
+  isSchedulingTimeLocked,
+  listBatchDetailsMissingFieldIds,
+  toBatchBookingDetailFields,
+} from './booking-batch-details';
 import { buildAppointmentCreateNotes } from './booking-summary';
 import { BookingPostConfirmService } from './booking-post-confirm.service';
 import { maskPhoneForLog } from './booking-contact-enrichment';
@@ -99,6 +107,7 @@ import {
   formatPreferredHmForDisplay,
   formatServiceAskWithOptionalMenu,
   timeWindowDisplayLabel,
+  buildBatchBookingDetailsAsk,
 } from './booking-conversation-copy';
 
 /**
@@ -461,6 +470,8 @@ export class ConversationBookingFlowService {
       todayYmd,
       customFieldDef: pendingCf,
       serviceMenuOptions: settings.serviceMenuOptions,
+      customFieldsJson: settings.customFieldsJson,
+      isFieldRequired: (fieldId: string) => this.isAskFieldRequired(settings, fieldId),
     });
     if (clearedPendingFieldId) {
       booking.pendingParseFailureCount = 0;
@@ -983,15 +994,31 @@ export class ConversationBookingFlowService {
       this.sanitizeBookingIntake(booking, settings);
       const missingBeforeCreate = this.listRequiredMissingFieldIds(settings, booking);
       if (missingBeforeCreate.length > 0) {
-        const first = missingBeforeCreate[0]!;
-        const fieldRequired = this.isAskFieldRequired(settings, first);
-        booking.pendingFieldId = first;
+        const batchReply = await this.tryEmitBatchDetailsAsk({
+          params,
+          settings,
+          booking,
+          prevMeta,
+          latest,
+          combined,
+          hadFrustration,
+          withTone,
+          fieldChanged: true,
+          resetOfferedSlots: true,
+        });
+        if (batchReply) return batchReply;
+
+        const nextAsk =
+          PRE_SCHEDULING_ASK_PRIORITY.find(k => missingBeforeCreate.includes(k)) ?? missingBeforeCreate[0];
+        const fieldRequired = this.isAskFieldRequired(settings, nextAsk);
+        const baseQ = this.promptForMissingField(nextAsk, settings);
+        const fpBase = fingerprintBookingQuestion(baseQ);
+        booking.pendingFieldId = nextAsk;
         booking.pendingFieldRequired = fieldRequired;
-        booking.lastAskedFieldId = first;
+        booking.lastAskedFieldId = nextAsk;
         booking.lastAskedAt = new Date().toISOString();
-        booking.lastQuestionFingerprint = undefined;
+        booking.lastQuestionFingerprint = fpBase;
         booking.sameFieldPromptCount = 0;
-        const baseQ = this.promptForMissingField(first, settings, !fieldRequired);
         const nextMeta = mergeBookingIntoConversationMetadata(prevMeta, {
           ...booking,
           status: 'collecting_details',
@@ -1000,20 +1027,20 @@ export class ConversationBookingFlowService {
           lastOfferedAt: undefined,
           selectedSlot: undefined,
         });
-        const composedMissing = await this.composeBookingCustomerReply({
+        const composedAsk = await this.composeBookingCustomerReply({
           tenantId: params.tenantId,
           conversationId: params.conversationId,
           latestInboundText: latest,
           combinedTranscript: combined,
           booking,
-          nextStep: buildBookingReplyComposerNextStepForAsk(first, settings, baseQ),
+          nextStep: buildBookingReplyComposerNextStepForAsk(nextAsk, settings, baseQ),
           userFrustrated: hadFrustration,
           businessName: params.tenantDisplayName,
         });
         return {
           handled: true,
           persistMetadata: nextMeta,
-          replyPlan: plan(withTone(composedMissing), 'booking_required_before_confirm'),
+          replyPlan: plan(withTone(composedAsk), 'booking_required_before_confirm'),
           routing: stubRouting(),
         };
       }
@@ -1217,7 +1244,7 @@ export class ConversationBookingFlowService {
     const nextAsk = this.selectNextAskFieldId(settings, booking);
     if (nextAsk) {
       const fieldRequired = this.isAskFieldRequired(settings, nextAsk);
-      const baseQ = this.promptForMissingField(nextAsk, settings, !fieldRequired);
+      const baseQ = this.promptForMissingField(nextAsk, settings);
       const fpBase = fingerprintBookingQuestion(baseQ);
       const suppress = !fieldChanged && this.shouldSuppressRepeatQuestion(booking, nextAsk, fpBase);
       if (suppress) {
@@ -1271,6 +1298,19 @@ export class ConversationBookingFlowService {
         routing: stubRouting(),
       };
     }
+
+    const batchAsk = await this.tryEmitBatchDetailsAsk({
+      params,
+      settings,
+      booking,
+      prevMeta,
+      latest,
+      combined,
+      hadFrustration,
+      withTone,
+      fieldChanged,
+    });
+    if (batchAsk) return batchAsk;
 
     if (!booking.preferredDate?.trim()) {
       const dateAsk = buildPreferredDateNeedAsk({
@@ -1770,7 +1810,9 @@ export class ConversationBookingFlowService {
     settings: { coreFieldsJson: Record<string, CoreFieldToggle>; customFieldsJson: CustomBookingFieldDto[] },
     booking: AisbpBookingStateV1,
   ): string | null {
-    for (const key of CORE_ASK_PRIORITY) {
+    if (isSchedulingTimeLocked(booking)) return null;
+
+    for (const key of PRE_SCHEDULING_ASK_PRIORITY) {
       const t = settings.coreFieldsJson[key];
       if (!t?.enabled) continue;
       if (!t.required) continue;
@@ -1786,7 +1828,7 @@ export class ConversationBookingFlowService {
       return id;
     }
 
-    for (const key of CORE_ASK_PRIORITY) {
+    for (const key of PRE_SCHEDULING_ASK_PRIORITY) {
       const t = settings.coreFieldsJson[key];
       if (!t?.enabled || t.required) continue;
       const v = this.readCore(booking, key);
@@ -1795,16 +1837,93 @@ export class ConversationBookingFlowService {
       if (this.isOptionalAsked(booking, key)) continue;
       return key;
     }
-    for (const cf of this.sortedCustomFields(settings.customFieldsJson)) {
-      if (cf.required) continue;
-      const id = `custom:${cf.id}`;
-      const ans = booking.customAnswers?.[cf.id];
-      if (ans?.trim()) continue;
-      if (this.isFieldSkipped(booking, id)) continue;
-      if (this.isOptionalAsked(booking, id)) continue;
-      return id;
-    }
     return null;
+  }
+
+  private async tryEmitBatchDetailsAsk(p: {
+    params: {
+      tenantId: string;
+      conversationId: string;
+      tenantDisplayName?: string;
+    };
+    settings: TenantBookingSettingsDto;
+    booking: AisbpBookingStateV1;
+    prevMeta: Record<string, unknown>;
+    latest: string;
+    combined: string;
+    hadFrustration: boolean;
+    withTone: (msg: string) => string;
+    fieldChanged: boolean;
+    resetOfferedSlots?: boolean;
+  }): Promise<BookingFlowOrchestrationHookResult | null> {
+    const { params, settings, booking, prevMeta, latest, combined, hadFrustration, withTone, fieldChanged } = p;
+    if (!canCollectContactDetailsInBatch(settings, booking)) return null;
+
+    const missingIds = listBatchDetailsMissingFieldIds(settings, booking);
+    if (missingIds.length === 0) return null;
+
+    const fields = toBatchBookingDetailFields(missingIds, settings, id => this.isAskFieldRequired(settings, id));
+    const humanDate = booking.preferredDate?.trim() ? formatHumanDateFromYmd(booking.preferredDate.trim()) : undefined;
+    const timeLabel = booking.preferredTime?.trim()
+      ? formatPreferredHmForDisplay(booking.preferredTime.trim())
+      : booking.preferredTimeWindow
+        ? timeWindowDisplayLabel(booking.preferredTimeWindow)
+        : undefined;
+    const baseQ = buildBatchBookingDetailsAsk({ humanDate, timeLabel, fields });
+    const fpBase = fingerprintBookingQuestion(baseQ);
+    const suppress =
+      !fieldChanged && this.shouldSuppressRepeatQuestion(booking, BATCH_DETAILS_PENDING_ID, fpBase);
+    const outQ = suppress ? this.clarifyBatchDetailsAsk(fields) : baseQ;
+
+    booking.pendingFieldId = BATCH_DETAILS_PENDING_ID;
+    booking.pendingBatchFieldIds = missingIds;
+    booking.pendingFieldRequired = fields.some(f => f.required);
+    booking.lastAskedFieldId = BATCH_DETAILS_PENDING_ID;
+    booking.lastAskedAt = new Date().toISOString();
+    booking.lastQuestionFingerprint = fpBase;
+    if (!suppress) booking.sameFieldPromptCount = 0;
+
+    this.logger.log(
+      `bookingNextStepSelected ${JSON.stringify({
+        step: 'ask_batch_details',
+        fieldIds: missingIds,
+        suppressedDuplicate: suppress,
+      })}`,
+    );
+
+    const nextMeta = mergeBookingIntoConversationMetadata(prevMeta, {
+      ...booking,
+      status: 'collecting_details',
+      ...(p.resetOfferedSlots
+        ? {
+            offeredSlots: undefined,
+            offeredSlotsCrmTimeZone: undefined,
+            lastOfferedAt: undefined,
+            selectedSlot: undefined,
+          }
+        : {}),
+    });
+    const composedAsk = await this.composeBookingCustomerReply({
+      tenantId: params.tenantId,
+      conversationId: params.conversationId,
+      latestInboundText: latest,
+      combinedTranscript: combined,
+      booking,
+      nextStep: { type: 'clarify_unknown', fieldId: BATCH_DETAILS_PENDING_ID, safeBaseMessage: outQ },
+      userFrustrated: hadFrustration,
+      businessName: params.tenantDisplayName,
+    });
+    return {
+      handled: true,
+      persistMetadata: nextMeta,
+      replyPlan: plan(withTone(composedAsk), suppress ? 'booking_ask_repeat_clarify' : 'booking_collect_batch_details'),
+      routing: stubRouting(),
+    };
+  }
+
+  private clarifyBatchDetailsAsk(fields: Array<{ label: string }>): string {
+    const list = fields.map(f => `• ${f.label}`).join('\n');
+    return `Please share the following in one message:\n${list}`;
   }
 
   private requiredFieldSkipRefusalCopy(
@@ -1869,30 +1988,26 @@ export class ConversationBookingFlowService {
     }
   }
 
-  private promptForMissingField(
-    fieldId: string,
-    settings: TenantBookingSettingsDto,
-    optionalAllowSkipHint: boolean,
-  ): string {
+  private promptForMissingField(fieldId: string, settings: TenantBookingSettingsDto): string {
     if (fieldId.startsWith('custom:')) {
       const id = fieldId.slice('custom:'.length);
       const cf = settings.customFieldsJson.find(c => c.id === id);
-      return cf ? formatCustomFieldBookingQuestion(cf, optionalAllowSkipHint) : copyAskService();
+      return cf ? formatCustomFieldBookingQuestion(cf, false) : copyAskService();
     }
     const key = fieldId as BookingCoreFieldKey;
     switch (key) {
       case 'name':
-        return copyAskBookingName() + (optionalAllowSkipHint ? ' You can skip this if you prefer.' : '');
+        return copyAskBookingName();
       case 'phone':
-        return copyAskBookingPhone() + (optionalAllowSkipHint ? ' You can skip this if you prefer.' : '');
+        return copyAskBookingPhone();
       case 'email':
-        return copyAskEmail() + (optionalAllowSkipHint ? ' You can skip this if you prefer.' : '');
+        return copyAskEmail();
       case 'service':
-        return formatServiceAskWithOptionalMenu(settings.serviceMenuOptions) + (optionalAllowSkipHint ? ' You can skip this if you prefer.' : '');
+        return formatServiceAskWithOptionalMenu(settings.serviceMenuOptions);
       case 'preferred_date':
-        return copyAskPreferredDate() + (optionalAllowSkipHint ? ' You can skip this if you prefer.' : '');
+        return copyAskPreferredDate();
       case 'preferred_time':
-        return copyAskPreferredTime() + (optionalAllowSkipHint ? ' You can skip this if you prefer.' : '');
+        return copyAskPreferredTime();
       case 'first_visit':
         return copyAskFirstVisit();
       default:

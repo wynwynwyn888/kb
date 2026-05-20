@@ -23,7 +23,7 @@ describe('formatCustomFieldBookingQuestion', () => {
     expect(t).not.toMatch(/Quick one/i);
     expect(t).not.toContain('??');
     expect(t).toContain('Options: Male, Female, No preference');
-    expect(t.toLowerCase()).toContain('skip');
+    expect(t.toLowerCase()).not.toContain('skip');
   });
 
   it('I: splits comma-joined option string into spaced list', () => {

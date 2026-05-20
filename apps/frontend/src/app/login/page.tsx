@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { Suspense, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '../../contexts/AuthContext';
@@ -131,7 +132,7 @@ export default function LoginPage() {
             </div>
 
             <div>
-              <label htmlFor="password" style={{ ...mvpLabelStyle, display: 'block', marginBottom: '0.35rem' }}>
+                <label htmlFor="password" style={{ ...mvpLabelStyle, display: 'block', marginBottom: '0.35rem' }}>
                 Password
               </label>
               <input
@@ -151,6 +152,14 @@ export default function LoginPage() {
                   borderRadius: 10,
                 }}
               />
+              <p style={{ margin: '0.45rem 0 0', textAlign: 'right' }}>
+                <Link
+                  href="/auth/forgot-password"
+                  style={{ fontSize: '0.84rem', fontWeight: 600, color: 'var(--aisbp-accent, #2563eb)' }}
+                >
+                  Forgot password?
+                </Link>
+              </p>
             </div>
 
             {error && (

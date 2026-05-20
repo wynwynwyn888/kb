@@ -71,6 +71,10 @@ model Agency {
   lowCreditWarningMessageTemplate String @default("") @map("low_credit_warning_message_template") @db.Text
   /// When true, the automated send uses the agency system workspace CRM connection.
   lowCreditWarningSendViaAgencyWorkspace Boolean @default(true) @map("low_credit_warning_send_via_agency_workspace")
+  creditResetReminderEnabled Boolean @default(false) @map("credit_reset_reminder_enabled")
+  creditResetReminderDaysJson Json @default("[30, 14, 7, 3, 1]") @map("credit_reset_reminder_days_json")
+  creditResetReminderMessageTemplate String @default("") @map("credit_reset_reminder_message_template") @db.Text
+  creditResetReminderSendViaAgencyWorkspace Boolean @default(true) @map("credit_reset_reminder_send_via_agency_workspace")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -83,6 +87,7 @@ model Agency {
   quotaAuditLogs QuotaAuditLog[]
   userInvitations UserInvitation[]
   workspaceCreditWarningEvents WorkspaceCreditWarningEvent[]
+  workspaceCreditResetReminderEvents WorkspaceCreditResetReminderEvent[]
 
   @@map("agencies")
 }
@@ -186,6 +191,7 @@ model Tenant {
   botProfiles        TenantBotProfile[]
   knowledgeVaults  KnowledgeVault[]
   creditWarningEvents WorkspaceCreditWarningEvent[]
+  creditResetReminderEvents WorkspaceCreditResetReminderEvent[]
 
   @@unique([ghlLocationId])
   @@index([agencyId])
@@ -216,6 +222,28 @@ model WorkspaceCreditWarningEvent {
   @@index([agencyId, createdAt])
   @@index([tenantId, createdAt])
   @@map("workspace_credit_warning_events")
+}
+
+/// Tracking log of automated credit reset / expiry reminder send attempts.
+model WorkspaceCreditResetReminderEvent {
+  id                  String   @id @default(uuid())
+  agencyId            String   @map("agency_id")
+  tenantId            String   @map("tenant_id")
+  daysBeforeReset     Int      @map("days_before_reset")
+  balanceAtSend       Int      @map("balance_at_send")
+  status              String
+  reason              String?
+  messagePreview      String?  @map("message_preview")
+  billingPeriodStart  DateTime? @map("billing_period_start")
+  billingPeriodEnd    DateTime? @map("billing_period_end")
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  agency Agency @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([agencyId, createdAt])
+  @@index([tenantId, createdAt])
+  @@map("workspace_credit_reset_reminder_events")
 }
 
 enum BookingMode {

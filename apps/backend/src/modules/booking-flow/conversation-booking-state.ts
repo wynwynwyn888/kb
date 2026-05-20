@@ -75,6 +75,8 @@ export interface AisbpBookingStateV1 {
   optionalAskedFieldIds?: string[];
   /** Core keys or `custom:<id>` the user explicitly skipped (optional Ask only). */
   skippedFieldIds?: string[];
+  /** When `pendingFieldId` is `batch:details`, field ids included in the combined ask. */
+  pendingBatchFieldIds?: string[];
   /** `YYYY-MM-DD` we last returned `booking_no_slots` for (wide follow-up UX). */
   noSlotsForDateYmd?: string;
   /** After a no-slots reply, set false; flipped true once a multi-day widen search was attempted. */
@@ -240,6 +242,9 @@ export function parseAisbpBookingState(metadata: Record<string, unknown> | undef
       typeof o['noSlotsWideSearchDone'] === 'boolean' ? (o['noSlotsWideSearchDone'] as boolean) : undefined,
     pendingSuggestedDateYmd:
       typeof o['pendingSuggestedDateYmd'] === 'string' ? o['pendingSuggestedDateYmd'].trim() : undefined,
+    pendingBatchFieldIds: Array.isArray(o['pendingBatchFieldIds'])
+      ? (o['pendingBatchFieldIds'] as unknown[]).filter((v): v is string => typeof v === 'string' && v.trim().length > 0)
+      : undefined,
   };
 }
 

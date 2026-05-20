@@ -14,6 +14,11 @@ import {
   stripBookingFrustrationForParse,
 } from './booking-intent-and-parse';
 import { matchUserLineToMenuOption, resolveServiceFromUserReplyLine } from './booking-service-intake';
+import {
+  BATCH_DETAILS_PENDING_ID,
+  applyBatchDetailsFromInbound,
+  finalizeBatchDetailsPending,
+} from './booking-batch-details';
 
 export type ApplyPendingFieldAnswerResult = {
   answered: boolean;
@@ -76,6 +81,8 @@ export function applyPendingFieldAnswer(params: {
   customFieldDef?: CustomBookingFieldDto | null;
   /** When `pendingFieldId` is `service`, optional tenant menu for strict resolution. */
   serviceMenuOptions?: string[];
+  customFieldsJson?: CustomBookingFieldDto[];
+  isFieldRequired?: (fieldId: string) => boolean;
 }): ApplyPendingFieldAnswerResult {
   const pid = (params.booking.pendingFieldId ?? '').trim();
   if (!pid) return { answered: false };
@@ -91,7 +98,36 @@ export function applyPendingFieldAnswer(params: {
     booking.pendingFieldId = undefined;
     booking.pendingFieldLabel = undefined;
     booking.pendingFieldRequired = undefined;
+    booking.pendingBatchFieldIds = undefined;
   };
+
+  if (pid === BATCH_DETAILS_PENDING_ID) {
+    const pendingFieldIds = booking.pendingBatchFieldIds ?? [];
+    if (pendingFieldIds.length === 0) {
+      clearPending();
+      return { answered: true, fieldId: pid, parsedValue: false };
+    }
+    const { parsedAny } = applyBatchDetailsFromInbound({
+      booking,
+      latest: line,
+      combinedHint: params.combinedHint ?? line,
+      settings: {
+        customFieldsJson: params.customFieldsJson ?? [],
+        serviceMenuOptions: params.serviceMenuOptions,
+      },
+      pendingFieldIds,
+    });
+    if (params.isFieldRequired) {
+      finalizeBatchDetailsPending({
+        booking,
+        pendingFieldIds,
+        isFieldRequired: params.isFieldRequired,
+      });
+    } else {
+      clearPending();
+    }
+    return { answered: true, fieldId: pid, parsedValue: parsedAny, skippedOptional: false };
+  }
 
   if (!required && isOptionalSkipIntent(line)) {
     booking.skippedFieldIds = appendUnique(booking.skippedFieldIds, pid);

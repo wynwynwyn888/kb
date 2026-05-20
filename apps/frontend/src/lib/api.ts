@@ -1252,6 +1252,36 @@ export async function saveAgencyLowCreditWarningSettings(
   });
 }
 
+export type AgencyCreditResetReminderSettings = {
+  enabled: boolean;
+  daysBefore: number[];
+  messageTemplate: string;
+  sendViaAgencyWorkspace: boolean;
+  allowedDaysBefore: number[];
+};
+
+export async function getAgencyCreditResetReminderSettings(token: string) {
+  return apiRequest<AgencyCreditResetReminderSettings>('/quotas/agency/credit-reset-reminder-settings', {
+    token,
+  });
+}
+
+export async function saveAgencyCreditResetReminderSettings(
+  token: string,
+  body: Partial<{
+    enabled: boolean;
+    daysBefore: number[];
+    messageTemplate: string;
+    sendViaAgencyWorkspace: boolean;
+  }>,
+) {
+  return apiRequest<AgencyCreditResetReminderSettings>('/quotas/agency/credit-reset-reminder-settings', {
+    token,
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+}
+
 export async function updateSubaccountWalletPlan(
   token: string,
   body: {

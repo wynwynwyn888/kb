@@ -7,9 +7,10 @@ import { QuotasController } from './quotas.controller';
 import { QuotasService } from './quotas.service';
 import { QueuesModule } from '../../queues/queues.module';
 import { CreditWarningsModule } from '../credit-warnings/credit-warnings.module';
+import { CreditResetRemindersModule } from '../credit-reset-reminders/credit-reset-reminders.module';
 
 @Module({
-  imports: [QueuesModule, AuthModule, CreditWarningsModule],
+  imports: [QueuesModule, AuthModule, CreditWarningsModule, CreditResetRemindersModule],
   controllers: [QuotasController],
   providers: [QuotasService],
   exports: [QuotasService],

@@ -282,8 +282,21 @@ describe('ConversationBookingFlowService', () => {
   });
 
   it('collects missing required fields before slots', async () => {
+    const fetchFree = jest.fn(async () => ({
+      slots: [],
+      calendarId: 'cal_1',
+      error: undefined as string | undefined,
+      retriedWithUserId: null,
+      crmTimezoneUsed: 'UTC',
+      selectedDate: '',
+      selectedTime: '',
+      startMs: 0,
+      endMs: 1,
+      ghlLocationId: 'loc',
+    }));
     const booking = {
       getBookingSettings: jest.fn(async () => baseSettings),
+      fetchFreeSlotsForAutomation: fetchFree,
     } as unknown as BookingSettingsService;
     const ghl = {} as unknown as GhlService;
     const r = await svc(booking, ghl).maybeHandleConversationBookingTurn({
@@ -297,11 +310,12 @@ describe('ConversationBookingFlowService', () => {
     });
     expect(r.handled).toBe(true);
     if (r.handled) {
-      expect(r.replyPlan.bubbles[0]!.text.toLowerCase()).toMatch(/name|phone/);
+      expect(r.replyPlan.bubbles[0]!.text.toLowerCase()).toMatch(/contact name|mobile number/);
+      expect(fetchFree).not.toHaveBeenCalled();
     }
   });
 
-  it('parses hair colour, May 21, and 9am from first message; asks optional name before slots', async () => {
+  it('parses hair colour, May 21, and 9am from first message; batches contact fields before slots', async () => {
     const fetchFree = jest.fn(async () => ({
       slots: [],
       calendarId: 'cal_1',
@@ -330,8 +344,8 @@ describe('ConversationBookingFlowService', () => {
     });
     expect(r.handled).toBe(true);
     if (r.handled) {
-      expect(r.replyPlan.bubbles[0]!.text).toMatch(/May I have the booking name/i);
-      expect(r.replyPlan.bubbles[0]!.text).toMatch(/skip this if you prefer/i);
+      expect(r.replyPlan.bubbles[0]!.text).toMatch(/Contact name/i);
+      expect(r.replyPlan.bubbles[0]!.text).not.toMatch(/skip this if you prefer/i);
       expect(fetchFree).not.toHaveBeenCalled();
       const meta = (r.persistMetadata as { aisbp_booking?: Record<string, unknown> }).aisbp_booking;
       expect(meta?.['service']).toMatch(/hair colour/i);
@@ -340,14 +354,14 @@ describe('ConversationBookingFlowService', () => {
     }
   });
 
-  it('asks for phone before slots when phone is required and name is already known', async () => {
+  it('batches contact fields before slots when time is locked and phone is still required', async () => {
     const fetchFree = jest.fn(async () => ({
       slots: [],
       calendarId: 'cal_1',
       error: undefined as string | undefined,
       retriedWithUserId: null,
       crmTimezoneUsed: 'UTC',
-      selectedDate: '2026-05-10',
+      selectedDate: '2030-05-10',
       selectedTime: '',
       startMs: 0,
       endMs: 1,
@@ -365,7 +379,8 @@ describe('ConversationBookingFlowService', () => {
         calendarId: 'cal_1',
         customerName: 'Sam',
         service: 'Haircut',
-        preferredDate: '2026-05-10',
+        preferredDate: '2030-05-10',
+        preferredTime: '15:00',
       },
     };
     const r = await svc(booking, ghl).maybeHandleConversationBookingTurn({
@@ -379,7 +394,7 @@ describe('ConversationBookingFlowService', () => {
     });
     expect(r.handled).toBe(true);
     if (r.handled) {
-      expect(r.replyPlan.bubbles[0]!.text).toMatch(/best contact number/i);
+      expect(r.replyPlan.bubbles[0]!.text).toMatch(/Mobile number/i);
       expect(r.replyPlan.bubbles[0]!.text).not.toMatch(/skip this if you prefer/i);
       expect(fetchFree).not.toHaveBeenCalled();
     }
@@ -403,7 +418,7 @@ describe('ConversationBookingFlowService', () => {
     });
     expect(r.handled).toBe(true);
     if (r.handled) {
-      expect(r.replyPlan.bubbles[0]!.text).toMatch(/May I have the booking name/i);
+      expect(r.replyPlan.bubbles[0]!.text).toMatch(/Contact name|booking name/i);
       expect(fetchFree).not.toHaveBeenCalled();
     }
   });
@@ -450,7 +465,7 @@ describe('ConversationBookingFlowService', () => {
     }
   });
 
-  it('optional name and phone are still asked before slots when service and date are parsed', async () => {
+  it('batches optional name and phone in one ask before slots when service, date, and time are parsed', async () => {
     const fetchFree = jest.fn(async () => ({
       slots: [
         { startTime: '2026-05-21T09:00:00.000Z', endTime: '2026-05-21T09:30:00.000Z' },
@@ -599,16 +614,16 @@ describe('ConversationBookingFlowService', () => {
   it('offers up to three slots when details complete', async () => {
     const fetchFree = jest.fn(async () => ({
       slots: [
-        { startTime: '2026-05-10T10:00:00.000Z', endTime: '2026-05-10T10:30:00.000Z' },
-        { startTime: '2026-05-10T10:30:00.000Z', endTime: '2026-05-10T11:00:00.000Z' },
-        { startTime: '2026-05-10T11:00:00.000Z', endTime: '2026-05-10T11:30:00.000Z' },
-        { startTime: '2026-05-10T11:30:00.000Z', endTime: '2026-05-10T12:00:00.000Z' },
+        { startTime: '2030-05-10T10:00:00.000Z', endTime: '2030-05-10T10:30:00.000Z' },
+        { startTime: '2030-05-10T10:30:00.000Z', endTime: '2030-05-10T11:00:00.000Z' },
+        { startTime: '2030-05-10T11:00:00.000Z', endTime: '2030-05-10T11:30:00.000Z' },
+        { startTime: '2030-05-10T11:30:00.000Z', endTime: '2030-05-10T12:00:00.000Z' },
       ],
       calendarId: 'cal_1',
       error: undefined as string | undefined,
       retriedWithUserId: null,
       crmTimezoneUsed: 'UTC',
-      selectedDate: '2026-05-10',
+      selectedDate: '2030-05-10',
       selectedTime: '',
       startMs: 0,
       endMs: 1,
@@ -628,7 +643,7 @@ describe('ConversationBookingFlowService', () => {
         customerName: 'Alex',
         phone: '+15551234567',
         service: 'Haircut',
-        preferredDate: '2026-05-10',
+        preferredDate: '2030-05-10',
       },
     };
 
@@ -652,9 +667,9 @@ describe('ConversationBookingFlowService', () => {
 
   it('continues active offered_slots session on SMS when latest message is just "2"', async () => {
     const slotRows = [
-      { startTime: '2026-05-10T10:00:00.000Z', endTime: '2026-05-10T10:30:00.000Z' },
-      { startTime: '2026-05-10T11:00:00.000Z', endTime: '2026-05-10T11:30:00.000Z' },
-      { startTime: '2026-05-10T11:30:00.000Z', endTime: '2026-05-10T12:00:00.000Z' },
+      { startTime: '2030-05-10T10:00:00.000Z', endTime: '2030-05-10T10:30:00.000Z' },
+      { startTime: '2030-05-10T11:00:00.000Z', endTime: '2030-05-10T11:30:00.000Z' },
+      { startTime: '2030-05-10T11:30:00.000Z', endTime: '2030-05-10T12:00:00.000Z' },
     ];
     const fetchFree = jest.fn(async () => ({
       slots: slotRows,
@@ -662,7 +677,7 @@ describe('ConversationBookingFlowService', () => {
       error: undefined as string | undefined,
       retriedWithUserId: null,
       crmTimezoneUsed: 'UTC',
-      selectedDate: '2026-05-10',
+      selectedDate: '2030-05-10',
       selectedTime: '',
       startMs: 0,
       endMs: 1,
@@ -683,22 +698,22 @@ describe('ConversationBookingFlowService', () => {
     const offeredSlots = [
       {
         option: 1,
-        startIso: '2026-05-10T10:00:00.000Z',
-        endIso: '2026-05-10T10:30:00.000Z',
+        startIso: '2030-05-10T10:00:00.000Z',
+        endIso: '2030-05-10T10:30:00.000Z',
         displayText: '6:00 AM',
         calendarId: 'cal_1',
       },
       {
         option: 2,
-        startIso: '2026-05-10T11:00:00.000Z',
-        endIso: '2026-05-10T11:30:00.000Z',
+        startIso: '2030-05-10T11:00:00.000Z',
+        endIso: '2030-05-10T11:30:00.000Z',
         displayText: '7:00 AM',
         calendarId: 'cal_1',
       },
       {
         option: 3,
-        startIso: '2026-05-10T11:30:00.000Z',
-        endIso: '2026-05-10T12:00:00.000Z',
+        startIso: '2030-05-10T11:30:00.000Z',
+        endIso: '2030-05-10T12:00:00.000Z',
         displayText: '7:30 AM',
         calendarId: 'cal_1',
       },
@@ -712,7 +727,7 @@ describe('ConversationBookingFlowService', () => {
         customerName: 'Alex',
         phone: '+15551234567',
         service: 'Haircut',
-        preferredDate: '2026-05-10',
+        preferredDate: '2030-05-10',
         offeredSlots,
         slotDurationMinutes: 30,
       },
@@ -753,9 +768,9 @@ describe('ConversationBookingFlowService', () => {
 
   it('live book fills Contacted from via getContact when contactSnapshot is missing', async () => {
     const slotRows = [
-      { startTime: '2026-05-10T10:00:00.000Z', endTime: '2026-05-10T10:30:00.000Z' },
-      { startTime: '2026-05-10T11:00:00.000Z', endTime: '2026-05-10T11:30:00.000Z' },
-      { startTime: '2026-05-10T11:30:00.000Z', endTime: '2026-05-10T12:00:00.000Z' },
+      { startTime: '2030-05-10T10:00:00.000Z', endTime: '2030-05-10T10:30:00.000Z' },
+      { startTime: '2030-05-10T11:00:00.000Z', endTime: '2030-05-10T11:30:00.000Z' },
+      { startTime: '2030-05-10T11:30:00.000Z', endTime: '2030-05-10T12:00:00.000Z' },
     ];
     const fetchFree = jest.fn(async () => ({
       slots: slotRows,
@@ -763,7 +778,7 @@ describe('ConversationBookingFlowService', () => {
       error: undefined as string | undefined,
       retriedWithUserId: null,
       crmTimezoneUsed: 'UTC',
-      selectedDate: '2026-05-10',
+      selectedDate: '2030-05-10',
       selectedTime: '',
       startMs: 0,
       endMs: 1,
@@ -798,22 +813,22 @@ describe('ConversationBookingFlowService', () => {
     const offeredSlots = [
       {
         option: 1,
-        startIso: '2026-05-10T10:00:00.000Z',
-        endIso: '2026-05-10T10:30:00.000Z',
+        startIso: '2030-05-10T10:00:00.000Z',
+        endIso: '2030-05-10T10:30:00.000Z',
         displayText: '6:00 AM',
         calendarId: 'cal_1',
       },
       {
         option: 2,
-        startIso: '2026-05-10T11:00:00.000Z',
-        endIso: '2026-05-10T11:30:00.000Z',
+        startIso: '2030-05-10T11:00:00.000Z',
+        endIso: '2030-05-10T11:30:00.000Z',
         displayText: '7:00 AM',
         calendarId: 'cal_1',
       },
       {
         option: 3,
-        startIso: '2026-05-10T11:30:00.000Z',
-        endIso: '2026-05-10T12:00:00.000Z',
+        startIso: '2030-05-10T11:30:00.000Z',
+        endIso: '2030-05-10T12:00:00.000Z',
         displayText: '7:30 AM',
         calendarId: 'cal_1',
       },
@@ -826,7 +841,7 @@ describe('ConversationBookingFlowService', () => {
         customerName: 'Alex',
         phone: '+15551234567',
         service: 'Haircut',
-        preferredDate: '2026-05-10',
+        preferredDate: '2030-05-10',
         offeredSlots,
         slotDurationMinutes: 30,
       },
@@ -856,9 +871,9 @@ describe('ConversationBookingFlowService', () => {
 
   it('live book still confirms when getContact fails; Contacted from shows dashes', async () => {
     const slotRows = [
-      { startTime: '2026-05-10T10:00:00.000Z', endTime: '2026-05-10T10:30:00.000Z' },
-      { startTime: '2026-05-10T11:00:00.000Z', endTime: '2026-05-10T11:30:00.000Z' },
-      { startTime: '2026-05-10T11:30:00.000Z', endTime: '2026-05-10T12:00:00.000Z' },
+      { startTime: '2030-05-10T10:00:00.000Z', endTime: '2030-05-10T10:30:00.000Z' },
+      { startTime: '2030-05-10T11:00:00.000Z', endTime: '2030-05-10T11:30:00.000Z' },
+      { startTime: '2030-05-10T11:30:00.000Z', endTime: '2030-05-10T12:00:00.000Z' },
     ];
     const fetchFree = jest.fn(async () => ({
       slots: slotRows,
@@ -866,7 +881,7 @@ describe('ConversationBookingFlowService', () => {
       error: undefined as string | undefined,
       retriedWithUserId: null,
       crmTimezoneUsed: 'UTC',
-      selectedDate: '2026-05-10',
+      selectedDate: '2030-05-10',
       selectedTime: '',
       startMs: 0,
       endMs: 1,
@@ -898,22 +913,22 @@ describe('ConversationBookingFlowService', () => {
     const offeredSlots = [
       {
         option: 1,
-        startIso: '2026-05-10T10:00:00.000Z',
-        endIso: '2026-05-10T10:30:00.000Z',
+        startIso: '2030-05-10T10:00:00.000Z',
+        endIso: '2030-05-10T10:30:00.000Z',
         displayText: '6:00 AM',
         calendarId: 'cal_1',
       },
       {
         option: 2,
-        startIso: '2026-05-10T11:00:00.000Z',
-        endIso: '2026-05-10T11:30:00.000Z',
+        startIso: '2030-05-10T11:00:00.000Z',
+        endIso: '2030-05-10T11:30:00.000Z',
         displayText: '7:00 AM',
         calendarId: 'cal_1',
       },
       {
         option: 3,
-        startIso: '2026-05-10T11:30:00.000Z',
-        endIso: '2026-05-10T12:00:00.000Z',
+        startIso: '2030-05-10T11:30:00.000Z',
+        endIso: '2030-05-10T12:00:00.000Z',
         displayText: '7:30 AM',
         calendarId: 'cal_1',
       },
@@ -926,7 +941,7 @@ describe('ConversationBookingFlowService', () => {
         customerName: 'Alex',
         phone: '+15551234567',
         service: 'Haircut',
-        preferredDate: '2026-05-10',
+        preferredDate: '2030-05-10',
         offeredSlots,
         slotDurationMinutes: 30,
       },
@@ -969,8 +984,8 @@ describe('ConversationBookingFlowService', () => {
       },
     };
     const slotRows = [
-      { startTime: '2026-05-10T10:00:00.000Z', endTime: '2026-05-10T10:30:00.000Z' },
-      { startTime: '2026-05-10T11:00:00.000Z', endTime: '2026-05-10T11:30:00.000Z' },
+      { startTime: '2030-05-10T10:00:00.000Z', endTime: '2030-05-10T10:30:00.000Z' },
+      { startTime: '2030-05-10T11:00:00.000Z', endTime: '2030-05-10T11:30:00.000Z' },
     ];
     const fetchFree = jest.fn(async () => ({
       slots: slotRows,
@@ -978,7 +993,7 @@ describe('ConversationBookingFlowService', () => {
       error: undefined as string | undefined,
       retriedWithUserId: null,
       crmTimezoneUsed: 'UTC',
-      selectedDate: '2026-05-10',
+      selectedDate: '2030-05-10',
       selectedTime: '',
       startMs: 0,
       endMs: 1,
@@ -1011,15 +1026,15 @@ describe('ConversationBookingFlowService', () => {
     const offeredSlots = [
       {
         option: 1,
-        startIso: '2026-05-10T10:00:00.000Z',
-        endIso: '2026-05-10T10:30:00.000Z',
+        startIso: '2030-05-10T10:00:00.000Z',
+        endIso: '2030-05-10T10:30:00.000Z',
         displayText: '6:00 AM',
         calendarId: 'cal_1',
       },
       {
         option: 2,
-        startIso: '2026-05-10T11:00:00.000Z',
-        endIso: '2026-05-10T11:30:00.000Z',
+        startIso: '2030-05-10T11:00:00.000Z',
+        endIso: '2030-05-10T11:30:00.000Z',
         displayText: '7:00 AM',
         calendarId: 'cal_1',
       },
@@ -1032,7 +1047,7 @@ describe('ConversationBookingFlowService', () => {
         customerName: 'Pat',
         phone: '+15550009999',
         service: '',
-        preferredDate: '2026-05-10',
+        preferredDate: '2030-05-10',
         offeredSlots,
         slotDurationMinutes: 30,
       },
@@ -1058,7 +1073,7 @@ describe('ConversationBookingFlowService', () => {
   });
 
   describe('Ask without Required (optional) semantics', () => {
-    it('offers slots after name then skip for optional phone', async () => {
+    it('offers slots after batch contact reply fills name and optional phone is left empty', async () => {
       const slots = [
         { startTime: '2026-05-21T09:00:00.000Z', endTime: '2026-05-21T09:30:00.000Z' },
         { startTime: '2026-05-21T09:30:00.000Z', endTime: '2026-05-21T10:00:00.000Z' },
@@ -1092,7 +1107,8 @@ describe('ConversationBookingFlowService', () => {
         metadata: meta,
       });
       expect(r.handled).toBe(true);
-      expect(r.replyPlan.bubbles[0]!.text).toMatch(/booking name/i);
+      expect(r.replyPlan.bubbles[0]!.text).toMatch(/Contact name/i);
+      expect(r.replyPlan.bubbles[0]!.text).toMatch(/Mobile number/i);
       meta = r.persistMetadata as Record<string, unknown>;
 
       r = await svc(booking, ghl).maybeHandleConversationBookingTurn({
@@ -1104,25 +1120,13 @@ describe('ConversationBookingFlowService', () => {
         latestInboundText: 'Lucy',
         metadata: meta,
       });
-      expect(r.replyPlan.bubbles[0]!.text).toMatch(/contact number/i);
-      meta = r.persistMetadata as Record<string, unknown>;
-
-      r = await svc(booking, ghl).maybeHandleConversationBookingTurn({
-        tenantId: 't1',
-        conversationId: 'c_opt_flow',
-        contactId: 'ct1',
-        channel: 'SMS',
-        combinedInboundText: 'skip',
-        latestInboundText: 'skip',
-        metadata: meta,
-      });
       expect(fetchFree).toHaveBeenCalled();
       const slotText = r.replyPlan.bubbles[0]!.text.toLowerCase();
       expect(slotText).toMatch(/9:00|available for|reserve/);
       expect(slotText).not.toMatch(/which one would you like me to reserve/);
     });
 
-    it('after a non-answer to optional name, asks phone instead of repeating name', async () => {
+    it('after a non-answer to batch contact ask, does not re-ask optional name and proceeds toward slots', async () => {
       const fetchFree = jest.fn(async () => ({
         slots: [
           { startTime: '2026-05-21T09:00:00.000Z', endTime: '2026-05-21T09:30:00.000Z' },
@@ -1162,8 +1166,8 @@ describe('ConversationBookingFlowService', () => {
         latestInboundText: '???',
         metadata: meta,
       });
-      expect(r.replyPlan.bubbles[0]!.text.toLowerCase()).toMatch(/contact number/);
-        expect(r.replyPlan.bubbles[0]!.text.toLowerCase()).not.toMatch(/booking name/);
+      expect(fetchFree).toHaveBeenCalled();
+      expect(r.replyPlan.bubbles[0]!.text.toLowerCase()).not.toMatch(/contact name/);
     });
 
     it('refuses skip when phone is required', async () => {
@@ -1179,7 +1183,7 @@ describe('ConversationBookingFlowService', () => {
           calendarId: 'cal_1',
           customerName: 'Sam',
           service: 'Cut',
-          preferredDate: '2026-05-10',
+          preferredDate: '2030-05-10',
           preferredTime: '10:00',
           pendingFieldId: 'phone',
           pendingFieldRequired: true,
@@ -1450,22 +1454,22 @@ describe('ConversationBookingFlowService', () => {
     const offeredMorningUtc = [
       {
         option: 1,
-        startIso: '2026-05-10T12:00:00.000Z',
-        endIso: '2026-05-10T12:30:00.000Z',
+        startIso: '2030-05-10T12:00:00.000Z',
+        endIso: '2030-05-10T12:30:00.000Z',
         displayText: '12:00 PM',
         calendarId: 'cal_1',
       },
       {
         option: 2,
-        startIso: '2026-05-10T12:30:00.000Z',
-        endIso: '2026-05-10T13:00:00.000Z',
+        startIso: '2030-05-10T12:30:00.000Z',
+        endIso: '2030-05-10T13:00:00.000Z',
         displayText: '12:30 PM',
         calendarId: 'cal_1',
       },
       {
         option: 3,
-        startIso: '2026-05-10T13:00:00.000Z',
-        endIso: '2026-05-10T13:30:00.000Z',
+        startIso: '2030-05-10T13:00:00.000Z',
+        endIso: '2030-05-10T13:30:00.000Z',
         displayText: '1:00 PM',
         calendarId: 'cal_1',
       },
@@ -1477,7 +1481,7 @@ describe('ConversationBookingFlowService', () => {
       error: undefined as string | undefined,
       retriedWithUserId: null,
       crmTimezoneUsed: 'UTC',
-      selectedDate: '2026-05-10',
+      selectedDate: '2030-05-10',
       selectedTime: '',
       startMs: 0,
       endMs: 1,
@@ -1493,7 +1497,7 @@ describe('ConversationBookingFlowService', () => {
           customerName: 'Alex',
           phone: '+15551234567',
           service: 'Haircut',
-          preferredDate: '2026-05-10',
+          preferredDate: '2030-05-10',
           offeredSlots: offered,
           offeredSlotsCrmTimeZone: 'UTC',
           slotDurationMinutes: 30,
@@ -1503,31 +1507,31 @@ describe('ConversationBookingFlowService', () => {
 
     it('D: offered_slots "3" books the third listed slot', async () => {
       const slotRows = [
-        { startTime: '2026-05-10T10:00:00.000Z', endTime: '2026-05-10T10:30:00.000Z' },
-        { startTime: '2026-05-10T11:00:00.000Z', endTime: '2026-05-10T11:30:00.000Z' },
-        { startTime: '2026-05-10T11:30:00.000Z', endTime: '2026-05-10T12:00:00.000Z' },
+        { startTime: '2030-05-10T10:00:00.000Z', endTime: '2030-05-10T10:30:00.000Z' },
+        { startTime: '2030-05-10T11:00:00.000Z', endTime: '2030-05-10T11:30:00.000Z' },
+        { startTime: '2030-05-10T11:30:00.000Z', endTime: '2030-05-10T12:00:00.000Z' },
       ];
       const fetchFree = jest.fn(async () => slotFetchResponse(slotRows));
       const bookSlot = jest.fn(async () => ({ success: true, appointmentId: 'ap_d3' }));
       const offered = [
         {
           option: 1,
-          startIso: '2026-05-10T10:00:00.000Z',
-          endIso: '2026-05-10T10:30:00.000Z',
+          startIso: '2030-05-10T10:00:00.000Z',
+          endIso: '2030-05-10T10:30:00.000Z',
           displayText: '6:00 AM',
           calendarId: 'cal_1',
         },
         {
           option: 2,
-          startIso: '2026-05-10T11:00:00.000Z',
-          endIso: '2026-05-10T11:30:00.000Z',
+          startIso: '2030-05-10T11:00:00.000Z',
+          endIso: '2030-05-10T11:30:00.000Z',
           displayText: '7:00 AM',
           calendarId: 'cal_1',
         },
         {
           option: 3,
-          startIso: '2026-05-10T11:30:00.000Z',
-          endIso: '2026-05-10T12:00:00.000Z',
+          startIso: '2030-05-10T11:30:00.000Z',
+          endIso: '2030-05-10T12:00:00.000Z',
           displayText: '7:30 AM',
           calendarId: 'cal_1',
         },
@@ -1563,14 +1567,14 @@ describe('ConversationBookingFlowService', () => {
       expect(r.handled).toBe(true);
       expect(bookSlot).toHaveBeenCalled();
       const arg = (bookSlot.mock.calls[0] ?? [])[0] as { startTime?: string };
-      expect(arg.startTime).toBe('2026-05-10T11:30:00.000Z');
+      expect(arg.startTime).toBe('2030-05-10T11:30:00.000Z');
     });
 
     it('A: offered_slots "2pm can?" does not send rigid numeric-only pick copy', async () => {
       const afternoonSlots = [
-        { startTime: '2026-05-10T14:00:00.000Z', endTime: '2026-05-10T14:30:00.000Z' },
-        { startTime: '2026-05-10T14:30:00.000Z', endTime: '2026-05-10T15:00:00.000Z' },
-        { startTime: '2026-05-10T15:00:00.000Z', endTime: '2026-05-10T15:30:00.000Z' },
+        { startTime: '2030-05-10T14:00:00.000Z', endTime: '2030-05-10T14:30:00.000Z' },
+        { startTime: '2030-05-10T14:30:00.000Z', endTime: '2030-05-10T15:00:00.000Z' },
+        { startTime: '2030-05-10T15:00:00.000Z', endTime: '2030-05-10T15:30:00.000Z' },
       ];
       const fetchFree = jest.fn(async () => slotFetchResponse(afternoonSlots));
       const booking = {
@@ -1595,8 +1599,8 @@ describe('ConversationBookingFlowService', () => {
 
     it('B: offered_slots "I want 2pm" refetches with preferredTime 14:00', async () => {
       const afternoonSlots = [
-        { startTime: '2026-05-10T14:00:00.000Z', endTime: '2026-05-10T14:30:00.000Z' },
-        { startTime: '2026-05-10T14:30:00.000Z', endTime: '2026-05-10T15:00:00.000Z' },
+        { startTime: '2030-05-10T14:00:00.000Z', endTime: '2030-05-10T14:30:00.000Z' },
+        { startTime: '2030-05-10T14:30:00.000Z', endTime: '2030-05-10T15:00:00.000Z' },
       ];
       const fetchFree = jest.fn(async () => slotFetchResponse(afternoonSlots));
       const booking = {
@@ -1618,8 +1622,8 @@ describe('ConversationBookingFlowService', () => {
 
     it('C: offered_slots "afternoon" sets preferredTimeWindow and refetches', async () => {
       const pool = [
-        { startTime: '2026-05-10T14:00:00.000Z', endTime: '2026-05-10T14:30:00.000Z' },
-        { startTime: '2026-05-10T15:00:00.000Z', endTime: '2026-05-10T15:30:00.000Z' },
+        { startTime: '2030-05-10T14:00:00.000Z', endTime: '2030-05-10T14:30:00.000Z' },
+        { startTime: '2030-05-10T15:00:00.000Z', endTime: '2030-05-10T15:30:00.000Z' },
       ];
       const fetchFree = jest.fn(async () => slotFetchResponse(pool));
       const booking = {
@@ -1645,9 +1649,9 @@ describe('ConversationBookingFlowService', () => {
 
     it('F: when 2pm exists in CRM, it is listed first after revision', async () => {
       const slots = [
-        { startTime: '2026-05-10T14:00:00.000Z', endTime: '2026-05-10T14:30:00.000Z' },
-        { startTime: '2026-05-10T15:30:00.000Z', endTime: '2026-05-10T16:00:00.000Z' },
-        { startTime: '2026-05-10T16:00:00.000Z', endTime: '2026-05-10T16:30:00.000Z' },
+        { startTime: '2030-05-10T14:00:00.000Z', endTime: '2030-05-10T14:30:00.000Z' },
+        { startTime: '2030-05-10T15:30:00.000Z', endTime: '2030-05-10T16:00:00.000Z' },
+        { startTime: '2030-05-10T16:00:00.000Z', endTime: '2030-05-10T16:30:00.000Z' },
       ];
       const fetchFree = jest.fn(async () => slotFetchResponse(slots));
       const booking = {
@@ -1672,9 +1676,9 @@ describe('ConversationBookingFlowService', () => {
 
     it('G: when 2pm missing, copy mentions unavailable and closest slots', async () => {
       const slots = [
-        { startTime: '2026-05-10T13:30:00.000Z', endTime: '2026-05-10T14:00:00.000Z' },
-        { startTime: '2026-05-10T14:30:00.000Z', endTime: '2026-05-10T15:00:00.000Z' },
-        { startTime: '2026-05-10T15:00:00.000Z', endTime: '2026-05-10T15:30:00.000Z' },
+        { startTime: '2030-05-10T13:30:00.000Z', endTime: '2030-05-10T14:00:00.000Z' },
+        { startTime: '2030-05-10T14:30:00.000Z', endTime: '2030-05-10T15:00:00.000Z' },
+        { startTime: '2030-05-10T15:00:00.000Z', endTime: '2030-05-10T15:30:00.000Z' },
       ];
       const fetchFree = jest.fn(async () => slotFetchResponse(slots));
       const booking = {
@@ -1722,9 +1726,9 @@ describe('ConversationBookingFlowService', () => {
 
     it('E: exact displayed time from offer books that slot', async () => {
       const slotRows = [
-        { startTime: '2026-05-10T12:00:00.000Z', endTime: '2026-05-10T12:30:00.000Z' },
-        { startTime: '2026-05-10T12:30:00.000Z', endTime: '2026-05-10T13:00:00.000Z' },
-        { startTime: '2026-05-10T13:00:00.000Z', endTime: '2026-05-10T13:30:00.000Z' },
+        { startTime: '2030-05-10T12:00:00.000Z', endTime: '2030-05-10T12:30:00.000Z' },
+        { startTime: '2030-05-10T12:30:00.000Z', endTime: '2030-05-10T13:00:00.000Z' },
+        { startTime: '2030-05-10T13:00:00.000Z', endTime: '2030-05-10T13:30:00.000Z' },
       ];
       const fetchFree = jest.fn(async () => slotFetchResponse(slotRows));
       const bookSlot = jest.fn(async () => ({ success: true, appointmentId: 'ap_e' }));
@@ -1817,9 +1821,9 @@ describe('ConversationBookingFlowService', () => {
 
     it('E: offered slot pick does not create appointment when stored service is generic', async () => {
       const slotRows = [
-        { startTime: '2026-05-10T10:00:00.000Z', endTime: '2026-05-10T10:30:00.000Z' },
-        { startTime: '2026-05-10T11:00:00.000Z', endTime: '2026-05-10T11:30:00.000Z' },
-        { startTime: '2026-05-10T11:30:00.000Z', endTime: '2026-05-10T12:00:00.000Z' },
+        { startTime: '2030-05-10T10:00:00.000Z', endTime: '2030-05-10T10:30:00.000Z' },
+        { startTime: '2030-05-10T11:00:00.000Z', endTime: '2030-05-10T11:30:00.000Z' },
+        { startTime: '2030-05-10T11:30:00.000Z', endTime: '2030-05-10T12:00:00.000Z' },
       ];
       const fetchFree = jest.fn(async () => ({
         slots: slotRows,
@@ -1827,7 +1831,7 @@ describe('ConversationBookingFlowService', () => {
         error: undefined as string | undefined,
         retriedWithUserId: null,
         crmTimezoneUsed: 'UTC',
-        selectedDate: '2026-05-10',
+        selectedDate: '2030-05-10',
         selectedTime: '',
         startMs: 0,
         endMs: 1,
@@ -1847,22 +1851,22 @@ describe('ConversationBookingFlowService', () => {
       const offeredSlots = [
         {
           option: 1,
-          startIso: '2026-05-10T10:00:00.000Z',
-          endIso: '2026-05-10T10:30:00.000Z',
+          startIso: '2030-05-10T10:00:00.000Z',
+          endIso: '2030-05-10T10:30:00.000Z',
           displayText: '6:00 AM',
           calendarId: 'cal_1',
         },
         {
           option: 2,
-          startIso: '2026-05-10T11:00:00.000Z',
-          endIso: '2026-05-10T11:30:00.000Z',
+          startIso: '2030-05-10T11:00:00.000Z',
+          endIso: '2030-05-10T11:30:00.000Z',
           displayText: '7:00 AM',
           calendarId: 'cal_1',
         },
         {
           option: 3,
-          startIso: '2026-05-10T11:30:00.000Z',
-          endIso: '2026-05-10T12:00:00.000Z',
+          startIso: '2030-05-10T11:30:00.000Z',
+          endIso: '2030-05-10T12:00:00.000Z',
           displayText: '7:30 AM',
           calendarId: 'cal_1',
         },
@@ -1875,7 +1879,7 @@ describe('ConversationBookingFlowService', () => {
           customerName: 'Alex',
           phone: '+15551234567',
           service: 'I want to book',
-          preferredDate: '2026-05-10',
+          preferredDate: '2030-05-10',
           offeredSlots,
           offeredSlotsCrmTimeZone: 'UTC',
           slotDurationMinutes: 30,

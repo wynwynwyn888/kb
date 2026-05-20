@@ -20,6 +20,8 @@ import { CurrentAgencyId, CurrentUser } from '../auth/decorators/current-user.de
 import type { SessionUser } from '../../lib/supabase';
 import { CreditWarningsService } from '../credit-warnings/credit-warnings.service';
 import { ALL_LOW_CREDIT_WARNING_THRESHOLDS } from '../credit-warnings/credit-warnings.constants';
+import { CreditResetRemindersService } from '../credit-reset-reminders/credit-reset-reminders.service';
+import { ALL_CREDIT_RESET_REMINDER_DAYS } from '../credit-reset-reminders/credit-reset-reminders.constants';
 
 @ApiTags('quotas')
 @ApiBearerAuth()
@@ -29,6 +31,7 @@ export class QuotasController {
   constructor(
     private readonly quotasService: QuotasService,
     private readonly creditWarnings: CreditWarningsService,
+    private readonly creditResetReminders: CreditResetRemindersService,
   ) {}
 
   @Get('status/:tenantId')
@@ -146,6 +149,7 @@ export class QuotasController {
   ) {
     if (!agencyId) throw new BadRequestException('Agency context required');
     const limit = limitStr ? parseInt(limitStr, 10) : 200;
+    this.creditResetReminders.processAgencyReminders(agencyId);
     return this.quotasService.listAgencyWallets(agencyId, user.id, { limit });
   }
 
@@ -334,6 +338,51 @@ export class QuotasController {
     }
     const saved = await this.creditWarnings.saveAgencyLowCreditWarningSettings(agencyId, dto);
     return { ...saved, allowedThresholds: [...ALL_LOW_CREDIT_WARNING_THRESHOLDS] };
+  }
+
+  @Get('agency/credit-reset-reminder-settings')
+  @ApiOperation({ summary: 'Read agency credit reset / expiry reminder settings' })
+  async getResetReminderSettings(@CurrentAgencyId() agencyId: string | null, @CurrentUser() user: SessionUser) {
+    if (!agencyId) throw new BadRequestException('Agency context required');
+    await this.assertAgencyStaffViaQuotas(agencyId, user.id);
+    const s = await this.creditResetReminders.getAgencySettings(agencyId);
+    return { ...s, allowedDaysBefore: [...ALL_CREDIT_RESET_REMINDER_DAYS] };
+  }
+
+  @Post('agency/credit-reset-reminder-settings')
+  @ApiOperation({ summary: 'Save agency credit reset / expiry reminder settings' })
+  async saveResetReminderSettings(
+    @CurrentAgencyId() agencyId: string | null,
+    @CurrentUser() user: SessionUser,
+    @Body()
+    dto: {
+      enabled?: boolean;
+      daysBefore?: number[];
+      messageTemplate?: string;
+      sendViaAgencyWorkspace?: boolean;
+    },
+  ) {
+    if (!agencyId) throw new BadRequestException('Agency context required');
+    await this.assertAgencyStaffViaQuotas(agencyId, user.id);
+    if (
+      dto.enabled === undefined &&
+      dto.daysBefore === undefined &&
+      dto.messageTemplate === undefined &&
+      dto.sendViaAgencyWorkspace === undefined
+    ) {
+      throw new BadRequestException('Provide at least one reset reminder setting to save');
+    }
+    if (dto.daysBefore !== undefined) {
+      if (!Array.isArray(dto.daysBefore)) throw new BadRequestException('daysBefore must be an array');
+      const allowed = new Set<number>(ALL_CREDIT_RESET_REMINDER_DAYS as readonly number[]);
+      for (const v of dto.daysBefore) {
+        if (typeof v !== 'number' || !allowed.has(v)) {
+          throw new BadRequestException(`Each reminder day must be one of ${[...allowed].join(', ')}`);
+        }
+      }
+    }
+    const saved = await this.creditResetReminders.saveAgencySettings(agencyId, dto);
+    return { ...saved, allowedDaysBefore: [...ALL_CREDIT_RESET_REMINDER_DAYS] };
   }
 
   /**

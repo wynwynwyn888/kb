@@ -2093,7 +2093,6 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                   value={createName}
                   onChange={e => setCreateName(e.target.value)}
                   style={mvpInputStyle}
-                  placeholder="e.g. DapperDog (active)"
                   autoComplete="off"
                   aria-label="New profile name"
                 />

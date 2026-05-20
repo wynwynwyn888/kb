@@ -1008,8 +1008,8 @@ export class ConversationBookingFlowService {
         });
         if (batchReply) return batchReply;
 
-        const nextAsk =
-          PRE_SCHEDULING_ASK_PRIORITY.find(k => missingBeforeCreate.includes(k)) ?? missingBeforeCreate[0];
+        const nextAsk: string =
+          PRE_SCHEDULING_ASK_PRIORITY.find(k => missingBeforeCreate.includes(k)) ?? missingBeforeCreate[0]!;
         const fieldRequired = this.isAskFieldRequired(settings, nextAsk);
         const baseQ = this.promptForMissingField(nextAsk, settings);
         const fpBase = fingerprintBookingQuestion(baseQ);

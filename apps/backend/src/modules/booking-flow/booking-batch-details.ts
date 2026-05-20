@@ -59,7 +59,7 @@ export function canCollectContactDetailsInBatch(
   settings: { coreFieldsJson: Record<string, { enabled?: boolean }> },
   booking: AisbpBookingStateV1,
 ): boolean {
-  const timeCfg = settings.coreFieldsJson.preferred_time;
+  const timeCfg = settings.coreFieldsJson['preferred_time'];
   if (timeCfg?.enabled) {
     return isSchedulingTimeLocked(booking);
   }

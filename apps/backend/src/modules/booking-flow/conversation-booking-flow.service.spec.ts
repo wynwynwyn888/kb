@@ -1505,6 +1505,53 @@ describe('ConversationBookingFlowService', () => {
       };
     }
 
+    it('E: single offered slot "yes please" books without confirm_slot re-list', async () => {
+      const slotRows = [{ startTime: '2030-05-10T15:00:00.000Z', endTime: '2030-05-10T15:30:00.000Z' }];
+      const fetchFree = jest.fn(async () => slotFetchResponse(slotRows));
+      const bookSlot = jest.fn(async () => ({ success: true, appointmentId: 'ap_yes_please' }));
+      const offered = [
+        {
+          option: 1,
+          startIso: '2030-05-10T15:00:00.000Z',
+          endIso: '2030-05-10T15:30:00.000Z',
+          displayText: '3:00 PM',
+          calendarId: 'cal_1',
+        },
+      ];
+      const booking = {
+        getBookingSettings: jest.fn(async () => baseSettings),
+        fetchFreeSlotsForAutomation: fetchFree,
+      } as unknown as BookingSettingsService;
+      const ghl = {
+        createGhlClientForConnectedTenantWorkerOrThrow: jest.fn(async () => ({
+          client: {
+            bookSlot,
+            getContact: jest.fn(async () => ({ success: true, contact: {} })),
+            getCalendar: jest.fn(async () => ({ summary: {} })),
+            updateAppointmentNotes: jest.fn(async () => ({ success: true })),
+            addContactNote: jest.fn(async () => ({ success: true })),
+            findContactByPhone: jest.fn(async () => ({ success: true, contact: undefined })),
+            createContact: jest.fn(),
+            sendMessage: jest.fn(),
+          },
+          ghlLocationId: 'loc1',
+        })),
+      } as unknown as GhlService;
+      const r = await svc(booking, ghl).maybeHandleConversationBookingTurn({
+        tenantId: 't1',
+        conversationId: 'c_slot_yes_please',
+        contactId: 'ct1',
+        channel: 'SMS',
+        combinedInboundText: 'yes please',
+        latestInboundText: 'yes please',
+        metadata: baseOfferedMeta(offered),
+      });
+      expect(r.handled).toBe(true);
+      expect(bookSlot).toHaveBeenCalledTimes(1);
+      const text = r.handled ? r.replyPlan.bubbles.map(b => b.text).join('\n') : '';
+      expect(text).not.toMatch(/Please choose one of the available times/i);
+    });
+
     it('D: offered_slots "3" books the third listed slot', async () => {
       const slotRows = [
         { startTime: '2030-05-10T10:00:00.000Z', endTime: '2030-05-10T10:30:00.000Z' },

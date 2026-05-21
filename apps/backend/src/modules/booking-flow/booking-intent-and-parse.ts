@@ -371,7 +371,8 @@ export function parseExactSlotReservationAffirmative(latestInboundText: string):
   const s = stripBookingFrustrationForParse(latestInboundText.replace(/\s+/g, ' ').trim()).cleaned.toLowerCase();
   if (!s) return false;
   if (/^(y|yes|yeah|yep|yup|ok|okay|sure|confirm|pls|please|can)\s*[!.?]*$/i.test(s)) return true;
-  if (/^(ok|yes|yeah)\s+(thanks|thank\s+you)\s*[!.?]*$/i.test(s)) return true;
+  if (/^(ok|yes|yeah|yep|yup)(\s+(please|pls|thanks|thank\s+you))?\s*[!.?]*$/i.test(s)) return true;
+  if (/^(please|pls)(\s+(yes|ok|yeah|yep))?\s*[!.?]*$/i.test(s)) return true;
   if (/\b(book\s+it|please\s+reserve|reserve\s+(it|please)|go\s+ahead)\b/i.test(s)) return true;
   return false;
 }

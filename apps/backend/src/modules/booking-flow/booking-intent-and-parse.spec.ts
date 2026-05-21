@@ -83,8 +83,37 @@ describe('extractPreferredTimeWindow', () => {
 describe('parseExactSlotReservationAffirmative', () => {
   it('accepts yes and book phrasing', () => {
     expect(parseExactSlotReservationAffirmative('yes')).toBe(true);
+    expect(parseExactSlotReservationAffirmative('yes please')).toBe(true);
+    expect(parseExactSlotReservationAffirmative('Yes pls!')).toBe(true);
+    expect(parseExactSlotReservationAffirmative('please yes')).toBe(true);
     expect(parseExactSlotReservationAffirmative('please reserve')).toBe(true);
     expect(parseExactSlotReservationAffirmative('can')).toBe(true);
+  });
+});
+
+describe('parseSlotSelectionOrTimeRevision single-slot affirmative', () => {
+  it('books the only offered slot on "yes please"', () => {
+    const offered = [
+      {
+        option: 1,
+        displayText: '3:00 PM',
+        startIso: '2026-05-27T07:00:00.000Z',
+        calendarId: 'cal',
+      },
+    ];
+    const rev = parseSlotSelectionOrTimeRevision(
+      'yes please',
+      '',
+      offered,
+      'Asia/Singapore',
+      '2026-05-27',
+      '2026-05-20',
+    );
+    expect(rev.kind).toBe('selected_slot');
+    if (rev.kind === 'selected_slot') {
+      expect(rev.slot.option).toBe(1);
+      expect(rev.slot.startIso).toBe(offered[0]!.startIso);
+    }
   });
 });
 

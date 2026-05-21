@@ -2420,6 +2420,9 @@ export class ConversationBookingFlowService {
     if (p.nextStep.fieldId === BATCH_DETAILS_PENDING_ID) {
       return p.nextStep.safeBaseMessage;
     }
+    if (p.nextStep.type === 'confirm_slot') {
+      return p.nextStep.safeBaseMessage;
+    }
     if (!this.bookingReplyComposer) return p.nextStep.safeBaseMessage;
     return this.bookingReplyComposer.compose({
       tenantId: p.tenantId,

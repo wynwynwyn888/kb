@@ -56,7 +56,8 @@ import {
   bookingUserTextHasExplicitFourDigitYear,
   mergeValidatedNluIntoBooking,
 } from './booking-nlu-merge';
-import type { BookingNluInterpretInput } from './booking-nlu.schema';
+import { planBookingTurnFromNlu, type BookingNluTurnAction } from './booking-nlu-planner';
+import type { BookingNluInterpretInput, BookingNluOutput } from './booking-nlu.schema';
 import type { BookingReplyComposerNextStep } from './booking-reply-composer.types';
 import {
   buildBookingReplyComposerNextStepForAsk,
@@ -404,6 +405,8 @@ export class ConversationBookingFlowService {
 
     let clearedPendingFieldId: string | undefined;
     let nluUserFrustrated = false;
+    let nluOut: BookingNluOutput | null = null;
+    let nluPlan: BookingNluTurnAction = { type: 'none' };
     if (!skipBookingNlu) {
       const input = this.buildBookingNluInterpretInput({
         tenantId: params.tenantId,
@@ -416,14 +419,26 @@ export class ConversationBookingFlowService {
       });
       const out = await this.bookingNluInterpreter.interpret(input);
       if (out) {
+        nluOut = out;
         nluUserFrustrated = Boolean(out.userFrustrated);
         const mergeResult = mergeValidatedNluIntoBooking(booking, settings, out, {
           minConfidence: BOOKING_NLU_MIN_MERGE_CONFIDENCE,
+          intent: out.intent,
           pendingFieldId: booking.pendingFieldId,
           crmTodayYmd,
           latestInboundText: latest,
           combinedInboundText: combined,
         });
+        nluPlan = planBookingTurnFromNlu({ nlu: out, booking, latestInboundText: latest });
+        this.logger.log(
+          `bookingNluPlan ${JSON.stringify({
+            tenantId: params.tenantId,
+            conversationId: params.conversationId,
+            intent: out.intent,
+            confidence: out.confidence,
+            action: nluPlan.type,
+          })}`,
+        );
         const res = this.resolvePendingIfBookingValuesFilled(booking, settings);
         if (res.clearedPendingFieldId) clearedPendingFieldId = res.clearedPendingFieldId;
         if (mergeResult.dateRepair) {
@@ -663,7 +678,7 @@ export class ConversationBookingFlowService {
         };
       }
 
-      const rev = parseSlotSelectionOrTimeRevision(
+      let rev = parseSlotSelectionOrTimeRevision(
         latest,
         combined,
         booking.offeredSlots,
@@ -671,6 +686,19 @@ export class ConversationBookingFlowService {
         booking.preferredDate!,
         todayYmd,
       );
+      if (nluPlan.type === 'confirm_single_slot' && booking.offeredSlots.length === 1) {
+        rev = { kind: 'selected_slot', slot: booking.offeredSlots[0]! };
+      } else if (nluPlan.type === 'select_slot_from_nlu') {
+        if (nluPlan.option != null) {
+          const slot = booking.offeredSlots.find(o => o.option === nluPlan.option);
+          if (slot) rev = { kind: 'selected_slot', slot };
+        } else if (nluPlan.timeHm) {
+          const matched = matchOfferedByHm(booking.offeredSlots, nluPlan.timeHm, crmTzForPick);
+          if (matched) rev = { kind: 'selected_slot', slot: matched };
+        }
+      } else if (nluOut?.intent === 'confirm_offer' && booking.offeredSlots.length === 1) {
+        rev = { kind: 'selected_slot', slot: booking.offeredSlots[0]! };
+      }
 
       if (rev.kind === 'time_revision' || rev.kind === 'time_window_revision' || rev.kind === 'date_time_revision') {
         if (rev.kind === 'time_revision') {
@@ -1387,6 +1415,7 @@ export class ConversationBookingFlowService {
       combined,
       hadFrustration,
       withTone,
+      forceDiscovery: nluPlan.type === 'discover_availability',
     });
     if (suggestWide) return suggestWide;
 
@@ -1425,11 +1454,28 @@ export class ConversationBookingFlowService {
 
     this.sanitizeBookingIntake(booking, settings);
     this.stripImplicitPastPreferredDateIfNeeded(booking, crmTodayYmd, latest, combined);
-    const slotFetch = await this.bookingSettings.fetchFreeSlotsForAutomation(params.tenantId, {
+    let slotFetch = await this.bookingSettings.fetchFreeSlotsForAutomation(params.tenantId, {
       calendarId: booking.calendarId,
       selectedDate: booking.preferredDate!,
       selectedTime: booking.preferredTime,
     });
+    if (!slotFetch.error && slotFetch.slots.length === 0 && booking.preferredTime?.trim()) {
+      const dayWide = await this.bookingSettings.fetchFreeSlotsForAutomation(params.tenantId, {
+        calendarId: booking.calendarId,
+        selectedDate: booking.preferredDate!,
+      });
+      if (!dayWide.error && dayWide.slots.length > 0) {
+        this.logger.log(
+          `bookingSlotsDayWideRetry ${JSON.stringify({
+            tenantId: params.tenantId,
+            conversationId: params.conversationId,
+            preferredTime: booking.preferredTime,
+            slotsReturned: dayWide.slots.length,
+          })}`,
+        );
+        slotFetch = dayWide;
+      }
+    }
 
     if (slotFetch.error) {
       this.logger.warn(`bookingSlotsFetched ${JSON.stringify({ tenantId: params.tenantId, error: true })}`);
@@ -2244,11 +2290,15 @@ export class ConversationBookingFlowService {
     combined: string;
     hadFrustration: boolean;
     withTone: (msg: string) => string;
+    /** NLU `request_availability` — skip phrase-regex gate. */
+    forceDiscovery?: boolean;
   }): Promise<BookingFlowOrchestrationHookResult | null> {
-    if (!this.isSuggestAlternativesAfterNoSlotsInbound(p.latest)) return null;
+    const forceDiscovery = Boolean(p.forceDiscovery);
+    if (!forceDiscovery && !this.isSuggestAlternativesAfterNoSlotsInbound(p.latest)) return null;
     const pd = p.booking.preferredDate?.trim();
     const ns = p.booking.noSlotsForDateYmd?.trim();
-    if (!pd || !ns || pd !== ns) return null;
+    if (!pd) return null;
+    if (!forceDiscovery && (!ns || pd !== ns)) return null;
     if (p.booking.noSlotsWideSearchDone) return null;
 
     p.booking.noSlotsWideSearchDone = true;

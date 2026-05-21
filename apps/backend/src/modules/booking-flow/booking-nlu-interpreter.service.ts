@@ -78,7 +78,7 @@ export class BookingNluInterpreterService {
       'Extract structured meaning from the LATEST user message using the transcript and booking state as context.',
       'Return ONLY one JSON object matching this schema (no markdown, no prose):',
       '{',
-      '  "intent": "booking_start" | "provide_field" | "select_slot" | "revise_time" | "revise_date_time" | "ask_question" | "cancel" | "unknown",',
+      '  "intent": "booking_start" | "provide_field" | "select_slot" | "revise_time" | "revise_date_time" | "request_availability" | "confirm_offer" | "ask_question" | "cancel" | "unknown",',
       '  "confidence": number between 0 and 1,',
       '  "fields": {',
       '    "service": string | null,',
@@ -114,6 +114,19 @@ export class BookingNluInterpreterService {
       '- "no. anything will do" with pending custom single_select => customAnswers for that field id only (value Anything); do not set firstVisit.',
       '- If pendingFieldId is preferred_time, prioritise extracting preferredTime or preferredTimeWindow from messy text.',
       '- slotSelection is advisory only; the host app may ignore it for safety.',
+      '',
+      'Intent selection (use the LATEST message; transcript gives context):',
+      '- request_availability: user asks what dates/times are open, "when are you available", "tell me available slots", "which date can", not naming only one new day.',
+      '- revise_date_time: user changes day and/or time ("26th", "28th?", "next week wednesday", "different date") even if booking already has a date.',
+      '- revise_time: user changes time/window only on the same day.',
+      '- confirm_offer: user accepts a reserve/confirm prompt ("yes", "yes please", "book it", "go ahead") while offeredSlots has one option or bot just offered one time.',
+      '- select_slot: user picks a numbered option or names a time from offeredSlots list.',
+      '- provide_field: user supplies intake fields (name, phone, batch line, service, date, time) without mainly asking for availability.',
+      '- ask_question: general question; if it is really about availability use request_availability instead.',
+      '- Relative dates: "next week", "next week wednesday", "wednesday?" => preferredDate YYYY-MM-DD using CRM context (today in payload).',
+      '- Ordinal day only ("26th", "28th?") => preferredDate for that day in the current/next reasonable month.',
+      '- After a failed date, "26th?" / "another day" => revise_date_time with the new preferredDate.',
+      '- "9am" / "3pm" => preferredTime HH:MM (24h).',
     ].join('\n');
 
     const profileAppendix = await this.botProfiles.getBookingNluProfileAppendix(input.tenantId);

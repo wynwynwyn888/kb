@@ -15,4 +15,12 @@ Live booking conversations showed contradictory steps: slots offered before cont
 
 - Unit: `booking-batch-details.spec.ts`, `booking-flow-guards` morning-window case.
 - Unit: `conversation-booking-flow.service.spec.ts` batch + offered_slots paths.
+- Unit: `booking-nlu-planner.spec.ts`, intent-aware `booking-nlu-merge.ts`.
 - Manual: date → morning → batch bullets → slots → pick 1 → book (no name/phone loop).
+
+## NLU-first orchestration (follow-up)
+
+- `planBookingTurnFromNlu`: intent drives discover / confirm / refetch after validated merge.
+- Merge allows schedule overwrite on `revise_*`, `request_availability`, and post-`no_slots` recovery.
+- `request_availability` triggers wide calendar scan without regex-only gates.
+- Narrow time fetch falls back to full-day when hour window returns zero slots.

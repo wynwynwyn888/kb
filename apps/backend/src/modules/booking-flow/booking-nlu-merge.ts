@@ -1,6 +1,7 @@
 import type { TenantBookingSettingsDto } from '../booking-settings/booking-settings.service';
 import type { AisbpBookingStateV1, AisbpPreferredTimeWindow } from './conversation-booking-state';
 import type { BookingNluOutput } from './booking-nlu.schema';
+import { nluAllowsSchedulingOverwrite } from './booking-nlu-planner';
 import {
   customSelectAnswerIsWholeOptionList,
   isAcceptedBookingServiceValue,
@@ -114,6 +115,7 @@ export function mergeValidatedNluIntoBooking(
   nlu: BookingNluOutput,
   opts: {
     minConfidence: number;
+    intent: BookingNluOutput['intent'];
     pendingFieldId?: string | null;
     /** CRM (or tenant) local `YYYY-MM-DD` — used to repair / reject NLU dates. */
     crmTodayYmd: string;
@@ -136,6 +138,16 @@ export function mergeValidatedNluIntoBooking(
   };
   const mergedFieldKeys: string[] = [];
   let dateRepair: BookingNluMergeResult['dateRepair'];
+  const scheduleOverwrite = nluAllowsSchedulingOverwrite(opts.intent, booking);
+
+  const clearNoSlotsRecoveryState = (): void => {
+    booking.noSlotsForDateYmd = undefined;
+    booking.noSlotsWideSearchDone = undefined;
+    booking.offeredSlots = undefined;
+    booking.offeredSlotsCrmTimeZone = undefined;
+    booking.lastOfferedAt = undefined;
+    booking.selectedSlot = undefined;
+  };
 
   if (!booking.service?.trim() && f.service?.trim()) {
     const s = f.service.trim();
@@ -152,66 +164,96 @@ export function mergeValidatedNluIntoBooking(
     }
   }
 
-  if (!booking.preferredDate?.trim() && f.preferredDate?.trim()) {
+  const mergePreferredDate = (): void => {
+    if (!f.preferredDate?.trim()) return;
     const rawNlu = f.preferredDate.trim();
     if (!parseYmd(rawNlu)) {
       flags.invalidDate = true;
-    } else {
-      const explicitYear =
-        bookingUserTextHasExplicitFourDigitYear(opts.latestInboundText) ||
-        bookingUserTextHasExplicitFourDigitYear(opts.combinedInboundText);
-      const det = deterministicDateFromUserLines(
-        opts.latestInboundText,
-        opts.combinedInboundText,
-        opts.crmTodayYmd,
-      );
-      let chosen: string | undefined;
-      if (!explicitYear) {
-        if (det) {
-          chosen = det;
-          if (det !== rawNlu) {
-            dateRepair = {
-              oldDate: rawNlu,
-              newDate: det,
-              sourceText: opts.latestInboundText.trim().slice(0, 240),
-            };
-          }
-        } else if (rawNlu < opts.crmTodayYmd) {
-          flags.invalidPastDate = true;
-        } else {
-          chosen = rawNlu;
+      return;
+    }
+    const explicitYear =
+      bookingUserTextHasExplicitFourDigitYear(opts.latestInboundText) ||
+      bookingUserTextHasExplicitFourDigitYear(opts.combinedInboundText);
+    const det = deterministicDateFromUserLines(
+      opts.latestInboundText,
+      opts.combinedInboundText,
+      opts.crmTodayYmd,
+    );
+    let chosen: string | undefined;
+    if (!explicitYear) {
+      if (det) {
+        chosen = det;
+        if (det !== rawNlu) {
+          dateRepair = {
+            oldDate: rawNlu,
+            newDate: det,
+            sourceText: opts.latestInboundText.trim().slice(0, 240),
+          };
         }
+      } else if (rawNlu < opts.crmTodayYmd) {
+        flags.invalidPastDate = true;
       } else {
         chosen = rawNlu;
       }
-      if (chosen !== undefined && !explicitYear && chosen < opts.crmTodayYmd) {
-        flags.invalidPastDate = true;
-        chosen = undefined;
-        dateRepair = undefined;
-      }
-      if (chosen !== undefined && !flags.invalidPastDate) {
-        booking.preferredDate = chosen;
-        mergedFieldKeys.push('preferredDate');
-      }
+    } else {
+      chosen = rawNlu;
+    }
+    if (chosen !== undefined && !explicitYear && chosen < opts.crmTodayYmd) {
+      flags.invalidPastDate = true;
+      chosen = undefined;
+      dateRepair = undefined;
+    }
+    if (chosen === undefined || flags.invalidPastDate) return;
+    const prev = booking.preferredDate?.trim();
+    if (!prev || scheduleOverwrite || chosen !== prev) {
+      if (prev && chosen !== prev) clearNoSlotsRecoveryState();
+      booking.preferredDate = chosen;
+      mergedFieldKeys.push('preferredDate');
+    }
+  };
+
+  if (!booking.preferredDate?.trim() || scheduleOverwrite) {
+    mergePreferredDate();
+  }
+  if (scheduleOverwrite && !mergedFieldKeys.includes('preferredDate')) {
+    const detOnly = deterministicDateFromUserLines(
+      opts.latestInboundText,
+      opts.combinedInboundText,
+      opts.crmTodayYmd,
+    );
+    if (detOnly && detOnly !== booking.preferredDate?.trim()) {
+      clearNoSlotsRecoveryState();
+      booking.preferredDate = detOnly;
+      mergedFieldKeys.push('preferredDate');
     }
   }
 
-  if (!booking.preferredTime?.trim() && f.preferredTime?.trim()) {
+  const mergePreferredTime = (): void => {
+    if (!f.preferredTime?.trim()) return;
     const t = normalizeHm(f.preferredTime);
     if (t) {
       booking.preferredTime = t;
       booking.preferredTimeWindow = 'exact';
       mergedFieldKeys.push('preferredTime');
+      if (scheduleOverwrite) clearNoSlotsRecoveryState();
     } else {
       flags.invalidTime = true;
     }
+  };
+
+  if (!booking.preferredTime?.trim() || scheduleOverwrite) {
+    mergePreferredTime();
   }
 
-  if (!booking.preferredTime?.trim() && f.preferredTimeWindow) {
+  if ((!booking.preferredTime?.trim() || scheduleOverwrite) && f.preferredTimeWindow) {
     const w = WINDOW_MAP[f.preferredTimeWindow];
     if (w) {
       booking.preferredTimeWindow = w;
+      if (scheduleOverwrite && opts.intent === 'revise_date_time') {
+        booking.preferredTime = undefined;
+      }
       mergedFieldKeys.push('preferredTimeWindow');
+      if (scheduleOverwrite) clearNoSlotsRecoveryState();
     }
   }
 

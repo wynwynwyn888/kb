@@ -10,8 +10,14 @@ import type { BookingNluOutput } from './booking-nlu.schema';
 
 const STYLIST_ID = 'cf_stylist';
 
-const mergeOpts = (latest: string, combined: string, crmTodayYmd: string) => ({
+const mergeOpts = (
+  latest: string,
+  combined: string,
+  crmTodayYmd: string,
+  intent: BookingNluOutput['intent'] = 'provide_field',
+) => ({
   minConfidence: BOOKING_NLU_MIN_MERGE_CONFIDENCE,
+  intent,
   crmTodayYmd,
   latestInboundText: latest,
   combinedInboundText: combined,
@@ -223,6 +229,29 @@ describe('mergeValidatedNluIntoBooking', () => {
     );
     expect(booking.preferredDate).toBeUndefined();
     expect(r.skipReason).toBe('invalid_past_date');
+  });
+
+  it('overwrites preferredDate on revise_date_time after a no-slots date', () => {
+    const booking: AisbpBookingStateV1 = {
+      status: 'collecting_details',
+      version: 1,
+      calendarId: 'cal',
+      preferredDate: '2026-05-27',
+      preferredTime: '09:00',
+      noSlotsForDateYmd: '2026-05-27',
+    };
+    const r = mergeValidatedNluIntoBooking(
+      booking,
+      settings(),
+      out({
+        intent: 'revise_date_time',
+        fields: { preferredDate: '2026-05-26' },
+      }),
+      mergeOpts('26th?', '26th?', '2026-05-20', 'revise_date_time'),
+    );
+    expect(r.mergedFieldKeys).toContain('preferredDate');
+    expect(booking.preferredDate).toBe('2026-05-26');
+    expect(booking.noSlotsForDateYmd).toBeUndefined();
   });
 });
 

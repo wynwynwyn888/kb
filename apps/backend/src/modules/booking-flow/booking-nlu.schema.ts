@@ -6,6 +6,10 @@ export const BOOKING_NLU_INTENTS = [
   'select_slot',
   'revise_time',
   'revise_date_time',
+  /** User asks what dates/times are open (no specific new date yet). */
+  'request_availability',
+  /** User accepts a single-slot “reserve this time?” offer (yes / yes please). */
+  'confirm_offer',
   'ask_question',
   'cancel',
   'unknown',

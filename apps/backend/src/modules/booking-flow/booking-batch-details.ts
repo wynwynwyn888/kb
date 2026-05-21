@@ -1,4 +1,5 @@
 import type { CustomBookingFieldDto } from '../../lib/tenant-automation-validation';
+import { customFieldIncludedInSummary } from './booking-summary';
 import type { BookingCoreFieldKey } from '../../lib/tenant-automation-constants';
 import type { AisbpBookingStateV1 } from './conversation-booking-state';
 import { labelForBatchBookingDetailField, type BatchBookingDetailField } from './booking-conversation-copy';
@@ -12,6 +13,7 @@ import {
 } from './booking-intent-and-parse';
 import { matchUserLineToMenuOption } from './booking-service-intake';
 import { isOptionalSkipIntent } from './booking-pending-field';
+import { isPreSchedulingIntakeComplete } from './booking-flow-guards';
 
 export const BATCH_DETAILS_PENDING_ID = 'batch:details';
 
@@ -52,24 +54,6 @@ function readCoreValue(booking: AisbpBookingStateV1, key: BookingCoreFieldKey): 
     default:
       return undefined;
   }
-}
-
-/** Whether contact/custom fields can be requested in one combined message (after scheduling intake). */
-export function canCollectContactDetailsInBatch(
-  settings: { coreFieldsJson: Record<string, { enabled?: boolean }> },
-  booking: AisbpBookingStateV1,
-): boolean {
-  const timeCfg = settings.coreFieldsJson['preferred_time'];
-  if (timeCfg?.enabled) {
-    return isSchedulingTimeLocked(booking);
-  }
-  for (const key of PRE_SCHEDULING_ASK_PRIORITY) {
-    if (key === 'preferred_time') continue;
-    const t = settings.coreFieldsJson[key];
-    if (!t?.enabled) continue;
-    if (!readCoreValue(booking, key)?.trim()) return false;
-  }
-  return true;
 }
 
 function appendUnique(list: string[] | undefined, id: string): string[] {
@@ -115,7 +99,7 @@ export function listBatchDetailsMissingFieldIds(
   settings: { coreFieldsJson: Record<string, { enabled?: boolean; required?: boolean }>; customFieldsJson: CustomBookingFieldDto[] },
   booking: AisbpBookingStateV1,
 ): string[] {
-  if (!canCollectContactDetailsInBatch(settings, booking)) return [];
+  if (!isPreSchedulingIntakeComplete(settings, booking)) return [];
   const out: string[] = [];
   for (const key of POST_SCHEDULING_ASK_PRIORITY) {
     const t = settings.coreFieldsJson[key];
@@ -129,7 +113,7 @@ export function listBatchDetailsMissingFieldIds(
     out.push(key);
   }
   for (const cf of sortedCustomFields(settings.customFieldsJson)) {
-    if (!cf.enabled) continue;
+    if (!customFieldIncludedInSummary(cf)) continue;
     const id = `custom:${cf.id}`;
     const ans = booking.customAnswers?.[cf.id];
     if (ans?.trim()) continue;
@@ -208,11 +192,16 @@ export function applyBatchDetailsFromInbound(params: {
     }
   }
   if (pendingFieldIds.includes('first_visit') && !booking.firstVisit?.trim()) {
-    const fv =
-      parseFirstVisitNaturalReply(line) ??
-      parseFirstVisitNaturalReply(text) ??
-      extractFirstVisit(line) ??
-      extractFirstVisit(text);
+    let fv: string | undefined;
+    for (const seg of commaSegments()) {
+      fv =
+        parseFirstVisitNaturalReply(seg) ??
+        extractFirstVisit(seg);
+      if (fv) break;
+    }
+    if (!fv) {
+      fv = parseFirstVisitNaturalReply(text) ?? extractFirstVisit(text);
+    }
     if (fv) {
       booking.firstVisit = fv;
       parsedAny = true;
@@ -226,7 +215,11 @@ export function applyBatchDetailsFromInbound(params: {
     if (!cf) continue;
     if (booking.customAnswers?.[cfId]?.trim()) continue;
     if (cf.fieldType === 'single_select' || cf.fieldType === 'single_choice') {
-      const hit = matchUserLineToMenuOption(line, cf.options ?? []);
+      let hit: string | undefined;
+      for (const seg of commaSegments()) {
+        hit = matchUserLineToMenuOption(seg, cf.options ?? []);
+        if (hit) break;
+      }
       if (hit) {
         booking.customAnswers = { ...(booking.customAnswers ?? {}), [cfId]: hit };
         parsedAny = true;

@@ -66,12 +66,18 @@ import { applyPendingFieldAnswer, isOptionalSkipIntent } from './booking-pending
 import {
   BATCH_DETAILS_PENDING_ID,
   PRE_SCHEDULING_ASK_PRIORITY,
-  canCollectContactDetailsInBatch,
+  applyBatchDetailsFromInbound,
+  finalizeBatchDetailsPending,
   isSchedulingTimeLocked,
   listBatchDetailsMissingFieldIds,
   toBatchBookingDetailFields,
 } from './booking-batch-details';
-import { buildAppointmentCreateNotes } from './booking-summary';
+import {
+  canCollectContactDetailsInBatch,
+  clearSlotOfferState,
+  mayOfferLiveSlots,
+} from './booking-flow-guards';
+import { buildAppointmentCreateNotes, customFieldIncludedInSummary } from './booking-summary';
 import { BookingPostConfirmService } from './booking-post-confirm.service';
 import { maskPhoneForLog } from './booking-contact-enrichment';
 import {
@@ -456,6 +462,8 @@ export class ConversationBookingFlowService {
 
     const hadFrustration = deterministicHadFrustration || nluUserFrustrated;
 
+    this.applyRichFieldExtraction(booking, settings, combined, latest, todayYmd);
+
     const pendingCustomId = booking.pendingFieldId?.startsWith('custom:')
       ? booking.pendingFieldId.slice('custom:'.length)
       : undefined;
@@ -471,6 +479,7 @@ export class ConversationBookingFlowService {
       customFieldDef: pendingCf,
       serviceMenuOptions: settings.serviceMenuOptions,
       customFieldsJson: settings.customFieldsJson,
+      coreFieldsJson: settings.coreFieldsJson,
       isFieldRequired: (fieldId: string) => this.isAskFieldRequired(settings, fieldId),
     });
     if (clearedPendingFieldId) {
@@ -516,10 +525,10 @@ export class ConversationBookingFlowService {
       booking.pendingParseFailureCount = (booking.pendingParseFailureCount ?? 0) + 1;
     }
 
-    this.applyRichFieldExtraction(booking, settings, combined, latest, todayYmd);
     this.syncNoSlotsFollowUpState(booking);
     this.stripImplicitPastPreferredDateIfNeeded(booking, crmTodayYmd, latest, combined);
     this.sanitizeBookingIntake(booking, settings);
+    this.applyCommaSeparatedBatchCatchUp(settings, booking, latest, combined);
 
     const pidAuto = booking.pendingFieldId?.trim();
     if (
@@ -1019,13 +1028,10 @@ export class ConversationBookingFlowService {
         booking.lastAskedAt = new Date().toISOString();
         booking.lastQuestionFingerprint = fpBase;
         booking.sameFieldPromptCount = 0;
+        clearSlotOfferState(booking);
         const nextMeta = mergeBookingIntoConversationMetadata(prevMeta, {
           ...booking,
           status: 'collecting_details',
-          offeredSlots: undefined,
-          offeredSlotsCrmTimeZone: undefined,
-          lastOfferedAt: undefined,
-          selectedSlot: undefined,
         });
         const composedAsk = await this.composeBookingCustomerReply({
           tenantId: params.tenantId,
@@ -1280,6 +1286,7 @@ export class ConversationBookingFlowService {
         })}`,
       );
 
+      clearSlotOfferState(booking);
       const nextMeta = mergeBookingIntoConversationMetadata(prevMeta, { ...booking, status: 'collecting_details' });
       const composedAsk = await this.composeBookingCustomerReply({
         tenantId: params.tenantId,
@@ -1382,6 +1389,39 @@ export class ConversationBookingFlowService {
       withTone,
     });
     if (suggestWide) return suggestWide;
+
+    if (!mayOfferLiveSlots(settings, booking)) {
+      const batchBeforeSlots = await this.tryEmitBatchDetailsAsk({
+        params,
+        settings,
+        booking,
+        prevMeta,
+        latest,
+        combined,
+        hadFrustration,
+        withTone,
+        fieldChanged,
+      });
+      if (batchBeforeSlots) return batchBeforeSlots;
+      this.logger.log(
+        `bookingSlotOfferBlocked ${JSON.stringify({
+          tenantId: params.tenantId,
+          conversationId: params.conversationId,
+          reason: 'contact_intake_incomplete',
+          batchPending: listBatchDetailsMissingFieldIds(settings, booking),
+        })}`,
+      );
+      const nextMeta = mergeBookingIntoConversationMetadata(prevMeta, { ...booking, status: 'collecting_details' });
+      return {
+        handled: true,
+        persistMetadata: nextMeta,
+        replyPlan: plan(
+          withTone('Thanks — I still need a few details before I can check live availability. Please share what I asked for above.'),
+          'booking_contact_before_slots',
+        ),
+        routing: stubRouting(),
+      };
+    }
 
     this.sanitizeBookingIntake(booking, settings);
     this.stripImplicitPastPreferredDateIfNeeded(booking, crmTodayYmd, latest, combined);
@@ -1810,22 +1850,14 @@ export class ConversationBookingFlowService {
     settings: { coreFieldsJson: Record<string, CoreFieldToggle>; customFieldsJson: CustomBookingFieldDto[] },
     booking: AisbpBookingStateV1,
   ): string | null {
-    if (isSchedulingTimeLocked(booking)) return null;
-
     for (const key of PRE_SCHEDULING_ASK_PRIORITY) {
       const t = settings.coreFieldsJson[key];
       if (!t?.enabled) continue;
       if (!t.required) continue;
       const v = this.readCore(booking, key);
       if (v?.trim()) continue;
+      if (key === 'preferred_time' && booking.preferredTimeWindow?.trim()) continue;
       return key;
-    }
-    for (const cf of this.sortedCustomFields(settings.customFieldsJson)) {
-      if (!cf.required) continue;
-      const id = `custom:${cf.id}`;
-      const ans = booking.customAnswers?.[cf.id];
-      if (ans?.trim()) continue;
-      return id;
     }
 
     for (const key of PRE_SCHEDULING_ASK_PRIORITY) {
@@ -1833,6 +1865,7 @@ export class ConversationBookingFlowService {
       if (!t?.enabled || t.required) continue;
       const v = this.readCore(booking, key);
       if (v?.trim()) continue;
+      if (key === 'preferred_time' && booking.preferredTimeWindow?.trim()) continue;
       if (this.isFieldSkipped(booking, key)) continue;
       if (this.isOptionalAsked(booking, key)) continue;
       return key;
@@ -2015,6 +2048,31 @@ export class ConversationBookingFlowService {
     }
   }
 
+  /** When metadata lost `pendingBatchFieldIds`, still parse comma-separated batch replies. */
+  private applyCommaSeparatedBatchCatchUp(
+    settings: TenantBookingSettingsDto,
+    booking: AisbpBookingStateV1,
+    latest: string,
+    combined: string,
+  ): void {
+    if (!latest.includes(',')) return;
+    if (!canCollectContactDetailsInBatch(settings, booking)) return;
+    const missing = listBatchDetailsMissingFieldIds(settings, booking);
+    if (missing.length === 0) return;
+    applyBatchDetailsFromInbound({
+      booking,
+      latest,
+      combinedHint: combined,
+      settings: { customFieldsJson: settings.customFieldsJson, serviceMenuOptions: settings.serviceMenuOptions },
+      pendingFieldIds: missing,
+    });
+    finalizeBatchDetailsPending({
+      booking,
+      pendingFieldIds: missing,
+      isFieldRequired: (fieldId: string) => this.isAskFieldRequired(settings, fieldId),
+    });
+  }
+
   private applyRichFieldExtraction(
     booking: AisbpBookingStateV1,
     settings: TenantBookingSettingsDto,
@@ -2074,9 +2132,25 @@ export class ConversationBookingFlowService {
     }
 
     for (const cf of settings.customFieldsJson) {
-      if (!cf.required) continue;
+      if (!customFieldIncludedInSummary(cf)) continue;
       if (!booking.customAnswers) booking.customAnswers = {};
-      if (booking.customAnswers[cf.id]) continue;
+      if (booking.customAnswers[cf.id]?.trim()) continue;
+      if (cf.fieldType === 'single_select' || cf.fieldType === 'single_choice') {
+        const segments = latest
+          .split(',')
+          .map(s => s.trim())
+          .filter(s => s.length > 0);
+        const candidates = [latest, ...segments];
+        for (const seg of candidates) {
+          const hit = matchUserLineToMenuOption(seg, cf.options ?? []);
+          if (hit) {
+            booking.customAnswers[cf.id] = hit;
+            break;
+          }
+        }
+        continue;
+      }
+      if (!cf.required) continue;
       if (cf.fieldType === 'checkbox' || cf.fieldType === 'yes_no') {
         if (/\b(yes|yep|yeah|no|nope)\b/i.test(latest)) {
           booking.customAnswers[cf.id] = /\bno\b/i.test(latest) ? 'no' : 'yes';
@@ -2423,6 +2497,7 @@ export class ConversationBookingFlowService {
     booking.pendingFieldId = undefined;
     booking.pendingFieldLabel = undefined;
     booking.pendingFieldRequired = undefined;
+    booking.pendingBatchFieldIds = undefined;
   }
 
   /** When NLU (or prior state) already satisfies the pending ask, clear pending so deterministic parse failure does not increment retries. */
@@ -2460,6 +2535,12 @@ export class ConversationBookingFlowService {
     }
     if (pid === 'first_visit' && booking.firstVisit?.trim()) {
       return cleared(pid);
+    }
+    if (pid === BATCH_DETAILS_PENDING_ID) {
+      if (listBatchDetailsMissingFieldIds(settings, booking).length === 0) {
+        return cleared(pid);
+      }
+      return { cleared: false };
     }
     if (pid.startsWith('custom:')) {
       const id = pid.slice('custom:'.length);

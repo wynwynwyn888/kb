@@ -88,6 +88,29 @@ describe('parseExactSlotReservationAffirmative', () => {
   });
 });
 
+describe('parseSlotSelectionOrTimeRevision multi-slot affirmative', () => {
+  const offered = [
+    { option: 1, displayText: '11:00 AM', startIso: '2026-05-25T03:00:00.000Z', calendarId: 'cal' },
+    { option: 2, displayText: '12:00 PM', startIso: '2026-05-25T04:00:00.000Z', calendarId: 'cal' },
+    { option: 3, displayText: '1:00 PM', startIso: '2026-05-25T05:00:00.000Z', calendarId: 'cal' },
+  ];
+
+  it('maps yes + preferred time to the matching offered slot when multiple slots listed', () => {
+    const rev = parseSlotSelectionOrTimeRevision(
+      'yes fuck',
+      '11am',
+      offered,
+      'Asia/Singapore',
+      '2026-05-25',
+      '2026-05-20',
+    );
+    expect(rev.kind).toBe('selected_slot');
+    if (rev.kind === 'selected_slot') {
+      expect(rev.slot.option).toBe(1);
+    }
+  });
+});
+
 describe('shouldSuppressImplicitSlotPickFromFrustration', () => {
   it('detects why-still-ask complaints', () => {
     expect(shouldSuppressImplicitSlotPickFromFrustration('i said 9am, why u still ask me?')).toBe(true);

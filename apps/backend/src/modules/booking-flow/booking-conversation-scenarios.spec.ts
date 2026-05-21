@@ -186,36 +186,29 @@ describe('Booking conversation scenarios (harness)', () => {
     r = await h.say('11am');
     expect(r.handled).toBe(true);
     expect(h.bookingState()?.['preferredTime']).toBe('11:00');
+    if (r.handled) {
+      expect(r.replyPlan.bubbles[0]!.text).toMatch(/check availability|provide/i);
+    }
 
-    r = await h.say('weewang');
+    r = await h.say('weewang, 141 235 5123, male, yes first visit');
     expect(r.handled).toBe(true);
     expect(h.bookingState()?.['customerName']).toMatch(/weewang/i);
-
-    r = await h.say('141 235 5123');
-    expect(r.handled).toBe(true);
     expect(String(h.bookingState()?.['phone'] ?? '').replace(/\s+/g, '')).toMatch(/141/);
-
-    r = await h.say('male');
-    expect(r.handled).toBe(true);
-    const ca = h.bookingState()?.['customAnswers'] as Record<string, string> | undefined;
-    expect(ca?.[STYLIST_FIELD_ID]).toBe('Male');
-
-    r = await h.say('yes first visit');
-    expect(r.handled).toBe(true);
     expect(h.bookingState()?.['firstVisit']).toBeTruthy();
+    expect(JSON.stringify(h.bookingState()?.['customAnswers'] ?? {})).toContain('Male');
 
     expect(fetchFree).toHaveBeenCalled();
     expect(h.bookingState()?.['status']).toBe('offered_slots');
     const offered = h.bookingState()?.['offeredSlots'] as AisbpOfferedSlot[] | undefined;
     expect(offered?.length).toBeGreaterThanOrEqual(3);
-    const thirdOffered = offered![2]!;
-    expect(thirdOffered.option).toBe(3);
+    const pickedOffered = offered![0]!;
+    expect(pickedOffered.option).toBe(1);
 
-    r = await h.say('3');
+    r = await h.say('1');
     expect(r.handled).toBe(true);
     expect(bookSlot).toHaveBeenCalledTimes(1);
     const bookArg = (bookSlot.mock.calls[0] ?? [])[0] as { notes?: string; startTime?: string };
-    expect(bookArg.startTime).toBe(thirdOffered.startIso);
+    expect(bookArg.startTime).toBe(pickedOffered.startIso);
     const notes = bookArg.notes ?? '';
     expect(notes).toContain('Service: Haircut');
     expect(notes).toMatch(/Booking name:\s*Weewang/i);

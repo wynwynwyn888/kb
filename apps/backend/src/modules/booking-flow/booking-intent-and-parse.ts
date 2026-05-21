@@ -781,8 +781,19 @@ export function parseSlotSelectionOrTimeRevision(
     return { kind: 'unparseable' };
   }
 
-  if (offeredSlots.length === 1 && parseExactSlotReservationAffirmative(latestInboundText)) {
-    return { kind: 'selected_slot', slot: offeredSlots[0]! };
+  if (parseExactSlotReservationAffirmative(latestInboundText)) {
+    if (offeredSlots.length === 1) {
+      return { kind: 'selected_slot', slot: offeredSlots[0]! };
+    }
+    const hmAff =
+      extractPreferredTime(latestClean) ??
+      extractPreferredTime(
+        stripBookingFrustrationForParse(combinedThreadForRevision.replace(/\s+/g, ' ').trim()).cleaned,
+      );
+    if (hmAff) {
+      const matched = matchOfferedByHm(offeredSlots, hmAff, crmTimezone);
+      if (matched) return { kind: 'selected_slot', slot: matched };
+    }
   }
 
   const selectionText = [latestInboundText, combinedThreadForRevision].filter(s => s?.trim()).join('\n');

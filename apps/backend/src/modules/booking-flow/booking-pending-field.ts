@@ -14,10 +14,12 @@ import {
   stripBookingFrustrationForParse,
 } from './booking-intent-and-parse';
 import { matchUserLineToMenuOption, resolveServiceFromUserReplyLine } from './booking-service-intake';
+import type { CoreFieldToggle } from '../../lib/tenant-automation-validation';
 import {
   BATCH_DETAILS_PENDING_ID,
   applyBatchDetailsFromInbound,
   finalizeBatchDetailsPending,
+  listBatchDetailsMissingFieldIds,
 } from './booking-batch-details';
 
 export type ApplyPendingFieldAnswerResult = {
@@ -82,6 +84,7 @@ export function applyPendingFieldAnswer(params: {
   /** When `pendingFieldId` is `service`, optional tenant menu for strict resolution. */
   serviceMenuOptions?: string[];
   customFieldsJson?: CustomBookingFieldDto[];
+  coreFieldsJson?: Record<string, CoreFieldToggle>;
   isFieldRequired?: (fieldId: string) => boolean;
 }): ApplyPendingFieldAnswerResult {
   const pid = (params.booking.pendingFieldId ?? '').trim();
@@ -102,10 +105,17 @@ export function applyPendingFieldAnswer(params: {
   };
 
   if (pid === BATCH_DETAILS_PENDING_ID) {
-    const pendingFieldIds = booking.pendingBatchFieldIds ?? [];
+    let pendingFieldIds = booking.pendingBatchFieldIds ?? [];
+    if (pendingFieldIds.length === 0 && params.coreFieldsJson && params.isFieldRequired) {
+      pendingFieldIds = listBatchDetailsMissingFieldIds(
+        { coreFieldsJson: params.coreFieldsJson, customFieldsJson: params.customFieldsJson ?? [] },
+        booking,
+      );
+      booking.pendingBatchFieldIds = pendingFieldIds.length > 0 ? pendingFieldIds : undefined;
+    }
     if (pendingFieldIds.length === 0) {
       clearPending();
-      return { answered: true, fieldId: pid, parsedValue: false };
+      return { answered: true, fieldId: pid, parsedValue: true };
     }
     const { parsedAny } = applyBatchDetailsFromInbound({
       booking,

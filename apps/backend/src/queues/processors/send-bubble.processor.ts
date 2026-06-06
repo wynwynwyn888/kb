@@ -92,7 +92,8 @@ export class SendBubbleProcessor extends WorkerHost {
       replyPlan?.responseMode === 'handover' ||
       (replyPlan?.handoverRecommended === true &&
         typeof replyPlan?.rationale === 'string' &&
-        replyPlan.rationale.includes('human_request'));
+        (replyPlan.rationale.includes('human_request') ||
+          replyPlan.rationale.includes('bot_reply:HUMAN_ESCALATION_PROMISE')));
     if (isHumanEscalationCustomerAck) {
       const channelUsed = summary.bubbleResults.find(b => b.success && b.ghlChannelUsed)?.ghlChannelUsed;
       try {

@@ -156,7 +156,7 @@ export function AutomationEscalationPanel() {
     <>
       <SectionCard
         title="Workspace scope"
-        subtitle="Human escalation applies to this workspace. When a customer asks for a person, AISalesBot Pro stops automated replies for that conversation."
+        subtitle="Human escalation applies to this workspace. When a customer asks for a person—or the assistant replies with a team follow-up promise—AISalesBot Pro stops automated replies for that conversation."
         accent="muted"
       >
         <p style={{ fontSize: '0.9rem', color: 'var(--aisbp-text-secondary)', lineHeight: 1.55, margin: 0 }}>
@@ -168,7 +168,7 @@ export function AutomationEscalationPanel() {
       <SectionCard title="Human escalation" subtitle="Team notification via CRM" accent="default">
         <p style={{ fontSize: '0.9rem', color: 'var(--aisbp-text-secondary)', lineHeight: 1.55, margin: '0 0 1rem' }}>
           Human escalation stops the assistant for that conversation and notifies your team when the customer asks for a
-          person or needs manual help.
+          person, or when the assistant’s reply promises that someone from the team will follow up.
         </p>
 
         {settings ? (

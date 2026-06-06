@@ -33,6 +33,7 @@ import { applyOutboundPolicyGuard } from '../../lib/outbound-policy-guard';
 import { detectMenuIntentInMessage } from '../../lib/kb-relevance';
 import { rewriteUnsupportedBusinessClaimsWhenNoKb } from '../../lib/outbound-safety-governor';
 import { stripProactiveHandoverCtaIfNeeded } from '../../lib/proactive-handover-cta-guard';
+import { containsBotHumanEscalationLanguage } from '../../lib/bot-human-escalation-language';
 import { safeTextPreviewForLog } from '../../lib/safe-text-preview-for-log';
 import { isProductionEnv } from '../../lib/safe-text-preview-for-log';
 import type { ConversationIntent } from '../conversation-policy/conversation-intent';
@@ -122,21 +123,13 @@ export class ReplyPlannerService {
       draftText: guarded,
     });
     const afterKbLeak = sanitizeOutboundInternalKbLeak(afterHours, latestIntent, []);
-    const proactive = stripProactiveHandoverCtaIfNeeded({
+    const proactive = this.prepareProactiveHandoverOutboundText({
       replyText: afterKbLeak,
       latestIntent,
       latestUserMessage,
+      tenantId,
+      conversationId,
     });
-    if (proactive.removed) {
-      this.logger.log(
-        `proactiveHandoverCtaRemoved ${JSON.stringify({
-          tenantId,
-          conversationId,
-          latestIntent,
-          reason: proactive.reason ?? 'proactive_handover_cta',
-        })}`,
-      );
-    }
     const bubbles = this.formatIntoBubbles(proactive.text);
     this.logLiveWhitespaceDebug({
       rawDraft: proactive.text,
@@ -155,6 +148,9 @@ export class ReplyPlannerService {
       suggestedActions: this.suggestActions(routing, []),
       draftProvenance: 'option_selection_template',
       routingRecommendedModel: routing.recommendedModel,
+      ...(proactive.botHumanEscalationLanguageDetected
+        ? { botHumanEscalationLanguageDetected: true }
+        : {}),
     };
   }
 
@@ -209,22 +205,14 @@ export class ReplyPlannerService {
         draftText: afterMenu,
       });
       const afterKbLeak = sanitizeOutboundInternalKbLeak(afterHours, policyContext!.latestIntent, kbChunks);
-      const proactiveForced = stripProactiveHandoverCtaIfNeeded({
+      const proactiveForced = this.prepareProactiveHandoverOutboundText({
         replyText: afterKbLeak,
         latestIntent: policyContext!.latestIntent,
         latestUserMessage: policyContext?.latestUserMessage,
         combinedHumanMessagesText: policyContext?.combinedHumanMessagesText,
+        tenantId,
+        conversationId,
       });
-      if (proactiveForced.removed) {
-        this.logger.log(
-          `proactiveHandoverCtaRemoved ${JSON.stringify({
-            tenantId,
-            conversationId,
-            latestIntent: policyContext!.latestIntent,
-            reason: proactiveForced.reason ?? 'proactive_handover_cta',
-          })}`,
-        );
-      }
       const bubbles = this.formatIntoBubbles(proactiveForced.text);
       this.logLiveWhitespaceDebug({
         rawDraft: proactiveForced.text,
@@ -243,6 +231,9 @@ export class ReplyPlannerService {
         bubbles,
         suggestedActions,
         draftProvenance: 'policy_reply',
+        ...(proactiveForced.botHumanEscalationLanguageDetected
+          ? { botHumanEscalationLanguageDetected: true }
+          : {}),
       };
     }
 
@@ -303,22 +294,14 @@ export class ReplyPlannerService {
         })}`,
       );
     }
-    const proactiveLive = stripProactiveHandoverCtaIfNeeded({
+    const proactiveLive = this.prepareProactiveHandoverOutboundText({
       replyText: finalDraft,
       latestIntent: policyContext?.latestIntent ?? 'UNKNOWN',
       latestUserMessage: policyContext?.latestUserMessage,
       combinedHumanMessagesText: policyContext?.combinedHumanMessagesText,
+      tenantId,
+      conversationId,
     });
-    if (proactiveLive.removed) {
-      this.logger.log(
-        `proactiveHandoverCtaRemoved ${JSON.stringify({
-          tenantId,
-          conversationId,
-          latestIntent: policyContext?.latestIntent ?? 'UNKNOWN',
-          reason: proactiveLive.reason ?? 'proactive_handover_cta',
-        })}`,
-      );
-    }
     const bubbles = this.formatIntoBubbles(proactiveLive.text);
     this.logLiveWhitespaceDebug({
       rawDraft: proactiveLive.text,
@@ -355,6 +338,9 @@ export class ReplyPlannerService {
         : {}),
       ...(draft.usedOpenAiFallback ? { usedOpenAiFallback: draft.usedOpenAiFallback } : {}),
       ...(draft.fallbackUsed != null ? { fallbackUsed: draft.fallbackUsed } : {}),
+      ...(proactiveLive.botHumanEscalationLanguageDetected
+        ? { botHumanEscalationLanguageDetected: true }
+        : {}),
     };
 
     const genMeta =
@@ -616,6 +602,38 @@ export class ReplyPlannerService {
     } else {
       this.logger.debug(line);
     }
+  }
+
+  private prepareProactiveHandoverOutboundText(params: {
+    replyText: string;
+    latestIntent: ConversationIntent;
+    latestUserMessage?: string;
+    combinedHumanMessagesText?: string;
+    tenantId: string;
+    conversationId: string;
+  }): { text: string; botHumanEscalationLanguageDetected: boolean } {
+    const botHumanEscalationLanguageDetected = containsBotHumanEscalationLanguage(params.replyText);
+    if (botHumanEscalationLanguageDetected) {
+      return { text: params.replyText, botHumanEscalationLanguageDetected: true };
+    }
+
+    const proactive = stripProactiveHandoverCtaIfNeeded({
+      replyText: params.replyText,
+      latestIntent: params.latestIntent,
+      latestUserMessage: params.latestUserMessage,
+      combinedHumanMessagesText: params.combinedHumanMessagesText,
+    });
+    if (proactive.removed) {
+      this.logger.log(
+        `proactiveHandoverCtaRemoved ${JSON.stringify({
+          tenantId: params.tenantId,
+          conversationId: params.conversationId,
+          latestIntent: params.latestIntent,
+          reason: proactive.reason ?? 'proactive_handover_cta',
+        })}`,
+      );
+    }
+    return { text: proactive.text, botHumanEscalationLanguageDetected: false };
   }
 
   private suggestActions(

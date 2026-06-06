@@ -50,6 +50,8 @@ export interface ReplyDecision {
   rationale: string;
   bubbles: ReplyBubbleDraft[];
   suggestedActions: SuggestedAction[];
+  /** When true, outbound copy promises human/team follow-up (orchestration may escalate). */
+  botHumanEscalationLanguageDetected?: boolean;
   draftProvenance?:
     | 'live_generation'
     | 'placeholder_fallback'

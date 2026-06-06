@@ -61,6 +61,7 @@ import { inferKbRetrievalIntentHint } from '../../lib/kb-intent-synonyms';
 import { ConversationBookingFlowService } from '../booking-flow/conversation-booking-flow.service';
 import { BookingSettingsService } from '../booking-settings/booking-settings.service';
 import { HumanEscalationRuntimeService } from '../human-escalation/human-escalation-runtime.service';
+import { containsBotHumanEscalationLanguage } from '../../lib/bot-human-escalation-language';
 import { BotProfilesService } from '../prompts/bot-profiles.service';
 import { safeTextPreviewForLog } from '../../lib/safe-text-preview-for-log';
 import {
@@ -774,6 +775,15 @@ export class ConversationOrchestrationService {
         plan_reply_ms = Math.round(performance.now() - planPerf0);
       }
 
+      replyPlan = await this.maybeEscalateFromBotReplyLanguage({
+        input,
+        conversationId,
+        latestMsg,
+        memoryEntries: memory.entries,
+        replyPlan,
+        routingIntent,
+      });
+
       // Inspect the planned reply bubbles for option lists (A/B/C, 1./2., bullets) and capture
       // them into option memory so the next user reply ("A") can be resolved against them.
       const assistantText = replyPlan.bubbles.map(b => b.text).join('\n\n');
@@ -868,6 +878,84 @@ export class ConversationOrchestrationService {
         };
       }
     }
+  }
+
+  /**
+   * When outbound copy promises human/team follow-up, run the same escalation side effects as an
+   * explicit customer handover request (when tenant human escalation automation is enabled).
+   */
+  private async maybeEscalateFromBotReplyLanguage(params: {
+    input: OrchestrationInput;
+    conversationId: string;
+    latestMsg: string;
+    memoryEntries: MemoryEntry[];
+    replyPlan: ReplyDecision;
+    routingIntent: ConversationIntent;
+  }): Promise<ReplyDecision> {
+    const { input, conversationId, latestMsg, memoryEntries, routingIntent } = params;
+    let { replyPlan } = params;
+
+    if (routingIntent === 'HUMAN_HANDOVER' || replyPlan.draftProvenance === 'human_escalation') {
+      return replyPlan;
+    }
+    if (replyPlan.planStatus !== 'PLANNED' || replyPlan.bubbles.length === 0) {
+      return replyPlan;
+    }
+
+    const assistantText = replyPlan.bubbles.map(b => b.text).join('\n\n');
+    const detected =
+      replyPlan.botHumanEscalationLanguageDetected === true ||
+      containsBotHumanEscalationLanguage(assistantText);
+    if (!detected) {
+      return replyPlan;
+    }
+
+    this.logger.log(
+      `humanEscalationBotReplyLanguageDetected ${JSON.stringify({
+        conversationId,
+        tenantId: input.tenantId,
+      })}`,
+    );
+
+    try {
+      const escalation = await this.humanEscalationRuntime.onHumanHandoverIntent({
+        tenantId: input.tenantId,
+        tenantDisplayName: input.tenant?.name,
+        conversationId,
+        contactId: input.conversation?.contactId ?? null,
+        latestInboundMessage: latestMsg,
+        memoryEntries,
+        contactPhone: input.incomingMessage.contactPhone ?? null,
+        contactDisplayName: input.incomingMessage.contactDisplayName ?? null,
+        handoverReason: 'bot_reply:HUMAN_ESCALATION_PROMISE',
+        summaryFallback: 'The assistant indicated that a team member will follow up.',
+      });
+
+      if (escalation.escalated) {
+        replyPlan = {
+          ...replyPlan,
+          responseMode: 'handover',
+          handoverRecommended: true,
+          rationale: 'bot_reply:HUMAN_ESCALATION_PROMISE',
+          draftProvenance: 'human_escalation',
+        };
+        this.logger.log(
+          `humanEscalationBotReplyEscalated ${JSON.stringify({
+            conversationId,
+            tenantId: input.tenantId,
+          })}`,
+        );
+      }
+    } catch (e) {
+      this.logger.warn(
+        `humanEscalationBotReplyRuntimeFailed ${JSON.stringify({
+          conversationId,
+          message: e instanceof Error ? e.message : String(e),
+        })}`,
+      );
+    }
+
+    return replyPlan;
   }
 
   /**

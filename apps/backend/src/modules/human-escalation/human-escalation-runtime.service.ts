@@ -74,6 +74,8 @@ export class HumanEscalationRuntimeService {
     memoryEntries: MemoryEntry[];
     contactPhone?: string | null;
     contactDisplayName?: string | null;
+    handoverReason?: string;
+    summaryFallback?: string;
   }): Promise<{ escalated: boolean; alreadyInHandover: boolean }> {
     const {
       tenantId,
@@ -83,6 +85,8 @@ export class HumanEscalationRuntimeService {
       memoryEntries,
       contactPhone,
       contactDisplayName,
+      handoverReason = 'human_intent:HUMAN_HANDOVER',
+      summaryFallback = 'The customer requested human assistance.',
     } = params;
 
     const settings = await this.escalationSettings.getSettings(tenantId);
@@ -113,7 +117,7 @@ export class HumanEscalationRuntimeService {
           conversationId,
           'REQUEST',
           'AI',
-          'human_intent:HUMAN_HANDOVER',
+          handoverReason,
         );
       } catch (e) {
         this.logger.warn(
@@ -166,7 +170,7 @@ export class HumanEscalationRuntimeService {
             message: e instanceof Error ? e.message : String(e),
           })}`,
         );
-        summary = 'The customer requested human assistance.';
+        summary = summaryFallback;
       }
     }
 

@@ -49,6 +49,7 @@ export function formatHandoverReasonLabel(note: string | null | undefined): stri
   const raw = (note ?? '').trim();
   if (!raw) return 'Human escalation';
   if (/human_intent:\s*human_handover/i.test(raw)) return 'Human escalation';
+  if (/bot_reply:\s*human_escalation_promise/i.test(raw)) return 'Human escalation';
   if (/human_handover/i.test(raw)) return 'Human escalation';
   return raw;
 }

@@ -4,6 +4,7 @@
  */
 
 import type { ConversationIntent } from '../modules/conversation-policy/conversation-intent';
+import { sentenceContainsBotHumanEscalationLanguage, splitRoughSentences } from './bot-human-escalation-language';
 import { detectComplaintServiceIssue } from './outbound-safety-governor';
 
 export type ProactiveHandoverCtaRemovedLog = {
@@ -32,23 +33,7 @@ export function allowsProactiveTeamConnectLanguage(params: {
 }
 
 function sentenceContainsProactiveHandoverCta(sentence: string): boolean {
-  const t = sentence.toLowerCase();
-  return (
-    t.includes('connect you with the team') ||
-    t.includes('connect you to the team') ||
-    t.includes('speak with the team') ||
-    /\bteam will assist\b/i.test(sentence) ||
-    /\bhuman agent\b/i.test(sentence) ||
-    /\brepresentative\b/i.test(sentence)
-  );
-}
-
-/** Split into rough sentences for CTA removal (period / ! / ?). */
-function splitSentences(text: string): string[] {
-  return text
-    .split(/(?<=[.!?])\s+/)
-    .map(s => s.trim())
-    .filter(Boolean);
+  return sentenceContainsBotHumanEscalationLanguage(sentence);
 }
 
 export function stripProactiveHandoverCtaIfNeeded(params: {
@@ -66,7 +51,7 @@ export function stripProactiveHandoverCtaIfNeeded(params: {
     return { text: params.replyText, removed: false };
   }
 
-  const sentences = splitSentences(raw);
+  const sentences = splitRoughSentences(raw);
   if (sentences.length === 0) {
     return { text: params.replyText, removed: false };
   }

@@ -6,7 +6,7 @@ import { formatPostgrestError } from '../../lib/format-postgrest-error';
 import { getSupabaseService } from '../../lib/supabase';
 import type { ConversationMemory, MemoryEntry } from './dto';
 
-const MAX_TURNS = 10; // last 10 user turns to load
+const MAX_TURNS = 20; // last 20 user turns to load
 
 @Injectable()
 export class ConversationMemoryLoader {

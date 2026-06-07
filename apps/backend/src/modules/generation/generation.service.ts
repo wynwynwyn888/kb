@@ -401,7 +401,7 @@ export class GenerationService {
       messages.push({ role: 'system', content: params.systemPrompt });
     }
 
-    const mem = params.memory.slice(-10);
+    const mem = params.memory.slice(-20);
     const incoming = params.incomingMessage?.trim() ?? '';
     let memForHistory = mem;
     if (incoming) {

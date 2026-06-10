@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
  * Nest watch + repeated patch-dist so Node ESM resolves extensionless relative imports.
- * `npm run build` runs patch-dist once; `nest start --watch` does not, which caused
- * ERR_MODULE_NOT_FOUND for paths like ./modules/auth/auth.module
+ * `npm run build` runs patch-dist once; compiled output keeps extensionless relative imports.
+ * We use `nest build --watch` (not `nest start --watch`) so Node only runs after patch-dist.
  */
 
 import { spawn } from 'node:child_process';
@@ -43,62 +43,90 @@ execSync('pnpm -w run build:libs', { cwd: root, stdio: 'inherit', shell: true, e
 execSync('npx nest build', { cwd: root, stdio: 'inherit', shell: true, env: childEnv });
 patch();
 
-/**
- * `nest start --watch` rewrites `dist/` incrementally; for extensionless relative imports, Node ESM
- * needs `patch-dist.mjs` before `node` loads those files. A fixed 2s poll often lost the race:
- * the watch compile finished and the process restarted before the next patch. Debounced `fs.watch`
- * patches soon after writes; still keep a slow interval as a fallback on flaky watch platforms.
- */
 const distPath = join(root, 'dist');
-let patchTimer = null;
-function schedulePatch() {
-  if (patchTimer) clearTimeout(patchTimer);
-  patchTimer = setTimeout(() => {
-    patchTimer = null;
-    patch();
-  }, 40);
+let nodeProc = null;
+let restartTimer = null;
+let restarting = false;
+
+function stopNode() {
+  if (!nodeProc) return;
+  nodeProc.removeAllListeners();
+  nodeProc.kill();
+  nodeProc = null;
+}
+
+function startNode() {
+  if (!existsSync(join(root, 'dist', 'main.js'))) return;
+  patch();
+  stopNode();
+  nodeProc = spawn(process.execPath, ['dist/main.js'], {
+    cwd: root,
+    stdio: 'inherit',
+    env: childEnv,
+  });
+  nodeProc.on('exit', (code, signal) => {
+    if (restarting || signal) return;
+    cleanup();
+    process.exit(code ?? 0);
+  });
+}
+
+function scheduleRestart() {
+  if (restartTimer) clearTimeout(restartTimer);
+  restartTimer = setTimeout(() => {
+    restartTimer = null;
+    restarting = true;
+    startNode();
+    restarting = false;
+  }, 120);
 }
 
 if (existsSync(distPath)) {
   try {
     watch(distPath, { recursive: true }, () => {
-      schedulePatch();
+      scheduleRestart();
     });
   } catch (e) {
-    console.warn('[dev-esm] dist watch unavailable, falling back to interval patch:', e);
+    console.warn('[dev-esm] dist watch unavailable, falling back to interval restart:', e);
   }
 }
 
 /** Safety net if fs.watch misses an edge (e.g. some platforms). */
-const interval = setInterval(patch, 8000);
+const interval = setInterval(() => {
+  patch();
+}, 8000);
 
-const nest = spawn('npx', ['nest', 'start', '--watch'], {
+startNode();
+
+const nest = spawn('npx', ['nest', 'build', '--watch'], {
   cwd: root,
   stdio: 'inherit',
   shell: true,
   env: childEnv,
 });
 
-/**
- * Watch mode rewrites `dist/` (often overwriting patched imports) and Nest can spawn `node`
- * before the first 120ms interval tick — that caused ERR_MODULE_NOT_FOUND on the first run.
- * Patch at 0–500ms, then a tight interval, then a slower long-running fallback.
- */
-for (const ms of [0, 10, 25, 50, 80, 120, 200, 350, 500]) {
-  setTimeout(() => patch(), ms);
+function cleanup() {
+  if (restartTimer) clearTimeout(restartTimer);
+  clearInterval(interval);
+  stopNode();
 }
-const burst = setInterval(patch, 50);
-setTimeout(() => clearInterval(burst), 12_000);
 
 nest.on('error', (err) => {
-  clearInterval(interval);
-  clearInterval(burst);
+  cleanup();
   console.error(err);
   process.exit(1);
 });
 
 nest.on('close', (code) => {
-  clearInterval(interval);
-  clearInterval(burst);
+  cleanup();
   process.exit(code ?? 0);
+});
+
+process.on('SIGINT', () => {
+  cleanup();
+  nest.kill('SIGINT');
+});
+process.on('SIGTERM', () => {
+  cleanup();
+  nest.kill('SIGTERM');
 });

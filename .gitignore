@@ -36,6 +36,9 @@ docker-compose.hostinger.yml.bak.*
 *.db
 *.db-journal
 
+# Local dev tools (e.g. portable Redis on Windows)
+.dev/
+
 # Cache
 .cache/
 .turbo/

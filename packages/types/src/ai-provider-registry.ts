@@ -57,13 +57,26 @@ export function defaultModelForLiveProvider(provider: string): string {
   return provider.toUpperCase() === 'MINIMAX' ? 'MiniMax-M3' : 'gpt-4o-mini';
 }
 
+/** Agencies saved before M3 default still have MiniMax-M2.7 in settings — treat as M3 unless highspeed. */
+export function upgradeLegacyMinimaxDefaultModel(model: string): string {
+  const m = model.trim();
+  if (m === 'MiniMax-M2.7') return 'MiniMax-M3';
+  return m;
+}
+
 /** Returns a registry-approved model id, or the provider default when missing/invalid. */
 export function normalizeModelForLiveProvider(provider: string, model: string | null | undefined): string {
   const p = provider.toUpperCase();
   if (!isAgencyLiveAiProvider(p)) return defaultModelForLiveProvider('OPENAI');
   const m = (model ?? '').trim();
-  if (isModelAllowedForLiveProvider(p, m)) return m;
-  return defaultModelForLiveProvider(p);
+  let resolved = m;
+  if (!isModelAllowedForLiveProvider(p, m)) {
+    resolved = defaultModelForLiveProvider(p);
+  }
+  if (p === 'MINIMAX') {
+    resolved = upgradeLegacyMinimaxDefaultModel(resolved);
+  }
+  return resolved;
 }
 
 export function listModelIdsForLiveProvider(provider: string): readonly string[] {

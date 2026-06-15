@@ -15,8 +15,21 @@ describe('ai-live-model-resolve', () => {
 
   it('resolves tenant OpenAI id when provider is MiniMax', () => {
     const r = resolveGenerationModel('MINIMAX', 'MiniMax-M2.7', 'gpt-4o');
-    expect(r.model).toBe('MiniMax-M2.7');
+    expect(r.model).toBe('MiniMax-M3');
+    expect(r.coercedFromStored).toBe(true);
     expect(r.coercedFromRequest).toBe(true);
+  });
+
+  it('upgrades legacy MiniMax-M2.7 stored default to M3', () => {
+    const r = resolveGenerationModel('MINIMAX', 'MiniMax-M2.7', undefined);
+    expect(r.model).toBe('MiniMax-M3');
+    expect(r.coercedFromStored).toBe(true);
+  });
+
+  it('keeps MiniMax-M2.7-highspeed when explicitly saved', () => {
+    const r = resolveGenerationModel('MINIMAX', 'MiniMax-M2.7-highspeed', undefined);
+    expect(r.model).toBe('MiniMax-M2.7-highspeed');
+    expect(r.coercedFromStored).toBe(false);
   });
 
   it('applies tenant override when valid for OpenAI', () => {

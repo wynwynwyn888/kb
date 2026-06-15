@@ -200,6 +200,8 @@ export class AgencyAiConfigService {
       .select('provider, api_key, settings, endpoint')
       .eq('agency_id', agencyId);
 
+    await this.migrateLegacyMinimaxDefaultModels(agencyId, rows ?? []);
+
     const keysPresent: Partial<Record<string, boolean>> = {};
     const providerSnapshots: Partial<Record<string, AgencyProviderFormSnapshot>> = {};
 
@@ -273,6 +275,30 @@ export class AgencyAiConfigService {
       },
       liveAiCatalog,
     };
+  }
+
+  /** One-time style upgrade: agencies saved when M2.7 was the default still have it in settings JSON. */
+  private async migrateLegacyMinimaxDefaultModels(
+    agencyId: string,
+    rows: Array<{ provider: string; settings: unknown }>,
+  ): Promise<void> {
+    for (const r of rows) {
+      if (String(r.provider).toUpperCase() !== 'MINIMAX') continue;
+      const s = (r.settings as Record<string, unknown> | null) ?? {};
+      const stored = typeof s['defaultModel'] === 'string' ? s['defaultModel'].trim() : '';
+      if (stored !== 'MiniMax-M2.7') continue;
+      const next = { ...s, defaultModel: 'MiniMax-M3' };
+      const { error } = await this.supabase
+        .from('agency_model_providers')
+        .update({ settings: next, updated_at: new Date().toISOString() })
+        .eq('agency_id', agencyId)
+        .eq('provider', 'MINIMAX');
+      if (error) {
+        this.logger.warn(`MiniMax M2.7→M3 migration failed for agency ${agencyId}: ${error.message}`);
+      } else {
+        this.logger.log(`Migrated agency ${agencyId} MiniMax default MiniMax-M2.7 → MiniMax-M3`);
+      }
+    }
   }
 
   private async persistHealthSnapshot(agencyId: string, snapshot: AiModelHealthSnapshot): Promise<void> {

@@ -13,6 +13,8 @@ out/
 .env.*.local
 .env.production
 infra/vps/.github-secrets.local.env
+infra/vps/.deploy.local.env
+.ssh-tmp/
 
 # IDE
 .idea/

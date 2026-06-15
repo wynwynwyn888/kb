@@ -28,7 +28,9 @@ alwaysApply: true
 - Public app: `https://kb.aisalesbot.pro` (Next on :3000 proxies to backend on :3001)
 - Containers: `aisbp-backend-1`, `aisbp-frontend-1`, `aisbp-redis-1`
 
-**Never store SSH passwords or GitHub PATs in the repo, rules, or chat logs.** Ask the user for credentials when needed, or use existing `gh` auth locally.
+**Local credentials (gitignored):** `infra/vps/.deploy.local.env` — copy from `.deploy.local.env.example`. Contains `GITHUB_PAT`, `SSH_HOST`, `SSH_USER`, `SSH_PASS`, `VPS_AISBP_PATH`. Never commit the real file.
+
+For local `git push`, prefer `gh` auth when logged in as **demodropai**; use `GITHUB_PAT` from the deploy env file for VPS `git fetch` when needed.
 
 ## Manual backend deploy (SSH)
 
@@ -44,7 +46,7 @@ docker ps --filter name=backend
 docker logs aisbp-backend-1 --tail 50
 ```
 
-`git fetch` on the VPS requires GitHub auth (deploy key, PAT for one pull, or Hostinger private-repo integration). After a PAT-based pull, reset remote to `https://github.com/demodropai/aisbp.git` (no token in URL).
+`git fetch` on the VPS: load `GITHUB_PAT` from `infra/vps/.deploy.local.env`, pull, then reset remote to `https://github.com/demodropai/aisbp.git` (no token left in URL).
 
 ## Verify deploy
 
@@ -62,7 +64,7 @@ docker compose --env-file .env.production -f docker-compose.hostinger.yml up -d 
 
 ## Local helper (Windows)
 
-Ephemeral SSH scripts can live in `.ssh-tmp/` (gitignored) using `ssh2` + env vars `SSH_PASS` / `GIT_PAT` — do not commit.
+Load `infra/vps/.deploy.local.env` for `SSH_PASS` / `GITHUB_PAT` when running SSH deploy scripts (e.g. under `.ssh-tmp/`, also gitignored).
 
 ## Docs
 

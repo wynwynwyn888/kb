@@ -158,7 +158,12 @@ export function extractGhlInboundImageMediaUrl(
   },
 ): string | null {
   const roots = collectGhlInboundMediaRootNodes(data, opts?.envelope, opts?.workflowFlatRaw);
-  const relaxed = ghlBodyIndicatesImagePlaceholder(opts?.messageBody ?? '');
+  const bodyRelaxed = ghlBodyIndicatesImagePlaceholder(opts?.messageBody ?? '');
+  const attachmentPresent = roots.some(node => {
+    const att = node['attachments'];
+    return Array.isArray(att) && att.length > 0;
+  });
+  const relaxed = bodyRelaxed || attachmentPresent;
 
   for (const node of roots) {
     const urls = extractImageUrlsFromNode(node, false);
@@ -173,6 +178,18 @@ export function extractGhlInboundImageMediaUrl(
   }
 
   return null;
+}
+
+/** True when webhook payload has attachment nodes but no audio URL was resolved. */
+export function ghlInboundHasAttachmentNodes(
+  data: Record<string, unknown>,
+  envelope?: Record<string, unknown>,
+  workflowFlatRaw?: Record<string, unknown>,
+): boolean {
+  return collectGhlInboundMediaRootNodes(data, envelope, workflowFlatRaw).some(node => {
+    const att = node['attachments'];
+    return Array.isArray(att) && att.length > 0;
+  });
 }
 
 function rowBody(row: Record<string, unknown>): string {

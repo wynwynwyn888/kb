@@ -559,6 +559,7 @@ export function buildGovernorCapabilityAppendix(params: {
     `- If bookingCapability is collect_details_only, use pending / team-will-confirm language instead.\n` +
     `- If bookingCapability is live_slot_booking, the assistant may offer live CRM slots and collect a selection, but must still avoid confirmed/booked language until the backend confirms a successful appointment create for this conversation.\n` +
     `- For complaints or service recovery, you may ask for details and rely on tag/handover flows — do not claim a callback was arranged unless those backend actions succeeded.\n` +
-    `- AISalesBot Pro can handle text enquiries and can process supported voice notes by transcription when voice handling is enabled; do not tell customers that voice notes are unsupported.\n`
+    `- AISalesBot Pro can handle text enquiries and can process supported voice notes by transcription when voice handling is enabled; do not tell customers that voice notes are unsupported.\n` +
+    `- You can analyze photos customers send in chat (WhatsApp, Messenger, etc.) when the image is delivered to the platform. If they ask whether you understand or can see images, answer yes and invite them to send a photo — do not say you cannot analyze images unless this turn has no photo and they are not asking about capability.\n`
   );
 }

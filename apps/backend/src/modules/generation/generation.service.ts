@@ -21,6 +21,7 @@ import type { SelectionResolution } from '../conversation-policy/option-resolver
 import { userRequestsFormattingPreference } from '../../lib/formatting-preference-intent';
 import { REPLY_LANGUAGE_MIRROR_SYSTEM_CONTENT } from '../../lib/reply-language-mirror';
 import { isInboundImagePlaceholderContent } from '../../lib/inbound-image';
+import { userAsksAboutImageCapability } from '../../lib/image-capability-intent';
 import { GhlInboundImageFetchService } from '../transcription/ghl-inbound-image-fetch.service';
 
 export interface GenerateDraftPolicyContext {
@@ -332,6 +333,9 @@ export class GenerationService {
 
     const hasVisionInput = messages.some(m => Array.isArray(m.content));
     if (hasVisionInput) {
+      this.logger.log(
+        `OpenAI vision turn: model=${generationModel} tenantId=${params.tenantId}`,
+      );
       try {
         const out = await this.openAiMultimodalChatCompletion({
           apiKey: row.api_key,
@@ -553,6 +557,15 @@ export class GenerationService {
         content:
           'Formatting preference: the customer asked for a specific reply shape (bolding, bullets, shorter text, or split messages). ' +
           'Treat this as a normal formatting request. Briefly confirm you can use WhatsApp *bold* for important points and bullet lists for clarity — do not claim you cannot bold text here.',
+      });
+    }
+
+    if (userAsksAboutImageCapability(inboundTrim) && !params.incomingImageUrl?.trim()) {
+      messages.push({
+        role: 'system',
+        content:
+          'The customer is asking whether you can understand images. Confirm yes — you analyze photos they send in this chat. ' +
+          'Invite them to send a photo if they want help with something visual. Do not say you cannot analyze images.',
       });
     }
 

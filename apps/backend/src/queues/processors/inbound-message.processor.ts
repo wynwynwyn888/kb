@@ -33,7 +33,7 @@ import { GhlVoiceRecordingFetchService } from '../../modules/transcription/ghl-v
 import { GhlVoiceMessageDiscoveryService } from '../../modules/transcription/ghl-voice-message-discovery.service';
 import { GhlVoiceConversationDiscoveryService } from '../../modules/transcription/ghl-voice-conversation-discovery.service';
 import { classifyGhlAudioPlaceholderBody } from '../../modules/webhooks/ghl-inbound-audio-media';
-import { INBOUND_IMAGE_PLACEHOLDER_CONTENT } from '../../lib/inbound-image';
+import { INBOUND_IMAGE_PLACEHOLDER_CONTENT, isInboundImagePlaceholderContent } from '../../lib/inbound-image';
 import {
   ghlBodyIndicatesImagePlaceholder,
   stripGhlImagePlaceholderFromInboundBody,
@@ -1096,6 +1096,7 @@ export class InboundMessageProcessor extends WorkerHost {
       latestInboundText: latestText,
       latestInboundMessageType: latestInbound.messageType,
       latestInboundImageUrl: latestInbound.imageMediaUrl,
+      inboundWebhookTimestampIso: job.data.inboundWebhookReceivedAtIso ?? new Date().toISOString(),
       recentInboundBatch: orchestrationBatch,
       resetDetectionBatch,
       contactDisplayName,
@@ -1119,6 +1120,7 @@ export class InboundMessageProcessor extends WorkerHost {
     latestInboundText: string;
     latestInboundMessageType?: InboundMessageJobData['messageType'];
     latestInboundImageUrl?: string | null;
+    inboundWebhookTimestampIso?: string;
     recentInboundBatch?: string[];
     /** Raw burst-window lines (oldest→newest), including `/new`, so trailing reset commands still run */
     resetDetectionBatch?: string[];
@@ -1141,6 +1143,7 @@ export class InboundMessageProcessor extends WorkerHost {
       latestInboundText,
       latestInboundMessageType,
       latestInboundImageUrl,
+      inboundWebhookTimestampIso,
       recentInboundBatch,
       resetDetectionBatch,
       contactDisplayName,
@@ -1202,7 +1205,15 @@ export class InboundMessageProcessor extends WorkerHost {
       ghlContactId,
       messageContent: latestInboundText,
       messageType: latestInboundMessageType ?? 'text',
-      imageMediaUrl: latestInboundImageUrl ?? null,
+      imageMediaUrl: await this.resolveOrchestrationImageUrl({
+        tenantId,
+        locationId,
+        ghlConversationId,
+        latestInboundMessageType: latestInboundMessageType ?? 'text',
+        latestInboundText,
+        latestInboundImageUrl: latestInboundImageUrl ?? null,
+        inboundWebhookTimestampIso: inboundWebhookTimestampIso ?? new Date().toISOString(),
+      }),
       timestamp: new Date().toISOString(),
       externalEventId: webhookEventId ?? `local:${conversationId}:${Date.now()}`,
       eventType: 'inbound_message',
@@ -1403,7 +1414,7 @@ export class InboundMessageProcessor extends WorkerHost {
     const ct = String(data.content_type ?? 'TEXT').toUpperCase();
     let messageType: InboundMessageJobData['messageType'] =
       ct === 'IMAGE' ? 'image' : ct === 'AUDIO' ? 'audio' : ct === 'VIDEO' ? 'video' : 'text';
-    if (messageType === 'text' && ghlBodyIndicatesImagePlaceholder(content)) {
+    if (messageType === 'text' && (ghlBodyIndicatesImagePlaceholder(content) || isInboundImagePlaceholderContent(content))) {
       messageType = 'image';
     }
     const meta =
@@ -1415,6 +1426,54 @@ export class InboundMessageProcessor extends WorkerHost {
         ? meta['imageMediaUrl'].trim()
         : null;
     return { messageType, imageMediaUrl };
+  }
+
+  private async resolveOrchestrationImageUrl(params: {
+    tenantId: string;
+    locationId: string;
+    ghlConversationId: string;
+    latestInboundMessageType: InboundMessageJobData['messageType'];
+    latestInboundText: string;
+    latestInboundImageUrl: string | null;
+    inboundWebhookTimestampIso: string;
+  }): Promise<string | null> {
+    const existing = params.latestInboundImageUrl?.trim();
+    if (existing) return existing;
+
+    const imageTurn =
+      params.latestInboundMessageType === 'image' ||
+      isInboundImagePlaceholderContent(params.latestInboundText) ||
+      ghlBodyIndicatesImagePlaceholder(params.latestInboundText);
+    if (!imageTurn || !params.ghlConversationId.trim() || !params.locationId.trim()) {
+      return null;
+    }
+    if (process.env['GHL_IMAGE_DISCOVER_MEDIA_URL'] === 'false') {
+      return null;
+    }
+
+    const discovered = await this.ghlVoiceMessageDiscovery.discoverInboundImageMediaUrl({
+      tenantId: params.tenantId,
+      locationId: params.locationId,
+      conversationId: params.ghlConversationId.trim(),
+      webhookTimestampIso: params.inboundWebhookTimestampIso,
+    });
+    if (discovered.ok) {
+      this.logger.log(
+        JSON.stringify({
+          orchestrationImageDiscoverySucceeded: true,
+          candidateCount: discovered.candidateCount,
+        }),
+      );
+      return discovered.imageMediaUrl;
+    }
+    this.logger.warn(
+      JSON.stringify({
+        orchestrationImageDiscoveryFailed: true,
+        reason: discovered.reason,
+        candidateCount: discovered.candidateCount ?? 0,
+      }),
+    );
+    return null;
   }
 
   /**

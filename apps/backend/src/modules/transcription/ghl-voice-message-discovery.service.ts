@@ -940,6 +940,20 @@ export class GhlVoiceMessageDiscoveryService {
       return { ok: false, reason: tokenResult.reason, candidateCount: 0 };
     }
 
+    if (preferredId) {
+      const row = await this.tryFetchMessageById({
+        baseUrl: ghlApiBase(),
+        token: tokenResult.token,
+        messageId: preferredId,
+      });
+      if (row) {
+        const url = extractGhlMessageImageMediaUrlFromRow(row);
+        if (url) {
+          return { ok: true, imageMediaUrl: url, messageId: preferredId, candidateCount: 1 };
+        }
+      }
+    }
+
     let lastCandidateCount = 0;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       if (attempt > 1) await sleep(delayMs);
@@ -1025,6 +1039,37 @@ export class GhlVoiceMessageDiscoveryService {
       return { ok: true, token: decrypt(String(data['private_token_encrypted'])) };
     } catch {
       return { ok: false, reason: 'token_decrypt_failed' };
+    }
+  }
+
+  private async tryFetchMessageById(params: {
+    baseUrl: string;
+    token: string;
+    messageId: string;
+  }): Promise<Record<string, unknown> | null> {
+    const url = `${params.baseUrl}/conversations/messages/${encodeURIComponent(params.messageId.trim())}`;
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), LIST_TIMEOUT_MS);
+    try {
+      const res = await fetch(url, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${params.token}`,
+          Version: '2021-07-28',
+          Accept: 'application/json',
+        },
+        signal: ac.signal,
+      });
+      if (!res.ok) return null;
+      const json = (await res.json()) as unknown;
+      const root = asRecord(json);
+      if (!root) return null;
+      const nested = asRecord(root['message']) ?? asRecord(root['data']);
+      return nested ?? root;
+    } catch {
+      return null;
+    } finally {
+      clearTimeout(timer);
     }
   }
 

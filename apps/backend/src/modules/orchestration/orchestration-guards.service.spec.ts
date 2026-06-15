@@ -153,10 +153,10 @@ describe('OrchestrationGuards', () => {
       expect(result.decision).toBe('PROCEED');
     });
 
-    it('returns SKIP_UNSUPPORTED_MESSAGE_TYPE for image', async () => {
-      const input = makeInput({ incomingMessage: { messageType: 'image', messageContent: '' } });
+    it('allows image inbound when vision pipeline is enabled', async () => {
+      const input = makeInput({ incomingMessage: { messageType: 'image', messageContent: '[Photo]' } });
       const result = await (guards as never)['checkMessageType'](input);
-      expect(result.decision).toBe('SKIP_UNSUPPORTED_MESSAGE_TYPE');
+      expect(result.decision).toBe('PROCEED');
     });
   });
 

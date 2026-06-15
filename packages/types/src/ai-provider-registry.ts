@@ -27,7 +27,8 @@ export const AI_LIVE_PROVIDER_REGISTRY: Record<
   MINIMAX: {
     label: 'MiniMax',
     models: [
-      { id: 'MiniMax-M2.7', label: 'MiniMax-M2.7', tier: 'default' },
+      { id: 'MiniMax-M3', label: 'MiniMax M3', tier: 'default' },
+      { id: 'MiniMax-M2.7', label: 'MiniMax-M2.7', tier: 'balanced' },
       { id: 'MiniMax-M2.7-highspeed', label: 'MiniMax-M2.7-highspeed', tier: 'highspeed' },
     ],
   },
@@ -53,7 +54,7 @@ export function isModelAllowedForLiveProvider(provider: string, model: string): 
 }
 
 export function defaultModelForLiveProvider(provider: string): string {
-  return provider.toUpperCase() === 'MINIMAX' ? 'MiniMax-M2.7' : 'gpt-4o-mini';
+  return provider.toUpperCase() === 'MINIMAX' ? 'MiniMax-M3' : 'gpt-4o-mini';
 }
 
 /** Returns a registry-approved model id, or the provider default when missing/invalid. */

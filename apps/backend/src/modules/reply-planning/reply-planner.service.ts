@@ -166,6 +166,8 @@ export class ReplyPlannerService {
     temperature?: number;
     maxTokens?: number | null;
     policyContext?: ReplyPlanPolicyContext;
+    /** Latest inbound customer photo URL for vision generation. */
+    incomingImageUrl?: string | null;
   }): Promise<ReplyDecision> {
     const { tenantId, routing, kbChunks, memory, systemPrompt, conversationId, policyContext } = params;
 
@@ -247,6 +249,7 @@ export class ReplyPlannerService {
       params.temperature,
       params.maxTokens,
       policyContext,
+      params.incomingImageUrl,
     );
 
     // ---------- Format into bubbles ----------
@@ -394,6 +397,7 @@ export class ReplyPlannerService {
     subaccountTemperature?: number,
     subaccountMaxTokens?: number | null,
     policyContext?: ReplyPlanPolicyContext,
+    incomingImageUrl?: string | null,
   ): Promise<{
     text: string;
     provenance: 'live_generation' | 'placeholder_fallback' | 'policy_reply';
@@ -429,6 +433,7 @@ export class ReplyPlannerService {
     const liveDraft = await this.generationService.generateDraft({
       tenantId,
       incomingMessage: incomingForGen,
+      incomingImageUrl,
       systemPrompt,
       memory,
       kbContext: kbChunks,

@@ -28,6 +28,8 @@ import {
   ghlInboundShouldTranscribeVoice,
   VOICE_INBOUND_PLACEHOLDER_NO_MEDIA_USER_MESSAGE,
 } from './ghl-inbound-audio-media';
+import { extractGhlInboundImageMediaUrl } from './ghl-inbound-image-media';
+import { INBOUND_IMAGE_PLACEHOLDER_CONTENT } from '../../lib/inbound-image';
 import { safeTextPreviewForLog } from '../../lib/safe-text-preview-for-log';
 import { resolveInboundGhlWebhookTenant } from './ghl-inbound-webhook-tenant-resolution';
 import { ghlWebhookShapeDiagnosticsEnabled } from '../../lib/production-log-flags';
@@ -194,6 +196,11 @@ export class WebhooksService {
       workflowFlatRaw,
     });
 
+    const imageMediaUrl = extractGhlInboundImageMediaUrl(data, {
+      envelope,
+      workflowFlatRaw,
+    });
+
     const voiceInboundAudioPlaceholderWithoutMediaUrl = isAudioPlaceholderInbound && !audioMediaUrl;
 
     let messageContent = rawMessageBody;
@@ -201,6 +208,11 @@ export class WebhooksService {
     if (voiceInboundAudioPlaceholderWithoutMediaUrl) {
       messageContent = VOICE_INBOUND_PLACEHOLDER_NO_MEDIA_USER_MESSAGE;
       messageType = 'text';
+    } else if (messageTypeMapped === 'image' || imageMediaUrl) {
+      messageType = 'image';
+      if (!messageContent.trim()) {
+        messageContent = INBOUND_IMAGE_PLACEHOLDER_CONTENT;
+      }
     }
 
     const voiceInboundNeedsTranscribe = voiceInboundAudioPlaceholderWithoutMediaUrl
@@ -258,6 +270,7 @@ export class WebhooksService {
       messageContent,
       messageType,
       audioMediaUrl: audioMediaUrl ?? null,
+      imageMediaUrl: imageMediaUrl ?? null,
       voiceInboundNeedsTranscribe,
       voiceInboundAudioPlaceholderWithoutMediaUrl,
       voiceInboundPlaceholderKind: isAudioPlaceholderInbound ? bodyPlaceholderKind : undefined,
@@ -492,6 +505,7 @@ export class WebhooksService {
       contactEmail: payload.contactEmail ?? undefined,
       contactFieldsFromExtendedWebhook: Boolean(payload.contactFieldsFromExtendedWebhook),
       audioMediaUrl: payload.audioMediaUrl ?? undefined,
+      imageMediaUrl: payload.imageMediaUrl ?? undefined,
       voiceInboundNeedsTranscribe: Boolean(payload.voiceInboundNeedsTranscribe),
       voiceInboundAudioPlaceholderWithoutMediaUrl: Boolean(
         payload.voiceInboundAudioPlaceholderWithoutMediaUrl,

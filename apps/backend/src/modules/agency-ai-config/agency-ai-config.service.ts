@@ -210,7 +210,7 @@ export class AgencyAiConfigService {
       const s = (r.settings as Record<string, unknown> | null) ?? {};
       const mg = s['minimaxGroupId'] as string | undefined;
       const snapshotDefault =
-        (s['defaultModel'] as string) ?? (prov === 'MINIMAX' ? 'MiniMax-M2.7' : 'gpt-4o-mini');
+        (s['defaultModel'] as string) ?? (prov === 'MINIMAX' ? 'MiniMax-M3' : 'gpt-4o-mini');
       providerSnapshots[prov] = {
         defaultModel: normalizeModelForLiveProvider(prov, snapshotDefault),
         maxTokens: s['maxTokens'] as number | undefined,

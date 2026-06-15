@@ -6,9 +6,13 @@ import { stripCustomerFacingMeta, stripModelThinking } from '@aisbp/formatter';
 import { summarizeAxiosErrorForLogs } from '../../lib/safe-http-error';
 import { getSupabaseService } from '../../lib/supabase';
 import { OpenAiProviderAdapter } from '@aisbp/ai-provider-openai';
+import axios from 'axios';
+import { extractAssistantTextFromOpenAiCompatibleBody } from '../../lib/openai-compatible-completion-text';
 import { normalizeModelForLiveProvider } from '@aisbp/types';
 import { isUsableOpenAiFallbackKey, resolveGenerationModel } from '../../lib/ai-live-model-resolve';
 import { minimaxChatCompletion } from './minimax.generate';
+import type { ChatMessageContent } from '../../lib/chat-message-content';
+import { buildUserMessageContent } from '../../lib/chat-message-content';
 import type { MemoryEntry } from '../orchestration/dto';
 import type { RetrievalChunk } from '../kb/dto/retrieval.dto';
 import type { ConversationIntent } from '../conversation-policy/conversation-intent';
@@ -54,6 +58,8 @@ export interface GenerateDraftParams {
   maxTokens?: number;
   /** Conversation policy summary for the latest turn (intent, selection, state). */
   policyContext?: GenerateDraftPolicyContext;
+  /** HTTP(S) URL for the latest inbound customer image (vision models). */
+  incomingImageUrl?: string | null;
 }
 
 export interface GenerateDraftResult {
@@ -263,6 +269,13 @@ export class GenerationService {
       params.maxTokens != null && Number.isFinite(params.maxTokens) ? Math.floor(params.maxTokens) : agMax;
     const messages = this.buildMessages(params);
     const groupId = (settings['minimaxGroupId'] as string | undefined)?.trim() || undefined;
+    const generationModel = params.incomingImageUrl?.trim()
+      ? providerName === 'MINIMAX'
+        ? pickMinimaxVisionModel(model)
+        : providerName === 'OPENAI'
+          ? pickOpenAiVisionModel(model)
+          : model
+      : model;
 
     if (providerName === 'MINIMAX') {
       try {
@@ -274,7 +287,7 @@ export class GenerationService {
           apiKey: row.api_key,
           baseUrl: row.endpoint ?? undefined,
           groupId,
-          model,
+          model: generationModel,
           messages: mmMsg,
           temperature: temp,
           maxTokens: maxT,
@@ -285,7 +298,7 @@ export class GenerationService {
         return {
           content: out.content || null,
           generationProvider: 'MINIMAX',
-          generationModel: (out.model && String(out.model).trim()) || model,
+          generationModel: (out.model && String(out.model).trim()) || generationModel,
         };
       } catch (e) {
         this.logger.warn(
@@ -293,7 +306,33 @@ export class GenerationService {
             `check Agency AI: MiniMax default model, API base (must be https://api.minimax.io/v1), ` +
             `and minimaxGroupId if your account requires it.`,
         );
-        return { content: null, generationProvider: 'MINIMAX', generationModel: model };
+        return { content: null, generationProvider: 'MINIMAX', generationModel };
+      }
+    }
+
+    const hasVisionInput = messages.some(m => Array.isArray(m.content));
+    if (hasVisionInput) {
+      try {
+        const out = await this.openAiMultimodalChatCompletion({
+          apiKey: row.api_key,
+          baseUrl: row.endpoint ?? undefined,
+          model: generationModel,
+          messages,
+          temperature: temp,
+          maxTokens: maxT,
+        });
+        this.logger.debug(
+          `OpenAI vision HTTP ok: generationModelActuallyUsed=${out.model} tokens=${out.totalTokens}`,
+        );
+        return {
+          content: out.content || null,
+          generationProvider: 'OPENAI',
+          generationModel: out.model,
+        };
+      } catch (e) {
+        const detail = summarizeAxiosErrorForLogs(e, 'OpenAI chat/completions (vision)');
+        this.logger.warn(`${detail} — verify OpenAI vision model and API key.`);
+        return { content: null, generationProvider: 'OPENAI', generationModel };
       }
     }
 
@@ -307,8 +346,8 @@ export class GenerationService {
     });
     try {
       const result = await adapter.generate({
-        model,
-        messages,
+        model: generationModel,
+        messages: messages.map(m => ({ role: m.role, content: String(m.content) })),
         temperature: temp,
         maxTokens: maxT,
       });
@@ -394,8 +433,8 @@ export class GenerationService {
 
   private buildMessages(
     params: GenerateDraftParams,
-  ): Array<{ role: 'system' | 'user' | 'assistant'; content: string }> {
-    const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [];
+  ): Array<{ role: 'system' | 'user' | 'assistant'; content: ChatMessageContent }> {
+    const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: ChatMessageContent }> = [];
 
     if (params.systemPrompt) {
       messages.push({ role: 'system', content: params.systemPrompt });
@@ -495,8 +534,56 @@ export class GenerationService {
       });
     }
 
-    messages.push({ role: 'user', content: params.incomingMessage });
+    if (params.incomingImageUrl?.trim()) {
+      messages.push({
+        role: 'system',
+        content:
+          'The customer sent a photo. Describe what you see in the image when relevant, then answer their question or caption helpfully. Do not claim you cannot see images.',
+      });
+    }
+
+    messages.push({
+      role: 'user',
+      content: buildUserMessageContent(params.incomingMessage, params.incomingImageUrl),
+    });
     return messages;
+  }
+
+  private async openAiMultimodalChatCompletion(params: {
+    apiKey: string;
+    baseUrl?: string;
+    model: string;
+    messages: Array<{ role: 'system' | 'user' | 'assistant'; content: ChatMessageContent }>;
+    temperature: number;
+    maxTokens: number;
+  }): Promise<{ content: string; model: string; totalTokens: number }> {
+    const base = (params.baseUrl ?? 'https://api.openai.com/v1').replace(/\/$/, '');
+    const response = await axios.post(
+      `${base}/chat/completions`,
+      {
+        model: params.model,
+        messages: params.messages,
+        temperature: params.temperature,
+        max_tokens: Math.min(8192, Math.max(1, params.maxTokens)),
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${params.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        timeout: 60_000,
+      },
+    );
+    const data = response.data as Record<string, unknown>;
+    const text = extractAssistantTextFromOpenAiCompatibleBody(data);
+    const usage = data['usage'] as { total_tokens?: number } | undefined;
+    const model =
+      typeof data['model'] === 'string' && data['model'].trim() ? data['model'].trim() : params.model;
+    return {
+      content: String(text).trim(),
+      model,
+      totalTokens: usage?.total_tokens ?? Math.ceil(String(text).length / 4),
+    };
   }
 
   private async getAgencyId(tenantId: string): Promise<string | null> {
@@ -525,4 +612,16 @@ export class GenerationService {
       settings: (data.settings as Record<string, unknown>) ?? {},
     };
   }
+}
+
+function pickOpenAiVisionModel(model: string): string {
+  const m = model.trim();
+  if (/^gpt-4o/i.test(m) || /^gpt-4\.1/i.test(m)) return m;
+  return 'gpt-4o-mini';
+}
+
+function pickMinimaxVisionModel(model: string): string {
+  const m = model.trim();
+  if (/^MiniMax-M3/i.test(m)) return m;
+  return 'MiniMax-M3';
 }

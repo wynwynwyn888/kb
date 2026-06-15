@@ -35,6 +35,8 @@ export interface NormalizedWebhookPayload {
   ghlMessageTypeRaw?: string | null;
   /** HTTP(S) URL for inbound voice/audio media when GHL sends attachments instead of plain text. */
   audioMediaUrl?: string | null;
+  /** HTTP(S) URL for inbound image attachments. */
+  imageMediaUrl?: string | null;
   /** When true, the inbound worker should transcribe before persisting text for orchestration. */
   voiceInboundNeedsTranscribe?: boolean;
   /**

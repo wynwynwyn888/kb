@@ -771,6 +771,7 @@ export class ConversationOrchestrationService {
               .filter(Boolean)
               .join('\n\n'),
           },
+          incomingImageUrl: input.incomingMessage.imageMediaUrl ?? null,
         });
         plan_reply_ms = Math.round(performance.now() - planPerf0);
       }

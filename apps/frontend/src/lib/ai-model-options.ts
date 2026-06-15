@@ -34,7 +34,7 @@ export function getModelFieldForProvider(provider: string, catalog?: LiveAiCatal
     const models =
       catalog?.modelsByProvider?.[p as 'OPENAI' | 'MINIMAX'] ?? AI_LIVE_PROVIDER_REGISTRY[p as 'OPENAI' | 'MINIMAX'].models;
     const options: ModelOption[] = models.map(m => ({ value: m.id, label: m.label }));
-    const defaultModel = p === 'MINIMAX' ? 'MiniMax-M2.7' : 'gpt-4o-mini';
+    const defaultModel = p === 'MINIMAX' ? 'MiniMax-M3' : 'gpt-4o-mini';
     return { mode: 'list', options, defaultModel };
   }
   return {

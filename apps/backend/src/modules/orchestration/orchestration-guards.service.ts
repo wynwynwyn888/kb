@@ -225,7 +225,7 @@ export class OrchestrationGuards {
   private async checkMessageType(
     input: OrchestrationInput,
   ): Promise<GuardResult> {
-    const supported = ['text'];
+    const supported = ['text', 'image'];
     const msgType = input.incomingMessage.messageType;
     if (!supported.includes(msgType)) {
       this.logger.debug(

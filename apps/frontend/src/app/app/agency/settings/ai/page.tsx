@@ -101,7 +101,7 @@ export default function AgencyAiSettingsPage() {
   const snapshotDefaultModel = useCallback(
     (p: LiveProviderId): string => {
       const s = snapshotFor(p, providerSnapshots, {
-        defaultModel: p === 'MINIMAX' ? 'MiniMax-M2.7' : 'gpt-4o-mini',
+        defaultModel: p === 'MINIMAX' ? 'MiniMax-M3' : 'gpt-4o-mini',
         maxTokens: PROVIDER_STACK_DEFAULTS.maxTokens,
         temperature: PROVIDER_STACK_DEFAULTS.temperature,
       });
@@ -150,7 +150,7 @@ export default function AgencyAiSettingsPage() {
   useEffect(() => {
     if (!editingProvider) return;
     const s = snapshotFor(editingProvider, providerSnapshots, {
-      defaultModel: editingProvider === 'MINIMAX' ? 'MiniMax-M2.7' : 'gpt-4o-mini',
+      defaultModel: editingProvider === 'MINIMAX' ? 'MiniMax-M3' : 'gpt-4o-mini',
       maxTokens: PROVIDER_STACK_DEFAULTS.maxTokens,
       temperature: PROVIDER_STACK_DEFAULTS.temperature,
     });

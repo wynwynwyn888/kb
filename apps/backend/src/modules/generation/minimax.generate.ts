@@ -3,12 +3,13 @@ import axios from 'axios';
 import {
   extractAssistantTextFromOpenAiCompatibleBody,
 } from '../../lib/openai-compatible-completion-text';
+import type { ChatMessageContent } from '../../lib/chat-message-content';
 import { summarizeAxiosErrorForLogs } from '../../lib/safe-http-error';
 
 /** International keys from platform.minimax.io use this base + `/chat/completions`. */
 const DEFAULT_BASE = 'https://api.minimax.io/v1';
 
-export type MinimaxMessage = { role: 'system' | 'user' | 'assistant'; content: string };
+export type MinimaxMessage = { role: 'system' | 'user' | 'assistant'; content: ChatMessageContent };
 
 function toSenderType(role: MinimaxMessage['role']): 'SYSTEM' | 'USER' | 'ASSISTANT' {
   if (role === 'system') return 'SYSTEM';
@@ -135,7 +136,7 @@ async function minimaxLegacyV2(
     model: params.model,
     messages: params.messages.map(m => ({
       sender_type: toSenderType(m.role),
-      text: m.content,
+      text: flattenMinimaxLegacyContent(m.content),
     })),
     tokens_to_generate: Math.min(8192, Math.max(1, params.maxTokens)),
     temperature: params.temperature,
@@ -187,4 +188,12 @@ interface MinimaxV2Response {
   reply?: string;
   result?: string;
   usage?: { total_tokens?: number };
+}
+
+function flattenMinimaxLegacyContent(content: ChatMessageContent): string {
+  if (typeof content === 'string') return content;
+  return content
+    .map(part => (part.type === 'text' ? part.text : '[image]'))
+    .filter(Boolean)
+    .join('\n');
 }

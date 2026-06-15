@@ -33,6 +33,7 @@ import { GhlVoiceRecordingFetchService } from '../../modules/transcription/ghl-v
 import { GhlVoiceMessageDiscoveryService } from '../../modules/transcription/ghl-voice-message-discovery.service';
 import { GhlVoiceConversationDiscoveryService } from '../../modules/transcription/ghl-voice-conversation-discovery.service';
 import { classifyGhlAudioPlaceholderBody } from '../../modules/webhooks/ghl-inbound-audio-media';
+import { INBOUND_IMAGE_PLACEHOLDER_CONTENT } from '../../lib/inbound-image';
 import { resolveInboundGhlWebhookTenant } from '../../modules/webhooks/ghl-inbound-webhook-tenant-resolution';
 import { FollowUpEngineService } from '../../modules/follow-up-engine/follow-up-engine.service';
 import { HumanEscalationHoldingReplyService } from '../../modules/human-escalation/human-escalation-holding-reply.service';
@@ -53,6 +54,8 @@ export interface InboundMessageJobData {
   contactFieldsFromExtendedWebhook?: boolean;
   /** Inbound audio media URL from GHL webhook (attachments / media). */
   audioMediaUrl?: string | null;
+  /** Inbound image media URL from GHL webhook (attachments / media). */
+  imageMediaUrl?: string | null;
   /** When true, run speech-to-text before persisting message content. */
   voiceInboundNeedsTranscribe?: boolean;
   /** GHL placeholder voice inbound with no media URL — persist metadata only, no transcription. */
@@ -142,6 +145,7 @@ export class InboundMessageProcessor extends WorkerHost {
       contactEmail,
       contactFieldsFromExtendedWebhook,
       audioMediaUrl,
+      imageMediaUrl,
       voiceInboundNeedsTranscribe,
       voiceInboundAudioPlaceholderWithoutMediaUrl,
       voiceInboundPlaceholderRawBody,
@@ -198,11 +202,12 @@ export class InboundMessageProcessor extends WorkerHost {
       );
       await this.refreshConversationChannel(conversation.id, channelNorm, locationId);
 
-      const resolved = await this.resolveVoiceInboundContent(
+      const resolved = await this.resolveInboundContent(
         {
           messageContent,
           messageType,
           audioMediaUrl: audioMediaUrl ?? null,
+          imageMediaUrl: imageMediaUrl ?? null,
           voiceInboundNeedsTranscribe: Boolean(voiceInboundNeedsTranscribe),
           voiceInboundAudioPlaceholderWithoutMediaUrl: Boolean(
             voiceInboundAudioPlaceholderWithoutMediaUrl,
@@ -420,6 +425,61 @@ export class InboundMessageProcessor extends WorkerHost {
       mediaBytes: tx.mediaBytes,
       contentType: tx.contentType,
     };
+  }
+
+  private resolveImageInboundContent(
+    job: Pick<InboundMessageJobData, 'messageContent' | 'imageMediaUrl'>,
+  ): {
+    content: string;
+    persistContentType: 'image';
+    voiceMetadata: Record<string, unknown>;
+  } {
+    const url = (job.imageMediaUrl ?? '').trim();
+    const caption = String(job.messageContent ?? '').trim();
+    return {
+      content: caption || INBOUND_IMAGE_PLACEHOLDER_CONTENT,
+      persistContentType: 'image',
+      voiceMetadata: {
+        inboundImage: true,
+        ...(url ? { imageMediaUrl: url } : { imageMediaUrlMissing: true }),
+      },
+    };
+  }
+
+  private async resolveInboundContent(
+    job: Pick<
+      InboundMessageJobData,
+      | 'messageContent'
+      | 'messageType'
+      | 'audioMediaUrl'
+      | 'imageMediaUrl'
+      | 'voiceInboundNeedsTranscribe'
+      | 'voiceInboundAudioPlaceholderWithoutMediaUrl'
+      | 'voiceInboundPlaceholderRawBody'
+      | 'voiceInboundPlaceholderKind'
+      | 'ghlInboundMessageId'
+      | 'ghlConversationId'
+      | 'ghlContactId'
+    > & { webhookTimestampIso: string },
+    tenantId: string,
+    conversationId: string,
+    webhookEventId: string | undefined,
+    locationId: string,
+  ): Promise<{
+    content: string;
+    persistContentType: InboundMessageJobData['messageType'];
+    voiceMetadata: Record<string, unknown>;
+  }> {
+    if (job.messageType === 'image' || (job.imageMediaUrl ?? '').trim()) {
+      return this.resolveImageInboundContent(job);
+    }
+    return this.resolveVoiceInboundContent(
+      job,
+      tenantId,
+      conversationId,
+      webhookEventId,
+      locationId,
+    );
   }
 
   private async resolveVoiceInboundContent(
@@ -961,6 +1021,7 @@ export class InboundMessageProcessor extends WorkerHost {
       orchestrateEnqueuedAtMs,
     );
     const { orchestrationBatch, resetDetectionBatch } = await this.fetchRecentInboundBatches(conversationId);
+    const latestInbound = await this.fetchLatestInboundOrchestrationContext(conversationId);
     const latestText = orchestrationBatch.length ? orchestrationBatch[orchestrationBatch.length - 1]! : '';
 
     this.logger.log(
@@ -996,6 +1057,8 @@ export class InboundMessageProcessor extends WorkerHost {
       ghlConversationId,
       webhookEventId,
       latestInboundText: latestText,
+      latestInboundMessageType: latestInbound.messageType,
+      latestInboundImageUrl: latestInbound.imageMediaUrl,
       recentInboundBatch: orchestrationBatch,
       resetDetectionBatch,
       contactDisplayName,
@@ -1017,6 +1080,8 @@ export class InboundMessageProcessor extends WorkerHost {
     ghlConversationId: string;
     webhookEventId?: string;
     latestInboundText: string;
+    latestInboundMessageType?: InboundMessageJobData['messageType'];
+    latestInboundImageUrl?: string | null;
     recentInboundBatch?: string[];
     /** Raw burst-window lines (oldest→newest), including `/new`, so trailing reset commands still run */
     resetDetectionBatch?: string[];
@@ -1037,6 +1102,8 @@ export class InboundMessageProcessor extends WorkerHost {
       ghlConversationId,
       webhookEventId,
       latestInboundText,
+      latestInboundMessageType,
+      latestInboundImageUrl,
       recentInboundBatch,
       resetDetectionBatch,
       contactDisplayName,
@@ -1097,7 +1164,8 @@ export class InboundMessageProcessor extends WorkerHost {
       ghlConversationId,
       ghlContactId,
       messageContent: latestInboundText,
-      messageType: 'text',
+      messageType: latestInboundMessageType ?? 'text',
+      imageMediaUrl: latestInboundImageUrl ?? null,
       timestamp: new Date().toISOString(),
       externalEventId: webhookEventId ?? `local:${conversationId}:${Date.now()}`,
       eventType: 'inbound_message',
@@ -1276,6 +1344,36 @@ export class InboundMessageProcessor extends WorkerHost {
     const withoutResetCmd = excludeChatResetInboundRows(rows);
     const orchestrationBatch = filterInboundRowsToBurstWindow(withoutResetCmd);
     return { orchestrationBatch, resetDetectionBatch };
+  }
+
+  private async fetchLatestInboundOrchestrationContext(conversationId: string): Promise<{
+    messageType: InboundMessageJobData['messageType'];
+    imageMediaUrl: string | null;
+  }> {
+    const { data, error } = await this.supabase
+      .from('messages')
+      .select('content_type, metadata')
+      .eq('conversation_id', conversationId)
+      .eq('direction', 'INBOUND')
+      .eq('sender', 'CONTACT')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error || !data) {
+      return { messageType: 'text', imageMediaUrl: null };
+    }
+    const ct = String(data.content_type ?? 'TEXT').toUpperCase();
+    const messageType: InboundMessageJobData['messageType'] =
+      ct === 'IMAGE' ? 'image' : ct === 'AUDIO' ? 'audio' : ct === 'VIDEO' ? 'video' : 'text';
+    const meta =
+      data.metadata && typeof data.metadata === 'object' && !Array.isArray(data.metadata)
+        ? (data.metadata as Record<string, unknown>)
+        : {};
+    const imageMediaUrl =
+      typeof meta['imageMediaUrl'] === 'string' && meta['imageMediaUrl'].trim()
+        ? meta['imageMediaUrl'].trim()
+        : null;
+    return { messageType, imageMediaUrl };
   }
 
   /**

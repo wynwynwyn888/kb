@@ -25,6 +25,7 @@ describe('agency-ai-config.validation', () => {
   });
 
   it('accepts allowed MiniMax model', () => {
+    expect(() => assertModelBelongsToProvider('MINIMAX', 'MiniMax-M3')).not.toThrow();
     expect(() => assertModelBelongsToProvider('MINIMAX', 'MiniMax-M2.7')).not.toThrow();
   });
 });

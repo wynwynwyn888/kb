@@ -9,7 +9,7 @@ import { resolveGenerationModel, isUsableOpenAiFallbackKey } from './ai-live-mod
 describe('ai-live-model-resolve', () => {
   it('resolves invalid stored MiniMax model to registry default', () => {
     const r = resolveGenerationModel('MINIMAX', 'gpt-4o', undefined);
-    expect(r.model).toBe('MiniMax-M2.7');
+    expect(r.model).toBe('MiniMax-M3');
     expect(r.coercedFromStored).toBe(true);
   });
 

@@ -13,6 +13,7 @@ import { isUsableOpenAiFallbackKey, resolveGenerationModel } from '../../lib/ai-
 import { minimaxChatCompletion } from './minimax.generate';
 import type { ChatMessageContent } from '../../lib/chat-message-content';
 import { buildUserMessageContent } from '../../lib/chat-message-content';
+import { stripGhlImagePlaceholderFromInboundBody } from '../webhooks/ghl-inbound-image-media';
 import type { MemoryEntry } from '../orchestration/dto';
 import type { RetrievalChunk } from '../kb/dto/retrieval.dto';
 import type { ConversationIntent } from '../conversation-policy/conversation-intent';
@@ -441,7 +442,7 @@ export class GenerationService {
     }
 
     const mem = params.memory.slice(-20);
-    const incoming = params.incomingMessage?.trim() ?? '';
+    const incoming = stripGhlImagePlaceholderFromInboundBody(params.incomingMessage?.trim() ?? '');
     let memForHistory = mem;
     if (incoming) {
       const batchN = params.inboundBatchUserLineCount;
@@ -524,7 +525,7 @@ export class GenerationService {
       });
     }
 
-    const inboundTrim = params.incomingMessage?.trim() ?? '';
+    const inboundTrim = stripGhlImagePlaceholderFromInboundBody(params.incomingMessage?.trim() ?? '');
     if (inboundTrim && userRequestsFormattingPreference(inboundTrim)) {
       messages.push({
         role: 'system',
@@ -544,7 +545,7 @@ export class GenerationService {
 
     messages.push({
       role: 'user',
-      content: buildUserMessageContent(params.incomingMessage, params.incomingImageUrl),
+      content: buildUserMessageContent(inboundTrim, params.incomingImageUrl),
     });
     return messages;
   }

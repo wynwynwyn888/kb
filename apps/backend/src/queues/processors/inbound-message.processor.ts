@@ -34,6 +34,10 @@ import { GhlVoiceMessageDiscoveryService } from '../../modules/transcription/ghl
 import { GhlVoiceConversationDiscoveryService } from '../../modules/transcription/ghl-voice-conversation-discovery.service';
 import { classifyGhlAudioPlaceholderBody } from '../../modules/webhooks/ghl-inbound-audio-media';
 import { INBOUND_IMAGE_PLACEHOLDER_CONTENT } from '../../lib/inbound-image';
+import {
+  ghlBodyIndicatesImagePlaceholder,
+  stripGhlImagePlaceholderFromInboundBody,
+} from '../../modules/webhooks/ghl-inbound-image-media';
 import { resolveInboundGhlWebhookTenant } from '../../modules/webhooks/ghl-inbound-webhook-tenant-resolution';
 import { FollowUpEngineService } from '../../modules/follow-up-engine/follow-up-engine.service';
 import { HumanEscalationHoldingReplyService } from '../../modules/human-escalation/human-escalation-holding-reply.service';
@@ -435,7 +439,7 @@ export class InboundMessageProcessor extends WorkerHost {
     voiceMetadata: Record<string, unknown>;
   } {
     const url = (job.imageMediaUrl ?? '').trim();
-    const caption = String(job.messageContent ?? '').trim();
+    const caption = stripGhlImagePlaceholderFromInboundBody(String(job.messageContent ?? ''));
     return {
       content: caption || INBOUND_IMAGE_PLACEHOLDER_CONTENT,
       persistContentType: 'image',
@@ -470,7 +474,7 @@ export class InboundMessageProcessor extends WorkerHost {
     persistContentType: InboundMessageJobData['messageType'];
     voiceMetadata: Record<string, unknown>;
   }> {
-    if (job.messageType === 'image' || (job.imageMediaUrl ?? '').trim()) {
+    if (job.messageType === 'image' || (job.imageMediaUrl ?? '').trim() || ghlBodyIndicatesImagePlaceholder(job.messageContent)) {
       return this.resolveImageInboundContent(job);
     }
     return this.resolveVoiceInboundContent(
@@ -1352,7 +1356,7 @@ export class InboundMessageProcessor extends WorkerHost {
   }> {
     const { data, error } = await this.supabase
       .from('messages')
-      .select('content_type, metadata')
+      .select('content, content_type, metadata')
       .eq('conversation_id', conversationId)
       .eq('direction', 'INBOUND')
       .eq('sender', 'CONTACT')
@@ -1362,9 +1366,13 @@ export class InboundMessageProcessor extends WorkerHost {
     if (error || !data) {
       return { messageType: 'text', imageMediaUrl: null };
     }
+    const content = typeof data.content === 'string' ? data.content : '';
     const ct = String(data.content_type ?? 'TEXT').toUpperCase();
-    const messageType: InboundMessageJobData['messageType'] =
+    let messageType: InboundMessageJobData['messageType'] =
       ct === 'IMAGE' ? 'image' : ct === 'AUDIO' ? 'audio' : ct === 'VIDEO' ? 'video' : 'text';
+    if (messageType === 'text' && ghlBodyIndicatesImagePlaceholder(content)) {
+      messageType = 'image';
+    }
     const meta =
       data.metadata && typeof data.metadata === 'object' && !Array.isArray(data.metadata)
         ? (data.metadata as Record<string, unknown>)

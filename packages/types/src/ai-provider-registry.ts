@@ -27,9 +27,9 @@ export const AI_LIVE_PROVIDER_REGISTRY: Record<
   MINIMAX: {
     label: 'MiniMax',
     models: [
-      { id: 'MiniMax-M3', label: 'MiniMax M3', tier: 'default' },
-      { id: 'MiniMax-M2.7', label: 'MiniMax-M2.7', tier: 'balanced' },
-      { id: 'MiniMax-M2.7-highspeed', label: 'MiniMax-M2.7-highspeed', tier: 'highspeed' },
+      { id: 'MiniMax-M3', label: 'MiniMax M3 (vision)', tier: 'default' },
+      { id: 'MiniMax-M2.7', label: 'MiniMax M2.7', tier: 'balanced' },
+      { id: 'MiniMax-M2.7-highspeed', label: 'MiniMax M2.7 Highspeed', tier: 'highspeed' },
     ],
   },
 } as const;

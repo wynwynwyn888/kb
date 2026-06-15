@@ -28,7 +28,7 @@ import {
   ghlInboundShouldTranscribeVoice,
   VOICE_INBOUND_PLACEHOLDER_NO_MEDIA_USER_MESSAGE,
 } from './ghl-inbound-audio-media';
-import { extractGhlInboundImageMediaUrl } from './ghl-inbound-image-media';
+import { extractGhlInboundImageMediaUrl, ghlBodyIndicatesImagePlaceholder, stripGhlImagePlaceholderFromInboundBody } from './ghl-inbound-image-media';
 import { INBOUND_IMAGE_PLACEHOLDER_CONTENT } from '../../lib/inbound-image';
 import { safeTextPreviewForLog } from '../../lib/safe-text-preview-for-log';
 import { resolveInboundGhlWebhookTenant } from './ghl-inbound-webhook-tenant-resolution';
@@ -199,7 +199,10 @@ export class WebhooksService {
     const imageMediaUrl = extractGhlInboundImageMediaUrl(data, {
       envelope,
       workflowFlatRaw,
+      messageBody: rawMessageBody,
     });
+
+    const imagePlaceholderInBody = ghlBodyIndicatesImagePlaceholder(rawMessageBody);
 
     const voiceInboundAudioPlaceholderWithoutMediaUrl = isAudioPlaceholderInbound && !audioMediaUrl;
 
@@ -208,11 +211,10 @@ export class WebhooksService {
     if (voiceInboundAudioPlaceholderWithoutMediaUrl) {
       messageContent = VOICE_INBOUND_PLACEHOLDER_NO_MEDIA_USER_MESSAGE;
       messageType = 'text';
-    } else if (messageTypeMapped === 'image' || imageMediaUrl) {
+    } else if (messageTypeMapped === 'image' || imageMediaUrl || imagePlaceholderInBody) {
       messageType = 'image';
-      if (!messageContent.trim()) {
-        messageContent = INBOUND_IMAGE_PLACEHOLDER_CONTENT;
-      }
+      const stripped = stripGhlImagePlaceholderFromInboundBody(rawMessageBody);
+      messageContent = stripped || INBOUND_IMAGE_PLACEHOLDER_CONTENT;
     }
 
     const voiceInboundNeedsTranscribe = voiceInboundAudioPlaceholderWithoutMediaUrl
@@ -435,7 +437,7 @@ export class WebhooksService {
       VoiceMessage: 'audio',
     };
 
-    return typeMap[ghlType || ''] || 'unknown';
+    return typeMap[ghlType || ''] || (ghlType?.toLowerCase().includes('image') ? 'image' : 'unknown');
   }
 
   /**

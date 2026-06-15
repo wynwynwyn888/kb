@@ -63,7 +63,7 @@ const MAX_PLACEHOLDER_WRAPPER_PEELS = 16;
  * Strip outer wrappers only when the entire normalized string matches one pair — never peels
  * fragments inside prose (e.g. "please >AUDIO< thanks").
  */
-function peelGhlPlaceholderOuterWrappers(normalized: string): string {
+export function peelGhlPlaceholderOuterWrappers(normalized: string): string {
   let t = normalized.trim();
   for (let i = 0; i < MAX_PLACEHOLDER_WRAPPER_PEELS; i++) {
     const len = t.length;

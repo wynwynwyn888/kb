@@ -10,6 +10,7 @@ import type {
   GuardOutcome,
   GuardDecision,
 } from './dto';
+import { ghlBodyIndicatesImagePlaceholder } from '../webhooks/ghl-inbound-image-media';
 
 @Injectable()
 export class OrchestrationGuards {
@@ -227,7 +228,11 @@ export class OrchestrationGuards {
   ): Promise<GuardResult> {
     const supported = ['text', 'image'];
     const msgType = input.incomingMessage.messageType;
-    if (!supported.includes(msgType)) {
+    const body = input.incomingMessage.messageContent ?? '';
+    if (
+      !supported.includes(msgType) &&
+      !(msgType === 'unknown' && ghlBodyIndicatesImagePlaceholder(body))
+    ) {
       this.logger.debug(
         `Guard SKIP_UNSUPPORTED_MESSAGE_TYPE for type=${msgType}`,
       );

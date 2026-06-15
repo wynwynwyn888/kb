@@ -132,12 +132,14 @@ function extractConversationId(
   const direct = pickFromSources(sources, [
     'conversationId',
     'conversation_id',
+    'externalConversationId',
+    'external_conversation_id',
     'data.conversationId',
   ]);
   if (direct !== undefined) return direct;
   const msg = r['message'];
   if (isPlainObject(msg)) {
-    return firstString(msg, ['conversationId', 'conversation_id']);
+    return firstString(msg, ['conversationId', 'conversation_id', 'externalConversationId']);
   }
   return undefined;
 }

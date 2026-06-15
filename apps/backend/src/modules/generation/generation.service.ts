@@ -580,7 +580,8 @@ export class GenerationService {
         role: 'system',
         content:
           'The customer sent a photo but the image file could not be retrieved from the channel. ' +
-          'Do not claim you can analyze images on this turn. Briefly acknowledge the photo and ask them to resend or describe what they need help with.',
+          'Acknowledge they sent a photo — do NOT say their message is empty. ' +
+          'Briefly explain you could not load the image file and ask them to resend or describe what they need.',
       });
     }
 

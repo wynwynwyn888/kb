@@ -910,7 +910,8 @@ export class GhlVoiceMessageDiscoveryService {
   async discoverInboundImageMediaUrl(params: {
     tenantId: string;
     locationId: string;
-    conversationId: string;
+    /** Real GHL conversation id — optional when preferredMessageId is set. */
+    conversationId?: string;
     webhookTimestampIso: string;
     preferredMessageId?: string;
   }): Promise<
@@ -921,12 +922,13 @@ export class GhlVoiceMessageDiscoveryService {
     const maxAttempts = readBoundedInt('GHL_IMAGE_DISCOVER_MAX_ATTEMPTS', 2, 1, 6);
     const webhookMs = Date.parse(params.webhookTimestampIso) || Date.now();
     const preferredId = params.preferredMessageId?.trim();
+    const conversationId = params.conversationId?.trim() ?? '';
 
     this.logger.log(
       JSON.stringify({
         imageMessageDiscoveryStarted: true,
         tenantId: params.tenantId,
-        conversationIdLen: params.conversationId.trim().length,
+        conversationIdLen: conversationId.length,
         delayMs,
         maxAttempts,
         preferredMessageIdPresent: Boolean(preferredId),
@@ -954,13 +956,17 @@ export class GhlVoiceMessageDiscoveryService {
       }
     }
 
+    if (!conversationId) {
+      return { ok: false, reason: 'no_conversation_id', candidateCount: 0 };
+    }
+
     let lastCandidateCount = 0;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       if (attempt > 1) await sleep(delayMs);
       const listResult = await this.tryListMessages({
         baseUrl: ghlApiBase(),
         token: tokenResult.token,
-        conversationId: params.conversationId,
+        conversationId,
       });
       if (!listResult.ok) {
         if (attempt === maxAttempts) {

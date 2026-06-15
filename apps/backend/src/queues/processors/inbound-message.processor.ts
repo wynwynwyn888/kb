@@ -431,10 +431,44 @@ export class InboundMessageProcessor extends WorkerHost {
     };
   }
 
+  private async resolveGhlConversationIdForImageDiscovery(params: {
+    tenantId: string;
+    locationId: string;
+    ghlConversationId?: string;
+    ghlContactId?: string;
+  }): Promise<string | null> {
+    const direct = params.ghlConversationId?.trim();
+    if (direct) return direct;
+    const contactId = params.ghlContactId?.trim();
+    if (!contactId || !params.locationId.trim()) return null;
+    const discovered = await this.ghlVoiceConversationDiscovery.discoverConversationIdByContact({
+      tenantId: params.tenantId,
+      locationId: params.locationId,
+      contactId,
+    });
+    if (discovered.ok) {
+      this.logger.log(
+        JSON.stringify({
+          inboundImageConversationDiscoverySucceeded: true,
+          candidateCount: discovered.candidateCount,
+        }),
+      );
+      return discovered.conversationId;
+    }
+    this.logger.warn(
+      JSON.stringify({
+        inboundImageConversationDiscoveryFailed: true,
+        reason: discovered.reason,
+        candidateCount: discovered.candidateCount ?? 0,
+      }),
+    );
+    return null;
+  }
+
   private async resolveImageInboundContent(
     job: Pick<
       InboundMessageJobData,
-      'messageContent' | 'imageMediaUrl' | 'ghlConversationId' | 'ghlInboundMessageId'
+      'messageContent' | 'imageMediaUrl' | 'ghlConversationId' | 'ghlInboundMessageId' | 'ghlContactId'
     > & { webhookTimestampIso: string },
     tenantId: string,
     locationId: string,
@@ -445,11 +479,21 @@ export class InboundMessageProcessor extends WorkerHost {
   }> {
     let url = (job.imageMediaUrl ?? '').trim();
     const discoverEnabled = process.env['GHL_IMAGE_DISCOVER_MEDIA_URL'] !== 'false';
-    if (!url && discoverEnabled && job.ghlConversationId?.trim() && locationId.trim()) {
+    const canDiscover =
+      Boolean(job.ghlInboundMessageId?.trim()) ||
+      Boolean(job.ghlConversationId?.trim()) ||
+      Boolean(job.ghlContactId?.trim());
+    if (!url && discoverEnabled && locationId.trim() && canDiscover) {
+      const conversationId = await this.resolveGhlConversationIdForImageDiscovery({
+        tenantId,
+        locationId,
+        ghlConversationId: job.ghlConversationId,
+        ghlContactId: job.ghlContactId,
+      });
       const discovered = await this.ghlVoiceMessageDiscovery.discoverInboundImageMediaUrl({
         tenantId,
         locationId,
-        conversationId: job.ghlConversationId.trim(),
+        ...(conversationId ? { conversationId } : {}),
         webhookTimestampIso: job.webhookTimestampIso,
         preferredMessageId: job.ghlInboundMessageId?.trim() || undefined,
       });
@@ -478,6 +522,9 @@ export class InboundMessageProcessor extends WorkerHost {
       persistContentType: 'image',
       voiceMetadata: {
         inboundImage: true,
+        ...(job.ghlInboundMessageId?.trim()
+          ? { ghlInboundMessageId: job.ghlInboundMessageId.trim() }
+          : {}),
         ...(url ? { imageMediaUrl: url } : { imageMediaUrlMissing: true }),
       },
     };
@@ -1096,6 +1143,7 @@ export class InboundMessageProcessor extends WorkerHost {
       latestInboundText: latestText,
       latestInboundMessageType: latestInbound.messageType,
       latestInboundImageUrl: latestInbound.imageMediaUrl,
+      latestInboundPreferredMessageId: latestInbound.preferredMessageId,
       inboundWebhookTimestampIso: job.data.inboundWebhookReceivedAtIso ?? new Date().toISOString(),
       recentInboundBatch: orchestrationBatch,
       resetDetectionBatch,
@@ -1120,6 +1168,7 @@ export class InboundMessageProcessor extends WorkerHost {
     latestInboundText: string;
     latestInboundMessageType?: InboundMessageJobData['messageType'];
     latestInboundImageUrl?: string | null;
+    latestInboundPreferredMessageId?: string | null;
     inboundWebhookTimestampIso?: string;
     recentInboundBatch?: string[];
     /** Raw burst-window lines (oldest→newest), including `/new`, so trailing reset commands still run */
@@ -1143,6 +1192,7 @@ export class InboundMessageProcessor extends WorkerHost {
       latestInboundText,
       latestInboundMessageType,
       latestInboundImageUrl,
+      latestInboundPreferredMessageId,
       inboundWebhookTimestampIso,
       recentInboundBatch,
       resetDetectionBatch,
@@ -1209,9 +1259,11 @@ export class InboundMessageProcessor extends WorkerHost {
         tenantId,
         locationId,
         ghlConversationId,
+        ghlContactId,
         latestInboundMessageType: latestInboundMessageType ?? 'text',
         latestInboundText,
         latestInboundImageUrl: latestInboundImageUrl ?? null,
+        preferredMessageId: latestInboundPreferredMessageId ?? null,
         inboundWebhookTimestampIso: inboundWebhookTimestampIso ?? new Date().toISOString(),
       }),
       timestamp: new Date().toISOString(),
@@ -1397,6 +1449,7 @@ export class InboundMessageProcessor extends WorkerHost {
   private async fetchLatestInboundOrchestrationContext(conversationId: string): Promise<{
     messageType: InboundMessageJobData['messageType'];
     imageMediaUrl: string | null;
+    preferredMessageId: string | null;
   }> {
     const { data, error } = await this.supabase
       .from('messages')
@@ -1408,7 +1461,7 @@ export class InboundMessageProcessor extends WorkerHost {
       .limit(1)
       .maybeSingle();
     if (error || !data) {
-      return { messageType: 'text', imageMediaUrl: null };
+      return { messageType: 'text', imageMediaUrl: null, preferredMessageId: null };
     }
     const content = typeof data.content === 'string' ? data.content : '';
     const ct = String(data.content_type ?? 'TEXT').toUpperCase();
@@ -1425,16 +1478,22 @@ export class InboundMessageProcessor extends WorkerHost {
       typeof meta['imageMediaUrl'] === 'string' && meta['imageMediaUrl'].trim()
         ? meta['imageMediaUrl'].trim()
         : null;
-    return { messageType, imageMediaUrl };
+    const preferredMessageId =
+      typeof meta['ghlInboundMessageId'] === 'string' && meta['ghlInboundMessageId'].trim()
+        ? meta['ghlInboundMessageId'].trim()
+        : null;
+    return { messageType, imageMediaUrl, preferredMessageId };
   }
 
   private async resolveOrchestrationImageUrl(params: {
     tenantId: string;
     locationId: string;
     ghlConversationId: string;
+    ghlContactId: string;
     latestInboundMessageType: InboundMessageJobData['messageType'];
     latestInboundText: string;
     latestInboundImageUrl: string | null;
+    preferredMessageId?: string | null;
     inboundWebhookTimestampIso: string;
   }): Promise<string | null> {
     const existing = params.latestInboundImageUrl?.trim();
@@ -1444,18 +1503,33 @@ export class InboundMessageProcessor extends WorkerHost {
       params.latestInboundMessageType === 'image' ||
       isInboundImagePlaceholderContent(params.latestInboundText) ||
       ghlBodyIndicatesImagePlaceholder(params.latestInboundText);
-    if (!imageTurn || !params.ghlConversationId.trim() || !params.locationId.trim()) {
+    if (!imageTurn || !params.locationId.trim()) {
+      return null;
+    }
+    const canDiscover =
+      Boolean(params.preferredMessageId?.trim()) ||
+      Boolean(params.ghlConversationId.trim()) ||
+      Boolean(params.ghlContactId.trim());
+    if (!canDiscover) {
       return null;
     }
     if (process.env['GHL_IMAGE_DISCOVER_MEDIA_URL'] === 'false') {
       return null;
     }
 
+    const conversationId = await this.resolveGhlConversationIdForImageDiscovery({
+      tenantId: params.tenantId,
+      locationId: params.locationId,
+      ghlConversationId: params.ghlConversationId,
+      ghlContactId: params.ghlContactId,
+    });
+
     const discovered = await this.ghlVoiceMessageDiscovery.discoverInboundImageMediaUrl({
       tenantId: params.tenantId,
       locationId: params.locationId,
-      conversationId: params.ghlConversationId.trim(),
+      ...(conversationId ? { conversationId } : {}),
       webhookTimestampIso: params.inboundWebhookTimestampIso,
+      preferredMessageId: params.preferredMessageId?.trim() || undefined,
     });
     if (discovered.ok) {
       this.logger.log(

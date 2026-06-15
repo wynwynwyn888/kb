@@ -32,11 +32,12 @@ export class GhlInboundImageFetchService {
     if (publicOk.ok && isImageContentType(publicOk.contentType)) {
       return mediaUrl;
     }
+    const publicFailReason = publicOk.ok ? 'not_image' : publicOk.reason;
 
     const token = await this.resolveAccessToken(params.tenantId);
     if (!token) {
       this.logger.warn(
-        `inboundImageFetchNoToken tenantId=${params.tenantId} publicFetch=${publicOk.reason ?? 'not_image'}`,
+        `inboundImageFetchNoToken tenantId=${params.tenantId} publicFetch=${publicFailReason}`,
       );
       return publicOk.ok ? mediaUrl : null;
     }
@@ -44,7 +45,7 @@ export class GhlInboundImageFetchService {
     const authed = await this.tryFetch(mediaUrl, token);
     if (!authed.ok) {
       this.logger.warn(
-        `inboundImageFetchFailed tenantId=${params.tenantId} reason=${authed.reason} publicReason=${publicOk.reason ?? 'n/a'}`,
+        `inboundImageFetchFailed tenantId=${params.tenantId} reason=${authed.reason} publicReason=${publicFailReason}`,
       );
       return null;
     }

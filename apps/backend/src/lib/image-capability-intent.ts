@@ -9,3 +9,15 @@ export function userAsksAboutImageCapability(text: string): boolean {
     /\bdo you (support|accept) (image|photo|picture)/i.test(t)
   );
 }
+
+/** Customer asks about a photo they already sent (text follow-up, no new attachment). */
+export function userAsksAboutRecentPhotoContent(text: string): boolean {
+  const t = text.trim().toLowerCase();
+  if (!t) return false;
+  return (
+    /\bwhat('?s| is) (in )?(the |this |my )?(photo|picture|image)\b/i.test(t) ||
+    /\b(describe|explain) (the |this |my )?(photo|picture|image)\b/i.test(t) ||
+    /\bwhat do you see\b/i.test(t) ||
+    /\bwhats the photo\b/i.test(t)
+  );
+}

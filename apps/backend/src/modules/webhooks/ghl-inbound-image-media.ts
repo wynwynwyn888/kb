@@ -94,28 +94,66 @@ export function stripGhlImagePlaceholderFromInboundBody(body: string): string {
   return kept.join('\n').trim();
 }
 
+function pushImageUrl(found: string[], url: string | null, relaxed: boolean): void {
+  if (!url || !isHttpUrl(url) || urlLooksLikeAudio(url)) return;
+  if (!relaxed && !urlFilenameHintsImage(url)) return;
+  found.push(url);
+}
+
+function extractImageUrlsFromAttachmentsValue(
+  attachments: unknown,
+  relaxed: boolean,
+  found: string[],
+): void {
+  if (!Array.isArray(attachments)) return;
+  for (const item of attachments) {
+    if (typeof item === 'string') {
+      pushImageUrl(found, item.trim(), relaxed);
+      continue;
+    }
+    if (!item || typeof item !== 'object') continue;
+    const rec = item as Record<string, unknown>;
+    if (relaxed) {
+      if (attachmentHintsAudio(rec)) continue;
+      pushImageUrl(found, extractUrlFromAttachmentLikeObject(rec), true);
+    } else if (attachmentHintsImage(rec)) {
+      pushImageUrl(found, extractUrlFromAttachmentLikeObject(rec), false);
+    }
+  }
+}
+
+function extractImageUrlsFromMeta(meta: unknown, relaxed: boolean, found: string[]): void {
+  if (!meta || typeof meta !== 'object' || Array.isArray(meta)) return;
+  const m = meta as Record<string, unknown>;
+  for (const key of URL_FIELD_KEYS) {
+    const u = asNonEmptyString(m[key]);
+    pushImageUrl(found, u, relaxed);
+  }
+  const wa = m['whatsapp'];
+  if (wa && typeof wa === 'object' && !Array.isArray(wa)) {
+    const w = wa as Record<string, unknown>;
+    const att = w['attachment'];
+    if (att && typeof att === 'object' && !Array.isArray(att)) {
+      pushImageUrl(found, extractUrlFromAttachmentLikeObject(att as Record<string, unknown>), relaxed);
+    }
+  }
+}
+
 function extractImageUrlsFromNode(node: Record<string, unknown>, relaxed: boolean): string[] {
   const found: string[] = [];
+
+  extractImageUrlsFromAttachmentsValue(node['attachments'], relaxed, found);
+  extractImageUrlsFromMeta(node['meta'], relaxed, found);
 
   const consider = (item: Record<string, unknown>) => {
     if (relaxed) {
       if (attachmentHintsAudio(item)) return;
-      const u = extractUrlFromAttachmentLikeObject(item);
-      if (u && !urlLooksLikeAudio(u)) found.push(u);
+      pushImageUrl(found, extractUrlFromAttachmentLikeObject(item), true);
       return;
     }
     if (!attachmentHintsImage(item)) return;
-    const u = extractUrlFromAttachmentLikeObject(item);
-    if (u) found.push(u);
+    pushImageUrl(found, extractUrlFromAttachmentLikeObject(item), false);
   };
-
-  const att = node['attachments'];
-  if (Array.isArray(att)) {
-    for (const item of att) {
-      if (!item || typeof item !== 'object') continue;
-      consider(item as Record<string, unknown>);
-    }
-  }
 
   const media = node['media'];
   if (media && typeof media === 'object' && !Array.isArray(media)) {
@@ -123,6 +161,10 @@ function extractImageUrlsFromNode(node: Record<string, unknown>, relaxed: boolea
   }
   if (Array.isArray(media)) {
     for (const item of media) {
+      if (typeof item === 'string') {
+        pushImageUrl(found, item.trim(), relaxed);
+        continue;
+      }
       if (!item || typeof item !== 'object') continue;
       consider(item as Record<string, unknown>);
     }
@@ -130,16 +172,15 @@ function extractImageUrlsFromNode(node: Record<string, unknown>, relaxed: boolea
 
   const msg = node['message'];
   if (typeof msg === 'string') {
-    const u = asNonEmptyString(msg);
-    if (u && isHttpUrl(u) && !urlLooksLikeAudio(u)) {
-      if (relaxed || urlFilenameHintsImage(u)) found.push(u);
+    pushImageUrl(found, asNonEmptyString(msg), relaxed);
+    for (const match of msg.matchAll(/https?:\/\/[^\s"'<>]+/gi)) {
+      pushImageUrl(found, match[0] ?? null, relaxed);
     }
   }
 
   if (relaxed) {
     for (const key of URL_FIELD_KEYS) {
-      const u = asNonEmptyString(node[key]);
-      if (u && isHttpUrl(u) && !urlLooksLikeAudio(u)) found.push(u);
+      pushImageUrl(found, asNonEmptyString(node[key]), true);
     }
   }
 
@@ -219,14 +260,17 @@ function messageRowIndicatesImage(row: Record<string, unknown>): boolean {
 /** Extract image URL from a GHL conversation message row (message history API). */
 export function extractGhlMessageImageMediaUrlFromRow(row: Record<string, unknown>): string | null {
   const body = rowBody(row);
-  const relaxed = messageRowIndicatesImage(row) || ghlBodyIndicatesImagePlaceholder(body);
+  const relaxed =
+    messageRowIndicatesImage(row) ||
+    ghlBodyIndicatesImagePlaceholder(body) ||
+    (Array.isArray(row['attachments']) && row['attachments'].length > 0);
   const direct = extractImageUrlsFromNode(row, relaxed);
   if (direct.length > 0) return direct[0]!;
 
   for (const nestedKey of ['message', 'payload', 'data', 'customData'] as const) {
     const nested = row[nestedKey];
     if (!nested || typeof nested !== 'object' || Array.isArray(nested)) continue;
-    const urls = extractImageUrlsFromNode(nested as Record<string, unknown>, relaxed);
+    const urls = extractImageUrlsFromNode(nested as Record<string, unknown>, true);
     if (urls.length > 0) return urls[0]!;
   }
   return null;

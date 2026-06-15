@@ -38,6 +38,7 @@ import {
   ghlBodyIndicatesImagePlaceholder,
   stripGhlImagePlaceholderFromInboundBody,
 } from '../../modules/webhooks/ghl-inbound-image-media';
+import { userAsksAboutRecentPhotoContent } from '../../lib/image-capability-intent';
 import { resolveInboundGhlWebhookTenant } from '../../modules/webhooks/ghl-inbound-webhook-tenant-resolution';
 import { FollowUpEngineService } from '../../modules/follow-up-engine/follow-up-engine.service';
 import { HumanEscalationHoldingReplyService } from '../../modules/human-escalation/human-escalation-holding-reply.service';
@@ -1257,6 +1258,7 @@ export class InboundMessageProcessor extends WorkerHost {
       messageType: latestInboundMessageType ?? 'text',
       imageMediaUrl: await this.resolveOrchestrationImageUrl({
         tenantId,
+        conversationId,
         locationId,
         ghlConversationId,
         ghlContactId,
@@ -1485,8 +1487,38 @@ export class InboundMessageProcessor extends WorkerHost {
     return { messageType, imageMediaUrl, preferredMessageId };
   }
 
+  private async fetchRecentStoredInboundImageUrl(conversationId: string): Promise<string | null> {
+    const { data, error } = await this.supabase
+      .from('messages')
+      .select('metadata, content_type, content')
+      .eq('conversation_id', conversationId)
+      .eq('direction', 'INBOUND')
+      .eq('sender', 'CONTACT')
+      .order('created_at', { ascending: false })
+      .limit(20);
+    if (error || !data?.length) return null;
+    for (const row of data) {
+      const meta =
+        row.metadata && typeof row.metadata === 'object' && !Array.isArray(row.metadata)
+          ? (row.metadata as Record<string, unknown>)
+          : {};
+      const url =
+        typeof meta['imageMediaUrl'] === 'string' && meta['imageMediaUrl'].trim()
+          ? meta['imageMediaUrl'].trim()
+          : null;
+      if (url) return url;
+      const ct = String(row.content_type ?? '').toUpperCase();
+      const content = typeof row.content === 'string' ? row.content : '';
+      if (ct === 'IMAGE' || ghlBodyIndicatesImagePlaceholder(content) || isInboundImagePlaceholderContent(content)) {
+        continue;
+      }
+    }
+    return null;
+  }
+
   private async resolveOrchestrationImageUrl(params: {
     tenantId: string;
+    conversationId: string;
     locationId: string;
     ghlConversationId: string;
     ghlContactId: string;
@@ -1499,10 +1531,17 @@ export class InboundMessageProcessor extends WorkerHost {
     const existing = params.latestInboundImageUrl?.trim();
     if (existing) return existing;
 
+    const asksAboutRecentPhoto = userAsksAboutRecentPhotoContent(params.latestInboundText);
+    if (asksAboutRecentPhoto) {
+      const stored = await this.fetchRecentStoredInboundImageUrl(params.conversationId);
+      if (stored) return stored;
+    }
+
     const imageTurn =
       params.latestInboundMessageType === 'image' ||
       isInboundImagePlaceholderContent(params.latestInboundText) ||
-      ghlBodyIndicatesImagePlaceholder(params.latestInboundText);
+      ghlBodyIndicatesImagePlaceholder(params.latestInboundText) ||
+      asksAboutRecentPhoto;
     if (!imageTurn || !params.locationId.trim()) {
       return null;
     }

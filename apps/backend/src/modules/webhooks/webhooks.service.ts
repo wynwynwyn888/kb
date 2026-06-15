@@ -274,7 +274,15 @@ export class WebhooksService {
     }
 
     const ghlInboundMessageId =
-      typeof data['id'] === 'string' && data['id'].trim() ? data['id'].trim() : undefined;
+      (typeof data['id'] === 'string' && data['id'].trim() ? data['id'].trim() : undefined) ||
+      (workflowFlatRaw &&
+      typeof workflowFlatRaw['messageId'] === 'string' &&
+      workflowFlatRaw['messageId'].trim()
+        ? workflowFlatRaw['messageId'].trim()
+        : undefined) ||
+      (typeof envelope['messageId'] === 'string' && envelope['messageId'].trim()
+        ? envelope['messageId'].trim()
+        : undefined);
 
     return {
       ghlLocationId: payload.locationId,

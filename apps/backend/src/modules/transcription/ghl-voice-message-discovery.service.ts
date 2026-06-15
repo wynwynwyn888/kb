@@ -775,6 +775,7 @@ export class GhlVoiceMessageDiscoveryService {
         baseUrl: ghlApiBase(),
         token: tokenResult.token,
         conversationId: params.conversationId,
+        locationId: params.locationId,
       });
 
       if (!listResult.ok) {
@@ -947,6 +948,7 @@ export class GhlVoiceMessageDiscoveryService {
         baseUrl: ghlApiBase(),
         token: tokenResult.token,
         messageId: preferredId,
+        locationId: params.locationId,
       });
       if (row) {
         const url = extractGhlMessageImageMediaUrlFromRow(row);
@@ -967,6 +969,7 @@ export class GhlVoiceMessageDiscoveryService {
         baseUrl: ghlApiBase(),
         token: tokenResult.token,
         conversationId,
+        locationId: params.locationId,
       });
       if (!listResult.ok) {
         if (attempt === maxAttempts) {
@@ -1018,6 +1021,16 @@ export class GhlVoiceMessageDiscoveryService {
       }
 
       if (attempt === maxAttempts) {
+        const debugLatestMessageSamples = rows.slice(0, 5).map((r, i) => safeMessageSample(r, i));
+        this.logger.warn(
+          JSON.stringify({
+            imageMessageDiscoveryFailed: true,
+            reason: rows.length > 0 ? 'image_media_url_not_found' : 'message_id_not_found',
+            candidateCount: lastCandidateCount,
+            rowCount: rows.length,
+            debugLatestMessageSamples,
+          }),
+        );
         return {
           ok: false,
           reason: rows.length > 0 ? 'image_media_url_not_found' : 'message_id_not_found',
@@ -1052,8 +1065,12 @@ export class GhlVoiceMessageDiscoveryService {
     baseUrl: string;
     token: string;
     messageId: string;
+    locationId?: string;
   }): Promise<Record<string, unknown> | null> {
-    const url = `${params.baseUrl}/conversations/messages/${encodeURIComponent(params.messageId.trim())}`;
+    const qs = params.locationId?.trim()
+      ? `?locationId=${encodeURIComponent(params.locationId.trim())}`
+      : '';
+    const url = `${params.baseUrl}/conversations/messages/${encodeURIComponent(params.messageId.trim())}${qs}`;
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), LIST_TIMEOUT_MS);
     try {
@@ -1083,13 +1100,17 @@ export class GhlVoiceMessageDiscoveryService {
     baseUrl: string;
     token: string;
     conversationId: string;
+    locationId?: string;
   }): Promise<
     | { ok: true; json: unknown }
     | { ok: false; reason: string; httpStatus?: number }
   > {
+    const locationQs = params.locationId?.trim()
+      ? `&locationId=${encodeURIComponent(params.locationId.trim())}`
+      : '';
     const url = `${params.baseUrl}/conversations/${encodeURIComponent(
       params.conversationId.trim(),
-    )}/messages?limit=${MESSAGE_LIMIT}`;
+    )}/messages?limit=${MESSAGE_LIMIT}${locationQs}`;
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), LIST_TIMEOUT_MS);
     try {

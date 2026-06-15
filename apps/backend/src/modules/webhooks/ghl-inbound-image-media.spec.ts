@@ -64,4 +64,14 @@ describe('ghl-inbound-image-media', () => {
     });
     expect(url).toBe('https://cdn.example.com/wa-photo.jpg');
   });
+
+  it('extracts image URL when attachments is a string array (GHL SMS/WhatsApp API shape)', () => {
+    const url = extractGhlMessageImageMediaUrlFromRow({
+      direction: 'inbound',
+      messageType: 'TYPE_SMS',
+      body: '',
+      attachments: ['https://storage.googleapis.com/ghl-bucket/photo.png'],
+    });
+    expect(url).toBe('https://storage.googleapis.com/ghl-bucket/photo.png');
+  });
 });

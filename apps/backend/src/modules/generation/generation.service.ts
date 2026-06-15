@@ -21,7 +21,7 @@ import type { SelectionResolution } from '../conversation-policy/option-resolver
 import { userRequestsFormattingPreference } from '../../lib/formatting-preference-intent';
 import { REPLY_LANGUAGE_MIRROR_SYSTEM_CONTENT } from '../../lib/reply-language-mirror';
 import { isInboundImagePlaceholderContent } from '../../lib/inbound-image';
-import { userAsksAboutImageCapability } from '../../lib/image-capability-intent';
+import { userAsksAboutImageCapability, userAsksAboutRecentPhotoContent } from '../../lib/image-capability-intent';
 import { GhlInboundImageFetchService } from '../transcription/ghl-inbound-image-fetch.service';
 
 export interface GenerateDraftPolicyContext {
@@ -564,8 +564,17 @@ export class GenerationService {
       messages.push({
         role: 'system',
         content:
-          'The customer is asking whether you can understand images. Confirm yes — you analyze photos they send in this chat. ' +
-          'Invite them to send a photo if they want help with something visual. Do not say you cannot analyze images.',
+          'The customer is asking whether you can understand images in general. Confirm yes — when a photo is sent successfully in this chat, you can analyze it. ' +
+          'Do not claim you are currently viewing a specific photo unless one was attached to this turn. Invite them to send a photo if they want visual help.',
+      });
+    }
+
+    if (userAsksAboutRecentPhotoContent(inboundTrim) && !params.incomingImageUrl?.trim()) {
+      messages.push({
+        role: 'system',
+        content:
+          'The customer is asking about a photo they sent earlier but the image file is not available on this turn. ' +
+          'Do NOT claim you saw, analyzed, or can describe the photo. Acknowledge their question, explain the image could not be loaded, and ask them to resend or describe what they need.',
       });
     }
 

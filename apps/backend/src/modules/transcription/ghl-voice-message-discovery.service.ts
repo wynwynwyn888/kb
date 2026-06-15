@@ -9,6 +9,7 @@ import {
   classifyGhlAudioPlaceholderBody,
   type GhlAudioPlaceholderKind,
 } from '../webhooks/ghl-inbound-audio-media';
+import { extractGhlMessageImageMediaUrlFromRow } from '../webhooks/ghl-inbound-image-media';
 
 const LIST_TIMEOUT_MS = 35_000;
 const MESSAGE_LIMIT = 40;
@@ -578,6 +579,37 @@ function compareCandidates(a: RankedCandidate, b: RankedCandidate, webhookMs: nu
   return da - db;
 }
 
+type ImageRankedCandidate = {
+  row: Record<string, unknown>;
+  score: number;
+  imageMediaUrl: string;
+};
+
+function imageCandidateFromRow(row: Record<string, unknown>): ImageRankedCandidate | null {
+  const imageMediaUrl = extractGhlMessageImageMediaUrlFromRow(row);
+  if (!imageMediaUrl) return null;
+  const directionSource = directionSourceOf(row);
+  const inboundLike = inboundLikeDirectionSource(directionSource);
+  let score = inboundLike ? 300 : 100;
+  const body = extractBody(row);
+  if (/image|photo|picture|ImageMessage/i.test(body)) score += 50;
+  const typeBundle = [
+    String(row['type'] ?? ''),
+    String(row['messageType'] ?? ''),
+    String(row['contentType'] ?? ''),
+  ].join(' ');
+  if (/image|photo|picture|ImageMessage/i.test(typeBundle)) score += 80;
+  return { row, score, imageMediaUrl };
+}
+
+function compareImageCandidates(a: ImageRankedCandidate, b: ImageRankedCandidate, webhookMs: number): number {
+  if (b.score !== a.score) return b.score - a.score;
+  const ta = timestampMsForRow(a.row);
+  const tb = timestampMsForRow(b.row);
+  if (tb !== ta) return tb - ta;
+  return Math.abs(ta - webhookMs) - Math.abs(tb - webhookMs);
+}
+
 function safeMessageSample(row: Record<string, unknown>, index: number): Record<string, unknown> {
   const id = resolveMessageRowId(row);
   const body = extractBody(row);
@@ -872,6 +904,109 @@ export class GhlVoiceMessageDiscoveryService {
     }
 
     return { ok: false, reason: 'message_id_not_found', candidateCount: lastCandidateCount };
+  }
+
+  /** Discover inbound photo URL from GHL message history when webhooks omit attachments. */
+  async discoverInboundImageMediaUrl(params: {
+    tenantId: string;
+    locationId: string;
+    conversationId: string;
+    webhookTimestampIso: string;
+    preferredMessageId?: string;
+  }): Promise<
+    | { ok: true; imageMediaUrl: string; messageId?: string; candidateCount: number }
+    | { ok: false; reason: string; candidateCount?: number }
+  > {
+    const delayMs = readBoundedInt('GHL_IMAGE_DISCOVER_DELAY_MS', 1500, 0, 120_000);
+    const maxAttempts = readBoundedInt('GHL_IMAGE_DISCOVER_MAX_ATTEMPTS', 2, 1, 6);
+    const webhookMs = Date.parse(params.webhookTimestampIso) || Date.now();
+    const preferredId = params.preferredMessageId?.trim();
+
+    this.logger.log(
+      JSON.stringify({
+        imageMessageDiscoveryStarted: true,
+        tenantId: params.tenantId,
+        conversationIdLen: params.conversationId.trim().length,
+        delayMs,
+        maxAttempts,
+        preferredMessageIdPresent: Boolean(preferredId),
+      }),
+    );
+
+    await sleep(delayMs);
+
+    const tokenResult = await this.resolveAccessToken(params.tenantId, params.locationId);
+    if (!tokenResult.ok) {
+      return { ok: false, reason: tokenResult.reason, candidateCount: 0 };
+    }
+
+    let lastCandidateCount = 0;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      if (attempt > 1) await sleep(delayMs);
+      const listResult = await this.tryListMessages({
+        baseUrl: ghlApiBase(),
+        token: tokenResult.token,
+        conversationId: params.conversationId,
+      });
+      if (!listResult.ok) {
+        if (attempt === maxAttempts) {
+          return { ok: false, reason: listResult.reason, candidateCount: 0 };
+        }
+        continue;
+      }
+
+      const extracted = extractMessagesArray(listResult.json);
+      const rows = extracted.rows;
+
+      if (preferredId) {
+        const match = rows.find(r => resolveMessageRowId(r) === preferredId);
+        if (match) {
+          const url = extractGhlMessageImageMediaUrlFromRow(match);
+          if (url) {
+            return {
+              ok: true,
+              imageMediaUrl: url,
+              messageId: preferredId,
+              candidateCount: 1,
+            };
+          }
+        }
+      }
+
+      const candidates = rows
+        .map(r => imageCandidateFromRow(r))
+        .filter((c): c is ImageRankedCandidate => Boolean(c));
+      lastCandidateCount = candidates.length;
+      candidates.sort((a, b) => compareImageCandidates(a, b, webhookMs));
+      const best = candidates[0];
+      if (best) {
+        const id = resolveMessageRowId(best.row);
+        this.logger.log(
+          JSON.stringify({
+            imageMessageDiscoverySucceeded: true,
+            messageIdPresent: Boolean(id),
+            candidateCount: lastCandidateCount,
+            detectedCollectionPath: extracted.detectedCollectionPath,
+          }),
+        );
+        return {
+          ok: true,
+          imageMediaUrl: best.imageMediaUrl,
+          messageId: id || undefined,
+          candidateCount: lastCandidateCount,
+        };
+      }
+
+      if (attempt === maxAttempts) {
+        return {
+          ok: false,
+          reason: rows.length > 0 ? 'image_media_url_not_found' : 'message_id_not_found',
+          candidateCount: lastCandidateCount,
+        };
+      }
+    }
+
+    return { ok: false, reason: 'image_media_url_not_found', candidateCount: lastCandidateCount };
   }
 
   private async resolveAccessToken(

@@ -431,14 +431,47 @@ export class InboundMessageProcessor extends WorkerHost {
     };
   }
 
-  private resolveImageInboundContent(
-    job: Pick<InboundMessageJobData, 'messageContent' | 'imageMediaUrl'>,
-  ): {
+  private async resolveImageInboundContent(
+    job: Pick<
+      InboundMessageJobData,
+      'messageContent' | 'imageMediaUrl' | 'ghlConversationId' | 'ghlInboundMessageId'
+    > & { webhookTimestampIso: string },
+    tenantId: string,
+    locationId: string,
+  ): Promise<{
     content: string;
     persistContentType: 'image';
     voiceMetadata: Record<string, unknown>;
-  } {
-    const url = (job.imageMediaUrl ?? '').trim();
+  }> {
+    let url = (job.imageMediaUrl ?? '').trim();
+    const discoverEnabled = process.env['GHL_IMAGE_DISCOVER_MEDIA_URL'] !== 'false';
+    if (!url && discoverEnabled && job.ghlConversationId?.trim() && locationId.trim()) {
+      const discovered = await this.ghlVoiceMessageDiscovery.discoverInboundImageMediaUrl({
+        tenantId,
+        locationId,
+        conversationId: job.ghlConversationId.trim(),
+        webhookTimestampIso: job.webhookTimestampIso,
+        preferredMessageId: job.ghlInboundMessageId?.trim() || undefined,
+      });
+      if (discovered.ok) {
+        url = discovered.imageMediaUrl;
+        this.logger.log(
+          JSON.stringify({
+            inboundImageDiscoverySucceeded: true,
+            candidateCount: discovered.candidateCount,
+            messageIdPresent: Boolean(discovered.messageId),
+          }),
+        );
+      } else {
+        this.logger.warn(
+          JSON.stringify({
+            inboundImageDiscoveryFailed: true,
+            reason: discovered.reason,
+            candidateCount: discovered.candidateCount ?? 0,
+          }),
+        );
+      }
+    }
     const caption = stripGhlImagePlaceholderFromInboundBody(String(job.messageContent ?? ''));
     return {
       content: caption || INBOUND_IMAGE_PLACEHOLDER_CONTENT,
@@ -475,7 +508,7 @@ export class InboundMessageProcessor extends WorkerHost {
     voiceMetadata: Record<string, unknown>;
   }> {
     if (job.messageType === 'image' || (job.imageMediaUrl ?? '').trim() || ghlBodyIndicatesImagePlaceholder(job.messageContent)) {
-      return this.resolveImageInboundContent(job);
+      return this.resolveImageInboundContent(job, tenantId, locationId);
     }
     return this.resolveVoiceInboundContent(
       job,

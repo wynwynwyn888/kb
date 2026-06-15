@@ -174,3 +174,43 @@ export function extractGhlInboundImageMediaUrl(
 
   return null;
 }
+
+function rowBody(row: Record<string, unknown>): string {
+  const messageObj =
+    row['message'] && typeof row['message'] === 'object' && !Array.isArray(row['message'])
+      ? (row['message'] as Record<string, unknown>)
+      : null;
+  for (const k of ['body', 'message', 'text', 'content'] as const) {
+    const v = row[k] ?? messageObj?.[k];
+    if (typeof v === 'string' && v.trim()) return v.trim();
+  }
+  return '';
+}
+
+function messageRowIndicatesImage(row: Record<string, unknown>): boolean {
+  const body = rowBody(row);
+  if (ghlBodyIndicatesImagePlaceholder(body)) return true;
+  const bundle = [
+    String(row['type'] ?? ''),
+    String(row['messageType'] ?? ''),
+    String(row['contentType'] ?? ''),
+    String(row['source'] ?? ''),
+  ].join(' ');
+  return /image|photo|picture|ImageMessage/i.test(bundle);
+}
+
+/** Extract image URL from a GHL conversation message row (message history API). */
+export function extractGhlMessageImageMediaUrlFromRow(row: Record<string, unknown>): string | null {
+  const body = rowBody(row);
+  const relaxed = messageRowIndicatesImage(row) || ghlBodyIndicatesImagePlaceholder(body);
+  const direct = extractImageUrlsFromNode(row, relaxed);
+  if (direct.length > 0) return direct[0]!;
+
+  for (const nestedKey of ['message', 'payload', 'data', 'customData'] as const) {
+    const nested = row[nestedKey];
+    if (!nested || typeof nested !== 'object' || Array.isArray(nested)) continue;
+    const urls = extractImageUrlsFromNode(nested as Record<string, unknown>, relaxed);
+    if (urls.length > 0) return urls[0]!;
+  }
+  return null;
+}

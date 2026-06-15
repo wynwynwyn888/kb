@@ -20,6 +20,8 @@ import type { ConversationIntent } from '../conversation-policy/conversation-int
 import type { SelectionResolution } from '../conversation-policy/option-resolver';
 import { userRequestsFormattingPreference } from '../../lib/formatting-preference-intent';
 import { REPLY_LANGUAGE_MIRROR_SYSTEM_CONTENT } from '../../lib/reply-language-mirror';
+import { isInboundImagePlaceholderContent } from '../../lib/inbound-image';
+import { GhlInboundImageFetchService } from '../transcription/ghl-inbound-image-fetch.service';
 
 export interface GenerateDraftPolicyContext {
   latestIntent: ConversationIntent;
@@ -99,10 +101,26 @@ export class GenerationService {
   private readonly logger = new Logger(GenerationService.name);
   private readonly supabase = getSupabaseService();
 
+  constructor(private readonly ghlInboundImageFetch: GhlInboundImageFetchService) {}
+
   async generateDraft(params: GenerateDraftParams): Promise<GenerateDraftResult> {
     const routingRecommendedModel = params.routingRecommendedModel?.trim() || undefined;
+    const rawImageUrl = params.incomingImageUrl?.trim() || null;
+    let incomingImageUrl: string | null = null;
+    if (rawImageUrl) {
+      incomingImageUrl = await this.ghlInboundImageFetch.resolveForVision({
+        tenantId: params.tenantId,
+        mediaUrl: rawImageUrl,
+      });
+      if (!incomingImageUrl) {
+        this.logger.warn(
+          `Vision image fetch failed tenantId=${params.tenantId} mediaHost=${safeHost(rawImageUrl)}`,
+        );
+      }
+    }
+    const genParams: GenerateDraftParams = { ...params, incomingImageUrl };
     try {
-      const agencyId = await this.getAgencyId(params.tenantId);
+      const agencyId = await this.getAgencyId(genParams.tenantId);
       if (!agencyId) {
         this.logger.debug('No agencyId for tenant — skipping live generation');
         return { content: null, skipReason: 'no_agency', routingRecommendedModel };
@@ -130,7 +148,7 @@ export class GenerationService {
 
       const tryPrimary = primary && primary.api_key;
       if (tryPrimary) {
-        const r = await this.runProvider(params, primary, active);
+        const r = await this.runProvider(genParams, primary, active);
         const cleaned = this.sanitizeCustomerFacing(r.content);
         if (cleaned && r.generationProvider && r.generationModel) {
           const generationModelActuallyUsed = r.generationModel;
@@ -153,7 +171,7 @@ export class GenerationService {
         }
         if (active !== 'OPENAI' && openaiFallbackOk && openaiFallback) {
           this.logger.warn(`Primary provider ${active} failed or empty; trying OpenAI fallback`);
-          const r2 = await this.runProvider(params, openaiFallback, 'OPENAI');
+          const r2 = await this.runProvider(genParams, openaiFallback, 'OPENAI');
           const cleaned2 = this.sanitizeCustomerFacing(r2.content);
           if (cleaned2 && r2.generationProvider && r2.generationModel) {
             const generationModelActuallyUsed = r2.generationModel;
@@ -191,7 +209,7 @@ export class GenerationService {
 
       // No primary key — use OpenAI only
       if (openaiFallbackOk && openaiFallback) {
-        const r2 = await this.runProvider(params, openaiFallback, 'OPENAI');
+        const r2 = await this.runProvider(genParams, openaiFallback, 'OPENAI');
         const cleaned2 = this.sanitizeCustomerFacing(r2.content);
         if (cleaned2 && r2.generationProvider && r2.generationModel) {
           const generationModelActuallyUsed = r2.generationModel;
@@ -544,6 +562,13 @@ export class GenerationService {
         content:
           'The customer sent a photo. Describe what you see in the image when relevant, then answer their question or caption helpfully. Do not claim you cannot see images.',
       });
+    } else if (isInboundImagePlaceholderContent(inboundTrim)) {
+      messages.push({
+        role: 'system',
+        content:
+          'The customer sent a photo but the image file could not be retrieved from the channel. ' +
+          'Do not claim you can analyze images on this turn. Briefly acknowledge the photo and ask them to resend or describe what they need help with.',
+      });
     }
 
     messages.push({
@@ -628,4 +653,12 @@ function pickMinimaxVisionModel(model: string): string {
   const m = model.trim();
   if (/^MiniMax-M3/i.test(m)) return m;
   return 'MiniMax-M3';
+}
+
+function safeHost(url: string): string {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return 'invalid';
+  }
 }

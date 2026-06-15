@@ -1,6 +1,7 @@
 import {
   classifyGhlImagePlaceholderBody,
   extractGhlInboundImageMediaUrl,
+  extractGhlMessageImageMediaUrlFromRow,
   ghlBodyIndicatesImagePlaceholder,
   stripGhlImagePlaceholderFromInboundBody,
 } from './ghl-inbound-image-media';
@@ -53,5 +54,14 @@ describe('ghl-inbound-image-media', () => {
       { messageBody: '>IMAGE<\ncaption' },
     );
     expect(url).toBe('https://cdn.example.com/ghl-upload-abc');
+  });
+
+  it('extracts image URL from GHL message history row', () => {
+    const url = extractGhlMessageImageMediaUrlFromRow({
+      direction: 'inbound',
+      messageType: 'ImageMessage',
+      attachments: [{ mediaUrl: 'https://cdn.example.com/wa-photo.jpg', contentType: 'image/jpeg' }],
+    });
+    expect(url).toBe('https://cdn.example.com/wa-photo.jpg');
   });
 });

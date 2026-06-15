@@ -1,0 +1,70 @@
+---
+description: AISBP GitHub push and Hostinger VPS backend deploy workflow
+alwaysApply: true
+---
+
+# AISBP — GitHub push & VPS deploy
+
+## Repository
+
+- GitHub: `demodropai/aisbp` (`https://github.com/demodropai/aisbp.git`)
+- Default branch: `main`
+- Local machine: `gh` is usually logged in as **demodropai** with `repo` + `workflow` — use `git push origin main` (no need to embed a PAT when gh credentials work).
+
+## Auto-deploy (CI)
+
+- Workflow: `.github/workflows/deploy-hostinger.yml` — **Deploy Hostinger VPS**
+- Triggers on push to `main` (and manual `workflow_dispatch`)
+- Uses `hostinger/deploy-on-vps@v2` with VM id in GitHub var `HOSTINGER_VM_ID`
+- This **initiates** a Hostinger Docker deploy but does **not** guarantee `/root/aisbp` on the VPS is updated for manual SSH builds.
+
+## VPS
+
+- Host: `72.62.243.54` (Hostinger VM `srv1267113` / id `1267113`)
+- SSH user: `root`
+- App path: `/root/aisbp`
+- Production env: `/root/aisbp/.env.production`
+- Compose file: `/root/aisbp/docker-compose.hostinger.yml`
+- Public app: `https://kb.aisalesbot.pro` (Next on :3000 proxies to backend on :3001)
+- Containers: `aisbp-backend-1`, `aisbp-frontend-1`, `aisbp-redis-1`
+
+**Never store SSH passwords or GitHub PATs in the repo, rules, or chat logs.** Ask the user for credentials when needed, or use existing `gh` auth locally.
+
+## Manual backend deploy (SSH)
+
+After push, if the VPS clone is stale or backend needs a forced rebuild:
+
+```bash
+cd /root/aisbp
+git fetch origin main
+git reset --hard origin/main
+docker compose --env-file .env.production -f docker-compose.hostinger.yml build --no-cache backend
+docker compose --env-file .env.production -f docker-compose.hostinger.yml up -d --force-recreate --no-deps backend
+docker ps --filter name=backend
+docker logs aisbp-backend-1 --tail 50
+```
+
+`git fetch` on the VPS requires GitHub auth (deploy key, PAT for one pull, or Hostinger private-repo integration). After a PAT-based pull, reset remote to `https://github.com/demodropai/aisbp.git` (no token in URL).
+
+## Verify deploy
+
+- Backend up (via frontend proxy): `curl https://kb.aisalesbot.pro/api/v1/debug/runtime` → `401` without auth is OK; `502` means backend down.
+- On VPS: `git log -1 --oneline` should match the pushed commit.
+
+## Full-stack / frontend
+
+To rebuild frontend after UI changes:
+
+```bash
+docker compose --env-file .env.production -f docker-compose.hostinger.yml build --no-cache frontend
+docker compose --env-file .env.production -f docker-compose.hostinger.yml up -d --force-recreate --no-deps frontend
+```
+
+## Local helper (Windows)
+
+Ephemeral SSH scripts can live in `.ssh-tmp/` (gitignored) using `ssh2` + env vars `SSH_PASS` / `GIT_PAT` — do not commit.
+
+## Docs
+
+- `docs/VPS_DEPLOY.md` — canonical backend deploy commands
+- `infra/vps/HOSTINGER.md` — GitHub Actions secrets and first-time setup

@@ -19,6 +19,7 @@ import type { RetrievalChunk } from '../kb/dto/retrieval.dto';
 import type { ConversationIntent } from '../conversation-policy/conversation-intent';
 import type { SelectionResolution } from '../conversation-policy/option-resolver';
 import { userRequestsFormattingPreference } from '../../lib/formatting-preference-intent';
+import { REPLY_LANGUAGE_MIRROR_SYSTEM_CONTENT } from '../../lib/reply-language-mirror';
 
 export interface GenerateDraftPolicyContext {
   latestIntent: ConversationIntent;
@@ -440,6 +441,8 @@ export class GenerationService {
     if (params.systemPrompt) {
       messages.push({ role: 'system', content: params.systemPrompt });
     }
+
+    messages.push({ role: 'system', content: REPLY_LANGUAGE_MIRROR_SYSTEM_CONTENT });
 
     const mem = params.memory.slice(-20);
     const incoming = stripGhlImagePlaceholderFromInboundBody(params.incomingMessage?.trim() ?? '');

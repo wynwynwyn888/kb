@@ -87,6 +87,7 @@ export class BookingReplyComposerService {
 
     const system = [
       'You rewrite booking chat replies for WhatsApp. Output ONLY JSON: {"reply": string, "confidence": number 0-1}.',
+      'Reply in the same language as latestInboundText (strict). Do not switch to English unless the customer wrote in English.',
       'Rules:',
       '- Preserve the exact business action implied by nextStep.type and safeBaseMessage.',
       '- Do not invent calendar slots, times, or availability.',

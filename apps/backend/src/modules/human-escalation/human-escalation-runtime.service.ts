@@ -316,9 +316,8 @@ export class HumanEscalationRuntimeService {
       customerPhoneForDuplicateCheck: pending.phoneForAlert,
     });
 
-    await this.clearPendingInternalAlert(conversationId);
-
     if (outcome === 'sent') {
+      await this.clearPendingInternalAlert(conversationId);
       await this.persistHumanEscalationAlertSentAt(conversationId);
       this.logger.log(
         `humanEscalationInternalAlertSent ${JSON.stringify({
@@ -675,14 +674,11 @@ export class HumanEscalationRuntimeService {
   private async persistHumanEscalationAlertSentAt(conversationId: string): Promise<void> {
     const { data, error } = await this.supabase.from('conversations').select('metadata').eq('id', conversationId).maybeSingle();
     if (error || !data) return;
-    const prev =
-      data.metadata && typeof data.metadata === 'object' && !Array.isArray(data.metadata)
-        ? (data.metadata as Record<string, unknown>)
-        : {};
-    const merged = {
-      ...prev,
+    const prev = readConversationMetadataField(data.metadata);
+    const incoming = {
       humanEscalationInternalAlertSentAt: new Date().toISOString(),
     };
+    const merged = mergeConversationMetadataForPersist(prev, incoming);
     const { error: upErr } = await this.supabase
       .from('conversations')
       .update({ metadata: merged, updated_at: new Date().toISOString() })
@@ -700,14 +696,11 @@ export class HumanEscalationRuntimeService {
   private async persistHumanEscalationInternalUpdateSentAt(conversationId: string): Promise<void> {
     const { data, error } = await this.supabase.from('conversations').select('metadata').eq('id', conversationId).maybeSingle();
     if (error || !data) return;
-    const prev =
-      data.metadata && typeof data.metadata === 'object' && !Array.isArray(data.metadata)
-        ? (data.metadata as Record<string, unknown>)
-        : {};
-    const merged = {
-      ...prev,
+    const prev = readConversationMetadataField(data.metadata);
+    const incoming = {
       humanEscalationLastInternalUpdateSentAt: new Date().toISOString(),
     };
+    const merged = mergeConversationMetadataForPersist(prev, incoming);
     const { error: upErr } = await this.supabase
       .from('conversations')
       .update({ metadata: merged, updated_at: new Date().toISOString() })

@@ -1621,14 +1621,14 @@ export class InboundMessageProcessor extends WorkerHost {
       row?.metadata && typeof row.metadata === 'object' && !Array.isArray(row.metadata)
         ? (row.metadata as Record<string, unknown>)
         : {};
-    const merged: Record<string, unknown> = {
-      ...prevMeta,
+    const incoming = {
       ghlChannelRaw: norm.raw,
       ghlOutboundChannel: norm.outboundChannel,
       ghlChannelSource: norm.source,
       channelIdentity: norm.identityChannel,
       locationId,
     };
+    const merged = mergeConversationMetadataForPersist(prevMeta, incoming);
     const { error } = await this.supabase
       .from('conversations')
       .update({
@@ -1736,13 +1736,14 @@ export class InboundMessageProcessor extends WorkerHost {
           ? { externalConversationId: identity.externalConversationId }
           : {}),
       };
+      const mergedSafe = mergeConversationMetadataForPersist(prevMeta, merged);
       const ghlIdToWrite = identity.externalConversationId ?? identity.derivedConversationKey;
       const { error: upErr } = await this.supabase
         .from('conversations')
         .update({
           ghl_conversation_id: ghlIdToWrite,
           channel: norm.dbChannel,
-          metadata: merged,
+          metadata: mergedSafe,
           updated_at: new Date().toISOString(),
         })
         .eq('id', legacy.id);
@@ -1789,6 +1790,19 @@ export class InboundMessageProcessor extends WorkerHost {
       .single();
 
     if (error || !data) {
+      const dupCode = typeof error === 'object' && error !== null && 'code' in error ? String((error as { code?: string }).code) : '';
+      if (dupCode === '23505') {
+        const { data: existing } = await this.supabase
+          .from('conversations')
+          .select('id')
+          .eq('tenant_id', tenantId)
+          .eq('ghl_conversation_id', ghlIdToWrite)
+          .maybeSingle();
+        if (existing?.id) {
+          safeLog(true, existing.id, 'create_race_reused');
+          return { id: existing.id, reused: true, derivedKeyHash: identity.derivedKeyHash };
+        }
+      }
       throw new Error(`Failed to create conversation: ${formatPostgrestError(error)}`);
     }
 

@@ -2,6 +2,7 @@ import { describe, expect, it } from '@jest/globals';
 import {
   BOOKING_CREATING_STALE_MS,
   bookingCreatingLockKey,
+  bookingTenantSlotLockKey,
   isBookingCreatingInFlight,
 } from './booking-creating-lock';
 import type { AisbpBookingStateV1 } from './conversation-booking-state';
@@ -33,5 +34,10 @@ describe('booking-creating-lock', () => {
 
   it('builds stable redis lock keys', () => {
     expect(bookingCreatingLockKey('conv-1')).toBe('booking:creating:conv-1');
+  });
+
+  it('builds tenant slot lock keys from calendar and start time', () => {
+    const key = bookingTenantSlotLockKey('t1', 'cal-1', '2026-05-27T09:00:00.000Z');
+    expect(key).toMatch(/^booking:slot:t1:cal-1:/);
   });
 });

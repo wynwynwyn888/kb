@@ -7,6 +7,10 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { formatPostgrestError } from '../../lib/format-postgrest-error';
+import {
+  mergeConversationMetadataForPersist,
+  readConversationMetadataField,
+} from '../../lib/conversation-metadata-merge';
 import { getSupabaseService } from '../../lib/supabase';
 import { createGhlClient } from '@aisbp/ghl-client';
 import { sanitizeOutboundCustomerText } from '../../lib/outbound-customer-text';
@@ -392,15 +396,12 @@ export class OutboundSendService {
       .eq('id', conversationId)
       .maybeSingle();
     if (error || !data) return;
-    const prev =
-      data.metadata && typeof data.metadata === 'object' && !Array.isArray(data.metadata)
-        ? (data.metadata as Record<string, unknown>)
-        : {};
-    const merged: Record<string, unknown> = {
-      ...prev,
+    const prev = readConversationMetadataField(data?.metadata);
+    const incoming = {
       ghlOutboundChannel: patch.ghlOutboundChannel,
       channelIdentity: patch.channelIdentity,
     };
+    const merged = mergeConversationMetadataForPersist(prev, incoming);
     const updateRow = {
       metadata: merged,
       channel: patch.dbChannel,
@@ -557,10 +558,25 @@ export class OutboundSendService {
     const nextUsed = wallet.used_quota + amt;
     const balanceAfter = wallet.total_quota - nextUsed;
 
-    await this.supabase
+    const { data: updatedWallet, error: walletUpErr } = await this.supabase
       .from('quota_wallets')
       .update({ used_quota: nextUsed, updated_at: new Date().toISOString() })
-      .eq('id', wallet.id);
+      .eq('id', wallet.id)
+      .eq('used_quota', wallet.used_quota)
+      .select('id')
+      .maybeSingle();
+
+    if (walletUpErr || !updatedWallet?.id) {
+      this.logger.warn(
+        `quotaDebitConflict ${JSON.stringify({
+          tenantId,
+          conversationId,
+          walletId: wallet.id,
+          message: walletUpErr ? formatPostgrestError(walletUpErr) : 'optimistic_lock_miss',
+        })}`,
+      );
+      return { debited: false };
+    }
 
     const { error: ledErr } = await this.supabase.from('quota_ledgers').insert({
       id: randomUUID(),

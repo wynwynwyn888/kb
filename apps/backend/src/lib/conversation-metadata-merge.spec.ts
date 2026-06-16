@@ -22,4 +22,10 @@ describe('mergeConversationMetadataForPersist', () => {
     const merged = mergeConversationMetadataForPersist(current, incoming);
     expect(merged['humanEscalationPendingInternalAlert']).toEqual(alert);
   });
+
+  it('applies incoming pending internal escalation alert when provided', () => {
+    const alert = { summary: 'help', latestInboundMessage: 'human please' };
+    const merged = mergeConversationMetadataForPersist({}, { humanEscalationPendingInternalAlert: alert });
+    expect(merged['humanEscalationPendingInternalAlert']).toEqual(alert);
+  });
 });

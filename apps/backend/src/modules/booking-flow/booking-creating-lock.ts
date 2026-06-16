@@ -22,3 +22,14 @@ export function healStaleCreatingBookingState(booking: AisbpBookingStateV1): boo
 export function bookingCreatingLockKey(conversationId: string): string {
   return `booking:creating:${conversationId.trim()}`;
 }
+
+/** Cross-conversation guard while checking/enforcing per-slot booking caps. */
+export function bookingTenantSlotLockKey(
+  tenantId: string,
+  calendarId: string,
+  startIso: string,
+): string {
+  const ms = Date.parse(startIso);
+  const bucket = Number.isFinite(ms) ? String(Math.floor(ms / 60_000)) : startIso.trim().slice(0, 32);
+  return `booking:slot:${tenantId.trim()}:${calendarId.trim()}:${bucket}`;
+}

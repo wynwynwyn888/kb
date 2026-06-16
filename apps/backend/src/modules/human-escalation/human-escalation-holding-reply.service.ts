@@ -3,6 +3,10 @@ import { Injectable, Logger } from '@nestjs/common';
 import type { Queue } from 'bullmq';
 import { getSupabaseService } from '../../lib/supabase';
 import { formatPostgrestError } from '../../lib/format-postgrest-error';
+import {
+  mergeConversationMetadataForPersist,
+  readConversationMetadataField,
+} from '../../lib/conversation-metadata-merge';
 import { QUEUES } from '../../queues/queue.constants';
 import type { ReplyDecision } from '../reply-planning/dto';
 import { HumanEscalationRuntimeService } from './human-escalation-runtime.service';
@@ -347,16 +351,13 @@ export class HumanEscalationHoldingReplyService {
       .eq('id', conversationId)
       .maybeSingle();
     if (error || !data) return;
-    const prev =
-      data.metadata && typeof data.metadata === 'object' && !Array.isArray(data.metadata)
-        ? (data.metadata as Record<string, unknown>)
-        : {};
-    const merged = {
-      ...prev,
+    const prev = readConversationMetadataField(data.metadata);
+    const incoming = {
       [METADATA_LAST_HOLDING_SENT_AT]: new Date().toISOString(),
       [METADATA_LAST_HOLDING_TYPE]: holdingReplyType,
       [METADATA_LAST_HOLDING_TEXT]: holdingReplyText.slice(0, 600),
     };
+    const merged = mergeConversationMetadataForPersist(prev, incoming);
     const { error: upErr } = await this.supabase
       .from('conversations')
       .update({ metadata: merged, updated_at: new Date().toISOString() })

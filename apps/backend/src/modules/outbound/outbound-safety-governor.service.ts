@@ -1,14 +1,16 @@
 // Pre-send safety: booking-language guard, menu repetition rewrite — runs before GHL outbound.
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { classifyConversationIntent } from '../conversation-policy/conversation-intent';
 import type { ReplyDecision } from '../reply-planning/dto';
 import { formatPostgrestError } from '../../lib/format-postgrest-error';
 import { getSupabaseService } from '../../lib/supabase';
+import { KbService } from '../kb/kb.service';
 import {
   SAFE_PENDING_BOOKING_REPLY,
   UNREQUESTED_MENU_FALLBACK_REPLY,
   isTrustedExecutedBookSlotSource,
+  rewriteUnsupportedBusinessClaimsWhenNoKb,
   shouldRewriteUnrequestedMenuRepetition,
   textClaimsBookingConfirmed,
 } from '../../lib/outbound-safety-governor';
@@ -23,6 +25,8 @@ export interface OutboundGovernorContext {
 export class OutboundSafetyGovernorService {
   private readonly logger = new Logger(OutboundSafetyGovernorService.name);
   private readonly supabase = getSupabaseService();
+
+  constructor(@Optional() private readonly kb?: KbService) {}
 
   /**
    * Allow confirmation wording only when a real booking intent already executed **before** we send
@@ -103,8 +107,67 @@ export class OutboundSafetyGovernorService {
 
     next = await this.applyBookingClaimGuard(next, ctx.conversationId);
     next = await this.applyMenuRepetitionGuard(next, ctx.conversationId);
+    next = await this.applyNoKbClaimGuard(next, ctx);
 
     return next;
+  }
+
+  private async applyNoKbClaimGuard(
+    plan: ReplyDecision,
+    ctx: OutboundGovernorContext,
+  ): Promise<ReplyDecision> {
+    const provenance = plan.draftProvenance ?? '';
+    const rationale = plan.rationale ?? '';
+    if (
+      provenance === 'human_escalation' ||
+      provenance === 'policy_reply' ||
+      rationale.includes('follow_up')
+    ) {
+      return plan;
+    }
+
+    const inbound = await this.getLatestInbound(ctx.conversationId);
+    let kbChunksReturned = 0;
+    if (this.kb && inbound?.content?.trim()) {
+      try {
+        const kb = await this.kb.retrieve({
+          tenantId: ctx.tenantId,
+          conversationId: ctx.conversationId,
+          query: inbound.content.trim(),
+          topK: 4,
+        });
+        kbChunksReturned = kb.chunks?.length ?? 0;
+      } catch (e) {
+        this.logger.warn(
+          `outboundNoKbGuardRetrieveFailed ${JSON.stringify({
+            conversationId: ctx.conversationId,
+            message: e instanceof Error ? e.message : String(e),
+          })}`,
+        );
+      }
+    }
+
+    const joined = plan.bubbles.map(b => b.text).join('\n\n');
+    const guarded = rewriteUnsupportedBusinessClaimsWhenNoKb({
+      replyText: joined,
+      kbChunksReturned,
+      latestIntent: inbound?.content ? classifyConversationIntent(inbound.content) : 'UNKNOWN',
+      latestUserMessage: inbound?.content,
+    });
+    if (!guarded.rewritten) return plan;
+
+    this.logger.log(
+      `outboundSafetyRewrite: ${JSON.stringify({
+        reason: guarded.reason ?? 'unsupported_business_claim_no_kb',
+        conversationId: ctx.conversationId,
+      })}`,
+    );
+
+    return {
+      ...plan,
+      bubbles: [{ index: 0, text: guarded.text }],
+      rationale: `${plan.rationale}; outboundSafetyRewrite=${guarded.reason ?? 'no_kb_claim'}`,
+    };
   }
 
   private async applyBookingClaimGuard(plan: ReplyDecision, conversationId: string): Promise<ReplyDecision> {

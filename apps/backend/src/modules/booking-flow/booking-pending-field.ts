@@ -12,6 +12,7 @@ import {
   resolveRelativeDayPhrase,
   parseFirstVisitNaturalReply,
   stripBookingFrustrationForParse,
+  isPastCalendarDateYmd,
 } from './booking-intent-and-parse';
 import { matchUserLineToMenuOption, resolveServiceFromUserReplyLine } from './booking-service-intake';
 import type { CoreFieldToggle } from '../../lib/tenant-automation-validation';
@@ -190,6 +191,9 @@ export function applyPendingFieldAnswer(params: {
     const wide = [line, params.combinedHint?.trim()].filter(Boolean).join('\n');
     const d = resolveRelativeDayPhrase(wide, todayYmd) ?? resolveBookingCalendarDay(wide, todayYmd);
     if (d) {
+      if (isPastCalendarDateYmd(d, todayYmd)) {
+        return { answered: false };
+      }
       booking.preferredDate = d;
       const t = extractPreferredTime(wide) || extractPreferredTime(line);
       const tw = extractPreferredTimeWindow(wide) || extractPreferredTimeWindow(line);

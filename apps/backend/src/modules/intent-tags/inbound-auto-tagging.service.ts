@@ -1,6 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { getSupabaseService } from '../../lib/supabase';
 import { formatPostgrestError } from '../../lib/format-postgrest-error';
+import {
+  mergeConversationMetadataForPersist,
+  readConversationMetadataField,
+} from '../../lib/conversation-metadata-merge';
 import { GhlService } from '../ghl/ghl.service';
 import { TagRulesService } from './tag-rules.service';
 import { TagRuleMatchService, type TagRuleMatchResult } from './tag-rule-match.service';
@@ -225,10 +229,7 @@ export class InboundAutoTaggingService {
       this.logger.warn(`mergeDedupe read failed: ${formatPostgrestError(error)}`);
       return;
     }
-    const prevMeta =
-      data?.metadata && typeof data.metadata === 'object' && !Array.isArray(data.metadata)
-        ? { ...(data.metadata as Record<string, unknown>) }
-        : {};
+    const prevMeta = readConversationMetadataField(data?.metadata);
     const prevDedupe =
       prevMeta[META_DEDUPE_KEY] && typeof prevMeta[META_DEDUPE_KEY] === 'object' && !Array.isArray(prevMeta[META_DEDUPE_KEY])
         ? { ...(prevMeta[META_DEDUPE_KEY] as Record<string, unknown>) }
@@ -241,10 +242,11 @@ export class InboundAutoTaggingService {
     for (const t of appliedTags) {
       dedupe[normTag(t)] = now;
     }
-    prevMeta[META_DEDUPE_KEY] = dedupe;
+    const incoming = { [META_DEDUPE_KEY]: dedupe };
+    const merged = mergeConversationMetadataForPersist(prevMeta, incoming);
     const { error: upErr } = await this.supabase
       .from('conversations')
-      .update({ metadata: prevMeta, updated_at: now })
+      .update({ metadata: merged, updated_at: now })
       .eq('id', conversationId);
     if (upErr) {
       this.logger.warn(`mergeDedupe update failed: ${formatPostgrestError(upErr)}`);

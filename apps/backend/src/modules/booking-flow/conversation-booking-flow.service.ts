@@ -96,9 +96,13 @@ import { BookingPostConfirmService } from './booking-post-confirm.service';
 import { AppCacheService } from '../../lib/app-cache.service';
 import {
   bookingCreatingLockKey,
+  bookingTenantSlotLockKey,
   healStaleCreatingBookingState,
   isBookingCreatingInFlight,
 } from './booking-creating-lock';
+
+const BOOKING_CANCEL_FAILED_REPLY =
+  "I couldn't cancel that appointment in the calendar automatically. Please try again in a moment, or contact the team directly for help.";
 import { maskPhoneForLog } from './booking-contact-enrichment';
 import {
   copyAskBookingName,
@@ -314,13 +318,18 @@ export class ConversationBookingFlowService {
           lastCreateError: undefined,
         };
       } else {
+        const keepOffered = Boolean(booking.offeredSlots?.length);
         booking = {
           ...booking,
-          status: 'collecting_details',
-          offeredSlots: undefined,
-          offeredSlotsCrmTimeZone: undefined,
-          lastOfferedAt: undefined,
-          selectedSlot: undefined,
+          status: keepOffered ? 'offered_slots' : 'collecting_details',
+          ...(keepOffered
+            ? {}
+            : {
+                offeredSlots: undefined,
+                offeredSlotsCrmTimeZone: undefined,
+                lastOfferedAt: undefined,
+                selectedSlot: undefined,
+              }),
           lastError: undefined,
           lastCreateError: undefined,
         };
@@ -429,23 +438,20 @@ export class ConversationBookingFlowService {
       }
       const wantsNewBooking = detectLiveBookingInterest(combined);
       const wantsCancelOnly =
-        /\bcancel(\s+my)?\s+appointment\b/i.test(combined) &&
-        !/\b(reschedule|rebook|change\s+my\s+appointment)\b/i.test(combined);
-      const wantsReschedule = /\b(reschedule|rebook|change\s+my\s+appointment)\b/i.test(combined);
+        /\bcancel(\s+my)?(\s+(appointment|booking))?\b/i.test(combined) &&
+        !/\b(reschedule|rebook|change\s+my\s+(appointment|booking))\b/i.test(combined);
+      const wantsReschedule = /\b(reschedule|rebook|change\s+my\s+(appointment|booking))\b/i.test(combined);
       if (!wantsNewBooking && !wantsReschedule && !wantsCancelOnly) {
         return { handled: false };
       }
       const priorAppointmentId = booking.appointmentId?.trim();
       if (priorAppointmentId && (wantsReschedule || wantsCancelOnly)) {
         const cancelRes = await this.cancelGhlAppointmentBestEffort(params.tenantId, priorAppointmentId);
-        if (!cancelRes.success && wantsCancelOnly) {
+        if (!cancelRes.success) {
           return {
             handled: true,
             persistMetadata: prevMeta,
-            replyPlan: plan(
-              "I couldn't cancel that appointment in the calendar automatically. The team has been notified — they'll confirm shortly.",
-              'booking_cancel_failed',
-            ),
+            replyPlan: plan(BOOKING_CANCEL_FAILED_REPLY, 'booking_cancel_failed'),
             routing: stubRouting(),
           };
         }
@@ -586,10 +592,7 @@ export class ConversationBookingFlowService {
           return {
             handled: true,
             persistMetadata: prevMeta,
-            replyPlan: plan(
-              "I couldn't cancel that appointment in the calendar automatically. The team has been notified — they'll confirm shortly.",
-              'booking_cancel_failed',
-            ),
+            replyPlan: plan(BOOKING_CANCEL_FAILED_REPLY, 'booking_cancel_failed'),
             routing: stubRouting(),
           };
         }
@@ -1332,36 +1335,64 @@ export class ConversationBookingFlowService {
       this.logger.log(`bookingAppointmentCreateStarted ${JSON.stringify({ tenantId: params.tenantId, calendarId: picked.calendarId })}`);
 
       const slotCap = Math.max(1, Math.floor(settings.maxBookingsPerSlot ?? 1));
-      const slotBookedCount = await this.countTenantExecutedBookingsAtSlot(
+      const tenantSlotLockKey = bookingTenantSlotLockKey(
         params.tenantId,
-        picked.startIso,
         picked.calendarId,
+        picked.startIso,
       );
-      if (slotBookedCount >= slotCap) {
-        this.logger.log(
-          `bookingSlotCapReached ${JSON.stringify({
-            tenantId: params.tenantId,
-            calendarId: picked.calendarId,
-            startIso: picked.startIso,
-            slotBookedCount,
-            slotCap,
-          })}`,
+      let tenantSlotRedisHeld = false;
+      try {
+        if (this.appCache) {
+          const slotRedis = await this.appCache.setIfNotExists(tenantSlotLockKey, { at: Date.now() }, 180);
+          if (slotRedis === 'held') {
+            const nextMeta = mergeBookingIntoConversationMetadata(prevMeta, {
+              ...booking,
+              status: 'offered_slots',
+              selectedSlot: picked,
+            });
+            return {
+              handled: true,
+              persistMetadata: nextMeta,
+              replyPlan: plan(
+                'That time may be getting booked by someone else right now. Please try again in a moment or pick another slot.',
+                'booking_slot_lock_held',
+              ),
+              routing: stubRouting(),
+            };
+          }
+          tenantSlotRedisHeld = slotRedis === 'acquired';
+        }
+
+        const slotBookedCount = await this.countTenantExecutedBookingsAtSlot(
+          params.tenantId,
+          picked.startIso,
+          picked.calendarId,
         );
-        const nextMeta = mergeBookingIntoConversationMetadata(prevMeta, {
-          ...booking,
-          status: 'offered_slots',
-          selectedSlot: undefined,
-        });
-        return {
-          handled: true,
-          persistMetadata: nextMeta,
-          replyPlan: plan(
-            "That time just filled up. Please pick another slot from the list, or tell me a different day or time.",
-            'booking_slot_cap',
-          ),
-          routing: stubRouting(),
-        };
-      }
+        if (slotBookedCount >= slotCap) {
+          this.logger.log(
+            `bookingSlotCapReached ${JSON.stringify({
+              tenantId: params.tenantId,
+              calendarId: picked.calendarId,
+              startIso: picked.startIso,
+              slotBookedCount,
+              slotCap,
+            })}`,
+          );
+          const nextMeta = mergeBookingIntoConversationMetadata(prevMeta, {
+            ...booking,
+            status: 'offered_slots',
+            selectedSlot: undefined,
+          });
+          return {
+            handled: true,
+            persistMetadata: nextMeta,
+            replyPlan: plan(
+              "That time just filled up. Please pick another slot from the list, or tell me a different day or time.",
+              'booking_slot_cap',
+            ),
+            routing: stubRouting(),
+          };
+        }
 
       if (!params.contactId?.trim()) {
         const nextMeta = mergeBookingIntoConversationMetadata(prevMeta, {
@@ -1404,14 +1435,19 @@ export class ConversationBookingFlowService {
             routing: stubRouting(),
           };
         }
+        const lockFailCopy =
+          lock.reason === 'read_failed' || lock.reason === 'update_failed'
+            ? "I'm having trouble securing that time right now. Please try again in a moment or pick another slot."
+            : "I'm already securing that time for you — one moment. If you don't hear back shortly, just send another message.";
+        const lockFailRationale =
+          lock.reason === 'read_failed' || lock.reason === 'update_failed'
+            ? 'booking_lock_failed'
+            : 'booking_in_flight';
         const nextMeta = mergeBookingIntoConversationMetadata(prevMeta, { ...booking, status: 'offered_slots' });
         return {
           handled: true,
           persistMetadata: nextMeta,
-          replyPlan: plan(
-            "I'm already securing that time for you — one moment. If you don't hear back shortly, just send another message.",
-            'booking_in_flight',
-          ),
+          replyPlan: plan(lockFailCopy, lockFailRationale),
           routing: stubRouting(),
         };
       }
@@ -1604,12 +1640,19 @@ export class ConversationBookingFlowService {
         lastQuestionFingerprint: undefined,
       });
 
+      await this.persistConversationMetadataBestEffort(params.conversationId, nextMeta);
+
       return {
         handled: true,
         persistMetadata: nextMeta,
         replyPlan: plan(withTone(composedConfirm), 'booking_confirmed'),
         routing: stubRouting(),
       };
+      } finally {
+        if (tenantSlotRedisHeld && this.appCache) {
+          await this.appCache.delete(tenantSlotLockKey);
+        }
+      }
     }
 
     const fieldChanged =
@@ -2134,12 +2177,70 @@ export class ConversationBookingFlowService {
     }
   }
 
+  private async persistConversationMetadataBestEffort(
+    conversationId: string,
+    incoming: Record<string, unknown>,
+  ): Promise<void> {
+    const { data, error } = await this.supabase
+      .from('conversations')
+      .select('metadata')
+      .eq('id', conversationId)
+      .maybeSingle();
+    if (error || !data) return;
+    const current = readConversationMetadataField(data.metadata);
+    const merged = mergeConversationMetadataForPersist(current, incoming);
+    const { error: upErr } = await this.supabase
+      .from('conversations')
+      .update({ metadata: merged, updated_at: new Date().toISOString() })
+      .eq('id', conversationId);
+    if (upErr) {
+      this.logger.warn(
+        `bookingMetadataPersistFailed ${JSON.stringify({
+          conversationId,
+          message: formatPostgrestError(upErr),
+        })}`,
+      );
+    }
+  }
+
+  private slotParamsMatch(
+    params: Record<string, unknown> | null | undefined,
+    calendarId: string,
+    startIso: string,
+  ): boolean {
+    if (!params || params['calendarId'] !== calendarId) return false;
+    const stored = typeof params['startTime'] === 'string' ? params['startTime'] : '';
+    return stored === startIso || this.sameMinute(stored, startIso);
+  }
+
   private async hasRecentExecutedBooking(
     tenantId: string,
     conversationId: string,
     startIso: string,
     calendarId: string,
   ): Promise<boolean> {
+    const { data: convRow } = await this.supabase
+      .from('conversations')
+      .select('metadata')
+      .eq('id', conversationId)
+      .maybeSingle();
+    const confirmed = parseAisbpBookingState(readConversationMetadataField(convRow?.metadata));
+    if (
+      confirmed?.status === 'confirmed' &&
+      confirmed.appointmentId?.trim() &&
+      confirmed.selectedSlot &&
+      this.slotParamsMatch(
+        {
+          calendarId: confirmed.selectedSlot.calendarId ?? confirmed.calendarId,
+          startTime: confirmed.selectedSlot.startIso,
+        },
+        calendarId,
+        startIso,
+      )
+    ) {
+      return true;
+    }
+
     const { data, error } = await this.supabase
       .from('action_intents')
       .select('id, params, executed_at')
@@ -2157,7 +2258,7 @@ export class ConversationBookingFlowService {
       const p = row.params as Record<string, unknown> | null;
       const ex = row.executed_at ? Date.parse(String(row.executed_at)) : 0;
       if (!Number.isFinite(ex) || ex < cutoff) continue;
-      if (p?.['calendarId'] === calendarId && p?.['startTime'] === startIso) return true;
+      if (this.slotParamsMatch(p, calendarId, startIso)) return true;
     }
     return false;
   }
@@ -2184,7 +2285,7 @@ export class ConversationBookingFlowService {
       const p = row.params as Record<string, unknown> | null;
       const ex = row.executed_at ? Date.parse(String(row.executed_at)) : 0;
       if (!Number.isFinite(ex) || ex < cutoff) continue;
-      if (p?.['calendarId'] === calendarId && p?.['startTime'] === startIso) count++;
+      if (this.slotParamsMatch(p, calendarId, startIso)) count++;
     }
     return count;
   }
@@ -2212,7 +2313,7 @@ export class ConversationBookingFlowService {
       const p = row.params as Record<string, unknown> | null;
       const ex = row.executed_at ? Date.parse(String(row.executed_at)) : 0;
       if (!Number.isFinite(ex) || ex < cutoff) continue;
-      if (p?.['calendarId'] === calendarId && p?.['startTime'] === startIso) {
+      if (p?.['calendarId'] === calendarId && this.slotParamsMatch(p, calendarId, startIso)) {
         const aid = typeof p['appointmentId'] === 'string' ? p['appointmentId'].trim() : '';
         return aid || undefined;
       }

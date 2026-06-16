@@ -36,10 +36,9 @@ export function mergeConversationMetadataForPersist(
     merged['inboundDebounce'] = incoming['inboundDebounce'];
   }
 
-  if (
-    current['humanEscalationPendingInternalAlert'] &&
-    !incoming['humanEscalationPendingInternalAlert']
-  ) {
+  if (incoming['humanEscalationPendingInternalAlert'] !== undefined) {
+    merged['humanEscalationPendingInternalAlert'] = incoming['humanEscalationPendingInternalAlert'];
+  } else if (current['humanEscalationPendingInternalAlert']) {
     merged['humanEscalationPendingInternalAlert'] = current['humanEscalationPendingInternalAlert'];
   }
 

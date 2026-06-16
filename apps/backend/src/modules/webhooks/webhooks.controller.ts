@@ -9,8 +9,12 @@ import {
   HttpCode,
   HttpStatus,
   Logger,
+  Req,
 } from '@nestjs/common';
+import type { RawBodyRequest } from '@nestjs/common';
+import { SkipThrottle } from '@nestjs/throttler';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import type { Request } from 'express';
 import { WebhooksService } from './webhooks.service';
 import { formatPostgrestError } from '../../lib/format-postgrest-error';
 import { WebhookVerificationService } from './webhook-verification.service';
@@ -22,6 +26,7 @@ import {
 import { ghlWebhookLogBodyKeysEnabled } from '../../lib/production-log-flags';
 
 @ApiTags('webhooks')
+@SkipThrottle()
 @Controller('webhooks/ghl')
 export class WebhooksController {
   private readonly logger = new Logger(WebhooksController.name);
@@ -36,6 +41,7 @@ export class WebhooksController {
   @ApiOperation({ summary: 'Handle GHL webhook events' })
   @ApiResponse({ status: 200, description: 'Webhook acknowledged' })
   async handleWebhook(
+    @Req() req: RawBodyRequest<Request>,
     @Body() body: unknown,
     @Headers('x-ghl-signature') signature: string,
     @Headers('x-aisbp-smoke-immediate') aisbpSmokeImmediate?: string,
@@ -57,14 +63,18 @@ export class WebhooksController {
       );
     }
 
-    // Log safe fields only — never log raw payload or message content
     this.logger.log(
       `Webhook received: event=${payload.event}, locationId=${payload.locationId}`,
     );
 
-    // Verify signature (placeholder — always passes until key management exists)
+    const rawBody =
+      req.rawBody ??
+      (body !== undefined && body !== null
+        ? Buffer.from(JSON.stringify(body), 'utf8')
+        : undefined);
+
     const verification = await this.webhookVerificationService.verifySignature(
-      body,
+      rawBody,
       signature,
     );
 
@@ -77,7 +87,6 @@ export class WebhooksController {
           locationId: payload.locationId,
         })}`,
       );
-      // Still return 200 to avoid GHL retry storms, but skip processing.
       return {
         success: true,
         message: 'Webhook received',
@@ -106,7 +115,6 @@ export class WebhooksController {
         message: 'Webhook received',
       };
     } catch (error) {
-      // Log error safely but still acknowledge GHL (PostgREST errors are not always Error instances)
       this.logger.error(`Webhook processing error: ${formatPostgrestError(error)}`);
       return {
         success: true,

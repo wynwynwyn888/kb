@@ -14,6 +14,7 @@ import { BookingSettingsModule } from '../booking-settings/booking-settings.modu
 
 import { PromptsModule } from '../prompts/prompts.module';
 import { HumanEscalationModule } from '../human-escalation/human-escalation.module';
+import { FollowUpEngineModule } from '../follow-up-engine/follow-up-engine.module';
 import { ConversationMemoryModule } from './conversation-memory.module';
 
 @Module({
@@ -28,6 +29,7 @@ import { ConversationMemoryModule } from './conversation-memory.module';
     BookingSettingsModule,
     PromptsModule,
     HumanEscalationModule,
+    FollowUpEngineModule,
   ],
   providers: [ConversationOrchestrationService, OrchestrationGuards],
   exports: [ConversationOrchestrationService],

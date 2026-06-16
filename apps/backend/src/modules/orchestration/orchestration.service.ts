@@ -61,6 +61,12 @@ import { inferKbRetrievalIntentHint } from '../../lib/kb-intent-synonyms';
 import { ConversationBookingFlowService } from '../booking-flow/conversation-booking-flow.service';
 import { BookingSettingsService } from '../booking-settings/booking-settings.service';
 import { HumanEscalationRuntimeService } from '../human-escalation/human-escalation-runtime.service';
+import { HumanEscalationSettingsService } from '../human-escalation/human-escalation-settings.service';
+import { FollowUpEngineService } from '../follow-up-engine/follow-up-engine.service';
+import {
+  mergeConversationMetadataForPersist,
+  readConversationMetadataField,
+} from '../../lib/conversation-metadata-merge';
 import { containsBotHumanEscalationLanguage } from '../../lib/bot-human-escalation-language';
 import { BotProfilesService } from '../prompts/bot-profiles.service';
 import { safeTextPreviewForLog } from '../../lib/safe-text-preview-for-log';
@@ -98,6 +104,8 @@ export class ConversationOrchestrationService {
     private readonly bookingSettings: BookingSettingsService,
     private readonly botProfiles: BotProfilesService,
     private readonly humanEscalationRuntime: HumanEscalationRuntimeService,
+    private readonly humanEscalationSettings: HumanEscalationSettingsService,
+    private readonly followUpEngine: FollowUpEngineService,
   ) {}
 
   /**
@@ -333,13 +341,22 @@ export class ConversationOrchestrationService {
 
       const complaintDet = detectComplaintServiceIssue(latestMsg);
       if (complaintDet.triggered) {
+        let complaintHandoverPaused = false;
         try {
-          await this.conversationsService.pauseForHandover(
-            conversationId,
-            'REQUEST',
-            'AI',
-            `service_complaint:${complaintDet.reason}`,
-          );
+          const escSettings = await this.humanEscalationSettings.getSettings(input.tenantId);
+          if (escSettings.enabled) {
+            await this.conversationsService.pauseForHandover(
+              conversationId,
+              'REQUEST',
+              'AI',
+              `service_complaint:${complaintDet.reason}`,
+            );
+            complaintHandoverPaused = true;
+            await this.followUpEngine.cancelPendingJobsForHumanEscalation({
+              tenantId: input.tenantId,
+              conversationId,
+            });
+          }
         } catch (e) {
           this.logger.warn(
             `complaint handover pause failed: ${e instanceof Error ? e.message : String(e)}`,
@@ -353,7 +370,7 @@ export class ConversationOrchestrationService {
             contactId: input.conversation?.contactId ?? null,
             reason: complaintDet.reason,
             tagsQueued: complaintDet.tags,
-            handoverPaused: true,
+            handoverPaused: complaintHandoverPaused,
           })}`,
         );
 
@@ -369,8 +386,8 @@ export class ConversationOrchestrationService {
 
         const complaintReplyPlan: ReplyDecision = {
           planStatus: 'PLANNED',
-          responseMode: 'standard',
-          handoverRecommended: false,
+          responseMode: complaintHandoverPaused ? 'handover' : 'standard',
+          handoverRecommended: complaintHandoverPaused,
           confidence: 0.95,
           rationale: `complaint_service_issue:${complaintDet.reason}`,
           bubbles: [{ index: 0, text: COMPLAINT_ESCALATION_REPLY }],
@@ -386,9 +403,9 @@ export class ConversationOrchestrationService {
 
         const routingComplaint: RoutingResponse = {
           recommendedModel: 'n/a',
-          responseMode: 'standard',
+          responseMode: complaintHandoverPaused ? 'handover' : 'standard',
           draftReply: null,
-          handoverRecommended: false,
+          handoverRecommended: complaintHandoverPaused,
           bookingIntentDetected: false,
           tagsSuggested: [],
           confidence: 1,
@@ -439,22 +456,23 @@ export class ConversationOrchestrationService {
         }
 
         if (humanEscalationActive) {
-        const policyOutcomeHuman = this.conversationPolicy.evaluate({
-          intent: routingIntent,
-          incomingRaw: latestMsg,
-          memory: memory.entries,
-          policyState: policyStatePre,
-          kbChunksRanked: [],
-          tenantDisplayName: input.tenant?.name,
-          promptConfigUpdatedAtIso: input.promptConfig?.updatedAt ?? null,
-          kbDocumentUpdatedAtIso: null,
-          currentTenantId: input.tenantId ?? null,
-        });
+          const policyOutcomeHuman = this.conversationPolicy.evaluate({
+            intent: routingIntent,
+            incomingRaw: latestMsg,
+            memory: memory.entries,
+            policyState: policyStatePre,
+            kbChunksRanked: [],
+            tenantDisplayName: input.tenant?.name,
+            promptConfigUpdatedAtIso: input.promptConfig?.updatedAt ?? null,
+            kbDocumentUpdatedAtIso: null,
+            currentTenantId: input.tenantId ?? null,
+          });
 
-        await this.persistConversationPolicyMetadata(
-          conversationId,
-          policyOutcomeHuman.nextPolicyState,
-        );
+          await this.persistConversationPolicyMetadata(
+            conversationId,
+            policyOutcomeHuman.nextPolicyState,
+          );
+        }
 
         const humanHandoverAck =
           "Of course. I'll arrange for a team member to assist you shortly.";
@@ -462,18 +480,21 @@ export class ConversationOrchestrationService {
         const humanReplyPlan: ReplyDecision = {
           planStatus: 'PLANNED',
           responseMode: 'handover',
-          handoverRecommended: true,
+          handoverRecommended: humanEscalationActive,
           confidence: 0.95,
-          rationale: 'human_request:HUMAN_HANDOVER',
+          rationale: humanEscalationActive
+            ? 'human_request:HUMAN_HANDOVER'
+            : 'human_request:HUMAN_HANDOVER_ack_only',
           bubbles: [{ index: 0, text: humanHandoverAck }],
           suggestedActions: [],
-          draftProvenance: 'human_escalation',
+          draftProvenance: humanEscalationActive ? 'human_escalation' : 'policy_reply',
         };
 
         this.logger.log(
           `humanEscalationCustomerAckSent ${JSON.stringify({
             conversationId,
             tenantId: input.tenantId,
+            escalated: humanEscalationActive,
           })}`,
         );
 
@@ -481,11 +502,13 @@ export class ConversationOrchestrationService {
           recommendedModel: 'n/a',
           responseMode: 'handover',
           draftReply: null,
-          handoverRecommended: true,
+          handoverRecommended: humanEscalationActive,
           bookingIntentDetected: false,
           tagsSuggested: [],
           confidence: 1,
-          reasoning: 'human_handover_short_circuit',
+          reasoning: humanEscalationActive
+            ? 'human_handover_short_circuit'
+            : 'human_handover_ack_only',
         };
 
         const logId = await this.persistOrchestrationLog(
@@ -506,7 +529,6 @@ export class ConversationOrchestrationService {
           replyPlan: humanReplyPlan,
           logId,
         };
-        }
       }
 
       const bookingHook = await this.bookingFlow.maybeHandleConversationBookingTurn({
@@ -1077,9 +1099,22 @@ export class ConversationOrchestrationService {
     conversationId: string,
     metadata: Record<string, unknown>,
   ): Promise<void> {
+    const { data, error: readError } = await this.supabase
+      .from('conversations')
+      .select('metadata')
+      .eq('id', conversationId)
+      .maybeSingle();
+    if (readError) {
+      this.logger.warn(
+        `Failed to load conversation metadata for persist: conversationId=${conversationId} ${formatPostgrestError(readError)}`,
+      );
+      return;
+    }
+    const current = readConversationMetadataField(data?.metadata);
+    const merged = mergeConversationMetadataForPersist(current, metadata);
     const { error } = await this.supabase
       .from('conversations')
-      .update({ metadata, updated_at: new Date().toISOString() })
+      .update({ metadata: merged, updated_at: new Date().toISOString() })
       .eq('id', conversationId);
     if (error) {
       this.logger.warn(

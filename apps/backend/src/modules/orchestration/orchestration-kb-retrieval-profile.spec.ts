@@ -69,6 +69,8 @@ describe('ConversationOrchestrationService — KB retrieval vs assistant profile
       {} as never,
       botProfiles as never,
       {} as never,
+      {} as never,
+      {} as never,
     );
   });
 

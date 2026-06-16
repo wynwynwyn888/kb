@@ -192,4 +192,20 @@ describe('FollowUpEngineService.scheduleAfterOutboundSend', () => {
     expect(order.indexOf('add')).toBe(0);
     expect(order.indexOf('followUpScheduled')).toBe(1);
   });
+
+  it('skips scheduling when conversation is already in handover', async () => {
+    conversations.isInHandover.mockResolvedValueOnce(true);
+    const engine = makeEngine();
+
+    await engine.scheduleAfterOutboundSend({
+      tenantId: 't1',
+      conversationId: 'conv-handover',
+      contactId: 'ct1',
+      ghlLocationId: 'loc1',
+      sentAtIso: '2026-05-06T10:00:00.000Z',
+    });
+
+    expect(followUpQueue.add).not.toHaveBeenCalled();
+    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('followUpScheduleSkipped'));
+  });
 });

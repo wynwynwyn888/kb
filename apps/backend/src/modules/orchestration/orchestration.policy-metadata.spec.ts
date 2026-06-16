@@ -50,6 +50,8 @@ describe('ConversationOrchestrationService — persistConversationPolicyMetadata
       {} as never,
       {} as never,
       {} as never,
+      {} as never,
+      {} as never,
     );
     (svc as unknown as { supabase: typeof supabase }).supabase = supabase;
 

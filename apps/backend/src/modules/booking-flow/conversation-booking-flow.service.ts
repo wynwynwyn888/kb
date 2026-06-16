@@ -1,5 +1,9 @@
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { createHash, randomUUID } from 'crypto';
+import {
+  mergeConversationMetadataForPersist,
+  readConversationMetadataField,
+} from '../../lib/conversation-metadata-merge';
 import { formatPostgrestError } from '../../lib/format-postgrest-error';
 import { getSupabaseService } from '../../lib/supabase';
 import { getBusinessLocalNow, resolveAppTimeZone } from '../../lib/business-time';
@@ -277,16 +281,37 @@ export class ConversationBookingFlowService {
     let booking = parseAisbpBookingState(prevMeta);
 
     if (booking?.status === 'failed') {
-      booking = {
-        ...booking,
-        status: 'collecting_details',
-        offeredSlots: undefined,
-        offeredSlotsCrmTimeZone: undefined,
-        lastOfferedAt: undefined,
-        selectedSlot: undefined,
-        lastError: undefined,
-        lastCreateError: undefined,
-      };
+      const startIso = booking.selectedSlot?.startIso?.trim() ?? '';
+      const calId = booking.calendarId?.trim() ?? '';
+      const alreadyBooked =
+        Boolean(booking.appointmentId?.trim()) ||
+        (startIso && calId
+          ? await this.hasRecentExecutedBooking(
+              params.tenantId,
+              params.conversationId,
+              startIso,
+              calId,
+            )
+          : false);
+      if (alreadyBooked) {
+        booking = {
+          ...booking,
+          status: 'confirmed',
+          lastError: undefined,
+          lastCreateError: undefined,
+        };
+      } else {
+        booking = {
+          ...booking,
+          status: 'collecting_details',
+          offeredSlots: undefined,
+          offeredSlotsCrmTimeZone: undefined,
+          lastOfferedAt: undefined,
+          selectedSlot: undefined,
+          lastError: undefined,
+          lastCreateError: undefined,
+        };
+      }
     }
 
     const interest = detectLiveBookingInterest(combined);
@@ -639,6 +664,14 @@ export class ConversationBookingFlowService {
       };
     }
 
+    if (booking.status === 'offered_slots' && nluPlan.type === 'refetch_slots_after_schedule_change') {
+      booking.offeredSlots = undefined;
+      booking.offeredSlotsCrmTimeZone = undefined;
+      booking.lastOfferedAt = undefined;
+      booking.selectedSlot = undefined;
+      booking.status = 'collecting_details';
+    }
+
     if (booking.status === 'offered_slots' && booking.offeredSlots?.length) {
       booking.pendingFieldId = undefined;
       booking.pendingFieldLabel = undefined;
@@ -717,6 +750,7 @@ export class ConversationBookingFlowService {
 
       const wantsSlotRefresh =
         nluPlan.type === 'discover_availability' ||
+        nluPlan.type === 'refetch_slots_after_schedule_change' ||
         userMessageImpliesAvailabilityDiscovery(latest) ||
         userMessageImpliesAvailabilityDiscovery(combined);
 
@@ -1025,7 +1059,7 @@ export class ConversationBookingFlowService {
       this.logger.log(`bookingSlotSelected ${JSON.stringify({ tenantId: params.tenantId, option: picked.option })}`);
 
       const ymd = booking.preferredDate!.trim();
-      const recheck = await this.bookingSettings.fetchFreeSlotsForAutomation(params.tenantId, {
+      let recheck = await this.bookingSettings.fetchFreeSlotsForAutomation(params.tenantId, {
         calendarId: picked.calendarId,
         selectedDate: ymd,
       });
@@ -1038,7 +1072,7 @@ export class ConversationBookingFlowService {
         })}`,
       );
 
-      if (recheck.error || recheck.slots.length === 0) {
+      if (recheck.error) {
         const nextMeta = mergeBookingIntoConversationMetadata(prevMeta, {
           ...booking,
           status: 'collecting_details',
@@ -1051,11 +1085,39 @@ export class ConversationBookingFlowService {
           handled: true,
           persistMetadata: nextMeta,
           replyPlan: plan(
-            "That slot may have just been taken. Let me pull fresh availability — one moment.\n\nI'm having trouble confirming that exact time against the live calendar. I'll pass your request to the team so they can lock it in for you.",
+            "I'm having trouble confirming that time against the live calendar right now. I'll pass your request to the team so they can lock it in for you.",
             'booking_recheck_failed',
           ),
           routing: stubRouting(),
         };
+      }
+
+      if (recheck.slots.length === 0) {
+        const dayWide = await this.bookingSettings.fetchFreeSlotsForAutomation(params.tenantId, {
+          calendarId: picked.calendarId,
+          selectedDate: ymd,
+        });
+        if (!dayWide.error && dayWide.slots.length > 0) {
+          recheck = dayWide;
+        } else {
+          const nextMeta = mergeBookingIntoConversationMetadata(prevMeta, {
+            ...booking,
+            status: 'collecting_details',
+            offeredSlots: undefined,
+            offeredSlotsCrmTimeZone: undefined,
+            lastOfferedAt: undefined,
+            selectedSlot: undefined,
+          });
+          return {
+            handled: true,
+            persistMetadata: nextMeta,
+            replyPlan: plan(
+              "That slot may have just been taken. Tell me another date (or the same date) and I'll fetch fresh times.",
+              'booking_recheck_empty',
+            ),
+            routing: stubRouting(),
+          };
+        }
       }
 
       const stillThere = recheck.slots.some(s => s.startTime === picked.startIso || this.sameMinute(s.startTime, picked.startIso));
@@ -1132,6 +1194,59 @@ export class ConversationBookingFlowService {
 
       this.logger.log(`bookingAppointmentCreateStarted ${JSON.stringify({ tenantId: params.tenantId, calendarId: picked.calendarId })}`);
 
+      if (!params.contactId?.trim()) {
+        const nextMeta = mergeBookingIntoConversationMetadata(prevMeta, {
+          ...booking,
+          status: 'offered_slots',
+          selectedSlot: picked,
+        });
+        return {
+          handled: true,
+          persistMetadata: nextMeta,
+          replyPlan: plan(
+            "I have that time ready, but I couldn't link your contact in our system to complete the booking automatically. The team will follow up shortly to confirm it for you.",
+            'booking_missing_contact',
+          ),
+          routing: stubRouting(),
+        };
+      }
+
+      const lock = await this.tryAcquireBookingCreatingLock({
+        conversationId: params.conversationId,
+        tenantId: params.tenantId,
+        booking,
+        picked,
+        prevMeta,
+      });
+      if (!lock.acquired) {
+        if (lock.reason === 'duplicate' || lock.reason === 'already_confirmed') {
+          const nextMeta = mergeBookingIntoConversationMetadata(prevMeta, {
+            ...booking,
+            status: 'confirmed',
+            selectedSlot: picked,
+          });
+          return {
+            handled: true,
+            persistMetadata: nextMeta,
+            replyPlan: plan(
+              `That time is already booked for you in our system — you're all set for ${picked.displayText}.`,
+              'booking_idempotent',
+            ),
+            routing: stubRouting(),
+          };
+        }
+        const nextMeta = mergeBookingIntoConversationMetadata(prevMeta, { ...booking, status: 'offered_slots' });
+        return {
+          handled: true,
+          persistMetadata: nextMeta,
+          replyPlan: plan(
+            "I'm already securing that time for you — one moment. If you don't hear back shortly, just send another message.",
+            'booking_in_flight',
+          ),
+          routing: stubRouting(),
+        };
+      }
+
       const { client, ghlLocationId } = await this.ghlService.createGhlClientForConnectedTenantWorkerOrThrow(params.tenantId);
       const resolvedConversationContact = await this.resolveStaffContactSnapshotForAlert({
         tenantId: params.tenantId,
@@ -1192,6 +1307,7 @@ export class ConversationBookingFlowService {
           ...booking,
           status: 'failed',
           selectedSlot: picked,
+          creatingStartedAt: undefined,
           lastError: bookRes.error ?? 'unknown',
           lastCreateError: bookRes.error ?? 'unknown',
         });
@@ -1236,6 +1352,7 @@ export class ConversationBookingFlowService {
           conversationId: params.conversationId,
           appointmentId: bookRes.appointmentId,
           hasContactId: Boolean(params.contactId),
+          intentPersisted: !insErr,
         })}`,
       );
 
@@ -1279,6 +1396,7 @@ export class ConversationBookingFlowService {
         selectedSlot: picked,
         appointmentId: bookRes.appointmentId,
         bookingConfirmedAt: new Date().toISOString(),
+        creatingStartedAt: undefined,
         offeredSlots: undefined,
         offeredSlotsCrmTimeZone: undefined,
         lastOfferedAt: undefined,
@@ -1689,6 +1807,61 @@ export class ConversationBookingFlowService {
     const db = Date.parse(b);
     if (!Number.isFinite(da) || !Number.isFinite(db)) return false;
     return Math.abs(da - db) < 90 * 1000;
+  }
+
+  private async tryAcquireBookingCreatingLock(params: {
+    conversationId: string;
+    tenantId: string;
+    booking: AisbpBookingStateV1;
+    picked: AisbpOfferedSlot;
+    prevMeta: Record<string, unknown>;
+  }): Promise<{
+    acquired: boolean;
+    reason?: 'duplicate' | 'already_confirmed' | 'in_flight' | 'read_failed' | 'update_failed';
+  }> {
+    const dup = await this.hasRecentExecutedBooking(
+      params.tenantId,
+      params.conversationId,
+      params.picked.startIso,
+      params.picked.calendarId,
+    );
+    if (dup) return { acquired: false, reason: 'duplicate' };
+
+    const { data, error } = await this.supabase
+      .from('conversations')
+      .select('metadata')
+      .eq('id', params.conversationId)
+      .maybeSingle();
+    if (error) return { acquired: false, reason: 'read_failed' };
+
+    const currentMeta = readConversationMetadataField(data?.metadata);
+    const currentBooking = parseAisbpBookingState(currentMeta);
+    if (currentBooking?.status === 'confirmed' && currentBooking.appointmentId) {
+      return { acquired: false, reason: 'already_confirmed' };
+    }
+    if (currentBooking?.status === 'creating') {
+      const started = currentBooking.creatingStartedAt
+        ? Date.parse(currentBooking.creatingStartedAt)
+        : 0;
+      const stale = !Number.isFinite(started) || Date.now() - started > 3 * 60 * 1000;
+      if (!stale) return { acquired: false, reason: 'in_flight' };
+    }
+
+    const creatingBooking: AisbpBookingStateV1 = {
+      ...params.booking,
+      status: 'creating',
+      selectedSlot: params.picked,
+      creatingStartedAt: new Date().toISOString(),
+    };
+    const incomingMeta = mergeBookingIntoConversationMetadata(params.prevMeta, creatingBooking);
+    const merged = mergeConversationMetadataForPersist(currentMeta, incomingMeta);
+
+    const { error: updErr } = await this.supabase
+      .from('conversations')
+      .update({ metadata: merged, updated_at: new Date().toISOString() })
+      .eq('id', params.conversationId);
+    if (updErr) return { acquired: false, reason: 'update_failed' };
+    return { acquired: true };
   }
 
   private async hasRecentExecutedBooking(

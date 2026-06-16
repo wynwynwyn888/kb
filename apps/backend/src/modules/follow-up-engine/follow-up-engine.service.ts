@@ -134,6 +134,16 @@ export class FollowUpEngineService {
     const settings = await this.followUpSettings.getFollowUpSettings(tenantId);
     if (!settings.enabled) return;
 
+    if (settings.stopOnEscalated) {
+      const inHandover = await this.conversations.isInHandover(conversationId);
+      if (inHandover) {
+        this.logger.log(
+          `followUpScheduleSkipped ${JSON.stringify({ tenantId, conversationId, reason: 'handover_active' })}`,
+        );
+        return;
+      }
+    }
+
     const enabledSteps = (settings.steps ?? []).filter(s => s.enabled);
     if (enabledSteps.length === 0) return;
 

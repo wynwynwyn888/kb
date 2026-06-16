@@ -77,6 +77,8 @@ export interface AisbpBookingStateV1 {
   skippedFieldIds?: string[];
   /** When `pendingFieldId` is `batch:details`, field ids included in the combined ask. */
   pendingBatchFieldIds?: string[];
+  /** ISO timestamp when `status` entered `creating` (in-flight GHL book guard). */
+  creatingStartedAt?: string;
   /** `YYYY-MM-DD` we last returned `booking_no_slots` for (wide follow-up UX). */
   noSlotsForDateYmd?: string;
   /** After a no-slots reply, set false; flipped true once a multi-day widen search was attempted. */
@@ -224,6 +226,7 @@ export function parseAisbpBookingState(metadata: Record<string, unknown> | undef
     selectedSlot: selected,
     appointmentId: typeof o['appointmentId'] === 'string' ? o['appointmentId'] : undefined,
     bookingConfirmedAt: typeof o['bookingConfirmedAt'] === 'string' ? o['bookingConfirmedAt'] : undefined,
+    creatingStartedAt: typeof o['creatingStartedAt'] === 'string' ? o['creatingStartedAt'] : undefined,
     slotDurationMinutes:
       typeof o['slotDurationMinutes'] === 'number' && Number.isFinite(o['slotDurationMinutes'])
         ? Math.floor(o['slotDurationMinutes'])

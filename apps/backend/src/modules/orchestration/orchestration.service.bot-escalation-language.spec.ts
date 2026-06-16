@@ -151,6 +151,8 @@ describe('ConversationOrchestrationService — bot reply human escalation langua
       bookingSettings as never,
       botProfiles as never,
       humanEscalationRuntime as never,
+      { getSettings: jestGlobal.fn(async () => ({ enabled: true })) } as never,
+      { cancelPendingJobsForHumanEscalation: jestGlobal.fn(async () => {}) } as never,
     );
 
     const result = await svc.orchestrate(makeInput('what are your hours?'));

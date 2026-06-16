@@ -17,7 +17,7 @@ async function bootstrap() {
   // eslint-disable-next-line no-console
   console.log(formatRuntimeBootLine());
 
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, { rawBody: true });
   app.use(helmet({ contentSecurityPolicy: false }));
   const configService = app.get(ConfigService);
   const bootLogger = new Logger('Bootstrap');
@@ -73,4 +73,8 @@ async function bootstrap() {
   console.log(`🚀 AISBP Backend running on http://localhost:${port}/${apiPrefix}`);
 }
 
-bootstrap();
+bootstrap().catch((err: unknown) => {
+  // eslint-disable-next-line no-console
+  console.error('Bootstrap failed:', err instanceof Error ? err.message : String(err));
+  process.exit(1);
+});

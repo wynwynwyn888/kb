@@ -1,9 +1,8 @@
-// Webhook signature verification (config-gated).
-// When WEBHOOK_SIGNATURE_SECRET is configured, validate x-ghl-signature as HMAC-SHA256 over the JSON body.
-// When not configured, accept all webhooks but log a one-time warning at runtime.
+// Webhook signature verification — HMAC-SHA256 over raw request bytes.
 
 import { Injectable, Logger } from '@nestjs/common';
 import { createHmac, timingSafeEqual } from 'node:crypto';
+import { isProductionEnv } from '../../lib/safe-text-preview-for-log';
 
 @Injectable()
 export class WebhookVerificationService {
@@ -11,23 +10,24 @@ export class WebhookVerificationService {
   private warnedNotConfigured = false;
 
   /**
-   * Verify GHL webhook signature
-   *
-   * Safe-mode implementation:
-   * - If WEBHOOK_SIGNATURE_SECRET is unset/blank: accept and return { valid: true, configured: false }
-   * - If set: require a signature and validate it; invalid signatures return { valid: false, configured: true }
-   *
-   * NOTE: This uses JSON.stringify(payload) since raw bytes are not captured in this build.
+   * Verify GHL webhook signature (`x-ghl-signature`).
+   * - Production: secret required; missing/invalid signatures reject.
+   * - Non-production: when secret unset, accepts with warning (local dev).
    */
   async verifySignature(
-    payload: unknown,
+    rawBody: Buffer | string | undefined,
     signature: string,
   ): Promise<{ valid: boolean; configured: boolean; reason?: string }> {
     const secret = String(process.env['WEBHOOK_SIGNATURE_SECRET'] ?? '').trim();
     if (!secret) {
+      if (isProductionEnv()) {
+        return { valid: false, configured: false, reason: 'not_configured' };
+      }
       if (!this.warnedNotConfigured) {
         this.warnedNotConfigured = true;
-        this.logger.warn('webhookVerificationNotConfigured WEBHOOK_SIGNATURE_SECRET is not set; accepting all webhooks');
+        this.logger.warn(
+          'webhookVerificationNotConfigured WEBHOOK_SIGNATURE_SECRET is not set; accepting unsigned webhooks in non-production',
+        );
       }
       return { valid: true, configured: false, reason: 'not_configured' };
     }
@@ -37,9 +37,19 @@ export class WebhookVerificationService {
       return { valid: false, configured: true, reason: 'missing_signature' };
     }
 
+    const bodyBuf = Buffer.isBuffer(rawBody)
+      ? rawBody
+      : Buffer.from(
+          typeof rawBody === 'string' ? rawBody : '',
+          'utf8',
+        );
+
+    if (bodyBuf.length === 0) {
+      return { valid: false, configured: true, reason: 'missing_raw_body' };
+    }
+
     const provided = sig.startsWith('sha256=') ? sig.slice('sha256='.length).trim() : sig;
-    const body = JSON.stringify(payload ?? {});
-    const expected = createHmac('sha256', secret).update(body, 'utf8').digest('hex');
+    const expected = createHmac('sha256', secret).update(bodyBuf).digest('hex');
 
     try {
       const a = Buffer.from(provided, 'hex');

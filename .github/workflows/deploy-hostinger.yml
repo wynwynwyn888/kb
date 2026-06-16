@@ -36,6 +36,7 @@ jobs:
             JWT_SECRET=${{ secrets.JWT_SECRET }}
             ENCRYPTION_KEY=${{ secrets.ENCRYPTION_KEY }}
             WEBHOOK_SIGNATURE_SECRET=${{ secrets.WEBHOOK_SIGNATURE_SECRET }}
+            INVITE_APP_BASE_URL=${{ secrets.INVITE_APP_BASE_URL }}
             CORS_ORIGIN=${{ secrets.CORS_ORIGIN }}
             NEXT_PUBLIC_SUPABASE_URL=${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
             NEXT_PUBLIC_SUPABASE_ANON_KEY=${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}

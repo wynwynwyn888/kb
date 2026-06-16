@@ -1,5 +1,5 @@
 import { ConfigService } from '@nestjs/config';
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit, Inject, forwardRef } from '@nestjs/common';
 import { formatPostgrestError } from '../../lib/format-postgrest-error';
 import { getSupabaseService } from '../../lib/supabase';
 import {
@@ -17,6 +17,7 @@ import {
 } from '../../lib/chat-reset-tenant-policy';
 import type { ReplyDecision } from '../reply-planning/dto';
 import { ConversationsService } from './conversations.service';
+import { FollowUpEngineService } from '../follow-up-engine/follow-up-engine.service';
 
 export interface ChatResetEligibilitySnapshot {
   allowed: boolean;
@@ -54,6 +55,8 @@ export class ConversationResetService implements OnModuleInit {
   constructor(
     private readonly config: ConfigService,
     private readonly conversationsService: ConversationsService,
+    @Inject(forwardRef(() => FollowUpEngineService))
+    private readonly followUpEngine: FollowUpEngineService,
   ) {}
 
   onModuleInit(): void {
@@ -170,6 +173,15 @@ export class ConversationResetService implements OnModuleInit {
       .eq('id', conversationId);
     if (uErr) {
       throw new Error(`Failed to persist reset metadata: ${formatPostgrestError(uErr)}`);
+    }
+
+    try {
+      await this.followUpEngine.cancelPendingJobsForBotReset({ tenantId, conversationId });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      this.logger.warn(
+        `botResetFollowUpCancelFailed ${JSON.stringify({ conversationId, tenantId, message: msg })}`,
+      );
     }
 
     this.logger.log(

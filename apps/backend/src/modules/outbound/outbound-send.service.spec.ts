@@ -44,6 +44,7 @@ function makeParams(overrides: {
   tenantId?: string;
   conversationId?: string;
   contactId?: string;
+  sendBubbleJobId?: string;
 } = {}) {
   return {
     tenantId: overrides.tenantId ?? 'tenant_1',
@@ -53,6 +54,19 @@ function makeParams(overrides: {
     replyPlan: overrides.replyPlan ?? makeReplyPlan(),
     sendBubbleJobId: 'job_1',
   };
+}
+
+/** Default agency credit deduction for sendReply tests (PER_LOGICAL_REPLY). */
+function mockOptimisticQuotaWalletUpdate() {
+  return jestGlobal.fn(() => ({
+    eq: jestGlobal.fn(() => ({
+      eq: jestGlobal.fn(() => ({
+        select: jestGlobal.fn(() => ({
+          maybeSingle: async () => ({ data: { id: 'w1' }, error: null }),
+        })),
+      })),
+    })),
+  }));
 }
 
 /** Default agency credit deduction for sendReply tests (PER_LOGICAL_REPLY). */
@@ -152,9 +166,7 @@ describe('OutboundSendService', () => {
                   maybeSingle: async () => ({ data: { metadata: {} }, error: null }),
                 }),
               }),
-              update: jestGlobal.fn(() => ({
-                eq: jestGlobal.fn(async () => ({ data: null, error: null })),
-              })),
+              update: mockOptimisticQuotaWalletUpdate(),
             } as never;
           }
           if (table === 'quota_wallets') {
@@ -162,9 +174,7 @@ describe('OutboundSendService', () => {
               select: () => ({
                 eq: () => ({ single: async () => ({ data: { id: 'w1', total_quota: 100, used_quota: 50, allow_negative_credits: false, negative_credit_limit: 0 }, error: null }) }),
               }),
-              update: jestGlobal.fn(() => ({
-                eq: jestGlobal.fn(async () => ({ data: null, error: null })),
-              })),
+              update: mockOptimisticQuotaWalletUpdate(),
             } as never;
           }
           if (table === 'quota_ledgers') {
@@ -228,9 +238,7 @@ describe('OutboundSendService', () => {
                   maybeSingle: async () => ({ data: { metadata: {} }, error: null }),
                 }),
               }),
-              update: jestGlobal.fn(() => ({
-                eq: jestGlobal.fn(async () => ({ data: null, error: null })),
-              })),
+              update: mockOptimisticQuotaWalletUpdate(),
             } as never;
           }
           if (table === 'quota_wallets') {
@@ -243,9 +251,7 @@ describe('OutboundSendService', () => {
                   }),
                 }),
               }),
-              update: jestGlobal.fn(() => ({
-                eq: jestGlobal.fn(async () => ({ data: null, error: null })),
-              })),
+              update: mockOptimisticQuotaWalletUpdate(),
             } as never;
           }
           if (table === 'quota_ledgers') {
@@ -309,9 +315,7 @@ describe('OutboundSendService', () => {
                   maybeSingle: async () => ({ data: { metadata: {} }, error: null }),
                 }),
               }),
-              update: jestGlobal.fn(() => ({
-                eq: jestGlobal.fn(async () => ({ data: null, error: null })),
-              })),
+              update: mockOptimisticQuotaWalletUpdate(),
             } as never;
           }
           if (table === 'quota_wallets') {
@@ -324,9 +328,7 @@ describe('OutboundSendService', () => {
                   }),
                 }),
               }),
-              update: jestGlobal.fn(() => ({
-                eq: jestGlobal.fn(async () => ({ data: null, error: null })),
-              })),
+              update: mockOptimisticQuotaWalletUpdate(),
             } as never;
           }
           if (table === 'quota_ledgers') {
@@ -412,9 +414,7 @@ describe('OutboundSendService', () => {
                 }),
               }),
             }),
-            update: jestGlobal.fn(() => ({
-              eq: jestGlobal.fn(async () => ({ data: null, error: null })),
-            })),
+            update: mockOptimisticQuotaWalletUpdate(),
           } as never;
         }
         if (table === 'quota_ledgers') {
@@ -614,9 +614,7 @@ describe('OutboundSendService', () => {
             select: () => ({
               eq: () => ({ single: async () => ({ data: { id: 'w1', total_quota: 100, used_quota: 10 }, error: null }) }),
             }),
-            update: jestGlobal.fn(() => ({
-              eq: jestGlobal.fn(async () => ({ data: null, error: null })),
-            })),
+            update: mockOptimisticQuotaWalletUpdate(),
           } as never;
         }
         if (table === 'quota_ledgers') {

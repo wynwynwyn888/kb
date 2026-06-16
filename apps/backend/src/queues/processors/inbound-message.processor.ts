@@ -1462,7 +1462,7 @@ export class InboundMessageProcessor extends WorkerHost {
   }> {
     const { data, error } = await this.supabase
       .from('messages')
-      .select('content, content_type, metadata')
+      .select('content, contentType, metadata')
       .eq('conversation_id', conversationId)
       .eq('direction', 'INBOUND')
       .eq('sender', 'CONTACT')
@@ -1473,7 +1473,7 @@ export class InboundMessageProcessor extends WorkerHost {
       return { messageType: 'text', imageMediaUrl: null, preferredMessageId: null };
     }
     const content = typeof data.content === 'string' ? data.content : '';
-    const ct = String(data.content_type ?? 'TEXT').toUpperCase();
+    const ct = String(data.contentType ?? 'TEXT').toUpperCase();
     let messageType: InboundMessageJobData['messageType'] =
       ct === 'IMAGE' ? 'image' : ct === 'AUDIO' ? 'audio' : ct === 'VIDEO' ? 'video' : 'text';
     if (messageType === 'text' && (ghlBodyIndicatesImagePlaceholder(content) || isInboundImagePlaceholderContent(content))) {
@@ -1497,7 +1497,7 @@ export class InboundMessageProcessor extends WorkerHost {
   private async fetchRecentStoredInboundImageUrl(conversationId: string): Promise<string | null> {
     const { data, error } = await this.supabase
       .from('messages')
-      .select('metadata, content_type, content')
+      .select('metadata, contentType, content')
       .eq('conversation_id', conversationId)
       .eq('direction', 'INBOUND')
       .eq('sender', 'CONTACT')
@@ -1514,7 +1514,7 @@ export class InboundMessageProcessor extends WorkerHost {
           ? meta['imageMediaUrl'].trim()
           : null;
       if (url) return url;
-      const ct = String(row.content_type ?? '').toUpperCase();
+      const ct = String(row.contentType ?? '').toUpperCase();
       const content = typeof row.content === 'string' ? row.content : '';
       if (ct === 'IMAGE' || ghlBodyIndicatesImagePlaceholder(content) || isInboundImagePlaceholderContent(content)) {
         continue;

@@ -253,6 +253,53 @@ export class HumanEscalationRuntimeService {
   }
 
   /**
+   * Stage an internal team alert for operational issues (booking cancel failure, etc.).
+   */
+  async stageStaffAlertForOpsIssue(params: {
+    tenantId: string;
+    conversationId: string;
+    contactId: string | null;
+    latestInboundMessage: string;
+    summary: string;
+    contactPhone?: string | null;
+    contactDisplayName?: string | null;
+  }): Promise<void> {
+    const settings = await this.escalationSettings.getSettings(params.tenantId);
+    if (!settings.enabled || !settings.teamNotificationNumber?.trim()) {
+      this.logger.log(
+        `opsStaffAlertSkipped ${JSON.stringify({
+          tenantId: params.tenantId,
+          conversationId: params.conversationId,
+          reason: 'escalation_disabled_or_no_number',
+        })}`,
+      );
+      return;
+    }
+
+    const crm = await this.resolveCrmContactForAlert(
+      params.tenantId,
+      params.contactId,
+      params.contactDisplayName ?? null,
+      params.contactPhone ?? null,
+    );
+
+    await this.persistPendingInternalAlert(params.conversationId, {
+      latestInboundMessage: params.latestInboundMessage,
+      summary: params.summary.trim(),
+      customerName: crm.displayName?.trim() || 'Unknown customer',
+      phoneForAlert: crm.phone?.trim() || params.contactPhone?.trim() || null,
+      contactId: params.contactId?.trim() || null,
+    });
+
+    this.logger.log(
+      `opsStaffAlertStaged ${JSON.stringify({
+        tenantId: params.tenantId,
+        conversationId: params.conversationId,
+      })}`,
+    );
+  }
+
+  /**
    * Send staged team SMS after customer ack outbound (GHL channel is known).
    * Call from send-bubble worker when draftProvenance is human_escalation.
    */
@@ -607,9 +654,11 @@ export class HumanEscalationRuntimeService {
         ? (data.metadata as Record<string, unknown>)
         : {};
     const { humanEscalationPendingInternalAlert: _removed, ...rest } = prev;
+    const merged = mergeConversationMetadataForPersist(prev, rest);
+    delete merged['humanEscalationPendingInternalAlert'];
     const { error: upErr } = await this.supabase
       .from('conversations')
-      .update({ metadata: rest, updated_at: new Date().toISOString() })
+      .update({ metadata: merged, updated_at: new Date().toISOString() })
       .eq('id', conversationId);
     if (upErr) {
       this.logger.warn(

@@ -87,14 +87,7 @@ export class SendBubbleProcessor extends WorkerHost {
         `outbound_send_ms=${outbound_send_ms} total_backend_reply_ms=${total_backend_reply_ms ?? 'na'}`,
     );
 
-    const isHumanEscalationCustomerAck =
-      replyPlan?.draftProvenance === 'human_escalation' ||
-      replyPlan?.responseMode === 'handover' ||
-      (replyPlan?.handoverRecommended === true &&
-        typeof replyPlan?.rationale === 'string' &&
-        (replyPlan.rationale.includes('human_request') ||
-          replyPlan.rationale.includes('bot_reply:HUMAN_ESCALATION_PROMISE')));
-    if (isHumanEscalationCustomerAck) {
+    if (summary.succeeded > 0 && summary.failed === 0) {
       const channelUsed = summary.bubbleResults.find(b => b.success && b.ghlChannelUsed)?.ghlChannelUsed;
       try {
         const flushResult = await this.humanEscalationRuntime.flushPendingInternalAlert(
@@ -102,13 +95,15 @@ export class SendBubbleProcessor extends WorkerHost {
           conversationId,
           channelUsed ?? null,
         );
-        this.logger.log(
-          `humanEscalationFlushPendingAlert ${JSON.stringify({
-            conversationId,
-            flushResult,
-            channelUsed: channelUsed ?? null,
-          })}`,
-        );
+        if (flushResult !== 'skipped_no_pending') {
+          this.logger.log(
+            `humanEscalationFlushPendingAlert ${JSON.stringify({
+              conversationId,
+              flushResult,
+              channelUsed: channelUsed ?? null,
+            })}`,
+          );
+        }
       } catch (e) {
         this.logger.warn(
           `humanEscalationFlushPendingAlertFailed ${JSON.stringify({

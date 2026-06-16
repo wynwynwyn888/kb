@@ -279,6 +279,20 @@ export class FollowUpEngineService {
    * When the conversation is escalated to humans, invalidate pending follow-up work and mark rows skipped.
    */
   async cancelPendingJobsForHumanEscalation(params: { tenantId: string; conversationId: string }): Promise<void> {
+    await this.invalidatePendingFollowUpJobs(params, 'human_escalated');
+  }
+
+  /**
+   * When bot state is reset, invalidate pending follow-up work so stale nudges do not fire.
+   */
+  async cancelPendingJobsForBotReset(params: { tenantId: string; conversationId: string }): Promise<void> {
+    await this.invalidatePendingFollowUpJobs(params, 'bot_reset');
+  }
+
+  private async invalidatePendingFollowUpJobs(
+    params: { tenantId: string; conversationId: string },
+    reason: 'human_escalated' | 'bot_reset',
+  ): Promise<void> {
     const { tenantId, conversationId } = params;
     const { data: pendingRows } = await this.supabase
       .from('conversation_follow_up_jobs')
@@ -298,13 +312,13 @@ export class FollowUpEngineService {
         );
       }
     }
-    const scheduleVersion = await this.bumpFollowUpScheduleVersion(conversationId, 'human_escalated');
+    const scheduleVersion = await this.bumpFollowUpScheduleVersion(conversationId, reason);
     const { error } = await this.supabase
       .from('conversation_follow_up_jobs')
       .update({
         status: 'SKIPPED',
         decided_at: new Date().toISOString(),
-        decision_reason: 'human_escalated',
+        decision_reason: reason,
         updated_at: new Date().toISOString(),
       })
       .eq('conversation_id', conversationId)
@@ -316,7 +330,7 @@ export class FollowUpEngineService {
       `followUpSkipped ${JSON.stringify({
         tenantId,
         conversationId,
-        reason: 'human_escalated',
+        reason,
         scheduleVersion,
       })}`,
     );
@@ -500,6 +514,7 @@ export class FollowUpEngineService {
       contactId,
       replyPlan,
       ghlLocationId,
+      sendBubbleJobId: `follow_up:${followUpJobId}`,
     });
 
     if (summary.succeeded > 0 && summary.failed === 0) {

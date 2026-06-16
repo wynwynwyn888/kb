@@ -5,6 +5,7 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { randomUUID } from 'crypto';
 import { getSupabaseService } from '../../lib/supabase';
+import { mergeConversationMetadataForPersist } from '../../lib/conversation-metadata-merge';
 import {
   formatHandoverChannelLabel,
   formatHandoverContactSummary,
@@ -126,12 +127,13 @@ export class HandoverService {
       humanEscalationPendingInternalAlert: _pending,
       ...metaAfterResume
     } = prevMeta;
+    const mergedResume = mergeConversationMetadataForPersist(prevMeta, metaAfterResume);
 
     const { error: convError } = await this.supabase
       .from('conversations')
       .update({
         status: 'ACTIVE',
-        metadata: metaAfterResume,
+        metadata: mergedResume,
         updated_at: new Date().toISOString(),
       })
       .eq('id', conversationId);

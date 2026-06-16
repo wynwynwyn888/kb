@@ -546,103 +546,112 @@ export class OutboundSendService {
       return { debited: false };
     }
 
-    const { data: wallet } = await this.supabase
-      .from('quota_wallets')
-      .select('id, total_quota, used_quota, period_start, period_end')
-      .eq('tenant_id', tenantId)
-      .single();
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const { data: wallet } = await this.supabase
+        .from('quota_wallets')
+        .select('id, total_quota, used_quota, period_start, period_end')
+        .eq('tenant_id', tenantId)
+        .single();
 
-    if (!wallet) return { debited: false };
+      if (!wallet) return { debited: false };
 
-    const balanceBefore = wallet.total_quota - wallet.used_quota;
-    const nextUsed = wallet.used_quota + amt;
-    const balanceAfter = wallet.total_quota - nextUsed;
+      const balanceBefore = wallet.total_quota - wallet.used_quota;
+      const nextUsed = wallet.used_quota + amt;
+      const balanceAfter = wallet.total_quota - nextUsed;
 
-    const { data: updatedWallet, error: walletUpErr } = await this.supabase
-      .from('quota_wallets')
-      .update({ used_quota: nextUsed, updated_at: new Date().toISOString() })
-      .eq('id', wallet.id)
-      .eq('used_quota', wallet.used_quota)
-      .select('id')
-      .maybeSingle();
+      const { data: updatedWallet, error: walletUpErr } = await this.supabase
+        .from('quota_wallets')
+        .update({ used_quota: nextUsed, updated_at: new Date().toISOString() })
+        .eq('id', wallet.id)
+        .eq('used_quota', wallet.used_quota)
+        .select('id')
+        .maybeSingle();
 
-    if (walletUpErr || !updatedWallet?.id) {
-      this.logger.warn(
-        `quotaDebitConflict ${JSON.stringify({
-          tenantId,
-          conversationId,
-          walletId: wallet.id,
-          message: walletUpErr ? formatPostgrestError(walletUpErr) : 'optimistic_lock_miss',
-        })}`,
-      );
-      return { debited: false };
-    }
-
-    const { error: ledErr } = await this.supabase.from('quota_ledgers').insert({
-      id: randomUUID(),
-      wallet_id: wallet.id,
-      amount: amt,
-      type: 'DEBIT',
-      movement_type: movementType,
-      balance_after: balanceAfter,
-      idempotency_key: idempotencyKey,
-      description,
-      conversation_id: conversationId,
-      metadata: { ...(metadata ?? {}), logicalReply: amt === 1 },
-      created_by_user_id: null,
-    });
-    if (ledErr) {
-      // If this is a unique conflict, treat as idempotent skip.
-      const msg = formatPostgrestError(ledErr);
-      if (/idempotency_key/i.test(msg) || /duplicate/i.test(msg) || /unique/i.test(msg)) {
-        this.logger.log(
-          `quotaDebitSkipped ${JSON.stringify({
+      if (walletUpErr || !updatedWallet?.id) {
+        this.logger.warn(
+          `quotaDebitConflict ${JSON.stringify({
             tenantId,
             conversationId,
-            reason: 'duplicate_idempotency_key',
+            walletId: wallet.id,
+            attempt: attempt + 1,
+            message: walletUpErr ? formatPostgrestError(walletUpErr) : 'optimistic_lock_miss',
           })}`,
         );
+        if (attempt < 2) {
+          await new Promise(r => setTimeout(r, 40 * (attempt + 1)));
+          continue;
+        }
         return { debited: false };
       }
-      throw new Error(`Failed to insert quota ledger: ${msg}`);
-    }
 
-    // Trigger automated low-credit warning. Always non-blocking — warning failures must not
-    // bubble back into the outbound send pipeline. Detached promise is intentional.
-    if (this.creditWarnings) {
-      const warner = this.creditWarnings;
-      const periodStart = wallet.period_start ? new Date(String(wallet.period_start)).toISOString() : null;
-      const periodEnd = wallet.period_end ? new Date(String(wallet.period_end)).toISOString() : null;
-      void warner
-        .maybeSendForCreditDebit({
-          tenantId,
-          balanceBefore,
-          balanceAfter,
-          periodStart,
-          periodEnd,
-          triggerSource: 'reply_debit',
-        })
-        .then(result => {
-          if (result.status !== 'SKIPPED' || result.reason !== 'no_threshold_crossed') {
-            this.logger.log(
-              `lowCreditWarning ${JSON.stringify({
-                tenantId,
-                conversationId,
-                status: result.status,
-                threshold: 'threshold' in result ? result.threshold : null,
-                reason: 'reason' in result ? result.reason : null,
-              })}`,
-            );
-          }
-        })
-        .catch(e => {
-          this.logger.warn(
+      const { error: ledErr } = await this.supabase.from('quota_ledgers').insert({
+        id: randomUUID(),
+        wallet_id: wallet.id,
+        amount: amt,
+        type: 'DEBIT',
+        movement_type: movementType,
+        balance_after: balanceAfter,
+        idempotency_key: idempotencyKey,
+        description,
+        conversation_id: conversationId,
+        metadata: { ...(metadata ?? {}), logicalReply: amt === 1 },
+        created_by_user_id: null,
+      });
+      if (ledErr) {
+        // If this is a unique conflict, treat as idempotent skip.
+        const msg = formatPostgrestError(ledErr);
+        if (/idempotency_key/i.test(msg) || /duplicate/i.test(msg) || /unique/i.test(msg)) {
+          this.logger.log(
+            `quotaDebitSkipped ${JSON.stringify({
+              tenantId,
+              conversationId,
+              reason: 'duplicate_idempotency_key',
+            })}`,
+          );
+          return { debited: false };
+        }
+        throw new Error(`Failed to insert quota ledger: ${msg}`);
+      }
+
+      // Trigger automated low-credit warning. Always non-blocking — warning failures must not
+      // bubble back into the outbound send pipeline. Detached promise is intentional.
+      if (this.creditWarnings) {
+        const warner = this.creditWarnings;
+        const periodStart = wallet.period_start ? new Date(String(wallet.period_start)).toISOString() : null;
+        const periodEnd = wallet.period_end ? new Date(String(wallet.period_end)).toISOString() : null;
+        void warner
+          .maybeSendForCreditDebit({
+            tenantId,
+            balanceBefore,
+            balanceAfter,
+            periodStart,
+            periodEnd,
+            triggerSource: 'reply_debit',
+          })
+          .then(result => {
+            if (result.status !== 'SKIPPED' || result.reason !== 'no_threshold_crossed') {
+              this.logger.log(
+                `lowCreditWarning ${JSON.stringify({
+                  tenantId,
+                  conversationId,
+                  status: result.status,
+                  threshold: 'threshold' in result ? result.threshold : null,
+                  reason: 'reason' in result ? result.reason : null,
+                })}`,
+              );
+            }
+          })
+          .catch(e => {
+            this.logger.warn(
             `lowCreditWarning fire-and-forget rejected tenant=${tenantId} ${e instanceof Error ? e.message : String(e)}`,
           );
         });
+      }
+
+      return { debited: true };
     }
 
-    return { debited: true };
+    return { debited: false };
   }
 
   private async persistOutboundMessage(params: {

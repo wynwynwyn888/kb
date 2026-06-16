@@ -93,6 +93,7 @@ import {
 } from './booking-flow-guards';
 import { buildAppointmentCreateNotes, customFieldIncludedInSummary } from './booking-summary';
 import { BookingPostConfirmService } from './booking-post-confirm.service';
+import { HumanEscalationRuntimeService } from '../human-escalation/human-escalation-runtime.service';
 import { AppCacheService } from '../../lib/app-cache.service';
 import {
   bookingCreatingLockKey,
@@ -234,6 +235,7 @@ export class ConversationBookingFlowService {
     @Optional() private readonly bookingNluInterpreter?: BookingNluInterpreterService,
     @Optional() private readonly bookingReplyComposer?: BookingReplyComposerService,
     @Optional() private readonly appCache?: AppCacheService,
+    @Optional() private readonly humanEscalationRuntime?: HumanEscalationRuntimeService,
   ) {}
 
   /**
@@ -300,7 +302,7 @@ export class ConversationBookingFlowService {
     if (booking?.status === 'failed') {
       const startIso = booking.selectedSlot?.startIso?.trim() ?? '';
       const calId = booking.calendarId?.trim() ?? '';
-      const alreadyBooked =
+      let alreadyBooked =
         Boolean(booking.appointmentId?.trim()) ||
         (startIso && calId
           ? await this.hasRecentExecutedBooking(
@@ -310,6 +312,18 @@ export class ConversationBookingFlowService {
               calId,
             )
           : false);
+      if (!alreadyBooked && startIso && calId) {
+        const orphanApptId = await this.findRecentAppointmentIdForSlot(
+          params.tenantId,
+          params.conversationId,
+          startIso,
+          calId,
+        );
+        if (orphanApptId) {
+          booking = { ...booking, appointmentId: orphanApptId };
+          alreadyBooked = true;
+        }
+      }
       if (alreadyBooked) {
         booking = {
           ...booking,
@@ -344,6 +358,9 @@ export class ConversationBookingFlowService {
           newStatus: booking.status,
         })}`,
       );
+      const healedMeta = mergeBookingIntoConversationMetadata(prevMeta, booking);
+      await this.persistConversationMetadataBestEffort(params.conversationId, healedMeta);
+      Object.assign(prevMeta, healedMeta);
     }
 
     if (isBookingCreatingInFlight(booking)) {
@@ -438,22 +455,26 @@ export class ConversationBookingFlowService {
       }
       const wantsNewBooking = detectLiveBookingInterest(combined);
       const wantsCancelOnly =
-        /\bcancel(\s+my)?(\s+(appointment|booking))?\b/i.test(combined) &&
+        (/\bcancel(\s+my)?(\s+(appointment|booking))?\b/i.test(combined) ||
+          /\b(delete|remove)(\s+my)?(\s+(appointment|booking))?\b/i.test(combined)) &&
         !/\b(reschedule|rebook|change\s+my\s+(appointment|booking))\b/i.test(combined);
       const wantsReschedule = /\b(reschedule|rebook|change\s+my\s+(appointment|booking))\b/i.test(combined);
       if (!wantsNewBooking && !wantsReschedule && !wantsCancelOnly) {
         return { handled: false };
       }
       const priorAppointmentId = booking.appointmentId?.trim();
-      if (priorAppointmentId && (wantsReschedule || wantsCancelOnly)) {
+      if (priorAppointmentId && (wantsReschedule || wantsCancelOnly || wantsNewBooking)) {
         const cancelRes = await this.cancelGhlAppointmentBestEffort(params.tenantId, priorAppointmentId);
         if (!cancelRes.success) {
-          return {
-            handled: true,
-            persistMetadata: prevMeta,
-            replyPlan: plan(BOOKING_CANCEL_FAILED_REPLY, 'booking_cancel_failed'),
-            routing: stubRouting(),
-          };
+          return this.returnBookingCancelFailure({
+            tenantId: params.tenantId,
+            conversationId: params.conversationId,
+            contactId: params.contactId,
+            prevMeta,
+            latestInbound: latest,
+            contactSnapshot: params.contactSnapshot,
+            appointmentId: priorAppointmentId,
+          });
         }
       }
       if (wantsCancelOnly && !wantsNewBooking) {
@@ -589,12 +610,15 @@ export class ConversationBookingFlowService {
       if (apptId) {
         const cancelRes = await this.cancelGhlAppointmentBestEffort(params.tenantId, apptId);
         if (!cancelRes.success) {
-          return {
-            handled: true,
-            persistMetadata: prevMeta,
-            replyPlan: plan(BOOKING_CANCEL_FAILED_REPLY, 'booking_cancel_failed'),
-            routing: stubRouting(),
-          };
+          return this.returnBookingCancelFailure({
+            tenantId: params.tenantId,
+            conversationId: params.conversationId,
+            contactId: params.contactId,
+            prevMeta,
+            latestInbound: latest,
+            contactSnapshot: params.contactSnapshot,
+            appointmentId: apptId,
+          });
         }
       }
       const reset = {
@@ -1573,6 +1597,17 @@ export class ConversationBookingFlowService {
             message: formatPostgrestError(insErr),
           })}`,
         );
+        const orphanMeta = mergeBookingIntoConversationMetadata(prevMeta, {
+          ...booking,
+          status: 'confirmed',
+          selectedSlot: picked,
+          appointmentId: bookRes.appointmentId,
+          bookingConfirmedAt: new Date().toISOString(),
+          creatingStartedAt: undefined,
+          lastCreateError: undefined,
+          lastError: undefined,
+        });
+        await this.persistConversationMetadataBestEffort(params.conversationId, orphanMeta);
       }
 
       this.logger.log(
@@ -2132,6 +2167,56 @@ export class ConversationBookingFlowService {
   private async releaseBookingCreatingLock(conversationId: string, redisHeld?: boolean): Promise<void> {
     if (redisHeld && this.appCache) {
       await this.appCache.delete(bookingCreatingLockKey(conversationId));
+    }
+  }
+
+  private async returnBookingCancelFailure(params: {
+    tenantId: string;
+    conversationId: string;
+    contactId: string;
+    prevMeta: Record<string, unknown>;
+    latestInbound: string;
+    contactSnapshot?: { displayName?: string; phone?: string; email?: string };
+    appointmentId?: string;
+  }): Promise<BookingFlowOrchestrationHookResult> {
+    await this.stageBookingCancelFailureAlert(params);
+    return {
+      handled: true,
+      persistMetadata: params.prevMeta,
+      replyPlan: plan(BOOKING_CANCEL_FAILED_REPLY, 'booking_cancel_failed'),
+      routing: stubRouting(),
+    };
+  }
+
+  private async stageBookingCancelFailureAlert(params: {
+    tenantId: string;
+    conversationId: string;
+    contactId: string;
+    latestInbound: string;
+    contactSnapshot?: { displayName?: string; phone?: string; email?: string };
+    appointmentId?: string;
+  }): Promise<void> {
+    if (!this.humanEscalationRuntime) return;
+    try {
+      await this.humanEscalationRuntime.stageStaffAlertForOpsIssue({
+        tenantId: params.tenantId,
+        conversationId: params.conversationId,
+        contactId: params.contactId,
+        latestInboundMessage: params.latestInbound,
+        summary:
+          `Booking calendar cancel failed for appointment ${params.appointmentId?.trim() || 'unknown'}. ` +
+          'Customer may have a duplicate appointment or needs manual calendar cleanup.',
+        contactPhone: params.contactSnapshot?.phone ?? null,
+        contactDisplayName: params.contactSnapshot?.displayName ?? null,
+      });
+    } catch (e) {
+      this.logger.warn(
+        `bookingCancelStaffAlertFailed ${JSON.stringify({
+          tenantId: params.tenantId,
+          conversationId: params.conversationId,
+          message: e instanceof Error ? e.message : String(e),
+        })}`,
+      );
     }
   }
 

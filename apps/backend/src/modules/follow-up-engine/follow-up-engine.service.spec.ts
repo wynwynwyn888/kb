@@ -351,6 +351,7 @@ describe('FollowUpEngineService.processFollowUpJob', () => {
     expect(outboundSafetyGovernor.applyOutboundGovernor).toHaveBeenCalled();
     expect(outboundSend.sendReply).toHaveBeenCalledWith(
       expect.objectContaining({
+        sendBubbleJobId: 'follow_up:job_5',
         replyPlan: expect.objectContaining({
           bubbles: [{ index: 0, text: 'governed' }],
         }),

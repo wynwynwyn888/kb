@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { FollowUpSettingsModule } from '../follow-up-settings/follow-up-settings.module';
 import { OutboundModule } from '../outbound/outbound.module';
 import { PromptsModule } from '../prompts/prompts.module';
@@ -19,10 +19,9 @@ import { FollowUpEngineService } from './follow-up-engine.service';
     KbModule,
     GenerationModule,
     AgencyAiConfigModule,
-    ConversationsModule,
+    forwardRef(() => ConversationsModule),
   ],
   providers: [FollowUpEngineService],
   exports: [FollowUpEngineService],
 })
 export class FollowUpEngineModule {}
-

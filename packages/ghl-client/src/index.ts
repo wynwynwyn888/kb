@@ -1290,15 +1290,23 @@ export class GhlClient {
   async cancelCalendarEvent(eventId: string): Promise<{ success: boolean; error?: string }> {
     const id = eventId.trim();
     if (!id) return { success: false, error: 'eventId required' };
+    const isAlreadyGone = (err: unknown): boolean =>
+      axios.isAxiosError(err) && (err.response?.status === 404 || err.response?.status === 410);
     try {
       await this.client.delete(`/calendars/events/${encodeURIComponent(id)}`, { data: {} });
       return { success: true };
     } catch (error) {
+      if (isAlreadyGone(error)) {
+        return { success: true };
+      }
       if (axios.isAxiosError(error) && (error.response?.status === 404 || error.response?.status === 400)) {
         try {
           await this.client.delete(`/calendars/events/appointments/${encodeURIComponent(id)}`, { data: {} });
           return { success: true };
         } catch (error2) {
+          if (isAlreadyGone(error2)) {
+            return { success: true };
+          }
           return {
             success: false,
             error: this.extractGhlErrorMessage(error2) ?? 'cancelCalendarEvent failed',

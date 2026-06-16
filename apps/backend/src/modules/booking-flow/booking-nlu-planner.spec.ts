@@ -32,6 +32,8 @@ describe('booking-nlu-planner', () => {
   it('detects availability discovery phrasing', () => {
     expect(userMessageImpliesAvailabilityDiscovery('u tell me when u are available')).toBe(true);
     expect(userMessageImpliesAvailabilityDiscovery('can u tell me which date ure available')).toBe(true);
+    expect(userMessageImpliesAvailabilityDiscovery('Do u have more slots on 19th?')).toBe(true);
+    expect(userMessageImpliesAvailabilityDiscovery('What time do u have on 19 June?')).toBe(true);
     expect(userMessageImpliesAvailabilityDiscovery('26th?')).toBe(false);
   });
 

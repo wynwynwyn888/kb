@@ -91,6 +91,21 @@ describe('parseExactSlotReservationAffirmative', () => {
   });
 });
 
+describe('parseSlotSelectionOrTimeRevision single-slot time mismatch', () => {
+  it('does not auto-select the only offered slot when user names a different time', () => {
+    const offered = [
+      {
+        option: 1,
+        displayText: '2:00 PM',
+        startIso: '2026-06-19T06:00:00.000Z',
+        calendarId: 'cal',
+      },
+    ];
+    const rev = parseSlotSelectionOrTimeRevision('3pm', '', offered, 'Asia/Singapore', '2026-06-19', '2026-06-16');
+    expect(rev).toEqual({ kind: 'time_revision', preferredTime: '15:00' });
+  });
+});
+
 describe('parseSlotSelectionOrTimeRevision single-slot affirmative', () => {
   it('books the only offered slot on "yes please"', () => {
     const offered = [

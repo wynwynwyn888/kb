@@ -32,6 +32,7 @@ import {
   findExactSlotMatchingPreferredHm,
   matchOfferedByHm,
   normalizedHmToMinutes,
+  parseExactSlotReservationAffirmative,
   parseExactSlotReservationNegative,
   parseFirstVisitNaturalReply,
   parseSlotSelectionOrTimeRevision,
@@ -56,7 +57,11 @@ import {
   bookingUserTextHasExplicitFourDigitYear,
   mergeValidatedNluIntoBooking,
 } from './booking-nlu-merge';
-import { planBookingTurnFromNlu, type BookingNluTurnAction } from './booking-nlu-planner';
+import {
+  planBookingTurnFromNlu,
+  userMessageImpliesAvailabilityDiscovery,
+  type BookingNluTurnAction,
+} from './booking-nlu-planner';
 import type { BookingNluInterpretInput, BookingNluOutput } from './booking-nlu.schema';
 import type { BookingReplyComposerNextStep } from './booking-reply-composer.types';
 import {
@@ -103,7 +108,6 @@ import {
   copyFrustrationRecoveryWithWindow,
   copyFrustrationAcknowledgeExactSlotAvailable,
   copyNoSlotsInWindow,
-  copyPickSlotHelpSofter,
   copyRequiredFieldCannotSkip,
   copyRequiredFieldPoliteFinal,
   copySingleExactTimeAvailable,
@@ -687,7 +691,10 @@ export class ConversationBookingFlowService {
         todayYmd,
       );
       if (nluPlan.type === 'confirm_single_slot' && booking.offeredSlots.length === 1) {
-        rev = { kind: 'selected_slot', slot: booking.offeredSlots[0]! };
+        const latestClean = stripBookingFrustrationForParse(latest.replace(/\s+/g, ' ').trim()).cleaned;
+        if (parseExactSlotReservationAffirmative(latest) && !extractPreferredTime(latestClean)) {
+          rev = { kind: 'selected_slot', slot: booking.offeredSlots[0]! };
+        }
       } else if (nluPlan.type === 'select_slot_from_nlu') {
         if (nluPlan.option != null) {
           const slot = booking.offeredSlots.find(o => o.option === nluPlan.option);
@@ -695,13 +702,34 @@ export class ConversationBookingFlowService {
         } else if (nluPlan.timeHm) {
           const matched = matchOfferedByHm(booking.offeredSlots, nluPlan.timeHm, crmTzForPick);
           if (matched) rev = { kind: 'selected_slot', slot: matched };
+          else rev = { kind: 'time_revision', preferredTime: nluPlan.timeHm };
         }
       } else if (nluOut?.intent === 'confirm_offer' && booking.offeredSlots.length === 1) {
-        rev = { kind: 'selected_slot', slot: booking.offeredSlots[0]! };
+        const latestClean = stripBookingFrustrationForParse(latest.replace(/\s+/g, ' ').trim()).cleaned;
+        const latestHm = extractPreferredTime(latestClean);
+        if (parseExactSlotReservationAffirmative(latest) && !latestHm) {
+          rev = { kind: 'selected_slot', slot: booking.offeredSlots[0]! };
+        } else if (latestHm) {
+          const matched = matchOfferedByHm(booking.offeredSlots, latestHm, crmTzForPick);
+          if (matched) rev = { kind: 'selected_slot', slot: matched };
+        }
       }
 
-      if (rev.kind === 'time_revision' || rev.kind === 'time_window_revision' || rev.kind === 'date_time_revision') {
-        if (rev.kind === 'time_revision') {
+      const wantsSlotRefresh =
+        nluPlan.type === 'discover_availability' ||
+        userMessageImpliesAvailabilityDiscovery(latest) ||
+        userMessageImpliesAvailabilityDiscovery(combined);
+
+      if (
+        rev.kind === 'time_revision' ||
+        rev.kind === 'time_window_revision' ||
+        rev.kind === 'date_time_revision' ||
+        (rev.kind === 'unparseable' && wantsSlotRefresh)
+      ) {
+        if (rev.kind === 'unparseable' && wantsSlotRefresh) {
+          booking.preferredTime = undefined;
+          booking.preferredTimeWindow = undefined;
+        } else if (rev.kind === 'time_revision') {
           booking.preferredTime = rev.preferredTime;
           booking.preferredTimeWindow = undefined;
         } else if (rev.kind === 'time_window_revision') {
@@ -722,11 +750,29 @@ export class ConversationBookingFlowService {
         booking.offeredSlotsCrmTimeZone = undefined;
 
         this.stripImplicitPastPreferredDateIfNeeded(booking, crmTodayYmd, latest, combined);
-        const slotFetch = await this.bookingSettings.fetchFreeSlotsForAutomation(params.tenantId, {
+        let slotFetch = await this.bookingSettings.fetchFreeSlotsForAutomation(params.tenantId, {
           calendarId: booking.calendarId,
           selectedDate: booking.preferredDate!,
           selectedTime: booking.preferredTime,
         });
+        if (!slotFetch.error && slotFetch.slots.length === 0 && booking.preferredTime?.trim()) {
+          const dayWide = await this.bookingSettings.fetchFreeSlotsForAutomation(params.tenantId, {
+            calendarId: booking.calendarId,
+            selectedDate: booking.preferredDate!,
+          });
+          if (!dayWide.error && dayWide.slots.length > 0) {
+            this.logger.log(
+              `bookingSlotsDayWideRetry ${JSON.stringify({
+                tenantId: params.tenantId,
+                conversationId: params.conversationId,
+                preferredTime: booking.preferredTime,
+                slotsReturned: dayWide.slots.length,
+                reason: 'offered_slots_revision',
+              })}`,
+            );
+            slotFetch = dayWide;
+          }
+        }
 
         if (slotFetch.error) {
           this.logger.warn(`bookingSlotsFetched ${JSON.stringify({ tenantId: params.tenantId, error: true })}`);
@@ -928,14 +974,19 @@ export class ConversationBookingFlowService {
         }
 
         const nextMeta = mergeBookingIntoConversationMetadata(prevMeta, { ...booking });
-        const pickHelp = copyPickSlotHelpSofter();
+        const humanDateRelist = formatHumanDateFromYmd(booking.preferredDate!.trim());
+        const offeredRelist = booking.offeredSlots!;
+        const relistBody = copySlotsOfferedWithHumanDate(
+          humanDateRelist,
+          offeredRelist.map(o => o.displayText),
+        );
         const composedPick = await this.composeBookingCustomerReply({
           tenantId: params.tenantId,
           conversationId: params.conversationId,
           latestInboundText: latest,
           combinedTranscript: combined,
           booking,
-          nextStep: { type: 'confirm_slot', safeBaseMessage: pickHelp },
+          nextStep: buildOfferSlotsComposerStep(relistBody, offeredRelist),
           userFrustrated: hadFrustration,
           businessName: params.tenantDisplayName,
         });

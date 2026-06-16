@@ -738,7 +738,6 @@ export function matchOfferedByHm(
       if (d.getHours() === wantH && d.getMinutes() === wantM) return o;
     }
   }
-  if (offered.length === 1) return offered[0];
   return undefined;
 }
 

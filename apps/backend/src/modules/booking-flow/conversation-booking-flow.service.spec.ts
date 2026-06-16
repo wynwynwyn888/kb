@@ -1749,7 +1749,7 @@ describe('ConversationBookingFlowService', () => {
       }
     });
 
-    it('H: gibberish still gets softer selection help copy', async () => {
+    it('H: gibberish re-lists offered slots instead of generic pick help', async () => {
       const fetchFree = jest.fn(async () => slotFetchResponse([]));
       const booking = {
         getBookingSettings: jest.fn(async () => baseSettings),
@@ -1766,8 +1766,91 @@ describe('ConversationBookingFlowService', () => {
       });
       expect(r.handled).toBe(true);
       if (r.handled) {
-        expect(r.replyPlan.bubbles[0]!.text).toMatch(/listed times/i);
-        expect(r.replyPlan.bubbles[0]!.text).not.toMatch(/Please reply with 1, 2, or 3/i);
+        const text = r.replyPlan.bubbles[0]!.text;
+        expect(text).toMatch(/1\.\s*12:00\s*PM/i);
+        expect(text).toMatch(/2\.\s*12:30\s*PM/i);
+        expect(text).not.toMatch(/Please reply with 1, 2, or 3/i);
+      }
+    });
+
+    it('I: single offered 2pm + user says 3pm refetches instead of booking 2pm', async () => {
+      const singleTwoPm = [
+        {
+          option: 1,
+          startIso: '2030-05-10T14:00:00.000Z',
+          endIso: '2030-05-10T14:30:00.000Z',
+          displayText: '2:00 PM',
+          calendarId: 'cal_1',
+        },
+      ];
+      const afternoonSlots = [
+        { startTime: '2030-05-10T15:00:00.000Z', endTime: '2030-05-10T15:30:00.000Z' },
+        { startTime: '2030-05-10T15:30:00.000Z', endTime: '2030-05-10T16:00:00.000Z' },
+      ];
+      const fetchFree = jest.fn(async () => slotFetchResponse(afternoonSlots));
+      const bookSlot = jest.fn(async () => ({ success: true, appointmentId: 'ap_i' }));
+      const booking = {
+        getBookingSettings: jest.fn(async () => baseSettings),
+        fetchFreeSlotsForAutomation: fetchFree,
+      } as unknown as BookingSettingsService;
+      const ghl = {
+        createGhlClientForConnectedTenantWorkerOrThrow: jest.fn(async () => ({
+          client: {
+            bookSlot,
+            getContact: jest.fn(async () => ({ success: true, contact: {} })),
+            getCalendar: jest.fn(async () => ({ summary: {} })),
+            updateAppointmentNotes: jest.fn(async () => ({ success: true })),
+            addContactNote: jest.fn(async () => ({ success: true })),
+            findContactByPhone: jest.fn(async () => ({ success: true, contact: undefined })),
+            createContact: jest.fn(),
+            sendMessage: jest.fn(),
+          },
+          ghlLocationId: 'loc1',
+        })),
+      } as unknown as GhlService;
+      const r = await svc(booking, ghl).maybeHandleConversationBookingTurn({
+        tenantId: 't1',
+        conversationId: 'c_slot_i',
+        contactId: 'ct1',
+        channel: 'SMS',
+        combinedInboundText: '3pm',
+        latestInboundText: '3pm',
+        metadata: baseOfferedMeta(singleTwoPm),
+      });
+      expect(r.handled).toBe(true);
+      expect(bookSlot).not.toHaveBeenCalled();
+      expect(fetchFree).toHaveBeenCalled();
+      if (r.handled) {
+        expect(r.replyPlan.bubbles[0]!.text).toMatch(/3:00\s*PM/i);
+      }
+    });
+
+    it('J: availability re-ask refetches slots instead of generic pick help', async () => {
+      const afternoonSlots = [
+        { startTime: '2030-05-10T14:00:00.000Z', endTime: '2030-05-10T14:30:00.000Z' },
+        { startTime: '2030-05-10T15:00:00.000Z', endTime: '2030-05-10T15:30:00.000Z' },
+        { startTime: '2030-05-10T16:00:00.000Z', endTime: '2030-05-10T16:30:00.000Z' },
+      ];
+      const fetchFree = jest.fn(async () => slotFetchResponse(afternoonSlots));
+      const booking = {
+        getBookingSettings: jest.fn(async () => baseSettings),
+        fetchFreeSlotsForAutomation: fetchFree,
+      } as unknown as BookingSettingsService;
+      const r = await svc(booking, {} as GhlService).maybeHandleConversationBookingTurn({
+        tenantId: 't1',
+        conversationId: 'c_slot_j',
+        contactId: 'ct1',
+        channel: 'SMS',
+        combinedInboundText: 'What time do u have on 19 June?',
+        latestInboundText: 'What time do u have on 19 June?',
+        metadata: baseOfferedMeta(offeredMorningUtc),
+      });
+      expect(r.handled).toBe(true);
+      expect(fetchFree).toHaveBeenCalled();
+      if (r.handled) {
+        const text = r.replyPlan.bubbles[0]!.text;
+        expect(text).toMatch(/1\./);
+        expect(text).not.toMatch(/choose one of the listed times/i);
       }
     });
 

@@ -15,7 +15,7 @@ export type BookingNluTurnAction =
 export function userMessageImpliesAvailabilityDiscovery(text: string): boolean {
   const t = text.trim().toLowerCase();
   if (!t) return false;
-  return /\b(when\s+(are\s+)?you\s+available|what\s+(dates?|times?|days?)\s+(are\s+)?(you\s+)?available|which\s+date|tell\s+me\s+(when|what|which)|any\s+openings?|show\s+(me\s+)?(available|open|slots)|u\s+tell\s+me\s+when|can\s+you\s+tell\s+me\s+which)\b/.test(
+  return /\b(when\s+(are\s+)?you\s+available|what\s+(dates?|times?|days?)\s+(are\s+)?(you\s+)?available|what\s+time\s+(do\s+)?(u|you)\s+have|which\s+(date|times?)|tell\s+me\s+(when|what|which)|any\s+openings?|show\s+(me\s+)?(available|open|slots)|u\s+tell\s+me\s+when|can\s+you\s+tell\s+me\s+which|more\s+slots?|other\s+(times?|slots?)|do\s+(u|you)\s+have\s+(more|any|other)|any\s+other\s+(times?|slots?))\b/.test(
     t,
   );
 }

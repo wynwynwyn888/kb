@@ -59,4 +59,11 @@ describe('bookingReplyComposerOutputPassesGuardrails', () => {
     const nextStep = { type: 'booking_confirmed' as const, safeBaseMessage: safe };
     expect(bookingReplyComposerOutputPassesGuardrails(nextStep, safe, safe)).toBe(true);
   });
+
+  it('rejects Portuguese drift', () => {
+    const safe = 'For 19 June we have 2:00 PM available. Would you like me to book that time?';
+    const nextStep = { type: 'offer_slots' as const, safeBaseMessage: safe, offeredSlots: [{ option: 1, label: '2:00 PM' }] };
+    const pt = 'Para o dia 19 de junho, temos 2:00 PM disponível. Você gostaria que eu reservasse esse horário?';
+    expect(bookingReplyComposerOutputPassesGuardrails(nextStep, safe, pt)).toBe(false);
+  });
 });

@@ -8,6 +8,7 @@ import { bookingReplyComposerOutputSchema } from './booking-reply-composer.schem
 import { bookingReplyComposerOutputPassesGuardrails } from './booking-reply-composer.guards';
 import type { BookingReplyComposerComposeInput } from './booking-reply-composer.types';
 import { BotProfilesService } from '../prompts/bot-profiles.service';
+import { REPLY_LANGUAGE_MIRROR_SYSTEM_CONTENT } from '../../lib/reply-language-mirror';
 
 type ProviderRow = {
   provider: string;
@@ -87,7 +88,7 @@ export class BookingReplyComposerService {
 
     const system = [
       'You rewrite booking chat replies for WhatsApp. Output ONLY JSON: {"reply": string, "confidence": number 0-1}.',
-      'Reply in the same language as latestInboundText (strict). Do not switch to English unless the customer wrote in English.',
+      REPLY_LANGUAGE_MIRROR_SYSTEM_CONTENT,
       'Rules:',
       '- Preserve the exact business action implied by nextStep.type and safeBaseMessage.',
       '- Do not invent calendar slots, times, or availability.',

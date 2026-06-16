@@ -29,6 +29,7 @@ import { polishKbSnippetForCustomer } from '../../lib/kb-faq-customer-text';
 import { applyBusinessHoursGroundingGuard } from '../../lib/business-hours-grounding-guard';
 import { applyMenuKbGroundingGuard } from '../../lib/menu-kb-grounding-guard';
 import { sanitizeOutboundInternalKbLeak } from '../../lib/outbound-internal-kb-sanitizer';
+import { containsDisallowedSingaporeReplyLanguage } from '../../lib/reply-language-guard';
 import { applyOutboundPolicyGuard } from '../../lib/outbound-policy-guard';
 import { detectMenuIntentInMessage } from '../../lib/kb-relevance';
 import { rewriteUnsupportedBusinessClaimsWhenNoKb } from '../../lib/outbound-safety-governor';
@@ -473,7 +474,7 @@ export class ReplyPlannerService {
     const generation_ms = Date.now() - generationStarted;
 
     const trimmed = stripModelThinking(liveDraft.content ?? '').trim();
-    if (trimmed.length > 0) {
+    if (trimmed.length > 0 && !containsDisallowedSingaporeReplyLanguage(trimmed)) {
       const gma = liveDraft.generationModelActuallyUsed ?? liveDraft.generationModel;
       this.logger.log(
         `Live draft generated: generation_ms=${generation_ms} ${trimmed.length} chars (generationModelActuallyUsed=${gma ?? 'n/a'}, configuredModel=${liveDraft.configuredModel ?? 'n/a'})`,
@@ -490,6 +491,15 @@ export class ReplyPlannerService {
         usedOpenAiFallback: liveDraft.usedOpenAiFallback,
         fallbackUsed: liveDraft.fallbackUsed ?? Boolean(liveDraft.usedOpenAiFallback),
       };
+    }
+
+    if (trimmed.length > 0 && containsDisallowedSingaporeReplyLanguage(trimmed)) {
+      this.logger.warn(
+        `disallowedReplyLanguage ${JSON.stringify({
+          tenantId,
+          sample: trimmed.slice(0, 120),
+        })}`,
+      );
     }
 
     this.logger.log(

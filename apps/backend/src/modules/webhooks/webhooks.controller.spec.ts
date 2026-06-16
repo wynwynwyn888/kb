@@ -16,23 +16,23 @@ describe('WebhooksController signature safe-mode', () => {
   it('secret absent → processes event', async () => {
     process.env['WEBHOOK_SIGNATURE_SECRET'] = '';
     const webhooksService = { handleGhlWebhook: jestGlobal.fn(async () => ({ success: true, eventId: 'e1' })) };
-    const verifier = { verifySignature: jestGlobal.fn(async () => ({ valid: true, configured: false })) };
+    const verifier = { verify: jestGlobal.fn(async () => ({ valid: true, configured: false })) };
     const controller = new WebhooksController(webhooksService as never, verifier as never);
 
     const body = { locationId: 'loc', event: 'conversation_message_created', data: { id: 'm1', conversationId: 'c1', message: 'Hi' } };
-    await controller.handleWebhook(reqFor(body) as never, body as never, '', undefined);
+    await controller.handleWebhook(reqFor(body) as never, body as never, '', '', undefined);
     expect(webhooksService.handleGhlWebhook).toHaveBeenCalled();
-    expect(verifier.verifySignature).toHaveBeenCalled();
+    expect(verifier.verify).toHaveBeenCalled();
   });
 
   it('secret present + invalid → returns 200 but does not process', async () => {
     process.env['WEBHOOK_SIGNATURE_SECRET'] = 'secret';
     const webhooksService = { handleGhlWebhook: jestGlobal.fn(async () => ({ success: true, eventId: 'e1' })) };
-    const verifier = { verifySignature: jestGlobal.fn(async () => ({ valid: false, configured: true, reason: 'invalid_signature' })) };
+    const verifier = { verify: jestGlobal.fn(async () => ({ valid: false, configured: true, reason: 'invalid_signature' })) };
     const controller = new WebhooksController(webhooksService as never, verifier as never);
 
     const body = { locationId: 'loc', event: 'conversation_message_created', data: { id: 'm1', conversationId: 'c1', message: 'Hi' } };
-    const res = await controller.handleWebhook(reqFor(body) as never, body as never, 'bad', undefined);
+    const res = await controller.handleWebhook(reqFor(body) as never, body as never, 'bad', '', undefined);
     expect(webhooksService.handleGhlWebhook).not.toHaveBeenCalled();
     expect(res).toEqual(expect.objectContaining({ success: true, skipped: true }));
   });
@@ -44,14 +44,14 @@ describe('WebhooksController signature safe-mode', () => {
     const rawBody = Buffer.from(JSON.stringify(body), 'utf8');
     const sig = createHmac('sha256', 'secret').update(rawBody).digest('hex');
     const verifier = {
-      verifySignature: jestGlobal.fn(async (buf: Buffer) => {
-        const expected = createHmac('sha256', 'secret').update(buf).digest('hex');
+      verify: jestGlobal.fn(async (input: { rawBody: Buffer; hmacSignature?: string }) => {
+        const expected = createHmac('sha256', 'secret').update(input.rawBody).digest('hex');
         return { valid: sig === expected, configured: true };
       }),
     };
     const controller = new WebhooksController(webhooksService as never, verifier as never);
 
-    await controller.handleWebhook({ rawBody } as never, body as never, sig, undefined);
+    await controller.handleWebhook({ rawBody } as never, body as never, sig, '', undefined);
     expect(webhooksService.handleGhlWebhook).toHaveBeenCalled();
   });
 });

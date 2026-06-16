@@ -1,8 +1,23 @@
-// Webhook signature verification — HMAC-SHA256 over raw request bytes.
+// Webhook verification — HMAC (raw body) or static token (GHL workflow webhooks).
 
 import { Injectable, Logger } from '@nestjs/common';
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { isProductionEnv } from '../../lib/safe-text-preview-for-log';
+
+export type WebhookVerificationInput = {
+  rawBody: Buffer | string | undefined;
+  /** HMAC hex digest in `x-ghl-signature` (integrations that sign the raw body). */
+  hmacSignature?: string;
+  /** Shared secret in `x-aisbp-webhook-token` (GHL workflow custom webhook headers). */
+  staticToken?: string;
+};
+
+function timingSafeEqualString(a: string, b: string): boolean {
+  const left = Buffer.from(a, 'utf8');
+  const right = Buffer.from(b, 'utf8');
+  if (left.length !== right.length) return false;
+  return timingSafeEqual(left, right);
+}
 
 @Injectable()
 export class WebhookVerificationService {
@@ -10,11 +25,43 @@ export class WebhookVerificationService {
   private warnedNotConfigured = false;
 
   /**
-   * Verify GHL webhook signature (`x-ghl-signature`).
-   * - Production: secret required; missing/invalid signatures reject.
-   * - Non-production: when secret unset, accepts with warning (local dev).
+   * Verify inbound GHL webhook auth.
+   * - Prefer `x-aisbp-webhook-token` when set (static secret — required for GHL workflow webhooks).
+   * - Else verify `x-ghl-signature` HMAC-SHA256 over raw request bytes.
    */
+  async verify(input: WebhookVerificationInput): Promise<{
+    valid: boolean;
+    configured: boolean;
+    reason?: string;
+  }> {
+    const secret = String(process.env['WEBHOOK_SIGNATURE_SECRET'] ?? '').trim();
+    const staticToken = String(input.staticToken ?? '').trim();
+
+    if (staticToken) {
+      if (!secret) {
+        if (isProductionEnv()) {
+          return { valid: false, configured: false, reason: 'not_configured' };
+        }
+        return { valid: true, configured: false, reason: 'not_configured' };
+      }
+      if (timingSafeEqualString(secret, staticToken)) {
+        return { valid: true, configured: true, reason: 'static_token' };
+      }
+      return { valid: false, configured: true, reason: 'invalid_static_token' };
+    }
+
+    return this.verifyHmacSignature(input.rawBody, input.hmacSignature ?? '');
+  }
+
+  /** @deprecated Use {@link verify} — kept for existing unit tests. */
   async verifySignature(
+    rawBody: Buffer | string | undefined,
+    signature: string,
+  ): Promise<{ valid: boolean; configured: boolean; reason?: string }> {
+    return this.verify({ rawBody, hmacSignature: signature });
+  }
+
+  private async verifyHmacSignature(
     rawBody: Buffer | string | undefined,
     signature: string,
   ): Promise<{ valid: boolean; configured: boolean; reason?: string }> {
@@ -39,10 +86,7 @@ export class WebhookVerificationService {
 
     const bodyBuf = Buffer.isBuffer(rawBody)
       ? rawBody
-      : Buffer.from(
-          typeof rawBody === 'string' ? rawBody : '',
-          'utf8',
-        );
+      : Buffer.from(typeof rawBody === 'string' ? rawBody : '', 'utf8');
 
     if (bodyBuf.length === 0) {
       return { valid: false, configured: true, reason: 'missing_raw_body' };

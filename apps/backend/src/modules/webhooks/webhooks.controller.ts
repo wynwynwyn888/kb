@@ -44,6 +44,7 @@ export class WebhooksController {
     @Req() req: RawBodyRequest<Request>,
     @Body() body: unknown,
     @Headers('x-ghl-signature') signature: string,
+    @Headers('x-aisbp-webhook-token') webhookToken: string,
     @Headers('x-aisbp-smoke-immediate') aisbpSmokeImmediate?: string,
   ) {
     if (ghlWebhookLogBodyKeysEnabled()) {
@@ -73,10 +74,11 @@ export class WebhooksController {
         ? Buffer.from(JSON.stringify(body), 'utf8')
         : undefined);
 
-    const verification = await this.webhookVerificationService.verifySignature(
+    const verification = await this.webhookVerificationService.verify({
       rawBody,
-      signature,
-    );
+      hmacSignature: signature,
+      staticToken: webhookToken,
+    });
 
     if (!verification.valid) {
       this.logger.warn(

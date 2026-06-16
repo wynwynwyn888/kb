@@ -56,4 +56,26 @@ describe('WebhookVerificationService', () => {
     expect(res.valid).toBe(false);
     expect(res.reason).toBe('missing_raw_body');
   });
+
+  it('static token matches secret → accepts', async () => {
+    process.env['WEBHOOK_SIGNATURE_SECRET'] = 'workflow-static-secret';
+    const svc = new WebhookVerificationService();
+    const res = await svc.verify({
+      rawBody: Buffer.from('{}'),
+      staticToken: 'workflow-static-secret',
+    });
+    expect(res.valid).toBe(true);
+    expect(res.reason).toBe('static_token');
+  });
+
+  it('static token mismatch → rejects', async () => {
+    process.env['WEBHOOK_SIGNATURE_SECRET'] = 'workflow-static-secret';
+    const svc = new WebhookVerificationService();
+    const res = await svc.verify({
+      rawBody: Buffer.from('{}'),
+      staticToken: 'HMAC-SHA256',
+    });
+    expect(res.valid).toBe(false);
+    expect(res.reason).toBe('invalid_static_token');
+  });
 });

@@ -1,13 +1,13 @@
 import { isProductionEnv } from './safe-text-preview-for-log';
 
+/**
+ * Production boot guard — required secrets for a safe live deployment.
+ * WEBHOOK_SIGNATURE_SECRET is optional at boot: when unset, webhooks still run (see WebhookVerificationService).
+ */
 export function assertProductionSecretsConfigured(): void {
   if (!isProductionEnv()) return;
 
   const missing: string[] = [];
-
-  if (!String(process.env['WEBHOOK_SIGNATURE_SECRET'] ?? '').trim()) {
-    missing.push('WEBHOOK_SIGNATURE_SECRET');
-  }
 
   const encryptionKey = String(process.env['ENCRYPTION_KEY'] ?? '').trim();
   const allowInsecure = process.env['ALLOW_INSECURE_DEV_KEY'] === 'true';

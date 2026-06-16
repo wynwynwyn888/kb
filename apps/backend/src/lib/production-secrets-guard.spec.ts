@@ -13,11 +13,11 @@ describe('assertProductionSecretsConfigured', () => {
     expect(() => assertProductionSecretsConfigured()).not.toThrow();
   });
 
-  it('throws in production when webhook secret missing', () => {
+  it('allows production boot without webhook secret when encryption key is set', () => {
     process.env['NODE_ENV'] = 'production';
     process.env['ENCRYPTION_KEY'] = 'x'.repeat(32);
     delete process.env['WEBHOOK_SIGNATURE_SECRET'];
-    expect(() => assertProductionSecretsConfigured()).toThrow(/WEBHOOK_SIGNATURE_SECRET/);
+    expect(() => assertProductionSecretsConfigured()).not.toThrow();
   });
 
   it('throws in production when insecure dev key enabled', () => {

@@ -77,4 +77,20 @@ describe('booking-nlu-planner', () => {
     });
     expect(plan).toEqual({ type: 'confirm_single_slot' });
   });
+
+  it('does not refetch slots on provide_field without schedule fields after no_slots', () => {
+    const booking = {
+      status: 'collecting_details',
+      version: 1,
+      calendarId: 'cal',
+      preferredDate: '2026-05-27',
+      noSlotsForDateYmd: '2026-05-27',
+    } as AisbpBookingStateV1;
+    const plan = planBookingTurnFromNlu({
+      nlu: nlu({ intent: 'provide_field', fields: { name: 'Lucy' } }),
+      booking,
+      latestInboundText: 'Lucy',
+    });
+    expect(plan).toEqual({ type: 'none' });
+  });
 });

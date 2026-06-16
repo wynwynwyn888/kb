@@ -3,6 +3,7 @@ import type { AisbpPreferredTimeWindow } from './conversation-booking-state';
 import {
   extractOrdinalDayWithoutMonthName,
   extractPreferredTime,
+  isAmbiguousSlashDate,
   resolveBookingCalendarDay,
   resolveRelativeDayPhrase,
   tryInferUpcomingOrdinalDayYmd,
@@ -130,6 +131,13 @@ export function buildPreferredDateNeedAsk(p: {
   preferredTimeWindow?: AisbpPreferredTimeWindow;
 }): { baseMessage: string; suggestedYmd?: string } {
   const wide = `${p.combined}\n${p.latest}`.trim();
+  if (isAmbiguousSlashDate(wide) || isAmbiguousSlashDate(p.latest)) {
+    return {
+      baseMessage:
+        'Could you confirm that date — for example was it 5 June or 6 May? A day and month name works best.',
+      suggestedYmd: undefined,
+    };
+  }
   const resolved =
     resolveBookingCalendarDay(wide, p.crmTodayYmd) ??
     resolveRelativeDayPhrase(wide, p.crmTodayYmd) ??

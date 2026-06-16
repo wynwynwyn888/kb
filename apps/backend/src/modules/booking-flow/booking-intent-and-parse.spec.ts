@@ -13,6 +13,7 @@ import {
   rankSlotsForBookingOffer,
   resolveBookingCalendarDay,
   resolveRelativeDayPhrase,
+  isAmbiguousSlashDate,
   shouldSuppressImplicitSlotPickFromFrustration,
   stripBookingFrustrationForParse,
   userCombinedMessageAskedAvailabilityQuestion,
@@ -54,6 +55,12 @@ describe('resolveBookingCalendarDay', () => {
   it('rolls to next year when day-month is in the past', () => {
     expect(resolveBookingCalendarDay('21 May', '2026-06-01')).toBe('2027-05-21');
   });
+
+  it('returns undefined for ambiguous slash dates like 05/06', () => {
+    expect(resolveBookingCalendarDay('05/06', '2026-05-01')).toBeUndefined();
+    expect(isAmbiguousSlashDate('book on 05/06 please')).toBe(true);
+    expect(isAmbiguousSlashDate('30/5')).toBe(false);
+  });
 });
 
 describe('resolveRelativeDayPhrase', () => {
@@ -64,9 +71,10 @@ describe('resolveRelativeDayPhrase', () => {
 });
 
 describe('extractPreferredTime', () => {
-  it('parses dotted pm, around, and trailing filler', () => {
+  it('parses dotted pm, around with am/pm, and trailing filler', () => {
     expect(extractPreferredTime('2.30pm')).toBe('14:30');
-    expect(extractPreferredTime('around 10')).toBe('10:00');
+    expect(extractPreferredTime('around 10')).toBeUndefined();
+    expect(extractPreferredTime('around 3')).toBe('15:00');
     expect(extractPreferredTime('around 10am')).toBe('10:00');
     expect(extractPreferredTime('10am man')).toBe('10:00');
   });
@@ -211,10 +219,11 @@ describe('parseFirstVisitNaturalReply', () => {
     expect(parseFirstVisitNaturalReply('been before, thanks')).toBe('no');
   });
 
-  it('accepts bare yes/no after normalization', () => {
+  it('accepts exact yes/no only when the whole line is short', () => {
     expect(parseFirstVisitNaturalReply('yes')).toBe('yes');
     expect(parseFirstVisitNaturalReply('no')).toBe('no');
     expect(parseFirstVisitNaturalReply('nope')).toBe('no');
+    expect(parseFirstVisitNaturalReply('yes please book me')).toBeUndefined();
   });
 });
 

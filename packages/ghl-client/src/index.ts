@@ -1284,6 +1284,21 @@ export class GhlClient {
   }
 
   /**
+   * Cancel a calendar appointment/event by id.
+   * GHL: DELETE /calendars/events/{eventId} with empty JSON body.
+   */
+  async cancelCalendarEvent(eventId: string): Promise<{ success: boolean; error?: string }> {
+    const id = eventId.trim();
+    if (!id) return { success: false, error: 'eventId required' };
+    try {
+      await this.client.delete(`/calendars/events/${encodeURIComponent(id)}`, { data: {} });
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: this.extractGhlErrorMessage(error) ?? 'cancelCalendarEvent failed' };
+    }
+  }
+
+  /**
    * List calendars for the location.
    * HighLevel: `GET /calendars/?locationId=...` with `Version: 2023-02-21`, `Accept: application/json`.
    */

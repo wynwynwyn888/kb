@@ -28,7 +28,7 @@ export function nluAllowsSchedulingOverwrite(
     return true;
   }
   if (booking.noSlotsForDateYmd?.trim()) {
-    return intent === 'provide_field' || intent === 'ask_question' || intent === 'select_slot';
+    return intent === 'request_availability' || intent === 'revise_date_time' || intent === 'revise_time';
   }
   return false;
 }
@@ -84,9 +84,6 @@ export function planBookingTurnFromNlu(params: {
   ) {
     const f = nlu.fields;
     if (f.preferredDate?.trim() || f.preferredTime?.trim() || f.preferredTimeWindow) {
-      return { type: 'refetch_slots_after_schedule_change' };
-    }
-    if (nluAllowsSchedulingOverwrite(intent, booking) && latest) {
       return { type: 'refetch_slots_after_schedule_change' };
     }
   }

@@ -7,8 +7,27 @@ import type { BookingPostConfirmService } from './booking-post-confirm.service';
 import type { BookingSettingsService } from '../booking-settings/booking-settings.service';
 import type { GhlService } from '../ghl/ghl.service';
 import type { AisbpOfferedSlot } from './conversation-booking-state';
+import * as businessTime from '../../lib/business-time';
 
 const capturedActionIntentInserts: unknown[] = [];
+
+const fixedBusinessNow: businessTime.BusinessLocalSnapshot = {
+  isoUtc: '2026-05-01T12:00:00.000Z',
+  localIso: '2026-05-01T12:00:00',
+  timeZone: 'UTC',
+  hour: 12,
+  minute: 0,
+  dayPeriod: 'afternoon',
+  greetingLabel: 'Good afternoon',
+};
+
+beforeAll(() => {
+  jest.spyOn(businessTime, 'getBusinessLocalNow').mockImplementation(() => fixedBusinessNow);
+});
+
+afterAll(() => {
+  jest.restoreAllMocks();
+});
 
 jest.mock('../../lib/supabase', () => ({
   getSupabaseService: () => ({
@@ -32,6 +51,28 @@ jest.mock('../../lib/supabase', () => ({
                   }),
                 }),
               }),
+            }),
+          }),
+        };
+      }
+      if (table === 'conversations') {
+        const conversationLockResult = {
+          data: { metadata: {}, updated_at: '2026-01-01T00:00:00.000Z' },
+          error: null,
+        };
+        const updateOk = {
+          select: () => Promise.resolve({ data: [{ id: 'mock-conv' }], error: null }),
+        };
+        return {
+          select: () => ({
+            eq: () => ({
+              maybeSingle: () => Promise.resolve(conversationLockResult),
+            }),
+          }),
+          update: () => ({
+            eq: () => ({
+              eq: () => updateOk,
+              select: () => Promise.resolve({ data: [{ id: 'mock-conv' }], error: null }),
             }),
           }),
         };
@@ -97,7 +138,12 @@ const allOptionalAskSettings = {
 
 function svc(booking: BookingSettingsService, ghl: GhlService) {
   const post = { runAfterLiveBookingConfirmed: jest.fn(async () => undefined) } as unknown as BookingPostConfirmService;
-  return new ConversationBookingFlowService(booking, ghl, post);
+  const enriched = {
+    resolveTenantCrmTimezone: jest.fn(async () => null),
+    loadCalendarBookingRules: jest.fn(async () => ({ slotDurationMinutes: 30, appointmentsPerSlot: 1 })),
+    ...booking,
+  } as unknown as BookingSettingsService;
+  return new ConversationBookingFlowService(enriched, ghl, post);
 }
 
 describe('isBookingFlowSupportedInboundText', () => {
@@ -809,7 +855,12 @@ describe('ConversationBookingFlowService', () => {
       })),
     } as unknown as GhlService;
     const post = { runAfterLiveBookingConfirmed: jest.fn(async () => undefined) } as unknown as BookingPostConfirmService;
-    const flow = new ConversationBookingFlowService(booking, ghl, post);
+    const enriched = {
+      resolveTenantCrmTimezone: jest.fn(async () => null),
+      loadCalendarBookingRules: jest.fn(async () => ({ slotDurationMinutes: 30, appointmentsPerSlot: 1 })),
+      ...booking,
+    } as unknown as BookingSettingsService;
+    const flow = new ConversationBookingFlowService(enriched, ghl, post);
     const offeredSlots = [
       {
         option: 1,
@@ -909,7 +960,12 @@ describe('ConversationBookingFlowService', () => {
       })),
     } as unknown as GhlService;
     const post = { runAfterLiveBookingConfirmed: jest.fn(async () => undefined) } as unknown as BookingPostConfirmService;
-    const flow = new ConversationBookingFlowService(booking, ghl, post);
+    const enriched = {
+      resolveTenantCrmTimezone: jest.fn(async () => null),
+      loadCalendarBookingRules: jest.fn(async () => ({ slotDurationMinutes: 30, appointmentsPerSlot: 1 })),
+      ...booking,
+    } as unknown as BookingSettingsService;
+    const flow = new ConversationBookingFlowService(enriched, ghl, post);
     const offeredSlots = [
       {
         option: 1,

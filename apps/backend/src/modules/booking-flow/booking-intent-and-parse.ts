@@ -165,6 +165,9 @@ export function resolveBookingCalendarDay(text: string, todayYmd: string): strin
     } else if (b > 12) {
       month = a;
       day = b;
+    } else if (a <= 12 && b <= 12 && a !== b) {
+      // Ambiguous DD/MM vs MM/DD (e.g. 05/06) — require explicit confirmation.
+      return undefined;
     } else {
       day = a;
       month = b;
@@ -201,6 +204,15 @@ export function resolveBookingCalendarDay(text: string, todayYmd: string): strin
   }
 
   return undefined;
+}
+
+/** Both parts ≤12 and unequal — e.g. 05/06 could be 5 Jun or 6 May. */
+export function isAmbiguousSlashDate(text: string): boolean {
+  const m = /\b(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?\b/.exec(text);
+  if (!m) return false;
+  const a = parseInt(m[1]!, 10);
+  const b = parseInt(m[2]!, 10);
+  return a >= 1 && a <= 12 && b >= 1 && b <= 12 && a !== b && !m[3];
 }
 
 function parseYmd(s: string): { y: number; m: number; d: number } | null {
@@ -301,14 +313,17 @@ export function extractPreferredTime(text: string): string | undefined {
     let h = parseInt(around[1]!, 10);
     const mm = around[2] ? parseInt(around[2]!, 10) : 0;
     const ap = around[3]?.toLowerCase();
-    if (!ap && h >= 1 && h <= 12) {
-      return `${String(h).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+    if (!ap) {
+      if (h >= 1 && h <= 7) {
+        h += 12;
+        return `${String(h).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+      }
+      // 8–12 without am/pm is ambiguous (e.g. around 10) — let window / follow-up handle it.
+      return undefined;
     }
     if (ap === 'pm' && h < 12) h += 12;
     if (ap === 'am' && h === 12) h = 0;
-    if (ap === 'pm' || ap === 'am') {
-      return `${String(h).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
-    }
+    return `${String(h).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
   }
 
   const dotPm = /\b(\d{1,2})\.(\d{2})\s*(am|pm)\b/i.exec(t);
@@ -680,8 +695,8 @@ export function parseFirstVisitNaturalReply(raw: string): 'yes' | 'no' | undefin
     return 'yes';
   }
 
-  if (/^(y|yes|yeah|yup|yep|correct|absolutely|definitely|sure)\b/.test(s)) return 'yes';
-  if (/^(n|no|nope|nah)\b/.test(s)) return 'no';
+  if (/^(y|yes|yeah|yup|yep|correct|absolutely|definitely|sure)$/i.test(s)) return 'yes';
+  if (/^(n|no|nope|nah)$/i.test(s)) return 'no';
 
   return undefined;
 }
@@ -705,7 +720,8 @@ export function parseSlotSelection(text: string, offered: { option: number; disp
   const digit = /^(\d)\b/.exec(t);
   if (digit) {
     const n = parseInt(digit[1]!, 10);
-    if (n >= 1 && n <= 3) return { kind: 'option', option: n };
+    const max = offered.length > 0 ? Math.max(...offered.map(o => o.option)) : 3;
+    if (n >= 1 && n <= max) return { kind: 'option', option: n };
   }
   return { kind: 'unclear' };
 }
@@ -739,6 +755,15 @@ export function matchOfferedByHm(
     }
   }
   return undefined;
+}
+
+/** Local HH:MM in CRM timezone from an ISO slot start. */
+export function isoStartToLocalHm(iso: string, crmTimeZone: string): string | undefined {
+  const mins = slotStartLocalMinutes(iso, crmTimeZone);
+  if (mins === undefined) return undefined;
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
 export type SlotSelectionOrTimeRevision =
@@ -785,11 +810,7 @@ export function parseSlotSelectionOrTimeRevision(
     if (offeredSlots.length === 1) {
       return { kind: 'selected_slot', slot: offeredSlots[0]! };
     }
-    const hmAff =
-      extractPreferredTime(latestClean) ??
-      extractPreferredTime(
-        stripBookingFrustrationForParse(combinedThreadForRevision.replace(/\s+/g, ' ').trim()).cleaned,
-      );
+    const hmAff = extractPreferredTime(latestClean);
     if (hmAff) {
       const matched = matchOfferedByHm(offeredSlots, hmAff, crmTimezone);
       if (matched) return { kind: 'selected_slot', slot: matched };

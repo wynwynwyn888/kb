@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { AppCacheModule } from '../../lib/app-cache.module';
 import { BookingSettingsModule } from '../booking-settings/booking-settings.module';
 import { GhlModule } from '../ghl/ghl.module';
 import { PromptsModule } from '../prompts/prompts.module';
@@ -8,7 +9,7 @@ import { BookingNluInterpreterService } from './booking-nlu-interpreter.service'
 import { BookingReplyComposerService } from './booking-reply-composer.service';
 
 @Module({
-  imports: [BookingSettingsModule, GhlModule, PromptsModule],
+  imports: [AppCacheModule, BookingSettingsModule, GhlModule, PromptsModule],
   providers: [
     ConversationBookingFlowService,
     BookingPostConfirmService,

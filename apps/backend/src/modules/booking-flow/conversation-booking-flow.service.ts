@@ -43,6 +43,8 @@ import {
   rankSlotsForBookingOffer,
   resolveBookingCalendarDay,
   resolveRelativeDayPhrase,
+  isoStartToLocalHm,
+  isAmbiguousSlashDate,
   shouldSuppressImplicitSlotPickFromFrustration,
   slotStartLocalMinutes,
   stripBookingFrustrationForParse,
@@ -89,6 +91,11 @@ import {
 } from './booking-flow-guards';
 import { buildAppointmentCreateNotes, customFieldIncludedInSummary } from './booking-summary';
 import { BookingPostConfirmService } from './booking-post-confirm.service';
+import { AppCacheService } from '../../lib/app-cache.service';
+import {
+  bookingCreatingLockKey,
+  isBookingCreatingInFlight,
+} from './booking-creating-lock';
 import { maskPhoneForLog } from './booking-contact-enrichment';
 import {
   copyAskBookingName,
@@ -219,6 +226,7 @@ export class ConversationBookingFlowService {
     private readonly bookingPostConfirm: BookingPostConfirmService,
     @Optional() private readonly bookingNluInterpreter?: BookingNluInterpreterService,
     @Optional() private readonly bookingReplyComposer?: BookingReplyComposerService,
+    @Optional() private readonly appCache?: AppCacheService,
   ) {}
 
   /**
@@ -271,8 +279,10 @@ export class ConversationBookingFlowService {
 
     const combined = params.combinedInboundText.trim();
     const latest = params.latestInboundText.trim();
-    const tz = params.tenantTimeZone?.trim() || resolveAppTimeZone();
-    const todayYmd = getBusinessLocalNow(tz).localIso.slice(0, 10);
+    const tenantCrmTz = (await this.bookingSettings.resolveTenantCrmTimezone(params.tenantId))?.trim();
+    const crmTz = tenantCrmTz || params.tenantTimeZone?.trim() || resolveAppTimeZone();
+    const todayYmd = getBusinessLocalNow(crmTz).localIso.slice(0, 10);
+    const crmTodayYmd = todayYmd;
 
     const prevMeta =
       params.metadata && typeof params.metadata === 'object' && !Array.isArray(params.metadata)
@@ -312,6 +322,19 @@ export class ConversationBookingFlowService {
           lastCreateError: undefined,
         };
       }
+    }
+
+    if (isBookingCreatingInFlight(booking)) {
+      this.logger.log(`bookingFlowSkipped ${JSON.stringify({ reason: 'creating_in_flight' })}`);
+      return {
+        handled: true,
+        persistMetadata: prevMeta,
+        replyPlan: plan(
+          "I'm already securing that time for you — one moment. If you don't hear back shortly, just send another message.",
+          'booking_in_flight',
+        ),
+        routing: stubRouting(),
+      };
     }
 
     const interest = detectLiveBookingInterest(combined);
@@ -372,8 +395,7 @@ export class ConversationBookingFlowService {
       bookingMode: settings.bookingMode,
     };
 
-    const crmTzForBookingDay = booking.offeredSlotsCrmTimeZone?.trim() || tz;
-    const crmTodayYmd = getBusinessLocalNow(crmTzForBookingDay).localIso.slice(0, 10);
+    const crmTzForBookingDay = booking.offeredSlotsCrmTimeZone?.trim() || crmTz;
 
     this.applyContactSnapshot(booking, params.contactSnapshot);
 
@@ -398,6 +420,10 @@ export class ConversationBookingFlowService {
       );
       if (!wantsNewBooking && !wantsReschedule) {
         return { handled: false };
+      }
+      const priorAppointmentId = booking.appointmentId?.trim();
+      if (priorAppointmentId && wantsReschedule) {
+        await this.cancelGhlAppointmentBestEffort(params.tenantId, priorAppointmentId);
       }
       booking = {
         ...emptyBookingState(),
@@ -500,6 +526,36 @@ export class ConversationBookingFlowService {
           );
         }
       }
+    }
+
+    if (
+      nluOut &&
+      nluOut.intent === 'cancel' &&
+      nluOut.confidence >= BOOKING_NLU_MIN_MERGE_CONFIDENCE
+    ) {
+      const apptId = booking.appointmentId?.trim();
+      if (apptId) {
+        await this.cancelGhlAppointmentBestEffort(params.tenantId, apptId);
+      }
+      const reset = {
+        ...emptyBookingState(),
+        calendarId: settings.defaultGhlCalendarId!.trim(),
+        version: (booking.version ?? 1) + 1,
+        bookingMode: settings.bookingMode,
+      };
+      this.applyContactSnapshot(reset, params.contactSnapshot);
+      const nextMeta = mergeBookingIntoConversationMetadata(prevMeta, reset);
+      return {
+        handled: true,
+        persistMetadata: nextMeta,
+        replyPlan: plan(
+          apptId
+            ? "I've cancelled your appointment. If you'd like to book again, just tell me the service and when works for you."
+            : "No problem — I've stopped the booking. Tell me when you'd like to try again.",
+          'booking_cancelled',
+        ),
+        routing: stubRouting(),
+      };
     }
 
     this.tryApplySuggestedPreferredDateConfirmation(booking, latest, combined, crmTodayYmd);
@@ -1059,9 +1115,12 @@ export class ConversationBookingFlowService {
       this.logger.log(`bookingSlotSelected ${JSON.stringify({ tenantId: params.tenantId, option: picked.option })}`);
 
       const ymd = booking.preferredDate!.trim();
+      const tzGuess = booking.offeredSlotsCrmTimeZone?.trim() || crmTzForBookingDay;
+      const pickedHm = isoStartToLocalHm(picked.startIso, tzGuess);
       let recheck = await this.bookingSettings.fetchFreeSlotsForAutomation(params.tenantId, {
         calendarId: picked.calendarId,
         selectedDate: ymd,
+        ...(pickedHm ? { selectedTime: pickedHm } : {}),
       });
 
       this.logger.log(
@@ -1069,6 +1128,7 @@ export class ConversationBookingFlowService {
           tenantId: params.tenantId,
           slotsReturned: recheck.slots.length,
           hasError: Boolean(recheck.error),
+          pickedHm: pickedHm ?? null,
         })}`,
       );
 
@@ -1100,6 +1160,19 @@ export class ConversationBookingFlowService {
         if (!dayWide.error && dayWide.slots.length > 0) {
           recheck = dayWide;
         } else {
+          const weekEnd = addCalendarDaysUtcYmd(ymd, 7);
+          if (weekEnd) {
+            const weekWide = await this.bookingSettings.fetchFreeSlotsForAutomation(params.tenantId, {
+              calendarId: picked.calendarId,
+              selectedDate: ymd,
+              endDate: weekEnd,
+            });
+            if (!weekWide.error && weekWide.slots.length > 0) {
+              recheck = weekWide;
+            }
+          }
+        }
+        if (recheck.slots.length === 0) {
           const nextMeta = mergeBookingIntoConversationMetadata(prevMeta, {
             ...booking,
             status: 'collecting_details',
@@ -1281,7 +1354,10 @@ export class ConversationBookingFlowService {
         selectedSlot: picked,
         crmTimeZone: recheck.crmTimezoneUsed,
       });
-      const endIso = picked.endIso;
+      await this.ensureCalendarSlotRulesOnBooking(params.tenantId, booking);
+      const endIso =
+        picked.endIso?.trim() ||
+        slotEndIso({ startTime: picked.startIso, endTime: undefined }, booking.slotDurationMinutes ?? 30);
 
       const bookRes = await client.bookSlot({
         locationId: ghlLocationId,
@@ -1296,6 +1372,7 @@ export class ConversationBookingFlowService {
       });
 
       if (!bookRes.success || !bookRes.appointmentId) {
+        await this.releaseBookingCreatingLock(params.conversationId, lock.redisHeld);
         this.logger.warn(
           `bookingAppointmentCreateFailed ${JSON.stringify({
             tenantId: params.tenantId,
@@ -1355,6 +1432,7 @@ export class ConversationBookingFlowService {
           intentPersisted: !insErr,
         })}`,
       );
+      await this.releaseBookingCreatingLock(params.conversationId, lock.redisHeld);
 
       await this.bookingPostConfirm.runAfterLiveBookingConfirmed({
         tenantId: params.tenantId,
@@ -1623,6 +1701,7 @@ export class ConversationBookingFlowService {
 
     this.sanitizeBookingIntake(booking, settings);
     this.stripImplicitPastPreferredDateIfNeeded(booking, crmTodayYmd, latest, combined);
+    await this.ensureCalendarSlotRulesOnBooking(params.tenantId, booking);
     let slotFetch = await this.bookingSettings.fetchFreeSlotsForAutomation(params.tenantId, {
       calendarId: booking.calendarId,
       selectedDate: booking.preferredDate!,
@@ -1669,12 +1748,12 @@ export class ConversationBookingFlowService {
       })}`,
     );
 
-    const crmTz = slotFetch.crmTimezoneUsed?.trim() || 'UTC';
+    const crmTzFromFetch = slotFetch.crmTimezoneUsed?.trim() || crmTz;
     const win = booking.preferredTimeWindow;
     const { ranked: top, usedWindowFallback } = rankSlotsForBookingOffer(slotFetch.slots, {
       preferredHm: booking.preferredTime,
       preferredWindow: win && win !== 'exact' ? win : undefined,
-      crmTimeZone: crmTz,
+      crmTimeZone: crmTzFromFetch,
       max: 3,
     });
     if (top.length === 0) {
@@ -1706,7 +1785,7 @@ export class ConversationBookingFlowService {
     const hasExactInFullMain =
       Boolean(prefHmMain) &&
       slotFetch.slots.some(s => {
-        const sm = slotStartLocalMinutes(s.startTime, crmTz);
+        const sm = slotStartLocalMinutes(s.startTime, crmTzFromFetch);
         const tm = normalizedHmToMinutes(prefHmMain!);
         return sm !== undefined && tm !== undefined && sm === tm;
       });
@@ -1714,7 +1793,7 @@ export class ConversationBookingFlowService {
     let offered: AisbpOfferedSlot[];
     let body: string;
     if (prefHmMain && hasExactInFullMain) {
-      const exact = findExactSlotMatchingPreferredHm(slotFetch.slots, prefHmMain, crmTz);
+      const exact = findExactSlotMatchingPreferredHm(slotFetch.slots, prefHmMain, crmTzFromFetch);
       if (!exact) {
         offered = top.map((s, i) => ({
           option: i + 1,
@@ -1769,7 +1848,7 @@ export class ConversationBookingFlowService {
       ...booking,
       status: 'offered_slots',
       offeredSlots: offered,
-      offeredSlotsCrmTimeZone: crmTz,
+      offeredSlotsCrmTimeZone: crmTzFromFetch,
       lastOfferedAt: new Date().toISOString(),
       pendingFieldId: undefined,
       pendingFieldLabel: undefined,
@@ -1818,6 +1897,7 @@ export class ConversationBookingFlowService {
   }): Promise<{
     acquired: boolean;
     reason?: 'duplicate' | 'already_confirmed' | 'in_flight' | 'read_failed' | 'update_failed';
+    redisHeld?: boolean;
   }> {
     const dup = await this.hasRecentExecutedBooking(
       params.tenantId,
@@ -1827,24 +1907,32 @@ export class ConversationBookingFlowService {
     );
     if (dup) return { acquired: false, reason: 'duplicate' };
 
+    const lockKey = bookingCreatingLockKey(params.conversationId);
+    let redisHeld = false;
+    if (this.appCache) {
+      redisHeld = await this.appCache.setIfNotExists(lockKey, { at: Date.now() }, 180);
+      if (!redisHeld) return { acquired: false, reason: 'in_flight' };
+    }
+
     const { data, error } = await this.supabase
       .from('conversations')
-      .select('metadata')
+      .select('metadata, updated_at')
       .eq('id', params.conversationId)
       .maybeSingle();
-    if (error) return { acquired: false, reason: 'read_failed' };
+    if (error) {
+      if (redisHeld) await this.appCache?.delete(lockKey);
+      return { acquired: false, reason: 'read_failed' };
+    }
 
     const currentMeta = readConversationMetadataField(data?.metadata);
     const currentBooking = parseAisbpBookingState(currentMeta);
     if (currentBooking?.status === 'confirmed' && currentBooking.appointmentId) {
+      if (redisHeld) await this.appCache?.delete(lockKey);
       return { acquired: false, reason: 'already_confirmed' };
     }
-    if (currentBooking?.status === 'creating') {
-      const started = currentBooking.creatingStartedAt
-        ? Date.parse(currentBooking.creatingStartedAt)
-        : 0;
-      const stale = !Number.isFinite(started) || Date.now() - started > 3 * 60 * 1000;
-      if (!stale) return { acquired: false, reason: 'in_flight' };
+    if (isBookingCreatingInFlight(currentBooking)) {
+      if (redisHeld) await this.appCache?.delete(lockKey);
+      return { acquired: false, reason: 'in_flight' };
     }
 
     const creatingBooking: AisbpBookingStateV1 = {
@@ -1855,13 +1943,65 @@ export class ConversationBookingFlowService {
     };
     const incomingMeta = mergeBookingIntoConversationMetadata(params.prevMeta, creatingBooking);
     const merged = mergeConversationMetadataForPersist(currentMeta, incomingMeta);
+    const rowUpdatedAt = typeof data?.updated_at === 'string' ? data.updated_at : null;
+    const nowIso = new Date().toISOString();
 
-    const { error: updErr } = await this.supabase
+    let updQuery = this.supabase
       .from('conversations')
-      .update({ metadata: merged, updated_at: new Date().toISOString() })
+      .update({ metadata: merged, updated_at: nowIso })
       .eq('id', params.conversationId);
-    if (updErr) return { acquired: false, reason: 'update_failed' };
-    return { acquired: true };
+    if (rowUpdatedAt) {
+      updQuery = updQuery.eq('updated_at', rowUpdatedAt);
+    }
+    const { data: updRows, error: updErr } = await updQuery.select('id');
+    if (updErr || !updRows?.length) {
+      if (redisHeld) await this.appCache?.delete(lockKey);
+      return { acquired: false, reason: 'update_failed' };
+    }
+    return { acquired: true, redisHeld };
+  }
+
+  private async releaseBookingCreatingLock(conversationId: string, redisHeld?: boolean): Promise<void> {
+    if (redisHeld && this.appCache) {
+      await this.appCache.delete(bookingCreatingLockKey(conversationId));
+    }
+  }
+
+  private async cancelGhlAppointmentBestEffort(tenantId: string, appointmentId: string): Promise<void> {
+    const id = appointmentId.trim();
+    if (!id) return;
+    try {
+      const { client } = await this.ghlService.createGhlClientForConnectedTenantWorkerOrThrow(tenantId);
+      const res = await client.cancelCalendarEvent(id);
+      this.logger.log(
+        `bookingAppointmentCancel ${JSON.stringify({
+          tenantId,
+          appointmentId: id,
+          success: res.success,
+          error: res.error ?? null,
+        })}`,
+      );
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      this.logger.warn(`bookingAppointmentCancelFailed ${JSON.stringify({ tenantId, appointmentId: id, message: msg })}`);
+    }
+  }
+
+  private async ensureCalendarSlotRulesOnBooking(tenantId: string, booking: AisbpBookingStateV1): Promise<void> {
+    if (booking.slotDurationMinutes && booking.slotDurationMinutes > 0) return;
+    const rules = await this.bookingSettings.loadCalendarBookingRules(tenantId, booking.calendarId);
+    if (rules.slotDurationMinutes && rules.slotDurationMinutes > 0) {
+      booking.slotDurationMinutes = rules.slotDurationMinutes;
+    }
+    if (rules.appointmentsPerSlot && rules.appointmentsPerSlot > 0) {
+      this.logger.debug(
+        `bookingCalendarCapacity ${JSON.stringify({
+          tenantId,
+          calendarId: booking.calendarId,
+          appointmentsPerSlot: rules.appointmentsPerSlot,
+        })}`,
+      );
+    }
   }
 
   private async hasRecentExecutedBooking(

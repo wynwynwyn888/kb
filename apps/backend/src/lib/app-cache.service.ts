@@ -57,4 +57,27 @@ export class AppCacheService implements OnModuleDestroy {
       this.logger.debug(`App cache set failed key=${key}: ${msg}`);
     }
   }
+
+  /** SET key value NX EX ttl — returns true when the key was created (lock acquired). */
+  async setIfNotExists(key: string, value: unknown, ttlSec = DEFAULT_TTL_SEC): Promise<boolean> {
+    if (!this.redis) return false;
+    try {
+      const res = await this.redis.set(key, JSON.stringify(value), 'EX', Math.max(5, ttlSec), 'NX');
+      return res === 'OK';
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.debug(`App cache setIfNotExists failed key=${key}: ${msg}`);
+      return false;
+    }
+  }
+
+  async delete(key: string): Promise<void> {
+    if (!this.redis) return;
+    try {
+      await this.redis.del(key);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      this.logger.debug(`App cache delete failed key=${key}: ${msg}`);
+    }
+  }
 }

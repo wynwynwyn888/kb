@@ -1,6 +1,6 @@
 import { BadRequestException, ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { getSupabaseService } from '../../lib/supabase';
-import { resolveAppTimeZone, snapUtcEpochMsToWholeMinute, snapUtcEpochMsToWholeSecond, wallClockInZoneToUtcMs } from '../../lib/business-time';
+import { resolveAppTimeZone, getBusinessLocalNow, snapUtcEpochMsToWholeMinute, snapUtcEpochMsToWholeSecond, wallClockInZoneToUtcMs } from '../../lib/business-time';
 import { GhlService } from '../ghl/ghl.service';
 import {
   GHL_CALENDARS_LIST_API_VERSION,
@@ -114,8 +114,7 @@ function computeFreeSlotRangeMs(
   },
 ): { startMs: number; endMs: number; selectedDate: string; selectedTime: string } {
   const selDate = body.selectedDate?.trim() || body.startDate?.trim();
-  const today = new Date();
-  const todayYmd = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  const todayYmd = getBusinessLocalNow(crmTz).localIso.slice(0, 10);
   const dateStr = selDate || todayYmd;
 
   const ymd = parseYmd(dateStr);
@@ -455,6 +454,11 @@ export class BookingSettingsService {
   }
 
   private async loadTenantCrmTimezone(tenantId: string): Promise<string | null> {
+    return this.resolveTenantCrmTimezone(tenantId);
+  }
+
+  /** CRM IANA timezone from tenant settings (single source for booking date math). */
+  async resolveTenantCrmTimezone(tenantId: string): Promise<string | null> {
     const { data, error } = await this.supabase.from('tenants').select('settings').eq('id', tenantId).maybeSingle();
     if (error || !data?.settings || typeof data.settings !== 'object' || data.settings === null) return null;
     const r = data.settings as Record<string, unknown>;
@@ -463,6 +467,31 @@ export class BookingSettingsService {
       if (typeof v === 'string' && v.trim()) return v.trim();
     }
     return null;
+  }
+
+  /** Slot duration and per-slot capacity from GHL calendar detail (authoritative over tenant defaults). */
+  async loadCalendarBookingRules(
+    tenantId: string,
+    calendarId: string,
+  ): Promise<{ slotDurationMinutes: number | null; appointmentsPerSlot: number | null }> {
+    const calId = calendarId.trim();
+    if (!calId) return { slotDurationMinutes: null, appointmentsPerSlot: null };
+    try {
+      const { client } = await this.ghlService.createGhlClientForConnectedTenantWorkerOrThrow(tenantId);
+      const calSnap = await client.getCalendar(calId);
+      const slotDurationMinutes =
+        typeof calSnap.summary?.slotDuration === 'number' && Number.isFinite(calSnap.summary.slotDuration)
+          ? Math.floor(calSnap.summary.slotDuration)
+          : null;
+      const appointmentsPerSlot =
+        typeof calSnap.summary?.appointmentsPerSlot === 'number' &&
+        Number.isFinite(calSnap.summary.appointmentsPerSlot)
+          ? Math.floor(calSnap.summary.appointmentsPerSlot)
+          : null;
+      return { slotDurationMinutes, appointmentsPerSlot };
+    } catch {
+      return { slotDurationMinutes: null, appointmentsPerSlot: null };
+    }
   }
 
   async testCalendar(

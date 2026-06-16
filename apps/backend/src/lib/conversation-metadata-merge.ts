@@ -21,6 +21,36 @@ function followUpScheduleVersion(meta: Record<string, unknown>): number {
   return typeof v === 'number' && Number.isFinite(v) ? Math.floor(v) : 0;
 }
 
+function bookingMergeRank(meta: Record<string, unknown>): { version: number; confirmedRank: number; confirmedAt: number } {
+  const b = meta['aisbp_booking'];
+  if (!b || typeof b !== 'object') {
+    return { version: 0, confirmedRank: 0, confirmedAt: 0 };
+  }
+  const o = b as Record<string, unknown>;
+  const version = typeof o['version'] === 'number' && Number.isFinite(o['version']) ? Math.floor(o['version']) : 0;
+  const status = typeof o['status'] === 'string' ? o['status'] : '';
+  const confirmedRank = status === 'confirmed' ? 2 : status === 'creating' ? 1 : 0;
+  const confirmedAtRaw = typeof o['bookingConfirmedAt'] === 'string' ? Date.parse(o['bookingConfirmedAt']) : 0;
+  const confirmedAt = Number.isFinite(confirmedAtRaw) ? confirmedAtRaw : 0;
+  return { version, confirmedRank, confirmedAt };
+}
+
+/** Prefer fresher booking state when versions tie (confirmed beats in-flight intake). */
+function shouldPreferCurrentBookingState(
+  current: Record<string, unknown>,
+  incoming: Record<string, unknown>,
+): boolean {
+  const cur = bookingMergeRank(current);
+  const inc = bookingMergeRank(incoming);
+  if (inc.version > cur.version) return false;
+  if (inc.version < cur.version) return true;
+  if (cur.confirmedRank > inc.confirmedRank) return true;
+  if (inc.confirmedRank > cur.confirmedRank) return false;
+  if (cur.confirmedAt > inc.confirmedAt) return true;
+  if (inc.confirmedAt > cur.confirmedAt) return false;
+  return false;
+}
+
 /** Merge `incoming` (from stale snapshot) onto `current` (fresh DB read). */
 export function mergeConversationMetadataForPersist(
   current: Record<string, unknown>,
@@ -46,7 +76,14 @@ export function mergeConversationMetadataForPersist(
     merged['aisbp_policy'] = incoming['aisbp_policy'];
   }
   if (incoming['aisbp_booking'] !== undefined) {
-    merged['aisbp_booking'] = incoming['aisbp_booking'];
+    if (
+      current['aisbp_booking'] !== undefined &&
+      shouldPreferCurrentBookingState(current, incoming)
+    ) {
+      merged['aisbp_booking'] = current['aisbp_booking'];
+    } else {
+      merged['aisbp_booking'] = incoming['aisbp_booking'];
+    }
   } else if (current['aisbp_booking'] !== undefined) {
     merged['aisbp_booking'] = current['aisbp_booking'];
   }

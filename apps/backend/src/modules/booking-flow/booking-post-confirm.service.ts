@@ -1,8 +1,9 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import type { GhlClient } from '@aisbp/ghl-client';
 import { isChannelVerified } from '@aisbp/ghl-client';
 import type { TenantBookingSettingsDto } from '../booking-settings/booking-settings.service';
 import { GhlService } from '../ghl/ghl.service';
+import { HumanEscalationRuntimeService } from '../human-escalation/human-escalation-runtime.service';
 import { digitsOnly, maskPhoneForLog } from './booking-contact-enrichment';
 import type { AisbpBookingStateV1, AisbpOfferedSlot } from './conversation-booking-state';
 import { buildBookingSummaryText, truncateForGhlNotes } from './booking-summary';
@@ -26,7 +27,10 @@ function isLikelyDuplicateContactError(message: string | undefined): boolean {
 export class BookingPostConfirmService {
   private readonly logger = new Logger(BookingPostConfirmService.name);
 
-  constructor(private readonly ghlService: GhlService) {}
+  constructor(
+    private readonly ghlService: GhlService,
+    @Optional() private readonly humanEscalationRuntime?: HumanEscalationRuntimeService,
+  ) {}
 
   /**
    * Best-effort staff persistence after GHL appointment create succeeds.
@@ -95,7 +99,15 @@ export class BookingPostConfirmService {
       );
 
       await this.persistSummaryNotes(client, params.customerContactId, params.appointmentId, summaryForSend);
-      await this.sendInternalStaffAlert(client, ghlLocationId, params, summaryForSend);
+      await this.sendInternalStaffAlert(client, ghlLocationId, {
+        tenantId: params.tenantId,
+        conversationId: params.conversationId,
+        appointmentId: params.appointmentId,
+        customerContactId: params.customerContactId,
+        booking: params.booking,
+        settings: params.settings,
+        contactSnapshot: params.contactSnapshot,
+      }, summaryForSend);
     } catch (e) {
       this.logger.warn(
         `bookingPostConfirmFailed ${JSON.stringify({
@@ -224,6 +236,9 @@ export class BookingPostConfirmService {
     ghlLocationId: string,
     params: {
       tenantId: string;
+      conversationId: string;
+      appointmentId: string;
+      customerContactId: string;
       booking: AisbpBookingStateV1;
       settings: TenantBookingSettingsDto;
       contactSnapshot?: { displayName?: string; phone?: string; email?: string };
@@ -268,6 +283,7 @@ export class BookingPostConfirmService {
 
     const { contactId } = await this.resolveStaffAlertContactId(client, ghlLocationId, teamPhone, toMasked);
     if (!contactId) {
+      await this.stageBookingConfirmAlertFallback(params, summary, 'staff_alert_contact_unresolved');
       return;
     }
 
@@ -289,6 +305,42 @@ export class BookingPostConfirmService {
           phase: 'sendMessage',
           toMasked,
           error: (send.error ?? 'send_failed').slice(0, 120),
+        })}`,
+      );
+      await this.stageBookingConfirmAlertFallback(params, summary, send.error ?? 'send_failed');
+    }
+  }
+
+  private async stageBookingConfirmAlertFallback(
+    params: {
+      tenantId: string;
+      conversationId: string;
+      appointmentId: string;
+      customerContactId: string;
+      contactSnapshot?: { displayName?: string; phone?: string; email?: string };
+    },
+    summary: string,
+    error: string,
+  ): Promise<void> {
+    if (!this.humanEscalationRuntime) return;
+    try {
+      await this.humanEscalationRuntime.stageStaffAlertForOpsIssue({
+        tenantId: params.tenantId,
+        conversationId: params.conversationId,
+        contactId: params.customerContactId,
+        latestInboundMessage: '',
+        summary:
+          `Booking confirmed (appointment ${params.appointmentId}) but internal SMS alert failed: ${error.slice(0, 120)}. ` +
+          `${summary.slice(0, 600)}`,
+        contactPhone: params.contactSnapshot?.phone ?? null,
+        contactDisplayName: params.contactSnapshot?.displayName ?? null,
+      });
+    } catch (e) {
+      this.logger.warn(
+        `bookingConfirmAlertFallbackFailed ${JSON.stringify({
+          tenantId: params.tenantId,
+          conversationId: params.conversationId,
+          message: e instanceof Error ? e.message : String(e),
         })}`,
       );
     }

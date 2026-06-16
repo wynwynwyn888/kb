@@ -3,6 +3,7 @@
 // TODO: Implement full alert logic
 
 import { Processor, WorkerHost, OnWorkerEvent } from '@nestjs/bullmq';
+import { Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
 import { QUEUES } from '../queue.constants';
 
@@ -16,15 +17,16 @@ export interface QuotaThresholdAlertJobData {
 
 @Processor(QUEUES.QUOTA_THRESHOLD_ALERT)
 export class QuotaThresholdAlertProcessor extends WorkerHost {
-  async process(job: Job<QuotaThresholdAlertJobData>): Promise<void> {
-    // TODO: Implementation
-    // 1. Get tenant and agency users (admins)
-    // 2. Create notification for each
-    // 3. Maybe send email alert (future)
-    // 4. Log alert in audit
+  private readonly logger = new Logger(QuotaThresholdAlertProcessor.name);
 
-    console.log('Processing quota threshold alert:', job.data);
-    throw new Error('Not implemented');
+  async process(job: Job<QuotaThresholdAlertJobData>): Promise<void> {
+    this.logger.warn(
+      `quotaThresholdAlertSkipped ${JSON.stringify({
+        reason: 'processor_not_implemented',
+        tenantId: job.data.tenantId,
+        thresholdPercent: job.data.thresholdPercent,
+      })}`,
+    );
   }
 
   @OnWorkerEvent('completed')

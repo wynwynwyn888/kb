@@ -9,6 +9,7 @@ import {
   policyStateAfterBotReset,
 } from '../conversation-policy/conversation-policy-state';
 import { stripAisbpBookingFromMetadata } from '../booking-flow/conversation-booking-state';
+import { mergeConversationMetadataForPersist } from '../../lib/conversation-metadata-merge';
 import {
   buildChatResetContactWhitelist,
   evaluateAllowChatResetCommands,
@@ -166,6 +167,7 @@ export class ConversationResetService implements OnModuleInit {
     const nextPolicy = policyStateAfterBotReset(prevPolicy, resetAt);
     let merged = mergePolicyIntoConversationMetadata(prevMeta, nextPolicy);
     merged = stripAisbpBookingFromMetadata(merged);
+    merged = mergeConversationMetadataForPersist(prevMeta, merged);
 
     const { error: uErr } = await this.supabase
       .from('conversations')

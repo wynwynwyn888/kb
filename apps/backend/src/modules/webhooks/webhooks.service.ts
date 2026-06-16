@@ -80,13 +80,22 @@ export class WebhooksService {
 
     if (!route.ok) {
       if (route.reason === 'duplicate_crm_location') {
-        return { success: true, duplicate: false };
+        this.logger.error(
+          `webhookRoutingFailed ${JSON.stringify({
+            reason: route.reason,
+            locationId: payload.locationId,
+            duplicateTenantIds: route.duplicateTenantIds ?? [],
+          })}`,
+        );
+        return { success: true, duplicate: false, skippedReason: 'duplicate_crm_location' };
       }
       this.logger.warn(
-        `Webhook skipped: no CONNECTED workspace for locationId=${payload.locationId} ` +
-          `(routing uses tenant_ghl_connections + bot_enabled + handover_paused; legacy tenants.ghl_location_id fallback only when unambiguous).`,
+        `webhookRoutingFailed ${JSON.stringify({
+          reason: route.reason,
+          locationId: payload.locationId,
+        })}`,
       );
-      return { success: true, duplicate: false };
+      return { success: true, duplicate: false, skippedReason: route.reason };
     }
 
     if (route.routeSource === 'tenant_ghl_connection') {

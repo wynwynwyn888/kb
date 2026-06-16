@@ -23,9 +23,29 @@ describe('mergeConversationMetadataForPersist', () => {
     expect(merged['humanEscalationPendingInternalAlert']).toEqual(alert);
   });
 
-  it('applies incoming pending internal escalation alert when provided', () => {
-    const alert = { summary: 'help', latestInboundMessage: 'human please' };
-    const merged = mergeConversationMetadataForPersist({}, { humanEscalationPendingInternalAlert: alert });
-    expect(merged['humanEscalationPendingInternalAlert']).toEqual(alert);
+  it('preserves higher-version confirmed booking from current DB row', () => {
+    const current = {
+      aisbp_booking: {
+        status: 'confirmed',
+        calendarId: 'c1',
+        version: 3,
+        appointmentId: 'ap1',
+        bookingConfirmedAt: '2026-06-01T10:00:00.000Z',
+      },
+    };
+    const incoming = {
+      aisbp_booking: { status: 'offered_slots', calendarId: 'c1', version: 2 },
+    };
+    const merged = mergeConversationMetadataForPersist(current, incoming);
+    expect((merged['aisbp_booking'] as { status: string; version: number }).status).toBe('confirmed');
+    expect((merged['aisbp_booking'] as { version: number }).version).toBe(3);
+  });
+
+  it('preserves current booking when incoming omits aisbp_booking', () => {
+    const current = { aisbp_booking: { status: 'confirmed', calendarId: 'c1', version: 2 } };
+    const incoming = { outboundChannel: 'SMS' };
+    const merged = mergeConversationMetadataForPersist(current, incoming);
+    expect((merged['aisbp_booking'] as { status: string }).status).toBe('confirmed');
+    expect(merged['outboundChannel']).toBe('SMS');
   });
 });

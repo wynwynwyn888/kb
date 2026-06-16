@@ -87,7 +87,7 @@ export class SendBubbleProcessor extends WorkerHost {
         `outbound_send_ms=${outbound_send_ms} total_backend_reply_ms=${total_backend_reply_ms ?? 'na'}`,
     );
 
-    if (summary.succeeded > 0 && summary.failed === 0) {
+    if (summary.succeeded > 0) {
       const channelUsed = summary.bubbleResults.find(b => b.success && b.ghlChannelUsed)?.ghlChannelUsed;
       try {
         const flushResult = await this.humanEscalationRuntime.flushPendingInternalAlert(

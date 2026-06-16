@@ -324,6 +324,16 @@ export class ConversationBookingFlowService {
           alreadyBooked = true;
         }
       }
+      if (!alreadyBooked) {
+        const latestApptId = await this.findLatestAppointmentIdForConversation(
+          params.tenantId,
+          params.conversationId,
+        );
+        if (latestApptId) {
+          booking = { ...booking, appointmentId: latestApptId, status: 'confirmed' };
+          alreadyBooked = true;
+        }
+      }
       if (alreadyBooked) {
         booking = {
           ...booking,
@@ -462,7 +472,14 @@ export class ConversationBookingFlowService {
       if (!wantsNewBooking && !wantsReschedule && !wantsCancelOnly) {
         return { handled: false };
       }
-      const priorAppointmentId = booking.appointmentId?.trim();
+      let priorAppointmentId = booking.appointmentId?.trim();
+      if (!priorAppointmentId && (wantsReschedule || wantsCancelOnly || wantsNewBooking)) {
+        priorAppointmentId = await this.resolvePriorAppointmentIdForCancel({
+          tenantId: params.tenantId,
+          conversationId: params.conversationId,
+          booking,
+        });
+      }
       if (priorAppointmentId && (wantsReschedule || wantsCancelOnly || wantsNewBooking)) {
         const cancelRes = await this.cancelGhlAppointmentBestEffort(params.tenantId, priorAppointmentId);
         if (!cancelRes.success) {
@@ -1385,6 +1402,56 @@ export class ConversationBookingFlowService {
             };
           }
           tenantSlotRedisHeld = slotRedis === 'acquired';
+        } else {
+          this.logger.warn(
+            `bookingTenantSlotLockUnavailable ${JSON.stringify({
+              tenantId: params.tenantId,
+              conversationId: params.conversationId,
+            })}`,
+          );
+          const firstCount = await this.countTenantExecutedBookingsAtSlot(
+            params.tenantId,
+            picked.startIso,
+            picked.calendarId,
+          );
+          if (firstCount >= slotCap) {
+            const nextMeta = mergeBookingIntoConversationMetadata(prevMeta, {
+              ...booking,
+              status: 'offered_slots',
+              selectedSlot: undefined,
+            });
+            return {
+              handled: true,
+              persistMetadata: nextMeta,
+              replyPlan: plan(
+                "That time just filled up. Please pick another slot from the list, or tell me a different day or time.",
+                'booking_slot_cap',
+              ),
+              routing: stubRouting(),
+            };
+          }
+          await new Promise(r => setTimeout(r, 100));
+          const secondCount = await this.countTenantExecutedBookingsAtSlot(
+            params.tenantId,
+            picked.startIso,
+            picked.calendarId,
+          );
+          if (secondCount >= slotCap || secondCount > firstCount) {
+            const nextMeta = mergeBookingIntoConversationMetadata(prevMeta, {
+              ...booking,
+              status: 'offered_slots',
+              selectedSlot: picked,
+            });
+            return {
+              handled: true,
+              persistMetadata: nextMeta,
+              replyPlan: plan(
+                'That time may be getting booked by someone else right now. Please try again in a moment or pick another slot.',
+                'booking_slot_lock_unavailable',
+              ),
+              routing: stubRouting(),
+            };
+          }
         }
 
         const slotBookedCount = await this.countTenantExecutedBookingsAtSlot(
@@ -2353,6 +2420,16 @@ export class ConversationBookingFlowService {
     startIso: string,
     calendarId: string,
   ): Promise<number> {
+    let count = await this.countBookingsAtSlotFromActionIntents(tenantId, startIso, calendarId);
+    const metadataCount = await this.countConfirmedBookingsAtSlotFromMetadata(tenantId, startIso, calendarId);
+    return Math.max(count, metadataCount);
+  }
+
+  private async countBookingsAtSlotFromActionIntents(
+    tenantId: string,
+    startIso: string,
+    calendarId: string,
+  ): Promise<number> {
     const { data, error } = await this.supabase
       .from('action_intents')
       .select('id, params, executed_at')
@@ -2373,6 +2450,99 @@ export class ConversationBookingFlowService {
       if (this.slotParamsMatch(p, calendarId, startIso)) count++;
     }
     return count;
+  }
+
+  private async countConfirmedBookingsAtSlotFromMetadata(
+    tenantId: string,
+    startIso: string,
+    calendarId: string,
+  ): Promise<number> {
+    try {
+      const { data, error } = await this.supabase
+        .from('conversations')
+        .select('metadata, updated_at')
+        .eq('tenant_id', tenantId)
+        .order('updated_at', { ascending: false })
+        .limit(40);
+      if (error || !data?.length) return 0;
+      const cutoff = Date.now() - 48 * 3600 * 1000;
+      let count = 0;
+      for (const row of data) {
+        const updated = row.updated_at ? Date.parse(String(row.updated_at)) : 0;
+        if (!Number.isFinite(updated) || updated < cutoff) continue;
+        const booking = parseAisbpBookingState(readConversationMetadataField(row.metadata));
+        if (booking?.status !== 'confirmed' || !booking.appointmentId?.trim()) continue;
+        const slotCal = booking.selectedSlot?.calendarId ?? booking.calendarId;
+        const slotStart = booking.selectedSlot?.startIso;
+        if (!slotStart || !slotCal) continue;
+        if (this.slotParamsMatch({ calendarId: slotCal, startTime: slotStart }, calendarId, startIso)) {
+          count++;
+        }
+      }
+      return count;
+    } catch (e) {
+      this.logger.warn(
+        `bookingMetadataSlotCountSkipped ${JSON.stringify({
+          tenantId,
+          message: e instanceof Error ? e.message : String(e),
+        })}`,
+      );
+      return 0;
+    }
+  }
+
+  private async resolvePriorAppointmentIdForCancel(params: {
+    tenantId: string;
+    conversationId: string;
+    booking: AisbpBookingStateV1;
+  }): Promise<string | undefined> {
+    const slot = params.booking.selectedSlot;
+    const calId = slot?.calendarId?.trim() || params.booking.calendarId?.trim();
+    const startIso = slot?.startIso?.trim();
+    if (startIso && calId) {
+      const fromSlot = await this.findRecentAppointmentIdForSlot(
+        params.tenantId,
+        params.conversationId,
+        startIso,
+        calId,
+      );
+      if (fromSlot) return fromSlot;
+    }
+    return this.findLatestAppointmentIdForConversation(params.tenantId, params.conversationId);
+  }
+
+  private async findLatestAppointmentIdForConversation(
+    tenantId: string,
+    conversationId: string,
+  ): Promise<string | undefined> {
+    const { data: convRow } = await this.supabase
+      .from('conversations')
+      .select('metadata')
+      .eq('id', conversationId)
+      .maybeSingle();
+    const fromMeta = parseAisbpBookingState(readConversationMetadataField(convRow?.metadata));
+    if (fromMeta?.appointmentId?.trim()) return fromMeta.appointmentId.trim();
+
+    const { data, error } = await this.supabase
+      .from('action_intents')
+      .select('id, params, executed_at')
+      .eq('tenant_id', tenantId)
+      .eq('conversation_id', conversationId)
+      .eq('action_type', 'UPDATE_CALENDAR')
+      .eq('status', 'EXECUTED')
+      .contains('params', { bookSlotIntent: true })
+      .order('executed_at', { ascending: false })
+      .limit(8);
+    if (error || !data?.length) return undefined;
+    const cutoff = Date.now() - 48 * 3600 * 1000;
+    for (const row of data) {
+      const ex = row.executed_at ? Date.parse(String(row.executed_at)) : 0;
+      if (!Number.isFinite(ex) || ex < cutoff) continue;
+      const p = row.params as Record<string, unknown> | null;
+      const aid = typeof p?.['appointmentId'] === 'string' ? p['appointmentId'].trim() : '';
+      if (aid) return aid;
+    }
+    return undefined;
   }
 
   private async findRecentAppointmentIdForSlot(
@@ -2987,6 +3157,11 @@ export class ConversationBookingFlowService {
     }
 
     if (!this.isAffirmativeBookingDateConfirm(line)) return;
+
+    if (isPastCalendarDateYmd(sug, crmTodayYmd)) {
+      booking.pendingSuggestedDateYmd = undefined;
+      return;
+    }
 
     booking.preferredDate = sug;
     booking.pendingSuggestedDateYmd = undefined;

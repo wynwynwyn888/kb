@@ -36,6 +36,25 @@ describe('isOptionalSkipIntent', () => {
   });
 });
 
+describe('applyPendingFieldAnswer preferred_date', () => {
+  it('rejects past calendar dates', () => {
+    const booking: AisbpBookingStateV1 = {
+      status: 'collecting_details',
+      version: 1,
+      calendarId: 'cal_1',
+      pendingFieldId: 'preferred_date',
+      pendingFieldRequired: true,
+    };
+    const r = applyPendingFieldAnswer({
+      booking,
+      latest: '2026-04-01',
+      todayYmd: '2026-05-01',
+    });
+    expect(r.answered).toBe(false);
+    expect(booking.preferredDate).toBeUndefined();
+  });
+});
+
 describe('applyPendingFieldAnswer optional skip', () => {
   it('marks optional phone skipped and clears pending', () => {
     const booking: AisbpBookingStateV1 = {

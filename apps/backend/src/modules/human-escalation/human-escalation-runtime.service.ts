@@ -17,6 +17,10 @@ import { HumanEscalationSettingsService } from './human-escalation-settings.serv
 import { HumanEscalationNotifyService } from './human-escalation-notify.service';
 import { GhlService } from '../ghl/ghl.service';
 import { GenerationService } from '../generation/generation.service';
+import {
+  mergeConversationMetadataForPersist,
+  readConversationMetadataField,
+} from '../../lib/conversation-metadata-merge';
 
 const HUMAN_ALERT_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 export const AI_NEEDS_HUMAN_REVIEW_TAG = 'ai_needs_human_review';
@@ -194,6 +198,58 @@ export class HumanEscalationRuntimeService {
     );
 
     return { escalated: true, alreadyInHandover };
+  }
+
+  /**
+   * Stage an internal team alert for service complaints (handover already paused by orchestration).
+   */
+  async stageStaffAlertForComplaint(params: {
+    tenantId: string;
+    conversationId: string;
+    contactId: string | null;
+    latestInboundMessage: string;
+    memoryEntries: MemoryEntry[];
+    contactPhone: string | null;
+    contactDisplayName: string | null;
+    reason: string;
+  }): Promise<void> {
+    const settings = await this.escalationSettings.getSettings(params.tenantId);
+    if (!settings.enabled || !settings.teamNotificationNumber?.trim()) {
+      this.logger.log(
+        `complaintStaffAlertSkipped ${JSON.stringify({
+          tenantId: params.tenantId,
+          conversationId: params.conversationId,
+          reason: 'escalation_disabled_or_no_number',
+        })}`,
+      );
+      return;
+    }
+
+    const crm = await this.resolveCrmContactForAlert(
+      params.tenantId,
+      params.contactId,
+      params.contactDisplayName,
+      params.contactPhone,
+    );
+    const summary =
+      (await this.tryAiInternalSummary(params.tenantId, params.latestInboundMessage, params.memoryEntries)) ??
+      `Service complaint (${params.reason}): ${params.latestInboundMessage.slice(0, 200)}`;
+
+    await this.persistPendingInternalAlert(params.conversationId, {
+      latestInboundMessage: params.latestInboundMessage,
+      summary,
+      customerName: crm.displayName?.trim() || 'Unknown customer',
+      phoneForAlert: crm.phone?.trim() || params.contactPhone?.trim() || null,
+      contactId: params.contactId?.trim() || null,
+    });
+
+    this.logger.log(
+      `complaintStaffAlertStaged ${JSON.stringify({
+        tenantId: params.tenantId,
+        conversationId: params.conversationId,
+        reason: params.reason,
+      })}`,
+    );
   }
 
   /**
@@ -487,14 +543,11 @@ export class HumanEscalationRuntimeService {
       .eq('id', conversationId)
       .maybeSingle();
     if (error || !data) return;
-    const prev =
-      data.metadata && typeof data.metadata === 'object' && !Array.isArray(data.metadata)
-        ? (data.metadata as Record<string, unknown>)
-        : {};
-    const merged = {
-      ...prev,
+    const prev = readConversationMetadataField(data.metadata);
+    const incoming = {
       humanEscalationPendingInternalAlert: pending,
     };
+    const merged = mergeConversationMetadataForPersist(prev, incoming);
     const { error: upErr } = await this.supabase
       .from('conversations')
       .update({ metadata: merged, updated_at: new Date().toISOString() })

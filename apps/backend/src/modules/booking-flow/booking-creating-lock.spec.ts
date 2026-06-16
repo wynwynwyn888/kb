@@ -23,6 +23,14 @@ describe('booking-creating-lock', () => {
     expect(isBookingCreatingInFlight(booking)).toBe(false);
   });
 
+  it('treats invalid creatingStartedAt as not in-flight', () => {
+    const booking = {
+      status: 'creating',
+      creatingStartedAt: 'not-a-date',
+    } as AisbpBookingStateV1;
+    expect(isBookingCreatingInFlight(booking)).toBe(false);
+  });
+
   it('builds stable redis lock keys', () => {
     expect(bookingCreatingLockKey('conv-1')).toBe('booking:creating:conv-1');
   });

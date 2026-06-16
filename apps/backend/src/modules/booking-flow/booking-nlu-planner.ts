@@ -28,7 +28,7 @@ export function nluAllowsSchedulingOverwrite(
     return true;
   }
   if (booking.noSlotsForDateYmd?.trim()) {
-    return false;
+    return intent === 'provide_field';
   }
   return false;
 }

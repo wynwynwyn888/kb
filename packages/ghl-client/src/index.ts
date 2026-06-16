@@ -1294,6 +1294,17 @@ export class GhlClient {
       await this.client.delete(`/calendars/events/${encodeURIComponent(id)}`, { data: {} });
       return { success: true };
     } catch (error) {
+      if (axios.isAxiosError(error) && (error.response?.status === 404 || error.response?.status === 400)) {
+        try {
+          await this.client.delete(`/calendars/events/appointments/${encodeURIComponent(id)}`, { data: {} });
+          return { success: true };
+        } catch (error2) {
+          return {
+            success: false,
+            error: this.extractGhlErrorMessage(error2) ?? 'cancelCalendarEvent failed',
+          };
+        }
+      }
       return { success: false, error: this.extractGhlErrorMessage(error) ?? 'cancelCalendarEvent failed' };
     }
   }

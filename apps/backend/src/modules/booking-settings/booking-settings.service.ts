@@ -254,6 +254,61 @@ function rowToDto(row: Record<string, unknown>): TenantBookingSettingsDto {
   };
 }
 
+function parseServiceMenuOptionsPatch(raw: unknown): string[] | undefined {
+  if (raw === null || raw === undefined) return undefined;
+  if (!Array.isArray(raw)) {
+    throw new BadRequestException('serviceMenuOptions must be an array of strings or null');
+  }
+  const opts = raw
+    .filter((x): x is string => typeof x === 'string' && x.trim().length > 0)
+    .map(x => x.trim());
+  return opts.length ? opts : undefined;
+}
+
+type GhlFreeSlotsClient = {
+  getCalendar: (calendarId: string) => Promise<{ summary?: GhlCalendarDetailSummary }>;
+  getFreeSlots: (params: {
+    calendarId: string;
+    startDateMs: number;
+    endDateMs: number;
+    timezone: string;
+    userId?: string;
+  }) => Promise<{ slots: GhlFreeSlot[]; error?: string }>;
+};
+
+async function retryEmptyFreeSlotsWithTeamMembers(
+  client: GhlFreeSlotsClient,
+  params: {
+    calendarId: string;
+    startMs: number;
+    endMs: number;
+    timezone: string;
+    initial: { slots: GhlFreeSlot[]; error?: string };
+  },
+): Promise<{ result: { slots: GhlFreeSlot[]; error?: string }; retriedWithUserId: string | null }> {
+  let result = params.initial;
+  let retriedWithUserId: string | null = null;
+  if (result.error || result.slots.length > 0) {
+    return { result, retriedWithUserId };
+  }
+  const cal = await client.getCalendar(params.calendarId);
+  const userIds = cal.summary?.teamMemberUserIds ?? [];
+  for (const uid of userIds) {
+    const r2 = await client.getFreeSlots({
+      calendarId: params.calendarId,
+      startDateMs: params.startMs,
+      endDateMs: params.endMs,
+      timezone: params.timezone,
+      userId: uid,
+    });
+    retriedWithUserId = uid;
+    if (!r2.error && r2.slots.length > 0) {
+      return { result: r2, retriedWithUserId };
+    }
+  }
+  return { result, retriedWithUserId };
+}
+
 @Injectable()
 export class BookingSettingsService {
   private readonly logger = new Logger(BookingSettingsService.name);
@@ -320,6 +375,7 @@ export class BookingSettingsService {
       internalBookingAlertNumber: string | null;
       internalBookingAlertChannel: string;
       internalBookingAlertTemplate: string | null;
+      serviceMenuOptions: unknown;
     }>,
   ): Promise<TenantBookingSettingsDto> {
     const current = await this.getBookingSettings(tenantId);
@@ -377,6 +433,11 @@ export class BookingSettingsService {
       throw new BadRequestException('Team notification number is required when internal booking alert is enabled');
     }
 
+    let serviceMenuOptions = current.serviceMenuOptions;
+    if (patch.serviceMenuOptions !== undefined) {
+      serviceMenuOptions = parseServiceMenuOptionsPatch(patch.serviceMenuOptions);
+    }
+
     const now = new Date().toISOString();
 
     const { data: existing } = await this.supabase
@@ -398,6 +459,7 @@ export class BookingSettingsService {
       internal_booking_alert_number: internalBookingAlertNumber,
       internal_booking_alert_channel: internalBookingAlertChannel,
       internal_booking_alert_template: internalBookingAlertTemplate,
+      service_menu_options: serviceMenuOptions ?? null,
       updated_at: now,
     };
 
@@ -680,32 +742,25 @@ export class BookingSettingsService {
 
     if (freeSlotsProd.hostMode !== 'widget_backend' && !r.error && r.slots.length === 0) {
       calWhenEmpty = await client.getCalendar(calendarId);
-      const userIds = calWhenEmpty.summary?.teamMemberUserIds;
-      if (userIds && userIds.length > 0) {
-        const uid = userIds[0]!;
-        const r2 = await client.getFreeSlots({
-          calendarId,
-          startDateMs: startMs,
-          endDateMs: endMs,
-          timezone: crmTimezoneUsed,
-          userId: uid,
-        });
-        retriedWithUserId = uid;
+      const retried = await retryEmptyFreeSlotsWithTeamMembers(client, {
+        calendarId,
+        startMs,
+        endMs,
+        timezone: crmTimezoneUsed,
+        initial: r,
+      });
+      retriedWithUserId = retried.retriedWithUserId;
+      if (retried.retriedWithUserId) {
         this.logger.debug(
           `bookingTestSlotsRetryWithUser ${JSON.stringify({
             calendarId,
-            userId: uid,
-            userIdsCount: userIds.length,
-            slotsReturned: r2.slots.length,
-            httpStatus: r2.httpStatus ?? null,
-            shapeSummary: r2.shapeSummary,
+            userId: retried.retriedWithUserId,
+            slotsReturned: retried.result.slots.length,
           })}`,
         );
-        if (r2.error) {
-          this.logger.warn(`bookingTestSlots retry free-slots error: ${r2.error}`);
-        } else if (r2.slots.length > 0) {
-          r = r2;
-        }
+      }
+      if (!retried.result.error && retried.result.slots.length > 0) {
+        r = { ...r, ...retried.result };
       }
     }
 
@@ -881,29 +936,25 @@ export class BookingSettingsService {
     let retriedWithUserId: string | null = null;
 
     if (freeSlotsProd.hostMode !== 'widget_backend' && !r.error && r.slots.length === 0) {
-      const calWhenEmpty = await client.getCalendar(calendarId);
-      const userIds = calWhenEmpty.summary?.teamMemberUserIds;
-      if (userIds && userIds.length > 0) {
-        const uid = userIds[0]!;
-        const r2 = await client.getFreeSlots({
-          calendarId,
-          startDateMs: startMs,
-          endDateMs: endMs,
-          timezone: crmTimezoneUsed,
-          userId: uid,
-        });
-        retriedWithUserId = uid;
+      const retried = await retryEmptyFreeSlotsWithTeamMembers(client, {
+        calendarId,
+        startMs,
+        endMs,
+        timezone: crmTimezoneUsed,
+        initial: r,
+      });
+      retriedWithUserId = retried.retriedWithUserId;
+      if (retried.retriedWithUserId) {
         this.logger.debug(
           `bookingSlotsFetchedRetry ${JSON.stringify({
             calendarId,
-            userId: uid,
-            slotsReturned: r2.slots.length,
-            httpStatus: r2.httpStatus ?? null,
+            userId: retried.retriedWithUserId,
+            slotsReturned: retried.result.slots.length,
           })}`,
         );
-        if (!r2.error && r2.slots.length > 0) {
-          r = r2;
-        }
+      }
+      if (!retried.result.error && retried.result.slots.length > 0) {
+        r = { ...r, ...retried.result };
       }
     }
 

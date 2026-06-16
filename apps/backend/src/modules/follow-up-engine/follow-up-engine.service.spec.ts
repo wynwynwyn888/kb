@@ -368,7 +368,14 @@ describe('FollowUpEngineService.processFollowUpJob', () => {
     });
     mockSupabase.from.mockImplementation((table: string) => {
       if (table === 'conversation_follow_up_jobs') {
-        return { update: jobUpdate };
+        return {
+          select: jestGlobal.fn().mockReturnValue({
+            eq: jestGlobal.fn().mockReturnValue({
+              eq: async () => ({ data: [{ id: 'job_pending_1' }] }),
+            }),
+          }),
+          update: jobUpdate,
+        };
       }
       throw new Error(`unexpected table ${table}`);
     });

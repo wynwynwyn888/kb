@@ -33,26 +33,21 @@ jest.mock('../../lib/supabase', () => ({
   getSupabaseService: () => ({
     from: (table: string) => {
       if (table === 'action_intents') {
+        const intentQueryResult = { data: [], error: null };
+        const intentSelectChain = (): Record<string, unknown> => ({
+          contains: () => ({
+            order: () => ({
+              limit: () => intentQueryResult,
+            }),
+          }),
+          eq: () => intentSelectChain(),
+        });
         return {
           insert: (payload: unknown) => {
             capturedActionIntentInserts.push(payload);
             return { error: null };
           },
-          select: () => ({
-            eq: () => ({
-              eq: () => ({
-                eq: () => ({
-                  eq: () => ({
-                    contains: () => ({
-                      order: () => ({
-                        limit: () => ({ data: [], error: null }),
-                      }),
-                    }),
-                  }),
-                }),
-              }),
-            }),
-          }),
+          select: () => intentSelectChain(),
         };
       }
       if (table === 'conversations') {

@@ -15,6 +15,11 @@ import { OutboundSendService } from '../outbound/outbound-send.service';
 import { OutboundSafetyGovernorService } from '../outbound/outbound-safety-governor.service';
 import { formatLiveCustomerDraftForPreview } from '../../lib/live-outbound-preview';
 import { toBullSafeFollowUpJobId } from './follow-up-bull-job-id';
+import {
+  mergeConversationMetadataForPersist,
+  readConversationMetadataField,
+} from '../../lib/conversation-metadata-merge';
+import { rewriteUnsupportedBusinessClaimsWhenNoKb } from '../../lib/outbound-safety-governor';
 import type { MemoryEntry } from '../orchestration/dto/memory-entry';
 import type { RetrievalChunk } from '../kb/dto/retrieval.dto';
 import type { ReplyDecision } from '../reply-planning/dto';
@@ -275,6 +280,24 @@ export class FollowUpEngineService {
    */
   async cancelPendingJobsForHumanEscalation(params: { tenantId: string; conversationId: string }): Promise<void> {
     const { tenantId, conversationId } = params;
+    const { data: pendingRows } = await this.supabase
+      .from('conversation_follow_up_jobs')
+      .select('id')
+      .eq('conversation_id', conversationId)
+      .eq('status', 'PENDING');
+    for (const row of pendingRows ?? []) {
+      const id = typeof row.id === 'string' ? row.id : '';
+      if (!id) continue;
+      try {
+        const bullJob = await this.followUpQueue.getJob(toBullSafeFollowUpJobId(id));
+        if (bullJob) await bullJob.remove();
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        this.logger.warn(
+          `followUpBullJobRemoveFailed ${JSON.stringify({ conversationId, followUpJobId: id, err: msg })}`,
+        );
+      }
+    }
     const scheduleVersion = await this.bumpFollowUpScheduleVersion(conversationId, 'human_escalated');
     const { error } = await this.supabase
       .from('conversation_follow_up_jobs')
@@ -407,6 +430,7 @@ export class FollowUpEngineService {
     // Compose message
     const mode = String(step['mode'] ?? '').trim();
     let outboundText = '';
+    let kbChunksReturned = 0;
     if (mode === 'fixed_message') {
       outboundText = String(step['fixedMessage'] ?? '').trim();
       if (!outboundText) {
@@ -415,12 +439,13 @@ export class FollowUpEngineService {
       }
     } else if (mode === 'ai_decides') {
       const instr = String(step['aiInstruction'] ?? '').trim() || DEFAULT_AI_INSTRUCTION;
-      outboundText = await this.generateAiFollowUpText({
+      const gen = await this.generateAiFollowUpText({
         tenantId,
         conversationId,
         instruction: instr,
       });
-      outboundText = outboundText.trim();
+      outboundText = gen.text.trim();
+      kbChunksReturned = gen.kbChunksReturned;
       if (!outboundText) {
         await this.markJobFailed(followUpJobId, 'ai_generation_empty');
         return;
@@ -428,6 +453,15 @@ export class FollowUpEngineService {
     } else {
       await this.markJobFailed(followUpJobId, `unknown_mode:${mode || 'empty'}`);
       return;
+    }
+
+    const noKbGuard = rewriteUnsupportedBusinessClaimsWhenNoKb({
+      replyText: outboundText,
+      kbChunksReturned,
+      latestIntent: 'UNKNOWN',
+    });
+    if (noKbGuard.rewritten) {
+      outboundText = noKbGuard.text;
     }
 
     // Send through existing outbound pipeline
@@ -507,15 +541,15 @@ export class FollowUpEngineService {
   private async bumpFollowUpScheduleVersion(conversationId: string, reason: string): Promise<number> {
     const { data, error } = await this.supabase.from('conversations').select('metadata').eq('id', conversationId).maybeSingle();
     if (error || !data) return 1;
-    const prev = data.metadata && typeof data.metadata === 'object' && !Array.isArray(data.metadata) ? (data.metadata as Record<string, unknown>) : {};
+    const prev = readConversationMetadataField(data.metadata);
     const cur = typeof prev['followUpScheduleVersion'] === 'number' && Number.isFinite(prev['followUpScheduleVersion']) ? Math.floor(prev['followUpScheduleVersion'] as number) : 0;
     const next = cur + 1;
-    const merged = {
-      ...prev,
+    const incoming = {
       followUpScheduleVersion: next,
       followUpScheduleVersionUpdatedAt: new Date().toISOString(),
       followUpScheduleVersionReason: reason,
     };
+    const merged = mergeConversationMetadataForPersist(prev, incoming);
     await this.supabase.from('conversations').update({ metadata: merged, updated_at: new Date().toISOString() }).eq('id', conversationId);
     return next;
   }
@@ -536,12 +570,12 @@ export class FollowUpEngineService {
 
   private async markConversationOptOut(conversationId: string, atIso: string, inboundText: string): Promise<void> {
     const { data } = await this.supabase.from('conversations').select('metadata').eq('id', conversationId).maybeSingle();
-    const prev = data?.metadata && typeof data.metadata === 'object' && !Array.isArray(data.metadata) ? (data.metadata as Record<string, unknown>) : {};
-    const merged = {
-      ...prev,
+    const prev = readConversationMetadataField(data?.metadata);
+    const incoming = {
       followUpOptOutAt: atIso,
       followUpOptOutText: inboundText.slice(0, 240),
     };
+    const merged = mergeConversationMetadataForPersist(prev, incoming);
     await this.supabase.from('conversations').update({ metadata: merged, updated_at: new Date().toISOString() }).eq('id', conversationId);
   }
 
@@ -601,11 +635,20 @@ export class FollowUpEngineService {
 
   private async deferJob(followUpJobId: string, nextDueAtIso: string, reason: string, meta?: Record<string, unknown>): Promise<void> {
     const delayMs = Math.max(0, Date.parse(nextDueAtIso) - Date.now());
+    const bullJobId = toBullSafeFollowUpJobId(followUpJobId);
+    try {
+      const existing = await this.followUpQueue.getJob(bullJobId);
+      if (existing) await existing.remove();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      this.logger.warn(`followUpDeferRemoveExistingFailed ${JSON.stringify({ followUpJobId, bullJobId, err: msg })}`);
+    }
     try {
       await this.followUpQueue.add(
         'follow-up',
         { kind: 'send_step', followUpJobId } satisfies FollowUpProcessorJob,
         {
+          jobId: bullJobId,
           delay: delayMs,
           attempts: 2,
           backoff: { type: 'exponential', delay: 2000 },
@@ -655,12 +698,16 @@ export class FollowUpEngineService {
       .eq('id', followUpJobId);
   }
 
-  private async generateAiFollowUpText(params: { tenantId: string; conversationId: string; instruction: string }): Promise<string> {
+  private async generateAiFollowUpText(params: {
+    tenantId: string;
+    conversationId: string;
+    instruction: string;
+  }): Promise<{ text: string; kbChunksReturned: number }> {
     const { tenantId, conversationId, instruction } = params;
     // Load tenant/agency prompt context like BotTestService, but with real conversation memory.
     const { data: tenant } = await this.supabase.from('tenants').select('id, agency_id').eq('id', tenantId).single();
     const agencyId = tenant?.agency_id as string | undefined;
-    if (!agencyId) return '';
+    if (!agencyId) return { text: '', kbChunksReturned: 0 };
 
     const { data: policyRows } = await this.supabase
       .from('agency_system_policies')
@@ -721,7 +768,10 @@ export class FollowUpEngineService {
       ...(subMax != null && subMax > 0 ? { maxTokens: subMax } : {}),
     });
 
-    return gen.content ? formatLiveCustomerDraftForPreview(gen.content) : '';
+    return {
+      text: gen.content ? formatLiveCustomerDraftForPreview(gen.content) : '',
+      kbChunksReturned: kbChunks.length,
+    };
   }
 
   private async loadConversationMemory(conversationId: string): Promise<MemoryEntry[]> {

@@ -45,6 +45,8 @@ import {
   resolveRelativeDayPhrase,
   isoStartToLocalHm,
   isAmbiguousSlashDate,
+  isPastCalendarDateYmd,
+  tryInferUpcomingOrdinalDayYmd,
   shouldSuppressImplicitSlotPickFromFrustration,
   slotStartLocalMinutes,
   stripBookingFrustrationForParse,
@@ -94,6 +96,7 @@ import { BookingPostConfirmService } from './booking-post-confirm.service';
 import { AppCacheService } from '../../lib/app-cache.service';
 import {
   bookingCreatingLockKey,
+  healStaleCreatingBookingState,
   isBookingCreatingInFlight,
 } from './booking-creating-lock';
 import { maskPhoneForLog } from './booking-contact-enrichment';
@@ -324,6 +327,16 @@ export class ConversationBookingFlowService {
       }
     }
 
+    if (booking && healStaleCreatingBookingState(booking)) {
+      this.logger.log(
+        `bookingCreatingStateHealed ${JSON.stringify({
+          tenantId: params.tenantId,
+          conversationId: params.conversationId,
+          newStatus: booking.status,
+        })}`,
+      );
+    }
+
     if (isBookingCreatingInFlight(booking)) {
       this.logger.log(`bookingFlowSkipped ${JSON.stringify({ reason: 'creating_in_flight' })}`);
       return {
@@ -415,15 +428,48 @@ export class ConversationBookingFlowService {
         };
       }
       const wantsNewBooking = detectLiveBookingInterest(combined);
-      const wantsReschedule = /\b(reschedule|rebook|change\s+my\s+appointment|cancel(\s+my)?\s+appointment)\b/i.test(
-        combined,
-      );
-      if (!wantsNewBooking && !wantsReschedule) {
+      const wantsCancelOnly =
+        /\bcancel(\s+my)?\s+appointment\b/i.test(combined) &&
+        !/\b(reschedule|rebook|change\s+my\s+appointment)\b/i.test(combined);
+      const wantsReschedule = /\b(reschedule|rebook|change\s+my\s+appointment)\b/i.test(combined);
+      if (!wantsNewBooking && !wantsReschedule && !wantsCancelOnly) {
         return { handled: false };
       }
       const priorAppointmentId = booking.appointmentId?.trim();
-      if (priorAppointmentId && wantsReschedule) {
-        await this.cancelGhlAppointmentBestEffort(params.tenantId, priorAppointmentId);
+      if (priorAppointmentId && (wantsReschedule || wantsCancelOnly)) {
+        const cancelRes = await this.cancelGhlAppointmentBestEffort(params.tenantId, priorAppointmentId);
+        if (!cancelRes.success && wantsCancelOnly) {
+          return {
+            handled: true,
+            persistMetadata: prevMeta,
+            replyPlan: plan(
+              "I couldn't cancel that appointment in the calendar automatically. The team has been notified — they'll confirm shortly.",
+              'booking_cancel_failed',
+            ),
+            routing: stubRouting(),
+          };
+        }
+      }
+      if (wantsCancelOnly && !wantsNewBooking) {
+        const reset = {
+          ...emptyBookingState(),
+          calendarId: settings.defaultGhlCalendarId!.trim(),
+          version: (booking.version ?? 1) + 1,
+          bookingMode: settings.bookingMode,
+        };
+        this.applyContactSnapshot(reset, params.contactSnapshot);
+        const nextMeta = mergeBookingIntoConversationMetadata(prevMeta, reset);
+        return {
+          handled: true,
+          persistMetadata: nextMeta,
+          replyPlan: plan(
+            priorAppointmentId
+              ? "I've cancelled your appointment. Tell me when you'd like to book again."
+              : "No problem — I've stopped the booking. Tell me when you'd like to try again.",
+            'booking_cancelled',
+          ),
+          routing: stubRouting(),
+        };
       }
       booking = {
         ...emptyBookingState(),
@@ -535,7 +581,18 @@ export class ConversationBookingFlowService {
     ) {
       const apptId = booking.appointmentId?.trim();
       if (apptId) {
-        await this.cancelGhlAppointmentBestEffort(params.tenantId, apptId);
+        const cancelRes = await this.cancelGhlAppointmentBestEffort(params.tenantId, apptId);
+        if (!cancelRes.success) {
+          return {
+            handled: true,
+            persistMetadata: prevMeta,
+            replyPlan: plan(
+              "I couldn't cancel that appointment in the calendar automatically. The team has been notified — they'll confirm shortly.",
+              'booking_cancel_failed',
+            ),
+            routing: stubRouting(),
+          };
+        }
       }
       const reset = {
         ...emptyBookingState(),
@@ -1094,12 +1151,19 @@ export class ConversationBookingFlowService {
         (rev.slot as AisbpOfferedSlot);
 
       const dup = await this.hasRecentExecutedBooking(params.tenantId, params.conversationId, picked.startIso, picked.calendarId);
+      const dupApptId = await this.findRecentAppointmentIdForSlot(
+        params.tenantId,
+        params.conversationId,
+        picked.startIso,
+        picked.calendarId,
+      );
       if (dup) {
         this.logger.log(`bookingFlowSkipped ${JSON.stringify({ reason: 'duplicate_executed_intent' })}`);
         const nextMeta = mergeBookingIntoConversationMetadata(prevMeta, {
           ...booking,
           status: 'confirmed',
           selectedSlot: picked,
+          ...(dupApptId ? { appointmentId: dupApptId } : {}),
         });
         return {
           handled: true,
@@ -1267,6 +1331,38 @@ export class ConversationBookingFlowService {
 
       this.logger.log(`bookingAppointmentCreateStarted ${JSON.stringify({ tenantId: params.tenantId, calendarId: picked.calendarId })}`);
 
+      const slotCap = Math.max(1, Math.floor(settings.maxBookingsPerSlot ?? 1));
+      const slotBookedCount = await this.countTenantExecutedBookingsAtSlot(
+        params.tenantId,
+        picked.startIso,
+        picked.calendarId,
+      );
+      if (slotBookedCount >= slotCap) {
+        this.logger.log(
+          `bookingSlotCapReached ${JSON.stringify({
+            tenantId: params.tenantId,
+            calendarId: picked.calendarId,
+            startIso: picked.startIso,
+            slotBookedCount,
+            slotCap,
+          })}`,
+        );
+        const nextMeta = mergeBookingIntoConversationMetadata(prevMeta, {
+          ...booking,
+          status: 'offered_slots',
+          selectedSlot: undefined,
+        });
+        return {
+          handled: true,
+          persistMetadata: nextMeta,
+          replyPlan: plan(
+            "That time just filled up. Please pick another slot from the list, or tell me a different day or time.",
+            'booking_slot_cap',
+          ),
+          routing: stubRouting(),
+        };
+      }
+
       if (!params.contactId?.trim()) {
         const nextMeta = mergeBookingIntoConversationMetadata(prevMeta, {
           ...booking,
@@ -1400,7 +1496,7 @@ export class ConversationBookingFlowService {
       }
 
       const intentSource = `CONVERSATION_BOOKING:${bookRes.appointmentId}`;
-      const { error: insErr } = await this.supabase.from('action_intents').insert({
+      const intentRow = {
         id: randomUUID(),
         tenant_id: params.tenantId,
         conversation_id: params.conversationId,
@@ -1418,9 +1514,29 @@ export class ConversationBookingFlowService {
         reason: 'conversation_booking_confirmed',
         gating_note: 'sync_create',
         executed_at: new Date().toISOString(),
-      });
+      };
+      let insErr: { message: string } | null = null;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const { error } = await this.supabase.from('action_intents').insert(intentRow);
+        if (!error) {
+          insErr = null;
+          break;
+        }
+        insErr = error;
+        if (attempt < 2) {
+          await new Promise(r => setTimeout(r, 80 * (attempt + 1)));
+          intentRow.id = randomUUID();
+        }
+      }
       if (insErr) {
-        this.logger.error(`booking intent insert failed: ${formatPostgrestError(insErr)}`);
+        this.logger.error(
+          `bookingIntentInsertOrphan ${JSON.stringify({
+            tenantId: params.tenantId,
+            conversationId: params.conversationId,
+            appointmentId: bookRes.appointmentId,
+            message: formatPostgrestError(insErr),
+          })}`,
+        );
       }
 
       this.logger.log(
@@ -1910,8 +2026,9 @@ export class ConversationBookingFlowService {
     const lockKey = bookingCreatingLockKey(params.conversationId);
     let redisHeld = false;
     if (this.appCache) {
-      redisHeld = await this.appCache.setIfNotExists(lockKey, { at: Date.now() }, 180);
-      if (!redisHeld) return { acquired: false, reason: 'in_flight' };
+      const redisLock = await this.appCache.setIfNotExists(lockKey, { at: Date.now() }, 180);
+      if (redisLock === 'held') return { acquired: false, reason: 'in_flight' };
+      redisHeld = redisLock === 'acquired';
     }
 
     const { data, error } = await this.supabase
@@ -1929,6 +2046,14 @@ export class ConversationBookingFlowService {
     if (currentBooking?.status === 'confirmed' && currentBooking.appointmentId) {
       if (redisHeld) await this.appCache?.delete(lockKey);
       return { acquired: false, reason: 'already_confirmed' };
+    }
+    if (
+      currentBooking?.appointmentId?.trim() &&
+      (currentBooking.selectedSlot?.startIso === params.picked.startIso ||
+        this.sameMinute(currentBooking.selectedSlot?.startIso ?? '', params.picked.startIso))
+    ) {
+      if (redisHeld) await this.appCache?.delete(lockKey);
+      return { acquired: false, reason: 'duplicate' };
     }
     if (isBookingCreatingInFlight(currentBooking)) {
       if (redisHeld) await this.appCache?.delete(lockKey);
@@ -1967,12 +2092,15 @@ export class ConversationBookingFlowService {
     }
   }
 
-  private async cancelGhlAppointmentBestEffort(tenantId: string, appointmentId: string): Promise<void> {
+  private async cancelGhlAppointmentBestEffort(
+    tenantId: string,
+    appointmentId: string,
+  ): Promise<{ success: boolean; error?: string }> {
     const id = appointmentId.trim();
-    if (!id) return;
+    if (!id) return { success: false, error: 'appointmentId required' };
     try {
       const { client } = await this.ghlService.createGhlClientForConnectedTenantWorkerOrThrow(tenantId);
-      const res = await client.cancelCalendarEvent(id);
+      let res = await client.cancelCalendarEvent(id);
       this.logger.log(
         `bookingAppointmentCancel ${JSON.stringify({
           tenantId,
@@ -1981,9 +2109,11 @@ export class ConversationBookingFlowService {
           error: res.error ?? null,
         })}`,
       );
+      return res;
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       this.logger.warn(`bookingAppointmentCancelFailed ${JSON.stringify({ tenantId, appointmentId: id, message: msg })}`);
+      return { success: false, error: msg };
     }
   }
 
@@ -2030,6 +2160,64 @@ export class ConversationBookingFlowService {
       if (p?.['calendarId'] === calendarId && p?.['startTime'] === startIso) return true;
     }
     return false;
+  }
+
+  private async countTenantExecutedBookingsAtSlot(
+    tenantId: string,
+    startIso: string,
+    calendarId: string,
+  ): Promise<number> {
+    const { data, error } = await this.supabase
+      .from('action_intents')
+      .select('id, params, executed_at')
+      .eq('tenant_id', tenantId)
+      .eq('action_type', 'UPDATE_CALENDAR')
+      .eq('status', 'EXECUTED')
+      .contains('params', { bookSlotIntent: true })
+      .order('executed_at', { ascending: false })
+      .limit(50);
+
+    if (error || !data?.length) return 0;
+    const cutoff = Date.now() - 48 * 3600 * 1000;
+    let count = 0;
+    for (const row of data) {
+      const p = row.params as Record<string, unknown> | null;
+      const ex = row.executed_at ? Date.parse(String(row.executed_at)) : 0;
+      if (!Number.isFinite(ex) || ex < cutoff) continue;
+      if (p?.['calendarId'] === calendarId && p?.['startTime'] === startIso) count++;
+    }
+    return count;
+  }
+
+  private async findRecentAppointmentIdForSlot(
+    tenantId: string,
+    conversationId: string,
+    startIso: string,
+    calendarId: string,
+  ): Promise<string | undefined> {
+    const { data, error } = await this.supabase
+      .from('action_intents')
+      .select('id, params, executed_at')
+      .eq('tenant_id', tenantId)
+      .eq('conversation_id', conversationId)
+      .eq('action_type', 'UPDATE_CALENDAR')
+      .eq('status', 'EXECUTED')
+      .contains('params', { bookSlotIntent: true })
+      .order('executed_at', { ascending: false })
+      .limit(8);
+
+    if (error || !data?.length) return undefined;
+    const cutoff = Date.now() - 48 * 3600 * 1000;
+    for (const row of data) {
+      const p = row.params as Record<string, unknown> | null;
+      const ex = row.executed_at ? Date.parse(String(row.executed_at)) : 0;
+      if (!Number.isFinite(ex) || ex < cutoff) continue;
+      if (p?.['calendarId'] === calendarId && p?.['startTime'] === startIso) {
+        const aid = typeof p['appointmentId'] === 'string' ? p['appointmentId'].trim() : '';
+        return aid || undefined;
+      }
+    }
+    return undefined;
   }
 
   private snapshotFromGhlContactRecord(c: Record<string, unknown>): {
@@ -2508,14 +2696,19 @@ export class ConversationBookingFlowService {
       if (e) booking.email = e;
     }
     if (!booking.preferredDate) {
+      const wide = `${combined}\n${latest}`.trim();
       const d =
         resolveRelativeDayPhrase(text, todayYmd) ||
         resolveBookingCalendarDay(text, todayYmd) ||
         resolveRelativeDayPhrase(combined, todayYmd) ||
         resolveBookingCalendarDay(combined, todayYmd) ||
         resolveRelativeDayPhrase(latest, todayYmd) ||
-        resolveBookingCalendarDay(latest, todayYmd);
-      if (d) booking.preferredDate = d;
+        resolveBookingCalendarDay(latest, todayYmd) ||
+        tryInferUpcomingOrdinalDayYmd(wide, todayYmd) ||
+        tryInferUpcomingOrdinalDayYmd(text, todayYmd) ||
+        tryInferUpcomingOrdinalDayYmd(combined, todayYmd) ||
+        tryInferUpcomingOrdinalDayYmd(latest, todayYmd);
+      if (d && !isPastCalendarDateYmd(d, todayYmd)) booking.preferredDate = d;
     }
     if (!booking.preferredTime) {
       const t =

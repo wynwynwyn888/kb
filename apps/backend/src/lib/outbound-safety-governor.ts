@@ -66,7 +66,7 @@ export function textClaimsBookingConfirmed(text: string): boolean {
  */
 export function isTrustedExecutedBookSlotSource(source: string | null | undefined): boolean {
   const s = typeof source === 'string' ? source.trim() : '';
-  if (!s) return true;
+  if (!s) return false;
   if (s === 'AI') return true;
   return s.startsWith('CONVERSATION_BOOKING:') || s.startsWith('WHATSAPP_BOOKING:');
 }

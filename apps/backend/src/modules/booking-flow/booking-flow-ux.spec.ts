@@ -6,24 +6,62 @@ import type { GhlService } from '../ghl/ghl.service';
 
 jest.mock('../../lib/supabase', () => ({
   getSupabaseService: () => ({
-    from: () => ({
-      select: () => ({
-        eq: () => ({
+    from: (table: string) => {
+      if (table === 'action_intents') {
+        const intentQueryResult = { data: [], error: null };
+        const intentSelectChain = (): Record<string, unknown> => ({
+          contains: () => ({
+            order: () => ({
+              limit: () => intentQueryResult,
+            }),
+          }),
+          eq: () => intentSelectChain(),
+        });
+        return {
+          insert: () => ({ error: null }),
+          select: () => intentSelectChain(),
+        };
+      }
+      if (table === 'conversations') {
+        const conversationLockResult = {
+          data: { metadata: {}, updated_at: '2026-01-01T00:00:00.000Z' },
+          error: null,
+        };
+        return {
+          select: () => ({
+            eq: () => ({
+              maybeSingle: () => Promise.resolve(conversationLockResult),
+            }),
+          }),
+          update: () => ({
+            eq: () => ({
+              eq: () => ({
+                select: () => Promise.resolve({ data: [{ id: 'mock-conv' }], error: null }),
+              }),
+              select: () => Promise.resolve({ data: [{ id: 'mock-conv' }], error: null }),
+            }),
+          }),
+        };
+      }
+      return {
+        select: () => ({
           eq: () => ({
             eq: () => ({
               eq: () => ({
-                contains: () => ({
-                  order: () => ({
-                    limit: () => ({ data: [], error: null }),
+                eq: () => ({
+                  contains: () => ({
+                    order: () => ({
+                      limit: () => ({ data: [], error: null }),
+                    }),
                   }),
                 }),
               }),
             }),
           }),
         }),
-      }),
-      insert: () => ({ error: null }),
-    }),
+        insert: () => ({ error: null }),
+      };
+    },
   }),
 }));
 
@@ -47,7 +85,12 @@ const baseSettings = {
 
 function svc(booking: BookingSettingsService, ghl: GhlService) {
   const post = { runAfterLiveBookingConfirmed: jest.fn(async () => undefined) } as unknown as BookingPostConfirmService;
-  return new ConversationBookingFlowService(booking, ghl, post);
+  const enriched = {
+    resolveTenantCrmTimezone: jest.fn(async () => null),
+    loadCalendarBookingRules: jest.fn(async () => ({ slotDurationMinutes: 30, appointmentsPerSlot: 1 })),
+    ...booking,
+  } as unknown as BookingSettingsService;
+  return new ConversationBookingFlowService(enriched, ghl, post);
 }
 
 const slotFetchUtcNineAm = {
@@ -68,6 +111,15 @@ const slotFetchUtcNineAm = {
 };
 
 describe('booking flow UX', () => {
+  beforeAll(() => {
+    jest.useFakeTimers({ advanceTimers: true });
+    jest.setSystemTime(new Date('2026-05-01T12:00:00.000Z'));
+  });
+
+  afterAll(() => {
+    jest.useRealTimers();
+  });
+
   it('A: preferredTime 09:00 with matching slot — direct reserve prompt, no generic 3-option list', async () => {
     const fetchFree = jest.fn(async () => slotFetchUtcNineAm);
     const booking = {

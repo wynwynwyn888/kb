@@ -196,7 +196,11 @@ export function mergeValidatedNluIntoBooking(
         chosen = rawNlu;
       }
     } else {
-      chosen = rawNlu;
+      if (rawNlu < opts.crmTodayYmd) {
+        flags.invalidPastDate = true;
+      } else {
+        chosen = rawNlu;
+      }
     }
     if (chosen !== undefined && !explicitYear && chosen < opts.crmTodayYmd) {
       flags.invalidPastDate = true;

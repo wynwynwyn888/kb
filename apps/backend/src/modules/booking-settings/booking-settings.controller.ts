@@ -43,6 +43,7 @@ export class BookingSettingsController {
       internalBookingAlertNumber: string | null;
       internalBookingAlertChannel: string;
       internalBookingAlertTemplate: string | null;
+      serviceMenuOptions: unknown;
     }>,
   ) {
     await this.ghlService.ensureTenantAccessOrThrow(tenantId, user.id);

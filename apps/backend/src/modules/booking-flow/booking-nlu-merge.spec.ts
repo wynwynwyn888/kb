@@ -194,16 +194,17 @@ describe('mergeValidatedNluIntoBooking', () => {
     expect(booking.preferredDate).toBe('2026-05-29');
   });
 
-  it('D: keeps explicit past calendar year from NLU when user typed that year', () => {
+  it('D: rejects explicit past calendar year from NLU when user typed that year', () => {
     const booking: AisbpBookingStateV1 = { status: 'collecting_details', version: 1, calendarId: 'cal_1' };
     const latest = 'book 15 Jan 2020 please';
-    mergeValidatedNluIntoBooking(
+    const result = mergeValidatedNluIntoBooking(
       booking,
       settings(),
       out({ fields: { preferredDate: '2020-01-15' } }),
       mergeOpts(latest, latest, '2026-05-03'),
     );
-    expect(booking.preferredDate).toBe('2020-01-15');
+    expect(booking.preferredDate).toBeUndefined();
+    expect(result.skipReason).toBe('invalid_past_date');
   });
 
   it('E: "29th may 330pm" => date 2026-05-29 + preferredTime 15:30 when NLU sends wrong year', () => {

@@ -15,21 +15,38 @@ jest.mock('../../lib/supabase', () => ({
   getSupabaseService: () => ({
     from: (table: string) => {
       if (table === 'action_intents') {
+        const intentQueryResult = { data: [], error: null };
+        const intentSelectChain = (): Record<string, unknown> => ({
+          contains: () => ({
+            order: () => ({
+              limit: () => intentQueryResult,
+            }),
+          }),
+          eq: () => intentSelectChain(),
+        });
         return {
           insert: () => ({ error: null }),
+          select: () => intentSelectChain(),
+        };
+      }
+      if (table === 'conversations') {
+        const conversationLockResult = {
+          data: { metadata: {}, updated_at: '2026-01-01T00:00:00.000Z' },
+          error: null,
+        };
+        const updateOk = {
+          select: () => Promise.resolve({ data: [{ id: 'mock-conv' }], error: null }),
+        };
+        return {
           select: () => ({
             eq: () => ({
-              eq: () => ({
-                eq: () => ({
-                  eq: () => ({
-                    contains: () => ({
-                      order: () => ({
-                        limit: () => ({ data: [], error: null }),
-                      }),
-                    }),
-                  }),
-                }),
-              }),
+              maybeSingle: () => Promise.resolve(conversationLockResult),
+            }),
+          }),
+          update: () => ({
+            eq: () => ({
+              eq: () => updateOk,
+              select: () => Promise.resolve({ data: [{ id: 'mock-conv' }], error: null }),
             }),
           }),
         };
@@ -118,7 +135,12 @@ function flowSvc(
 ) {
   const p = post ?? ({ runAfterLiveBookingConfirmed: jest.fn(async () => undefined) } as unknown as BookingPostConfirmService);
   const nluSvc = nlu ? ({ interpret: nlu.interpret } as unknown as BookingNluInterpreterService) : undefined;
-  return new ConversationBookingFlowService(booking, ghl, p, nluSvc);
+  const enriched = {
+    resolveTenantCrmTimezone: jest.fn(async () => null),
+    loadCalendarBookingRules: jest.fn(async () => ({ slotDurationMinutes: 30, appointmentsPerSlot: 1 })),
+    ...booking,
+  } as unknown as BookingSettingsService;
+  return new ConversationBookingFlowService(enriched, ghl, p, nluSvc);
 }
 
 describe('Booking conversation scenarios (harness)', () => {

@@ -156,10 +156,10 @@ describe('outbound-safety-governor', () => {
       expect(isTrustedExecutedBookSlotSource('CONVERSATION_BOOKING:ap1')).toBe(true);
     });
 
-    it('allows AI and empty source', () => {
+    it('allows AI source but rejects empty source', () => {
       expect(isTrustedExecutedBookSlotSource('AI')).toBe(true);
-      expect(isTrustedExecutedBookSlotSource('')).toBe(true);
-      expect(isTrustedExecutedBookSlotSource(undefined)).toBe(true);
+      expect(isTrustedExecutedBookSlotSource('')).toBe(false);
+      expect(isTrustedExecutedBookSlotSource(undefined)).toBe(false);
     });
 
     it('rejects unrelated sources', () => {

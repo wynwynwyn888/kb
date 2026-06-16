@@ -58,16 +58,25 @@ export class AppCacheService implements OnModuleDestroy {
     }
   }
 
-  /** SET key value NX EX ttl — returns true when the key was created (lock acquired). */
-  async setIfNotExists(key: string, value: unknown, ttlSec = DEFAULT_TTL_SEC): Promise<boolean> {
-    if (!this.redis) return false;
+  /**
+   * SET key value NX EX ttl.
+   * - `acquired` — lock taken
+   * - `held` — key already exists (another worker holds the lock)
+   * - `unavailable` — Redis disabled or errored (caller should fall back to DB-only locking)
+   */
+  async setIfNotExists(
+    key: string,
+    value: unknown,
+    ttlSec = DEFAULT_TTL_SEC,
+  ): Promise<'acquired' | 'held' | 'unavailable'> {
+    if (!this.redis) return 'unavailable';
     try {
       const res = await this.redis.set(key, JSON.stringify(value), 'EX', Math.max(5, ttlSec), 'NX');
-      return res === 'OK';
+      return res === 'OK' ? 'acquired' : 'held';
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       this.logger.debug(`App cache setIfNotExists failed key=${key}: ${msg}`);
-      return false;
+      return 'unavailable';
     }
   }
 

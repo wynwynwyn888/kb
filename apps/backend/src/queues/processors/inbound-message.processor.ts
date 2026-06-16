@@ -13,6 +13,10 @@ import { QUEUES } from '../queue.constants';
 import { ConversationOrchestrationService } from '../../modules/orchestration/orchestration.service';
 import type { NormalizedWebhookPayload } from '../../modules/webhooks/dto/ghl-webhook.payload';
 import { bumpInboundDebounceMeta, shouldSkipStaleDebounceJob } from '../../lib/inbound-debounce';
+import {
+  mergeConversationMetadataForPersist,
+  readConversationMetadataField,
+} from '../../lib/conversation-metadata-merge';
 import { classifyConversationIntent } from '../../modules/conversation-policy/conversation-intent';
 import { deriveConversationIdentity } from '../../lib/conversation-identity';
 import { resolveGhlInboundChannel } from '../../lib/ghl-channel-routing';
@@ -236,7 +240,8 @@ export class InboundMessageProcessor extends WorkerHost {
         content: resolved.content,
         contentType: resolved.persistContentType,
         metadata: {
-          ghlMessageId: webhookEventId,
+          ghlMessageId: ghlInboundMessageId?.trim() || webhookEventId,
+          ...(ghlInboundMessageId?.trim() ? { ghlInboundMessageId: ghlInboundMessageId.trim() } : {}),
           receivedAt: timestamp,
           ...resolved.voiceMetadata,
         },
@@ -326,7 +331,9 @@ export class InboundMessageProcessor extends WorkerHost {
         .select('metadata')
         .eq('id', conversation.id)
         .single();
-      const { merged, newVersion } = bumpInboundDebounceMeta(convMetaRow?.metadata);
+      const currentMeta = readConversationMetadataField(convMetaRow?.metadata);
+      const { merged: debounceBump, newVersion } = bumpInboundDebounceMeta(currentMeta);
+      const merged = mergeConversationMetadataForPersist(currentMeta, debounceBump);
       const { error: metaErr } = await this.supabase
         .from('conversations')
         .update({ metadata: merged, updated_at: new Date().toISOString() })

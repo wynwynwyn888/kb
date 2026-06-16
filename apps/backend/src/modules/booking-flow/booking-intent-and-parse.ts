@@ -757,6 +757,12 @@ export function matchOfferedByHm(
   return undefined;
 }
 
+export function isPastCalendarDateYmd(ymd: string, crmTodayYmd: string): boolean {
+  const d = ymd.trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return false;
+  return d < crmTodayYmd.trim();
+}
+
 /** Local HH:MM in CRM timezone from an ISO slot start. */
 export function isoStartToLocalHm(iso: string, crmTimeZone: string): string | undefined {
   const mins = slotStartLocalMinutes(iso, crmTimeZone);
@@ -820,7 +826,7 @@ export function parseSlotSelectionOrTimeRevision(
   const selectionText = [latestInboundText, combinedThreadForRevision].filter(s => s?.trim()).join('\n');
   const cleaned = stripBookingFrustrationForParse(selectionText.replace(/\s+/g, ' ').trim()).cleaned;
   if (!cleaned) return { kind: 'unparseable' };
-  const curDate = currentPreferredDate.trim();
+  const curDate = (currentPreferredDate ?? '').trim();
   const newDate = resolveBookingDateFromInboundText(cleaned, todayYmd);
 
   const hm = extractPreferredTime(cleaned);

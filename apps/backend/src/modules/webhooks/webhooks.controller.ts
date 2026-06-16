@@ -93,13 +93,18 @@ export class WebhooksController {
         success: true,
         message: 'Webhook received',
         skipped: true,
+        verificationFailed: true,
       };
     }
 
     try {
+      const isProd = process.env['NODE_ENV'] === 'production';
+      const smokeAllowedInProd =
+        String(process.env['AISBP_ALLOW_WEBHOOK_SMOKE_IN_PROD'] ?? '').toLowerCase() === 'true';
       const smokeImmediate =
-        String(aisbpSmokeImmediate ?? '').toLowerCase() === 'true' ||
-        String(process.env['AISBP_WEBHOOK_SMOKE_IMMEDIATE'] ?? '').toLowerCase() === 'true';
+        (!isProd || smokeAllowedInProd) &&
+        (String(aisbpSmokeImmediate ?? '').toLowerCase() === 'true' ||
+          String(process.env['AISBP_WEBHOOK_SMOKE_IMMEDIATE'] ?? '').toLowerCase() === 'true');
       const result = await this.webhooksService.handleGhlWebhook(payload, {
         smokeImmediate,
         workflowFlatRaw,

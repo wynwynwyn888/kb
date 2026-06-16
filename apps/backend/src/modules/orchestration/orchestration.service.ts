@@ -356,6 +356,25 @@ export class ConversationOrchestrationService {
               tenantId: input.tenantId,
               conversationId,
             });
+            try {
+              await this.humanEscalationRuntime.stageStaffAlertForComplaint({
+                tenantId: input.tenantId,
+                conversationId,
+                contactId: input.conversation?.contactId ?? null,
+                latestInboundMessage: latestMsg,
+                memoryEntries: memory.entries,
+                contactPhone: input.incomingMessage.contactPhone ?? null,
+                contactDisplayName: input.incomingMessage.contactDisplayName ?? null,
+                reason: complaintDet.reason,
+              });
+            } catch (e) {
+              this.logger.warn(
+                `complaintStaffAlertFailed ${JSON.stringify({
+                  conversationId,
+                  message: e instanceof Error ? e.message : String(e),
+                })}`,
+              );
+            }
           }
         } catch (e) {
           this.logger.warn(
@@ -474,8 +493,9 @@ export class ConversationOrchestrationService {
           );
         }
 
-        const humanHandoverAck =
-          "Of course. I'll arrange for a team member to assist you shortly.";
+        const humanHandoverAck = humanEscalationActive
+          ? "Of course. I'll arrange for a team member to assist you shortly."
+          : "Thanks for reaching out. I can't connect you with a team member through this channel right now, but I'm here to help.";
 
         const humanReplyPlan: ReplyDecision = {
           planStatus: 'PLANNED',
@@ -1160,7 +1180,8 @@ export class ConversationOrchestrationService {
       data?.metadata && typeof data.metadata === 'object' && !Array.isArray(data.metadata)
         ? (data.metadata as Record<string, unknown>)
         : {};
-    const merged = mergePolicyIntoConversationMetadata(prev, policyState);
+    const policyPatch = mergePolicyIntoConversationMetadata(prev, policyState);
+    const merged = mergeConversationMetadataForPersist(prev, policyPatch);
     const { error } = await this.supabase
       .from('conversations')
       .update({ metadata: merged, updated_at: new Date().toISOString() })

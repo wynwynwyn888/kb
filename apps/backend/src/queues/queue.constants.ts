@@ -5,6 +5,9 @@ export const QUEUES = {
   // Inbound message processing from GHL webhooks
   INBOUND_MESSAGE_PROCESSOR: 'inbound-message-processor',
 
+  // Heavy audio transcription (offloaded from inbound worker)
+  MEDIA_TRANSCRIPTION: 'media-transcription',
+
   // Send formatted message bubbles back to GHL
   SEND_BUBBLE: 'send-bubble',
 
@@ -41,6 +44,14 @@ export const queueConfig: Record<QueueName, {
       backoff: { type: 'exponential', delay: 1000 },
       removeOnComplete: true,
       removeOnFail: false, // Keep for debugging
+    },
+  },
+  [QUEUES.MEDIA_TRANSCRIPTION]: {
+    defaultJobOptions: {
+      attempts: 2,
+      backoff: { type: 'exponential', delay: 3000 },
+      removeOnComplete: true,
+      removeOnFail: false,
     },
   },
   [QUEUES.SEND_BUBBLE]: {

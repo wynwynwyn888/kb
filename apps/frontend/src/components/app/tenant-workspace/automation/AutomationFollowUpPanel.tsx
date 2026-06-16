@@ -19,6 +19,8 @@ import {
   mvpPrimaryButtonStyle,
   mvpSecondaryButtonStyle,
 } from '@/components/app/mvp-ui';
+import { ConfirmDialog } from '@/components/app/ConfirmDialog';
+import { useToast } from '@/components/app/ToastProvider';
 
 function btn(kind: 'primary' | 'secondary' | 'danger', disabled: boolean): CSSProperties {
   const base =
@@ -58,12 +60,14 @@ export function AutomationFollowUpPanel() {
   const params = useParams();
   const tenantId = params['tenantId'] as string;
   const { token } = useAuth();
+  const { pushToast } = useToast();
 
   const [loadErr, setLoadErr] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [followUp, setFollowUp] = useState<TenantFollowUpSettings | null>(null);
   const [banner, setBanner] = useState('');
+  const [removeStepIdx, setRemoveStepIdx] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     if (!token || !tenantId) return;
@@ -91,8 +95,11 @@ export function AutomationFollowUpPanel() {
       const next = await patchTenantFollowUpSettings(token, tenantId, followUp);
       setFollowUp(next);
       setBanner('Saved.');
+      pushToast('Follow-up settings saved.', 'success');
     } catch (e) {
-      setBanner(e instanceof Error ? e.message : 'Save failed');
+      const err = e instanceof Error ? e.message : 'Save failed';
+      setBanner(err);
+      pushToast(err, 'error');
     } finally {
       setBusy(null);
     }
@@ -388,7 +395,7 @@ export function AutomationFollowUpPanel() {
                 <button
                   type="button"
                   disabled={busy !== null}
-                  onClick={() => removeStep(idx)}
+                  onClick={() => setRemoveStepIdx(idx)}
                   style={{ ...btn('danger', busy !== null), marginTop: '0.35rem', fontSize: '0.78rem' }}
                 >
                   Delete step
@@ -427,11 +434,33 @@ export function AutomationFollowUpPanel() {
               Save follow-up settings
             </button>
             {banner ? (
-              <p style={{ marginTop: '0.65rem', fontSize: '0.85rem', color: 'var(--aisbp-muted)' }}>{banner}</p>
+              <p
+                role={banner.includes('fail') || banner.includes('required') ? 'alert' : 'status'}
+                style={{
+                  marginTop: '0.65rem',
+                  fontSize: '0.85rem',
+                  color: banner.includes('fail') || banner.includes('required') ? '#b91c1c' : '#059669',
+                }}
+              >
+                {banner}
+              </p>
             ) : null}
           </>
         )}
       </SectionCard>
+      <ConfirmDialog
+        open={removeStepIdx !== null}
+        title="Delete follow-up step?"
+        description="This removes the step from your draft. Save follow-up settings to apply the change."
+        confirmLabel="Delete step"
+        destructive
+        onCancel={() => setRemoveStepIdx(null)}
+        onConfirm={() => {
+          if (removeStepIdx !== null) removeStep(removeStepIdx);
+          setRemoveStepIdx(null);
+          pushToast('Step removed. Save to apply.', 'info');
+        }}
+      />
     </div>
   );
 }

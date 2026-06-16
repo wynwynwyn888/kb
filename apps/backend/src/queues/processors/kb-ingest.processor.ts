@@ -1,8 +1,5 @@
-// KB Ingest Processor
-// Ingests documents into knowledge base with embeddings
-// TODO: Implement full ingestion logic
-
 import { Processor, WorkerHost, OnWorkerEvent } from '@nestjs/bullmq';
+import { Injectable, Logger } from '@nestjs/common';
 import { Job } from 'bullmq';
 import { QUEUES } from '../queue.constants';
 
@@ -11,29 +8,28 @@ export interface KbIngestJobData {
   tenantId: string;
 }
 
+/**
+ * KB documents are ingested synchronously in KbService today.
+ * This processor acknowledges queued jobs so retries do not fail indefinitely.
+ */
 @Processor(QUEUES.KB_INGEST)
+@Injectable()
 export class KbIngestProcessor extends WorkerHost {
-  async process(job: Job<KbIngestJobData>): Promise<void> {
-    // TODO: Implementation
-    // 1. Load document from DB
-    // 2. Extract text based on mime type
-    // 3. Chunk content (semantic or fixed-size)
-    // 4. Generate embeddings using configured AI provider
-    // 5. Store chunks in DB with vectors (pgvector)
-    // 6. Update document status to 'ready' or 'failed'
-    // 7. Create notification for tenant user
+  private readonly logger = new Logger(KbIngestProcessor.name);
 
-    console.log('Processing KB ingest:', job.data);
-    throw new Error('Not implemented');
+  async process(job: Job<KbIngestJobData>): Promise<void> {
+    this.logger.log(
+      `KB ingest job acknowledged (sync ingest path): documentId=${job.data.documentId} tenantId=${job.data.tenantId}`,
+    );
   }
 
   @OnWorkerEvent('completed')
   onCompleted(job: Job) {
-    console.log(`KB ingest job ${job.id} completed`);
+    this.logger.debug(`KB ingest job ${job.id} completed`);
   }
 
   @OnWorkerEvent('failed')
   onFailed(job: Job, error: Error) {
-    console.error(`KB ingest job ${job.id} failed:`, error.message);
+    this.logger.error(`KB ingest job ${job.id} failed: ${error.message}`);
   }
 }

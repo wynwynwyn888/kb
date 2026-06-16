@@ -131,7 +131,13 @@ export function StatusPill({
 
 export function LoadingBlock({ message = 'Loading…' }: { message?: string }) {
   return (
-    <p style={{ color: 'var(--aisbp-muted, #555)', fontSize: '0.9rem', margin: '0.5rem 0' }}>{message}</p>
+    <p
+      aria-live="polite"
+      aria-busy="true"
+      style={{ color: 'var(--aisbp-muted, #555)', fontSize: '0.9rem', margin: '0.5rem 0' }}
+    >
+      {message}
+    </p>
   );
 }
 

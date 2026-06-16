@@ -11,6 +11,8 @@ import { KbIngestProcessor } from './processors/kb-ingest.processor';
 import { HandoverNotifyProcessor } from './processors/handover-notify.processor';
 import { QuotaThresholdAlertProcessor } from './processors/quota-threshold-alert.processor';
 import { FollowUpProcessor } from './processors/follow-up.processor';
+import { MediaTranscriptionProcessor } from './processors/media-transcription.processor';
+import { MediaTranscriptionQueueService } from './media-transcription-queue.service';
 
 // Feature modules
 import { OrchestrationModule } from '../modules/orchestration/orchestration.module';
@@ -55,8 +57,10 @@ import { ConversationMemoryModule } from '../modules/orchestration/conversation-
     KbIngestProcessor,
     HandoverNotifyProcessor,
     QuotaThresholdAlertProcessor,
+    MediaTranscriptionProcessor,
+    MediaTranscriptionQueueService,
     FollowUpProcessor,
   ],
-  exports: [BullModule],
+  exports: [BullModule, MediaTranscriptionQueueService],
 })
 export class QueuesModule {}

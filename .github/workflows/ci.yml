@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_call:
+
+jobs:
+  test-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build libraries
+        run: pnpm run build:libs
+
+      - name: Backend unit tests
+        run: pnpm --filter @aisbp/backend test
+
+      - name: Frontend unit tests
+        run: pnpm --filter @aisbp/frontend test
+
+      - name: Build monorepo
+        run: pnpm run build

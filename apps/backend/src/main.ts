@@ -4,16 +4,21 @@ import { NestFactory } from '@nestjs/core';
 import { ConfigService } from '@nestjs/config';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
+import helmet from 'helmet';
 import { AppModule } from './app.module.js';
 import { formatRuntimeBootLine } from './lib/runtime-build-marker.js';
+import { assertProductionSecretsConfigured } from './lib/production-secrets-guard.js';
+import { isProductionEnv } from './lib/safe-text-preview-for-log.js';
 
 async function bootstrap() {
+  assertProductionSecretsConfigured();
   // Print build marker as the very first boot log so the running container is
   // unambiguous before we even initialise Nest.
   // eslint-disable-next-line no-console
   console.log(formatRuntimeBootLine());
 
   const app = await NestFactory.create(AppModule);
+  app.use(helmet({ contentSecurityPolicy: false }));
   const configService = app.get(ConfigService);
   const bootLogger = new Logger('Bootstrap');
   bootLogger.log(formatRuntimeBootLine('AISBP runtime'));
@@ -55,7 +60,13 @@ async function bootstrap() {
     .addBearerAuth()
     .build();
   const document = SwaggerModule.createDocument(app, swaggerConfig);
-  SwaggerModule.setup('docs', app, document);
+  const swaggerEnabled =
+    !isProductionEnv() || String(process.env['SWAGGER_ENABLED'] ?? '').trim().toLowerCase() === 'true';
+  if (swaggerEnabled) {
+    SwaggerModule.setup('docs', app, document);
+  } else {
+    bootLogger.log('Swagger disabled in production (set SWAGGER_ENABLED=true to expose /docs)');
+  }
 
   const port = configService.get<number>('PORT', 3001);
   await app.listen(port);

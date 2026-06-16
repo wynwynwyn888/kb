@@ -6,6 +6,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { getSupabaseService } from '../../lib/supabase';
 import { decrypt } from '../../lib/encryption';
+import { validateMediaFetchUrl } from '../../lib/ssrf-safe-url';
 
 const FETCH_TIMEOUT_MS = 45_000;
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
@@ -26,11 +27,17 @@ export class GhlInboundImageFetchService {
    */
   async resolveForVision(params: { tenantId: string; mediaUrl: string }): Promise<string | null> {
     const mediaUrl = params.mediaUrl.trim();
-    if (!/^https?:\/\//i.test(mediaUrl)) return null;
+    const validated = validateMediaFetchUrl(mediaUrl);
+    if (!validated.ok) {
+      this.logger.warn(
+        `inboundImageFetchBlocked tenantId=${params.tenantId} reason=${validated.reason}`,
+      );
+      return null;
+    }
 
-    const publicOk = await this.tryFetch(mediaUrl, null);
+    const publicOk = await this.tryFetch(validated.url.toString(), null);
     if (publicOk.ok && isImageContentType(publicOk.contentType)) {
-      return mediaUrl;
+      return validated.url.toString();
     }
     const publicFailReason = publicOk.ok ? 'not_image' : publicOk.reason;
 
@@ -39,10 +46,10 @@ export class GhlInboundImageFetchService {
       this.logger.warn(
         `inboundImageFetchNoToken tenantId=${params.tenantId} publicFetch=${publicFailReason}`,
       );
-      return publicOk.ok ? mediaUrl : null;
+      return publicOk.ok ? validated.url.toString() : null;
     }
 
-    const authed = await this.tryFetch(mediaUrl, token);
+    const authed = await this.tryFetch(validated.url.toString(), token);
     if (!authed.ok) {
       this.logger.warn(
         `inboundImageFetchFailed tenantId=${params.tenantId} reason=${authed.reason} publicReason=${publicFailReason}`,
@@ -86,7 +93,7 @@ export class GhlInboundImageFetchService {
         headers['Authorization'] = `Bearer ${token}`;
         headers['Version'] = '2021-07-28';
       }
-      const res = await fetch(url, { method: 'GET', redirect: 'follow', signal: ac.signal, headers });
+      const res = await fetch(url, { method: 'GET', redirect: 'error', signal: ac.signal, headers });
       if (!res.ok) return { ok: false, reason: `http_${res.status}` };
       const buf = Buffer.from(await res.arrayBuffer());
       if (buf.length > MAX_IMAGE_BYTES) return { ok: false, reason: 'too_large' };

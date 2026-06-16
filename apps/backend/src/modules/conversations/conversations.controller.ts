@@ -18,6 +18,7 @@ import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { ConversationsService } from './conversations.service';
 import { ConversationsControllerService } from './conversations-controller.service';
 import { ConversationResetService } from './conversation-reset.service';
+import { TenantsService } from '../tenants/tenants.service';
 import { QUEUES } from '../../queues/queue.constants';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentTenantId, CurrentAgencyId, CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -32,6 +33,7 @@ export class ConversationsController {
     private readonly conversationsService: ConversationsService,
     private readonly controllerService: ConversationsControllerService,
     private readonly conversationResetService: ConversationResetService,
+    private readonly tenantsService: TenantsService,
     @InjectQueue(QUEUES.SEND_BUBBLE) private readonly sendBubbleQueue: Queue,
   ) {}
 
@@ -52,10 +54,7 @@ export class ConversationsController {
       throw new NotFoundException('tenantId is required');
     }
 
-    // Access check: agency users can cross tenants; tenant users must match
-    if (user.tenantId && user.tenantId !== effectiveTenantId) {
-      throw new NotFoundException('Conversation not found');
-    }
+    await this.assertTenantScope(user, effectiveTenantId);
 
     return this.controllerService.findAll(effectiveTenantId, status, page, pageSize);
   }
@@ -71,10 +70,7 @@ export class ConversationsController {
       throw new NotFoundException('Conversation not found');
     }
 
-    // Access check
-    if (user.tenantId && user.tenantId !== conversation.tenantId) {
-      throw new NotFoundException('Conversation not found');
-    }
+    await this.assertTenantScope(user, conversation.tenantId);
 
     return conversation;
   }
@@ -92,10 +88,7 @@ export class ConversationsController {
       throw new NotFoundException('Conversation not found');
     }
 
-    // Access check
-    if (user.tenantId && user.tenantId !== conversation.tenantId) {
-      throw new NotFoundException('Conversation not found');
-    }
+    await this.assertTenantScope(user, conversation.tenantId);
 
     return this.controllerService.getMessages(id, limit, before);
   }
@@ -108,9 +101,7 @@ export class ConversationsController {
     if (!conversation) {
       throw new NotFoundException('Conversation not found');
     }
-    if (user.tenantId && user.tenantId !== conversation.tenantId) {
-      throw new NotFoundException('Conversation not found');
-    }
+    await this.assertTenantScope(user, conversation.tenantId);
 
     const ghlLocationId = await this.controllerService.getTenantGhlLocationId(conversation.tenantId);
     if (!ghlLocationId) {
@@ -140,5 +131,12 @@ export class ConversationsController {
       resetVersion: result.resetVersion,
       clearedKeys: [...result.clearedKeys],
     };
+  }
+
+  private async assertTenantScope(user: SessionUser, effectiveTenantId: string): Promise<void> {
+    const ok = await this.tenantsService.checkTenantAccess(effectiveTenantId, user.id);
+    if (!ok) {
+      throw new NotFoundException('Conversation not found');
+    }
   }
 }

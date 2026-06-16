@@ -6,6 +6,7 @@ import { getSupabaseService } from '../../lib/supabase';
 import type { TenantRole } from '../../lib/enums';
 import { resolveBotMode, type BotOperatingMode, isBotModeString } from '../../lib/bot-mode';
 import { BotProfilesService } from '../prompts/bot-profiles.service';
+import { AppCacheService } from '../../lib/app-cache.service';
 
 /** When the DB enforces NOT NULL on `ghl_location_id`, store a sentinel until a real GHL id is set in Integrations. */
 const PENDING_GHL_PREFIX = 'pending:';
@@ -79,7 +80,10 @@ export interface TenantDetail extends TenantSummary {
 
 @Injectable()
 export class TenantsService {
-  constructor(private readonly botProfiles: BotProfilesService) {}
+  constructor(
+    private readonly botProfiles: BotProfilesService,
+    private readonly appCache: AppCacheService,
+  ) {}
 
   /**
    * Get all tenants for an agency (agency-level access required)
@@ -291,6 +295,12 @@ export class TenantsService {
    * Check if user has access to a tenant
    */
   async checkTenantAccess(tenantId: string, profileId: string): Promise<boolean> {
+    const cacheKey = `tenant_access:${tenantId}:${profileId}`;
+    const cached = await this.appCache.get<boolean>(cacheKey);
+    if (cached === true || cached === false) {
+      return cached;
+    }
+
     const supabase = getSupabaseService();
 
     // First check tenant_users
@@ -302,6 +312,7 @@ export class TenantsService {
       .single();
 
     if (tenantMembership) {
+      await this.appCache.set(cacheKey, true, 60);
       return true;
     }
 
@@ -313,6 +324,7 @@ export class TenantsService {
       .single();
 
     if (!tenant) {
+      await this.appCache.set(cacheKey, false, 60);
       return false;
     }
 
@@ -323,7 +335,9 @@ export class TenantsService {
       .eq('agency_id', tenant.agency_id)
       .single();
 
-    return !!agencyMembership;
+    const allowed = !!agencyMembership;
+    await this.appCache.set(cacheKey, allowed, 60);
+    return allowed;
   }
 
   /**

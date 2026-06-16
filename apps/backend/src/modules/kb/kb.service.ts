@@ -35,6 +35,9 @@ import { KB_VAULT_DELETE_HAS_DOCUMENTS_MSG, kbDuplicateVaultDisplayName } from '
 const DEFAULT_TOP_K = 5;
 /** Default rows returned for KB search UI (client may display fewer). */
 const KB_SEARCH_DEFAULT_TOP_K = 12;
+/** Cap corpus size for keyword retrieval (most recently updated docs first). */
+const MAX_KB_DOCUMENTS_FOR_RETRIEVAL = 200;
+const MAX_KB_CHUNKS_FOR_RETRIEVAL = 3000;
 
 function truncateSnippetToLines(snippet: string, maxLines: number, maxChars: number): string {
   const normalized = snippet.replace(/\r\n/g, '\n');
@@ -1263,7 +1266,9 @@ export class KbService {
       .from('knowledge_documents')
       .select('id, title, source, updated_at')
       .eq('tenant_id', tenantId)
-      .eq('status', 'READY');
+      .eq('status', 'READY')
+      .order('updated_at', { ascending: false })
+      .limit(MAX_KB_DOCUMENTS_FOR_RETRIEVAL);
 
     const v = vaultId?.trim();
     if (v) {
@@ -1297,7 +1302,8 @@ export class KbService {
     const { data: rows, error: cErr } = await this.supabase
       .from('knowledge_chunks')
       .select('id, document_id, content, metadata')
-      .in('document_id', docIds);
+      .in('document_id', docIds)
+      .limit(MAX_KB_CHUNKS_FOR_RETRIEVAL);
 
     if (cErr) {
       this.logger.warn(`loadTenantChunks: chunks failed: ${cErr.message}`);

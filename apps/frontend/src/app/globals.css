@@ -144,3 +144,13 @@ html.dark select option {
   background-color: var(--aisbp-surface);
   color: var(--aisbp-text);
 }
+
+:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+button:focus:not(:focus-visible),
+a:focus:not(:focus-visible) {
+  outline: none;
+}

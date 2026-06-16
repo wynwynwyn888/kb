@@ -545,7 +545,7 @@ export class WebhooksService {
         type: 'exponential',
         delay: 1000,
       },
-      removeOnComplete: false,
+      removeOnComplete: true,
       removeOnFail: false,
     });
 

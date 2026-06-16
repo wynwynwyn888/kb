@@ -13,13 +13,27 @@ const nextConfig = {
    * `main-app.js`, `layout.js`, `page.js`, and the login form never hydrates (looks like “can’t log in”).
    */
   async headers() {
+    const securityHeaders = [
+      { key: 'X-Frame-Options', value: 'DENY' },
+      { key: 'X-Content-Type-Options', value: 'nosniff' },
+      { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+      { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
+    ];
     if (process.env.NODE_ENV === 'production') {
-      return [];
+      return [
+        {
+          source: '/:path*',
+          headers: [
+            ...securityHeaders,
+            { key: 'Strict-Transport-Security', value: 'max-age=31536000; includeSubDomains' },
+          ],
+        },
+      ];
     }
     return [
       {
         source: '/:path*',
-        headers: [{ key: 'Cache-Control', value: 'no-store, must-revalidate' }],
+        headers: [{ key: 'Cache-Control', value: 'no-store, must-revalidate' }, ...securityHeaders],
       },
     ];
   },
@@ -29,10 +43,17 @@ const nextConfig = {
    */
   async rewrites() {
     const backend = process.env.BACKEND_DEV_URL || 'http://127.0.0.1:3001';
-    return [
-      { source: '/docs', destination: `${backend}/docs` },
-      { source: '/docs/:path*', destination: `${backend}/docs/:path*` },
-    ];
+    const rewrites = [];
+    const swaggerEnabled =
+      process.env.NODE_ENV !== 'production' ||
+      String(process.env.SWAGGER_ENABLED ?? '').trim().toLowerCase() === 'true';
+    if (swaggerEnabled) {
+      rewrites.push(
+        { source: '/docs', destination: `${backend}/docs` },
+        { source: '/docs/:path*', destination: `${backend}/docs/:path*` },
+      );
+    }
+    return rewrites;
   },
   async redirects() {
     return [

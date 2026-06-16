@@ -11,6 +11,7 @@ import { TENANT_WORKSPACE_META_CHANGED, type TenantWorkspaceMetaDetail } from '@
 import { rememberAgencyWorkspaceSelection } from '@/lib/theme-preference';
 import { appFloatingPrimaryButtonStyle } from '@/components/app/mvp-ui';
 import { formatWorkspaceDisplayName } from '@/lib/workspace-display';
+import { useModalA11y } from '@/hooks/use-modal-a11y';
 
 type SubaccountRow = { id: string; name: string; ghlLocationId?: string | null; status?: string; isAgencyWorkspace?: boolean };
 
@@ -94,11 +95,13 @@ export function WorkspaceSwitcher() {
   const isAgencyRoute = pathname.startsWith('/app/agency');
 
   const [open, setOpen] = useState(false);
+  const closePanel = useCallback(() => setOpen(false), []);
+  const { dialogRef } = useModalA11y(open, closePanel);
   const [q, setQ] = useState('');
   const [panelPos, setPanelPos] = useState<{ top: number; left: number } | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
+  const panelRef = dialogRef;
 
   const [subTitleName, setSubTitleName] = useState<string | null>(null);
   const [subIsAgencyWorkspace, setSubIsAgencyWorkspace] = useState(false);
@@ -306,7 +309,7 @@ export function WorkspaceSwitcher() {
   const listSelectedId = isSubaccountRoute ? activeSubaccountId : isGhlSettings ? ghlSubParam : null;
 
   const panelContent = open && panelPos && (
-    <div id="ws-panel" ref={panelRef} style={panelBoxStyle(panelPos.top, panelPos.left)} role="dialog" aria-label="Switch workspace">
+    <div id="ws-panel" ref={panelRef} style={panelBoxStyle(panelPos.top, panelPos.left)} role="dialog" aria-modal="true" aria-label="Switch workspace">
       {canShowAgencySwitch && inSubContext ? (
         <button type="button" style={backToAgencyAccountBtn} onClick={goAgency}>
           Back to Agency View

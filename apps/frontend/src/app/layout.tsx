@@ -4,6 +4,7 @@ import Script from 'next/script';
 import { Inter } from 'next/font/google';
 import { AuthProvider } from '../contexts/AuthContext';
 import { UnauthorizedSessionHandler } from '../components/app/UnauthorizedSessionHandler';
+import { ToastProvider } from '../components/app/ToastProvider';
 import './globals.css';
 
 const inter = Inter({
@@ -33,8 +34,10 @@ export default function RootLayout({
       <body style={{ margin: 0 }}>
         <Script id="aisbp-theme-boot" strategy="beforeInteractive" dangerouslySetInnerHTML={{ __html: themeBoot }} />
         <AuthProvider>
-          <UnauthorizedSessionHandler />
-          {children}
+          <ToastProvider>
+            <UnauthorizedSessionHandler />
+            {children}
+          </ToastProvider>
         </AuthProvider>
       </body>
     </html>

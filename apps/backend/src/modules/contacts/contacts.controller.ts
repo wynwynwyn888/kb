@@ -1,13 +1,15 @@
 // Contacts controller
 
-import { Controller, Post, Get, Body, Param, Query } from '@nestjs/common';
-import { ApiTags, ApiOperation } from '@nestjs/swagger';
+import { Controller, Post, Get, Body, Param, Query, UseGuards } from '@nestjs/common';
+import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { ContactsService } from './contacts.service';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
-const STUB_DESC =
-  'Not implemented: handler throws. This controller has no JwtAuthGuard — endpoints are not Bearer-protected.';
+const STUB_DESC = 'Not implemented: handler throws. JWT required.';
 
 @ApiTags('contacts')
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard)
 @Controller('contacts')
 export class ContactsController {
   constructor(private readonly contactsService: ContactsService) {}

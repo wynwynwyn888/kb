@@ -11,6 +11,9 @@ import { TenantNavIcon } from '@/components/app/TenantNavIcon';
 import { buildTenantSidebarNav, type TenantNavNode } from '@/lib/tenant-workspace-nav';
 import { appFloatingSecondaryButtonStyle } from '@/components/app/mvp-ui';
 import { ThemeToggle } from '@/components/app/ThemeToggle';
+import { useMediaQuery } from '@/hooks/use-media-query';
+
+const MOBILE_NAV_BP = '(max-width: 768px)';
 
 const SIDEBAR_AGENCY_PX = 260;
 const SIDEBAR_TENANT_PX = 276;
@@ -160,6 +163,8 @@ export function AppShell({ children }: { children: ReactNode }) {
     : [];
 
   const [groupOpen, setGroupOpen] = useState<Record<string, boolean>>({});
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const isMobile = useMediaQuery(MOBILE_NAV_BP);
   const groupActiveByLabel = useMemo(() => {
     const m: Record<string, boolean> = {};
     for (const n of tenantNavNodes) {
@@ -167,6 +172,14 @@ export function AppShell({ children }: { children: ReactNode }) {
     }
     return m;
   }, [tenantNavNodes, pathname]);
+
+  useEffect(() => {
+    if (!isMobile) setMobileNavOpen(false);
+  }, [isMobile]);
+
+  useEffect(() => {
+    setMobileNavOpen(false);
+  }, [pathname]);
 
   useEffect(() => {
     if (!loading && !user) {
@@ -188,7 +201,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   const mainStyle: CSSProperties = {
     ...mainBase,
-    marginLeft: sidebarWidthPx,
+    marginLeft: isMobile ? 0 : sidebarWidthPx,
     maxWidth: isTenantPath ? 'min(1200px, 100%)' : 'min(1120px, 100%)',
     marginTop: 0,
     paddingTop: 0,
@@ -197,17 +210,69 @@ export function AppShell({ children }: { children: ReactNode }) {
     minHeight: '100vh',
   };
 
+  const asideStyle: CSSProperties = {
+    ...(isTenantPath ? asideTenant : asideAgency),
+    ...(isMobile
+      ? {
+          transform: mobileNavOpen ? 'translateX(0)' : 'translateX(-105%)',
+          transition: 'transform 180ms ease',
+          boxShadow: mobileNavOpen ? '8px 0 32px rgba(15, 23, 42, 0.18)' : 'none',
+        }
+      : {}),
+  };
+
   const mainScrollStyle: CSSProperties = {
     flex: 1,
     minHeight: 0,
-    padding: '1.75rem 2.25rem 2.5rem',
+    padding: isMobile ? '1rem 1rem 2rem' : '1.75rem 2.25rem 2.5rem',
     overflowY: 'auto' as const,
     WebkitOverflowScrolling: 'touch' as const,
   };
 
   return (
     <div style={{ minHeight: '100vh', background: 'var(--aisbp-shell-bg, #f8fafc)' }}>
-      <aside style={isTenantPath ? asideTenant : asideAgency}>
+      <a
+        href="#app-main-content"
+        className="aisbp-skip-link"
+        style={{
+          position: 'absolute',
+          left: -9999,
+          top: 'auto',
+          width: 1,
+          height: 1,
+          overflow: 'hidden',
+        }}
+        onFocus={e => {
+          e.currentTarget.style.left = '12px';
+          e.currentTarget.style.top = '12px';
+          e.currentTarget.style.width = 'auto';
+          e.currentTarget.style.height = 'auto';
+          e.currentTarget.style.padding = '0.5rem 0.75rem';
+          e.currentTarget.style.background = '#fff';
+          e.currentTarget.style.zIndex = '10001';
+        }}
+        onBlur={e => {
+          e.currentTarget.style.left = '-9999px';
+        }}
+      >
+        Skip to main content
+      </a>
+      {isMobile && mobileNavOpen ? (
+        <button
+          type="button"
+          aria-label="Close navigation menu"
+          onClick={() => setMobileNavOpen(false)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 39,
+            border: 'none',
+            background: 'rgba(15, 23, 42, 0.45)',
+            cursor: 'pointer',
+          }}
+        />
+      ) : null}
+      <aside style={asideStyle} aria-hidden={isMobile && !mobileNavOpen ? true : undefined}>
         <div style={{ marginBottom: '0.85rem' }}>
           <BrandLogo height={34} maxWidth={200} />
         </div>
@@ -308,8 +373,8 @@ export function AppShell({ children }: { children: ReactNode }) {
               </p>
 
               {showAgencyNav && (
-                <nav style={navStyle}>
-                  <Link href="/app/agency" style={linkStyle(pathname === '/app/agency')}>
+                <nav style={navStyle} aria-label="Agency navigation">
+                  <Link href="/app/agency" style={linkStyle(pathname === '/app/agency')} aria-current={pathname === '/app/agency' ? 'page' : undefined}>
                     Dashboard
                   </Link>
                   <Link
@@ -383,8 +448,23 @@ export function AppShell({ children }: { children: ReactNode }) {
           </button>
         </div>
       </aside>
-      <main style={mainStyle}>
+      <main id="app-main-content" style={mainStyle}>
         <header style={appHeaderBar}>
+          {isMobile ? (
+            <button
+              type="button"
+              aria-label={mobileNavOpen ? 'Close menu' : 'Open menu'}
+              aria-expanded={mobileNavOpen}
+              onClick={() => setMobileNavOpen(v => !v)}
+              style={{
+                ...appFloatingSecondaryButtonStyle,
+                marginRight: 'auto',
+                padding: '0.4rem 0.65rem',
+              }}
+            >
+              Menu
+            </button>
+          ) : null}
           <ThemeToggle />
         </header>
         <div style={mainScrollStyle}>{children}</div>

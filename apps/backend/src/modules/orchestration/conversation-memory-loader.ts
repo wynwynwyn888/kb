@@ -7,6 +7,8 @@ import { getSupabaseService } from '../../lib/supabase';
 import type { ConversationMemory, MemoryEntry } from './dto';
 
 const MAX_TURNS = 20; // last 20 user turns to load
+/** Upper bound on rows fetched before slicing to turns (inbound + outbound pairs). */
+const MAX_MESSAGE_ROWS = MAX_TURNS * 8;
 
 @Injectable()
 export class ConversationMemoryLoader {
@@ -27,13 +29,22 @@ export class ConversationMemoryLoader {
   ): Promise<ConversationMemory> {
     // Load messages ordered oldest→newest (ascending created_at)
     // Limit to last MAX_TURNS inbound user messages plus their AI responses
-    const { data, error } = await this.supabase
+    const resetAfter = opts?.memoryResetAfterIso?.trim() ?? '';
+
+    let query = this.supabase
       .from('messages')
       .select('id, direction, sender, content, contentType, created_at')
       .eq('conversation_id', conversationId)
-      .order('created_at', { ascending: true });
+      .order('created_at', { ascending: false })
+      .limit(MAX_MESSAGE_ROWS);
 
-    if (error || !data) {
+    if (resetAfter) {
+      query = query.gt('created_at', resetAfter);
+    }
+
+    const { data: rawRows, error } = await query;
+
+    if (error || !rawRows) {
       this.logger.warn(
         `Failed to load memory for conversation=${conversationId}: ${formatPostgrestError(error ?? 'no data')}`,
       );
@@ -45,10 +56,9 @@ export class ConversationMemoryLoader {
       };
     }
 
-    const resetAfter = opts?.memoryResetAfterIso?.trim() ?? '';
-    const scoped = resetAfter
-      ? data.filter(m => String(m.created_at ?? '') > resetAfter)
-      : data;
+    const data = [...rawRows].reverse();
+
+    const scoped = data;
 
     // Filter to last N user turns and their responses
     const userMessages = scoped.filter(m => m.direction === 'INBOUND');

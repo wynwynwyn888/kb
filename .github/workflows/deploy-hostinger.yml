@@ -11,7 +11,12 @@ on:
     branches: [main]
 
 jobs:
+  test-and-build:
+    uses: ./.github/workflows/ci.yml
+    secrets: inherit
+
   deploy:
+    needs: test-and-build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -30,6 +35,7 @@ jobs:
             SUPABASE_SERVICE_ROLE_KEY=${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
             JWT_SECRET=${{ secrets.JWT_SECRET }}
             ENCRYPTION_KEY=${{ secrets.ENCRYPTION_KEY }}
+            WEBHOOK_SIGNATURE_SECRET=${{ secrets.WEBHOOK_SIGNATURE_SECRET }}
             CORS_ORIGIN=${{ secrets.CORS_ORIGIN }}
             NEXT_PUBLIC_SUPABASE_URL=${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
             NEXT_PUBLIC_SUPABASE_ANON_KEY=${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}

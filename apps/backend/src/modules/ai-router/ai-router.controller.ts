@@ -6,12 +6,16 @@ import {
   Body,
   UseGuards,
   BadRequestException,
+  NotFoundException,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { AiRouterService } from './ai-router.service';
+import { TenantsService } from '../tenants/tenants.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import type { SessionUser } from '../../lib/supabase';
 import type { MemoryEntry, RoutingRequest } from '../orchestration/dto';
 import type { RetrievalChunk } from '../kb/dto/retrieval.dto';
 
@@ -41,7 +45,10 @@ export interface AiRouterRouteBodyDto {
 @UseGuards(JwtAuthGuard)
 @Controller('ai-router')
 export class AiRouterController {
-  constructor(private readonly aiRouterService: AiRouterService) {}
+  constructor(
+    private readonly aiRouterService: AiRouterService,
+    private readonly tenantsService: TenantsService,
+  ) {}
 
   @Post('route')
   @HttpCode(HttpStatus.OK)
@@ -51,7 +58,7 @@ export class AiRouterController {
       'Calls AiRouterService.route (no LLM). Maps `prompt` or `incomingMessage` to RoutingRequest.incomingMessage. ' +
       '`context.kbResults` / `systemPrompt` are accepted for API compatibility; the current router heuristic does not use KB text.',
   })
-  async route(@Body() dto: AiRouterRouteBodyDto) {
+  async route(@Body() dto: AiRouterRouteBodyDto, @CurrentUser() user: SessionUser) {
     const fromIncoming = typeof dto.incomingMessage === 'string' ? dto.incomingMessage : '';
     const fromPrompt = typeof dto.prompt === 'string' ? dto.prompt : '';
     const incoming = (fromIncoming.trim() || fromPrompt.trim());
@@ -64,6 +71,11 @@ export class AiRouterController {
     }
     if (!incoming) {
       throw new BadRequestException('prompt or incomingMessage is required');
+    }
+
+    const ok = await this.tenantsService.checkTenantAccess(dto.tenantId, user.id);
+    if (!ok) {
+      throw new NotFoundException('Not found');
     }
 
     const req: RoutingRequest = {

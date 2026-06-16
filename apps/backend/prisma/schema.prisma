@@ -704,6 +704,7 @@ model Conversation {
 
   @@unique([ghlConversationId])
   @@index([tenantId])
+  @@index([tenantId, lastMessageAt(sort: Desc)])
   @@map("conversations")
 }
 
@@ -741,6 +742,7 @@ model Message {
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
   @@index([conversationId])
+  @@index([conversationId, createdAt(sort: Desc)])
   @@map("messages")
 }
 
@@ -774,6 +776,7 @@ model HandoverEvent {
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
   @@index([conversationId])
+  @@index([status, createdAt(sort: Desc)])
   @@map("handover_events")
 }
 
@@ -850,6 +853,7 @@ model QuotaLedger {
   wallet QuotaWallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
 
   @@index([walletId])
+  @@index([walletId, movementType, createdAt(sort: Desc)])
   @@map("quota_ledgers")
 }
 

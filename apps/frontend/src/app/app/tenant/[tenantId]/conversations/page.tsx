@@ -11,6 +11,8 @@ import {
   PageHeader,
   formatDateTime,
 } from '@/components/app/mvp-ui';
+import { ConfirmDialog } from '@/components/app/ConfirmDialog';
+import { useToast } from '@/components/app/ToastProvider';
 
 type ConvRow = {
   id: string;
@@ -40,6 +42,7 @@ export default function TenantConversationsReadonlyPage() {
   const params = useParams();
   const tenantId = params['tenantId'] as string;
   const { token } = useAuth();
+  const { pushToast } = useToast();
   const [rows, setRows] = useState<ConvRow[]>([]);
   const [listLoading, setListLoading] = useState(true);
   const [listErr, setListErr] = useState('');
@@ -47,6 +50,7 @@ export default function TenantConversationsReadonlyPage() {
   const [messages, setMessages] = useState<MessageRow[]>([]);
   const [msgLoading, setMsgLoading] = useState(false);
   const [resetBusy, setResetBusy] = useState(false);
+  const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
   const [resetBanner, setResetBanner] = useState('');
   const [msgErr, setMsgErr] = useState('');
 
@@ -232,24 +236,14 @@ export default function TenantConversationsReadonlyPage() {
               <button
                 type="button"
                 disabled={resetBusy || !token}
-                onClick={async () => {
-                  setResetBanner('');
-                  setResetBusy(true);
-                  try {
-                    await resetConversationBotState(token!, sel!);
-                    setResetBanner('Bot state cleared for this thread. A short confirmation is queued to the contact.');
-                  } catch (e) {
-                    setResetBanner(e instanceof Error ? e.message : 'Reset failed');
-                  } finally {
-                    setResetBusy(false);
-                  }
-                }}
+                onClick={() => setResetConfirmOpen(true)}
                 style={{
                   fontSize: '0.75rem',
                   padding: '0.35rem 0.65rem',
                   borderRadius: '6px',
-                  border: '1px solid #cbd5e1',
-                  background: '#f8fafc',
+                  border: '1px solid var(--aisbp-border, #cbd5e1)',
+                  background: 'var(--aisbp-surface-muted, #f8fafc)',
+                  color: 'var(--aisbp-text, #0f172a)',
                   cursor: resetBusy ? 'wait' : 'pointer',
                 }}
               >
@@ -342,6 +336,33 @@ export default function TenantConversationsReadonlyPage() {
           </div>
         </div>
       </div>
+      <ConfirmDialog
+        open={resetConfirmOpen}
+        title="Reset bot state?"
+        description="This clears the bot memory anchor for this thread and queues a short confirmation message to the contact. Message history is kept."
+        confirmLabel="Reset bot state"
+        destructive
+        busy={resetBusy}
+        onCancel={() => setResetConfirmOpen(false)}
+        onConfirm={async () => {
+          if (!token || !sel) return;
+          setResetBanner('');
+          setResetBusy(true);
+          try {
+            await resetConversationBotState(token, sel);
+            setResetConfirmOpen(false);
+            const msg = 'Bot state cleared for this thread. A short confirmation is queued to the contact.';
+            setResetBanner(msg);
+            pushToast(msg, 'success');
+          } catch (e) {
+            const err = e instanceof Error ? e.message : 'Reset failed';
+            setResetBanner(err);
+            pushToast(err, 'error');
+          } finally {
+            setResetBusy(false);
+          }
+        }}
+      />
     </div>
   );
 }

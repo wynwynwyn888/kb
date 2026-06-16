@@ -32,10 +32,12 @@ import { BookingSettingsModule } from './modules/booking-settings/booking-settin
 import { IntentTagsModule } from './modules/intent-tags/intent-tags.module';
 import { FollowUpSettingsModule } from './modules/follow-up-settings/follow-up-settings.module';
 import { FollowUpEngineModule } from './modules/follow-up-engine/follow-up-engine.module';
+import { AppCacheModule } from './lib/app-cache.module';
 import { HumanEscalationModule } from './modules/human-escalation/human-escalation.module';
 
 @Module({
   imports: [
+    AppCacheModule,
     // Configuration
     ConfigModule.forRoot({
       isGlobal: true,

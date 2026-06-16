@@ -1,13 +1,15 @@
 // Audit controller
 
-import { Controller, Get, Post, Body, Param, Query } from '@nestjs/common';
-import { ApiTags, ApiOperation } from '@nestjs/swagger';
+import { Controller, Get, Post, Body, Param, Query, UseGuards } from '@nestjs/common';
+import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { AuditService } from './audit.service';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
-const STUB_DESC =
-  'Not implemented: handler throws. This controller has no JwtAuthGuard — endpoints are not Bearer-protected.';
+const STUB_DESC = 'Not implemented: handler throws. JWT required.';
 
 @ApiTags('audit')
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard)
 @Controller('audit')
 export class AuditController {
   constructor(private readonly auditService: AuditService) {}

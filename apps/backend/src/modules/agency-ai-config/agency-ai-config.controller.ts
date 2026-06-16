@@ -1,6 +1,6 @@
 // Agency AI Config controller - manage agency-level AI provider settings
 
-import { Body, Controller, Get, NotFoundException, Patch, Post, ServiceUnavailableException, UseGuards } from '@nestjs/common';
+import { Body, Controller, ForbiddenException, Get, NotFoundException, Patch, Post, ServiceUnavailableException, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import {
   AgencyAiConfigService,
@@ -10,6 +10,7 @@ import {
 } from './agency-ai-config.service';
 import { SaveAgencyAiConfigBodyDto, SetActiveProviderBodyDto, TestAgencyAiModelBodyDto } from './save-agency-ai-config.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { AuthService } from '../auth/auth.service';
 import { CurrentAgencyId, CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { SessionUser } from '../../lib/supabase';
 
@@ -18,7 +19,10 @@ import type { SessionUser } from '../../lib/supabase';
 @UseGuards(JwtAuthGuard)
 @Controller('agency-ai-config')
 export class AgencyAiConfigController {
-  constructor(private readonly configService: AgencyAiConfigService) {}
+  constructor(
+    private readonly configService: AgencyAiConfigService,
+    private readonly authService: AuthService,
+  ) {}
 
   @Get()
   @ApiOperation({ summary: 'Get agency AI provider config' })
@@ -43,6 +47,7 @@ export class AgencyAiConfigController {
     if (!agencyId) {
       throw new NotFoundException('Agency context not found');
     }
+    await this.assertAgencyAdmin(user.id, agencyId);
     return this.configService.saveConfig(agencyId, dto as SaveAgencyAiConfigDto, user.id);
   }
 
@@ -56,6 +61,7 @@ export class AgencyAiConfigController {
     if (!agencyId) {
       throw new NotFoundException('Agency context not found');
     }
+    await this.assertAgencyAdmin(user.id, agencyId);
     return this.configService.saveSubaccountBehaviorPolicy(agencyId, body, user.id);
   }
 
@@ -84,6 +90,14 @@ export class AgencyAiConfigController {
     if (!agencyId) {
       throw new NotFoundException('Agency context not found');
     }
+    await this.assertAgencyAdmin(user.id, agencyId);
     return this.configService.setActiveProvider(agencyId, body.provider as SaveableProvider, user.id);
+  }
+
+  private async assertAgencyAdmin(profileId: string, agencyId: string): Promise<void> {
+    const ok = await this.authService.isAgencyAdmin(profileId, agencyId);
+    if (!ok) {
+      throw new ForbiddenException('Agency admin access required');
+    }
   }
 }

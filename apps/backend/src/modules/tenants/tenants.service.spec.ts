@@ -17,7 +17,7 @@ describe('TenantsService.deleteTenant', () => {
 
   beforeEach(() => {
     jestGlobal.clearAllMocks();
-    service = new TenantsService({} as never);
+    service = new TenantsService({} as never, { get: async () => null, set: async () => {} } as never);
   });
 
   it('rejects deletion when target is the agency system workspace', async () => {

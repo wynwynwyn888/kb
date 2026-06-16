@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { getSupabaseService } from '../../lib/supabase';
 import { formatPostgrestError } from '../../lib/format-postgrest-error';
 import { isUsableOpenAiFallbackKey } from '../../lib/ai-live-model-resolve';
+import { validateMediaFetchUrl } from '../../lib/ssrf-safe-url';
 
 export const VOICE_NOTE_TRANSCRIPTION_FAILED_USER_MESSAGE =
   "I couldn't read the voice note clearly. Could you send it again or type the key point?";
@@ -73,10 +74,15 @@ export class AudioTranscriptionService {
   }
 
   private async downloadAudio(mediaUrl: string): Promise<{ buffer: Buffer; contentType: string | null }> {
+    const validated = validateMediaFetchUrl(mediaUrl);
+    if (!validated.ok) {
+      throw new Error(`ssrf_blocked:${validated.reason}`);
+    }
+
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), DOWNLOAD_TIMEOUT_MS);
     try {
-      const res = await fetch(mediaUrl, { redirect: 'follow', signal: ac.signal });
+      const res = await fetch(validated.url.toString(), { redirect: 'error', signal: ac.signal });
       if (!res.ok) {
         throw new Error(`http_${res.status}`);
       }

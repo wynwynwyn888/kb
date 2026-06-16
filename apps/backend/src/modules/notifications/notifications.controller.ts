@@ -1,13 +1,15 @@
 // Notifications controller
 
-import { Controller, Get, Patch, Body, Param, Query } from '@nestjs/common';
-import { ApiTags, ApiOperation } from '@nestjs/swagger';
+import { Controller, Get, Patch, Body, Param, Query, UseGuards } from '@nestjs/common';
+import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { NotificationsService } from './notifications.service';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
-const STUB_DESC =
-  'Not implemented: handler throws. This controller has no JwtAuthGuard — endpoints are not Bearer-protected.';
+const STUB_DESC = 'Not implemented: handler throws. JWT required.';
 
 @ApiTags('notifications')
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard)
 @Controller('notifications')
 export class NotificationsController {
   constructor(private readonly notificationsService: NotificationsService) {}

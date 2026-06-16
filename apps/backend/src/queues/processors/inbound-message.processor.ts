@@ -26,7 +26,6 @@ import { safeTextPreviewForLog } from '../../lib/safe-text-preview-for-log';
 import { ConversationResetService } from '../../modules/conversations/conversation-reset.service';
 import { InboundAutoTaggingService } from '../../modules/intent-tags/inbound-auto-tagging.service';
 import {
-  AudioTranscriptionService,
   VOICE_NOTE_TRANSCRIPTION_FAILED_USER_MESSAGE,
 } from '../../modules/transcription/audio-transcription.service';
 import { GhlVoiceRecordingFetchService } from '../../modules/transcription/ghl-voice-recording-fetch.service';
@@ -42,6 +41,7 @@ import { userAsksAboutRecentPhotoContent } from '../../lib/image-capability-inte
 import { resolveInboundGhlWebhookTenant } from '../../modules/webhooks/ghl-inbound-webhook-tenant-resolution';
 import { FollowUpEngineService } from '../../modules/follow-up-engine/follow-up-engine.service';
 import { HumanEscalationHoldingReplyService } from '../../modules/human-escalation/human-escalation-holding-reply.service';
+import { MediaTranscriptionQueueService } from '../media-transcription-queue.service';
 
 export interface InboundMessageJobData {
   locationId: string;
@@ -105,7 +105,7 @@ export interface OrchestrateDebouncedJobData {
   channelRaw?: string;
 }
 
-@Processor(QUEUES.INBOUND_MESSAGE_PROCESSOR)
+@Processor(QUEUES.INBOUND_MESSAGE_PROCESSOR, { concurrency: 3 })
 @Injectable()
 export class InboundMessageProcessor extends WorkerHost {
   private readonly logger = new Logger(InboundMessageProcessor.name);
@@ -115,7 +115,7 @@ export class InboundMessageProcessor extends WorkerHost {
     private readonly orchestrationService: ConversationOrchestrationService,
     private readonly conversationResetService: ConversationResetService,
     private readonly inboundAutoTagging: InboundAutoTaggingService,
-    private readonly audioTranscription: AudioTranscriptionService,
+    private readonly mediaTranscriptionQueue: MediaTranscriptionQueueService,
     private readonly ghlVoiceRecordingFetch: GhlVoiceRecordingFetchService,
     private readonly ghlVoiceMessageDiscovery: GhlVoiceMessageDiscoveryService,
     private readonly ghlVoiceConversationDiscovery: GhlVoiceConversationDiscoveryService,
@@ -413,7 +413,7 @@ export class InboundMessageProcessor extends WorkerHost {
         fetched.reason === 'http_422' ? 'recording_fetch_http_422' : fetched.reason;
       return { ok: false, failureReason: fr };
     }
-    const tx = await this.audioTranscription.transcribeAudioBuffer({
+    const tx = await this.mediaTranscriptionQueue.transcribeAudioBuffer({
       tenantId: params.tenantId,
       buffer: fetched.buffer,
       contentType: fetched.contentType,
@@ -665,7 +665,7 @@ export class InboundMessageProcessor extends WorkerHost {
 
       if (discovered.ok) {
         if (discovered.audioMediaUrl) {
-          const tx = await this.audioTranscription.transcribeRemoteMedia({
+          const tx = await this.mediaTranscriptionQueue.transcribeRemoteMedia({
             tenantId,
             mediaUrl: discovered.audioMediaUrl,
             conversationId,
@@ -846,7 +846,7 @@ export class InboundMessageProcessor extends WorkerHost {
       }
 
       if (discoveredMsg.audioMediaUrl) {
-        const tx = await this.audioTranscription.transcribeRemoteMedia({
+        const tx = await this.mediaTranscriptionQueue.transcribeRemoteMedia({
           tenantId,
           mediaUrl: discoveredMsg.audioMediaUrl,
           conversationId,
@@ -1033,7 +1033,7 @@ export class InboundMessageProcessor extends WorkerHost {
       mediaHost = null;
     }
 
-    const tx = await this.audioTranscription.transcribeRemoteMedia({
+    const tx = await this.mediaTranscriptionQueue.transcribeRemoteMedia({
       tenantId,
       mediaUrl: url,
       conversationId,

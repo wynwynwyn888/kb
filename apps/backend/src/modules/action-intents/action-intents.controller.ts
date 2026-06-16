@@ -3,6 +3,7 @@
 import { Controller, Get, Query, UseGuards, NotFoundException } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { ActionIntentsService } from './action-intents.service';
+import { TenantsService } from '../tenants/tenants.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentTenantId, CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { SessionUser } from '../../lib/supabase';
@@ -12,7 +13,10 @@ import type { SessionUser } from '../../lib/supabase';
 @UseGuards(JwtAuthGuard)
 @Controller('action-intents')
 export class ActionIntentsController {
-  constructor(private readonly actionIntentsService: ActionIntentsService) {}
+  constructor(
+    private readonly actionIntentsService: ActionIntentsService,
+    private readonly tenantsService: TenantsService,
+  ) {}
 
   @Get()
   @ApiOperation({ summary: 'List action intents for a tenant' })
@@ -30,9 +34,7 @@ export class ActionIntentsController {
       throw new NotFoundException('tenantId is required');
     }
 
-    if (user.tenantId && user.tenantId !== effectiveTenantId) {
-      throw new NotFoundException('Not found');
-    }
+    await this.assertTenantScope(user, effectiveTenantId);
 
     return this.actionIntentsService.findAll(effectiveTenantId, {
       conversationId,
@@ -40,5 +42,12 @@ export class ActionIntentsController {
       limit: limit ? Number(limit) : undefined,
       page: page ? Number(page) : undefined,
     });
+  }
+
+  private async assertTenantScope(user: SessionUser, effectiveTenantId: string): Promise<void> {
+    const ok = await this.tenantsService.checkTenantAccess(effectiveTenantId, user.id);
+    if (!ok) {
+      throw new NotFoundException('Not found');
+    }
   }
 }

@@ -15,6 +15,7 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { QuotasService } from './quotas.service';
+import { TenantsService } from '../tenants/tenants.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentAgencyId, CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { SessionUser } from '../../lib/supabase';
@@ -30,6 +31,7 @@ import { ALL_CREDIT_RESET_REMINDER_DAYS } from '../credit-reset-reminders/credit
 export class QuotasController {
   constructor(
     private readonly quotasService: QuotasService,
+    private readonly tenantsService: TenantsService,
     private readonly creditWarnings: CreditWarningsService,
     private readonly creditResetReminders: CreditResetRemindersService,
   ) {}
@@ -71,7 +73,7 @@ export class QuotasController {
       throw new BadRequestException('amount must be >= 0');
     }
 
-    this.assertTenantScope(user, dto.tenantId);
+    await this.assertTenantScope(user, dto.tenantId);
 
     const allowed = await this.quotasService.checkQuota(dto.tenantId, dto.amount);
     return {
@@ -123,7 +125,7 @@ export class QuotasController {
   @ApiOperation({ summary: 'Credits usage summary for tenant (client-safe)' })
   async tenantUsage(@Param('tenantId') tenantId: string, @CurrentUser() user: SessionUser) {
     if (!tenantId?.trim()) throw new BadRequestException('tenantId is required');
-    this.assertTenantScope(user, tenantId);
+    await this.assertTenantScope(user, tenantId);
     return this.quotasService.getTenantUsageSummary(tenantId);
   }
 
@@ -135,7 +137,7 @@ export class QuotasController {
     @Query('limit') limitStr?: string,
   ) {
     if (!tenantId?.trim()) throw new BadRequestException('tenantId is required');
-    this.assertTenantScope(user, tenantId);
+    await this.assertTenantScope(user, tenantId);
     const limit = limitStr ? parseInt(limitStr, 10) : 50;
     return this.quotasService.getTenantLedger(tenantId, { limit });
   }
@@ -393,9 +395,10 @@ export class QuotasController {
     await this.quotasService.getAgencyQuotaSettings(agencyId, profileId);
   }
 
-  /** Tenant-scoped users may only act on their tenant; agency-only users are not restricted here (matches conversations). */
-  private assertTenantScope(user: SessionUser, effectiveTenantId: string): void {
-    if (user.tenantId && user.tenantId !== effectiveTenantId) {
+  /** Tenant-scoped routes require tenant membership or same-agency staff. */
+  private async assertTenantScope(user: SessionUser, effectiveTenantId: string): Promise<void> {
+    const ok = await this.tenantsService.checkTenantAccess(effectiveTenantId, user.id);
+    if (!ok) {
       throw new NotFoundException('Not found');
     }
   }

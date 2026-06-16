@@ -273,10 +273,40 @@ export function mergeBookingIntoConversationMetadata(
   prev: Record<string, unknown>,
   booking: AisbpBookingStateV1,
 ): Record<string, unknown> {
+  const prevBooking = parseAisbpBookingState(prev);
+  let version = booking.version ?? 1;
+  if (prevBooking) {
+    const prevVer = prevBooking.version ?? 1;
+    const incomingVer = booking.version ?? 1;
+    if (incomingVer > prevVer) {
+      version = incomingVer;
+    } else if (bookingPersistFingerprint(prevBooking) !== bookingPersistFingerprint(booking)) {
+      version = prevVer + 1;
+    } else {
+      version = prevVer;
+    }
+  }
   return {
     ...prev,
-    [AISBP_BOOKING_METADATA_KEY]: { ...booking },
+    [AISBP_BOOKING_METADATA_KEY]: { ...booking, version },
   };
+}
+
+function bookingPersistFingerprint(b: AisbpBookingStateV1): string {
+  return JSON.stringify({
+    status: b.status,
+    appointmentId: b.appointmentId ?? null,
+    calendarId: b.calendarId,
+    selectedStart: b.selectedSlot?.startIso ?? null,
+    offeredStarts: b.offeredSlots?.map(s => s.startIso) ?? null,
+    pendingFieldId: b.pendingFieldId ?? null,
+    service: b.service ?? null,
+    preferredDate: b.preferredDate ?? null,
+    preferredTime: b.preferredTime ?? null,
+    customerName: b.customerName ?? null,
+    phone: b.phone ?? null,
+    email: b.email ?? null,
+  });
 }
 
 export function stripAisbpBookingFromMetadata(prev: Record<string, unknown>): Record<string, unknown> {

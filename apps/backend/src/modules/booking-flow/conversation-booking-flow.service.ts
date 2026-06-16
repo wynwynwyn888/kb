@@ -623,7 +623,14 @@ export class ConversationBookingFlowService {
       nluOut.intent === 'cancel' &&
       nluOut.confidence >= BOOKING_NLU_MIN_MERGE_CONFIDENCE
     ) {
-      const apptId = booking.appointmentId?.trim();
+      let apptId = booking.appointmentId?.trim();
+      if (!apptId) {
+        apptId = await this.resolvePriorAppointmentIdForCancel({
+          tenantId: params.tenantId,
+          conversationId: params.conversationId,
+          booking,
+        });
+      }
       if (apptId) {
         const cancelRes = await this.cancelGhlAppointmentBestEffort(params.tenantId, apptId);
         if (!cancelRes.success) {

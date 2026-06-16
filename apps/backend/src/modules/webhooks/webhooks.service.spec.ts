@@ -357,6 +357,7 @@ describe('WebhooksService', () => {
       );
 
       expect(result.success).toBe(true);
+      expect(result.skippedReason).toBe('duplicate_crm_location');
       expect(mockQueue.add).not.toHaveBeenCalled();
     });
 

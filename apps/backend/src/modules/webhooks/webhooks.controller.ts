@@ -120,6 +120,8 @@ export class WebhooksController {
         success: true,
         eventId: result.eventId,
         message: 'Webhook received',
+        ...(result.duplicate ? { duplicate: true as const, duplicateReason: result.duplicateReason } : {}),
+        ...(result.skippedReason ? { skippedReason: result.skippedReason } : {}),
       };
     } catch (error) {
       this.logger.error(`Webhook processing error: ${formatPostgrestError(error)}`);

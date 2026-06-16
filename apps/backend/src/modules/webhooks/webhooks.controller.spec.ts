@@ -54,4 +54,25 @@ describe('WebhooksController signature safe-mode', () => {
     await controller.handleWebhook({ rawBody } as never, body as never, sig, '', undefined);
     expect(webhooksService.handleGhlWebhook).toHaveBeenCalled();
   });
+
+  it('propagates skippedReason from service result', async () => {
+    process.env['WEBHOOK_SIGNATURE_SECRET'] = '';
+    const webhooksService = {
+      handleGhlWebhook: jestGlobal.fn(async () => ({
+        success: true,
+        skippedReason: 'duplicate_crm_location',
+      })),
+    };
+    const verifier = { verify: jestGlobal.fn(async () => ({ valid: true, configured: false })) };
+    const controller = new WebhooksController(webhooksService as never, verifier as never);
+
+    const body = { locationId: 'loc', event: 'conversation_message_created', data: { id: 'm1', conversationId: 'c1', message: 'Hi' } };
+    const res = await controller.handleWebhook(reqFor(body) as never, body as never, '', '', undefined);
+    expect(res).toEqual(
+      expect.objectContaining({
+        success: true,
+        skippedReason: 'duplicate_crm_location',
+      }),
+    );
+  });
 });

@@ -66,4 +66,16 @@ describe('bookingReplyComposerOutputPassesGuardrails', () => {
     const pt = 'Para o dia 19 de junho, temos 2:00 PM disponível. Você gostaria que eu reservasse esse horário?';
     expect(bookingReplyComposerOutputPassesGuardrails(nextStep, safe, pt)).toBe(false);
   });
+
+  it('rejects AI or model identity disclosure', () => {
+    const safe = 'May I have your preferred time?';
+    const nextStep = { type: 'ask_time' as const, fieldId: 'preferred_time', safeBaseMessage: safe };
+    expect(
+      bookingReplyComposerOutputPassesGuardrails(
+        nextStep,
+        safe,
+        'As an AI language model, I can help you pick a time.',
+      ),
+    ).toBe(false);
+  });
 });

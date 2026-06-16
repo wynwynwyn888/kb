@@ -70,6 +70,7 @@ import {
 } from '../../lib/compact-runtime-system-prompt';
 import { shouldSkipKbShortFollowUpActiveTopic } from '../../lib/short-followup-kb';
 import { WHATSAPP_OUTPUT_CONTRACT_BLOCK } from '../../lib/whatsapp-output-contract';
+import { buildBrandAssistantIdentitySystemContent } from '../../lib/brand-assistant-identity';
 import {
   promptCompactTruncationWarnKey,
   shouldEmitPromptCompactTruncationWarn,
@@ -736,6 +737,7 @@ export class ConversationOrchestrationService {
         const planPerf0 = performance.now();
         replyPlan = await this.replyPlanner.planReply({
           tenantId: input.tenantId,
+          businessDisplayName: input.tenant?.name,
           routing,
           kbChunks,
           memory: memory.entries,
@@ -1265,13 +1267,13 @@ export class ConversationOrchestrationService {
       agencyPrompt: agencyRaw,
     });
 
-    let base = 'You are a helpful AI assistant.';
+    let base = buildBrandAssistantIdentitySystemContent(input.tenant?.name);
     if (compact.agencyBody.trim() && compact.tenantBody.trim()) {
-      base = `${compact.agencyBody.trim()}\n\n---\n\nSubaccount bot instructions:\n${compact.tenantBody.trim()}`;
+      base = `${compact.agencyBody.trim()}\n\n---\n\nSubaccount bot instructions:\n${compact.tenantBody.trim()}\n\n---\n\n${base}`;
     } else if (compact.tenantBody.trim()) {
-      base = compact.tenantBody.trim();
+      base = `${compact.tenantBody.trim()}\n\n---\n\n${base}`;
     } else if (compact.agencyBody.trim()) {
-      base = compact.agencyBody.trim();
+      base = `${compact.agencyBody.trim()}\n\n---\n\n${base}`;
     }
 
     const tenantTz = input.tenant?.timeZone?.trim();

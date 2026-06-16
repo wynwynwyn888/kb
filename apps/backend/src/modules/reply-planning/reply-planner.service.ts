@@ -30,6 +30,7 @@ import { applyBusinessHoursGroundingGuard } from '../../lib/business-hours-groun
 import { applyMenuKbGroundingGuard } from '../../lib/menu-kb-grounding-guard';
 import { sanitizeOutboundInternalKbLeak } from '../../lib/outbound-internal-kb-sanitizer';
 import { containsDisallowedSingaporeReplyLanguage } from '../../lib/reply-language-guard';
+import { applyBrandAssistantIdentityGuard } from '../../lib/brand-assistant-identity';
 import { applyOutboundPolicyGuard } from '../../lib/outbound-policy-guard';
 import { detectMenuIntentInMessage } from '../../lib/kb-relevance';
 import { rewriteUnsupportedBusinessClaimsWhenNoKb } from '../../lib/outbound-safety-governor';
@@ -169,6 +170,8 @@ export class ReplyPlannerService {
     policyContext?: ReplyPlanPolicyContext;
     /** Latest inbound customer photo URL for vision generation. */
     incomingImageUrl?: string | null;
+    /** Tenant display name for brand identity outbound guard. */
+    businessDisplayName?: string;
   }): Promise<ReplyDecision> {
     const { tenantId, routing, kbChunks, memory, systemPrompt, conversationId, policyContext } = params;
 
@@ -251,6 +254,7 @@ export class ReplyPlannerService {
       params.maxTokens,
       policyContext,
       params.incomingImageUrl,
+      params.businessDisplayName,
     );
 
     // ---------- Format into bubbles ----------
@@ -399,6 +403,7 @@ export class ReplyPlannerService {
     subaccountMaxTokens?: number | null,
     policyContext?: ReplyPlanPolicyContext,
     incomingImageUrl?: string | null,
+    businessDisplayName?: string,
   ): Promise<{
     text: string;
     provenance: 'live_generation' | 'placeholder_fallback' | 'policy_reply';
@@ -435,6 +440,7 @@ export class ReplyPlannerService {
       tenantId,
       incomingMessage: incomingForGen,
       incomingImageUrl,
+      businessDisplayName,
       systemPrompt,
       memory,
       kbContext: kbChunks,
@@ -474,13 +480,23 @@ export class ReplyPlannerService {
     const generation_ms = Date.now() - generationStarted;
 
     const trimmed = stripModelThinking(liveDraft.content ?? '').trim();
-    if (trimmed.length > 0 && !containsDisallowedSingaporeReplyLanguage(trimmed)) {
+    const identityGuarded = applyBrandAssistantIdentityGuard({
+      text: trimmed,
+      businessName: businessDisplayName,
+    });
+    if (identityGuarded.rewritten) {
+      this.logger.warn(
+        `brandIdentityGuardRewrite ${JSON.stringify({ tenantId, sample: trimmed.slice(0, 120) })}`,
+      );
+    }
+    const outboundText = identityGuarded.text.trim();
+    if (outboundText.length > 0 && !containsDisallowedSingaporeReplyLanguage(outboundText)) {
       const gma = liveDraft.generationModelActuallyUsed ?? liveDraft.generationModel;
       this.logger.log(
-        `Live draft generated: generation_ms=${generation_ms} ${trimmed.length} chars (generationModelActuallyUsed=${gma ?? 'n/a'}, configuredModel=${liveDraft.configuredModel ?? 'n/a'})`,
+        `Live draft generated: generation_ms=${generation_ms} ${outboundText.length} chars (generationModelActuallyUsed=${gma ?? 'n/a'}, configuredModel=${liveDraft.configuredModel ?? 'n/a'})`,
       );
       return {
-        text: trimmed,
+        text: outboundText,
         provenance: 'live_generation',
         agencyActiveProvider: liveDraft.agencyActiveProvider,
         configuredModel: liveDraft.configuredModel,
@@ -493,7 +509,14 @@ export class ReplyPlannerService {
       };
     }
 
-    if (trimmed.length > 0 && containsDisallowedSingaporeReplyLanguage(trimmed)) {
+    if (outboundText.length > 0 && containsDisallowedSingaporeReplyLanguage(outboundText)) {
+      this.logger.warn(
+        `disallowedReplyLanguage ${JSON.stringify({
+          tenantId,
+          sample: outboundText.slice(0, 120),
+        })}`,
+      );
+    } else if (trimmed.length > 0 && containsDisallowedSingaporeReplyLanguage(trimmed)) {
       this.logger.warn(
         `disallowedReplyLanguage ${JSON.stringify({
           tenantId,

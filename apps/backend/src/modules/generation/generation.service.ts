@@ -20,6 +20,7 @@ import type { ConversationIntent } from '../conversation-policy/conversation-int
 import type { SelectionResolution } from '../conversation-policy/option-resolver';
 import { userRequestsFormattingPreference } from '../../lib/formatting-preference-intent';
 import { REPLY_LANGUAGE_MIRROR_SYSTEM_CONTENT } from '../../lib/reply-language-mirror';
+import { buildBrandAssistantIdentitySystemContent, resolveBrandLabel } from '../../lib/brand-assistant-identity';
 import { isInboundImagePlaceholderContent } from '../../lib/inbound-image';
 import { userAsksAboutImageCapability, userAsksAboutRecentPhotoContent } from '../../lib/image-capability-intent';
 import { GhlInboundImageFetchService } from '../transcription/ghl-inbound-image-fetch.service';
@@ -65,6 +66,8 @@ export interface GenerateDraftParams {
   policyContext?: GenerateDraftPolicyContext;
   /** HTTP(S) URL for the latest inbound customer image (vision models). */
   incomingImageUrl?: string | null;
+  /** Tenant display name for brand identity guardrails. */
+  businessDisplayName?: string | null;
 }
 
 export interface GenerateDraftResult {
@@ -428,7 +431,7 @@ export class GenerationService {
           'If one line requests something likely out of scope for this business and another is in scope, address the in-scope part and politely clarify the other. ' +
           'When several threads compete, prioritize: (1) safety, allergy, medical concerns, complaints (2) booking (3) factual KB (hours, location, price) (4) out-of-scope vs alternatives (5) recommendations (6) menu / meta / small talk. ' +
           'Use only facts that answer those messages; '
-        : 'Use only facts that answer the **latest** customer message; ignore irrelevant snippets. ') +
+        : 'Use only facts that answer the **latest** customer message; ignore irrelevant snippets, distractions, and off-topic media. ') +
       'Summarize and rewrite into a short, natural WhatsApp-style reply.\n\n' +
       `Source excerpts:\n${kbText}\n\n` +
       'Do not invent prices, ingredients, availability, or items not clearly supported by the excerpts.';
@@ -465,6 +468,10 @@ export class GenerationService {
     }
 
     messages.push({ role: 'system', content: REPLY_LANGUAGE_MIRROR_SYSTEM_CONTENT });
+    messages.push({
+      role: 'system',
+      content: buildBrandAssistantIdentitySystemContent(params.businessDisplayName),
+    });
 
     const mem = params.memory.slice(-20);
     const incoming = stripGhlImagePlaceholderFromInboundBody(params.incomingMessage?.trim() ?? '');
@@ -561,11 +568,13 @@ export class GenerationService {
     }
 
     if (userAsksAboutImageCapability(inboundTrim) && !params.incomingImageUrl?.trim()) {
+      const brand = resolveBrandLabel(params.businessDisplayName);
       messages.push({
         role: 'system',
         content:
-          'The customer is asking whether you can understand images in general. Confirm yes — when a photo is sent successfully in this chat, you can analyze it. ' +
-          'Do not claim you are currently viewing a specific photo unless one was attached to this turn. Invite them to send a photo if they want visual help.',
+          `The customer is asking whether you can understand images. Confirm that when they send a photo related to their enquiry with ${brand}, you can take a look. ` +
+          'Do not claim you are currently viewing a specific photo unless one was attached to this turn. ' +
+          'Do not describe yourself as AI or mention vision models. Invite them to send a relevant photo if they need visual help.',
       });
     }
 
@@ -579,10 +588,12 @@ export class GenerationService {
     }
 
     if (params.incomingImageUrl?.trim()) {
+      const brand = resolveBrandLabel(params.businessDisplayName);
       messages.push({
         role: 'system',
         content:
-          'The customer sent a photo. Describe what you see in the image when relevant, then answer their question or caption helpfully. Do not claim you cannot see images.',
+          `The customer sent a photo. Only describe or use the image when it helps their enquiry with ${brand} (booking, services, complaint evidence, etc.). ` +
+          'If the image is unrelated or distracting, acknowledge briefly and steer back to how you can help with their enquiry. Do not claim you cannot see images.',
       });
     } else if (isInboundImagePlaceholderContent(inboundTrim)) {
       messages.push({

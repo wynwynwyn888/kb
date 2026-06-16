@@ -9,6 +9,7 @@ import { bookingReplyComposerOutputPassesGuardrails } from './booking-reply-comp
 import type { BookingReplyComposerComposeInput } from './booking-reply-composer.types';
 import { BotProfilesService } from '../prompts/bot-profiles.service';
 import { REPLY_LANGUAGE_MIRROR_SYSTEM_CONTENT } from '../../lib/reply-language-mirror';
+import { buildBrandAssistantIdentitySystemContent } from '../../lib/brand-assistant-identity';
 
 type ProviderRow = {
   provider: string;
@@ -89,6 +90,7 @@ export class BookingReplyComposerService {
     const system = [
       'You rewrite booking chat replies for WhatsApp. Output ONLY JSON: {"reply": string, "confidence": number 0-1}.',
       REPLY_LANGUAGE_MIRROR_SYSTEM_CONTENT,
+      buildBrandAssistantIdentitySystemContent(input.businessName),
       'Rules:',
       '- Preserve the exact business action implied by nextStep.type and safeBaseMessage.',
       '- Do not invent calendar slots, times, or availability.',

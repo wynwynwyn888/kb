@@ -28,7 +28,7 @@ export function nluAllowsSchedulingOverwrite(
     return true;
   }
   if (booking.noSlotsForDateYmd?.trim()) {
-    return intent === 'request_availability' || intent === 'revise_date_time' || intent === 'revise_time';
+    return false;
   }
   return false;
 }

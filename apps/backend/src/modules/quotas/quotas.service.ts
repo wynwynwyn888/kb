@@ -7,8 +7,6 @@ import {
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { InjectQueue } from '@nestjs/bullmq';
-import { Queue } from 'bullmq';
 import { getSupabaseService } from '../../lib/supabase';
 import { randomUUID } from 'node:crypto';
 
@@ -28,11 +26,16 @@ export class QuotasService {
   private readonly logger = new Logger(QuotasService.name);
   private readonly supabase = getSupabaseService();
 
-  constructor(
-    @InjectQueue('quota-threshold-alert') private readonly alertQueue: Queue,
-  ) {}
-
   async checkQuota(tenantId: string, amount: number): Promise<boolean> {
+    const { data: tenantRow } = await this.supabase
+      .from('tenants')
+      .select('credits_unlimited')
+      .eq('id', tenantId)
+      .maybeSingle();
+    if (Boolean((tenantRow as { credits_unlimited?: boolean } | null)?.credits_unlimited)) {
+      return true;
+    }
+
     const { data: wallet, error } = await this.supabase
       .from('quota_wallets')
       .select('total_quota, used_quota')

@@ -97,11 +97,15 @@ export class OrchestrationGuards {
       return { decision: 'ERROR', guardName: 'ghl_connected', reason: 'Tenant context not loaded' };
     }
 
-    const { data: conn } = await this.supabase
+    let connQuery = this.supabase
       .from('tenant_ghl_connections')
       .select('status')
-      .eq('tenant_id', input.tenantId)
-      .single();
+      .eq('tenant_id', input.tenantId);
+    const locationId = input.tenant.ghlLocationId?.trim();
+    if (locationId) {
+      connQuery = connQuery.eq('ghl_location_id', locationId);
+    }
+    const { data: conn } = await connQuery.maybeSingle();
 
     if (!conn || conn.status !== 'CONNECTED') {
       this.logger.debug(`Guard SKIP_GHL_DISCONNECTED for tenant=${input.tenantId}`);
@@ -182,6 +186,15 @@ export class OrchestrationGuards {
   }
 
   private async checkQuotaAvailable(input: OrchestrationInput): Promise<GuardResult> {
+    const { data: tenantRow } = await this.supabase
+      .from('tenants')
+      .select('credits_unlimited')
+      .eq('id', input.tenantId)
+      .maybeSingle();
+    if (Boolean((tenantRow as { credits_unlimited?: boolean } | null)?.credits_unlimited)) {
+      return { decision: 'PROCEED', guardName: 'quota_available' };
+    }
+
     const { data: wallet } = await this.supabase
       .from('quota_wallets')
       .select('total_quota, used_quota, allow_negative_credits, negative_credit_limit')

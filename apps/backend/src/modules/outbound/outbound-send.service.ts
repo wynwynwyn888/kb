@@ -33,6 +33,7 @@ export interface BubbleSendResult {
   index: number;
   text: string;
   success: boolean;
+  skippedDuplicate?: boolean;
   /** GHL channel that actually delivered the message (after fallback). */
   ghlChannelUsed?: OutboundChannel;
   ghlMessageId?: string;
@@ -185,8 +186,24 @@ export class OutboundSendService {
     let succeeded = 0;
     let failed = 0;
 
+    const jobId = sendBubbleJobId?.trim() ?? '';
+    const alreadySent =
+      jobId.length > 0
+        ? await this.fetchAlreadySentBubbleIndices(conversationId, jobId)
+        : new Set<number>();
+
     for (let i = 0; i < physicalBubbles.length; i++) {
       const bubble = physicalBubbles[i]!;
+      if (alreadySent.has(bubble.index)) {
+        bubbleResults.push({
+          index: bubble.index,
+          text: bubble.text,
+          success: true,
+          skippedDuplicate: true,
+        });
+        succeeded++;
+        continue;
+      }
       const outboundText = bubble.text;
       const result = await this.sendSingleBubble(ghlClient, {
         locationId: ghlLocationId,
@@ -209,6 +226,8 @@ export class OutboundSendService {
           content: outboundText,
           contentType: 'TEXT',
           ghlMessageId: result.ghlMessageId,
+          sendBubbleJobId: jobId || undefined,
+          bubbleIndex: bubble.index,
         });
       } else {
         failed++;
@@ -610,6 +629,11 @@ export class OutboundSendService {
           );
           return { debited: false };
         }
+        await this.supabase
+          .from('quota_wallets')
+          .update({ used_quota: wallet.used_quota, updated_at: new Date().toISOString() })
+          .eq('id', wallet.id)
+          .eq('used_quota', nextUsed);
         throw new Error(`Failed to insert quota ledger: ${msg}`);
       }
 
@@ -654,6 +678,32 @@ export class OutboundSendService {
     return { debited: false };
   }
 
+  private async fetchAlreadySentBubbleIndices(
+    conversationId: string,
+    sendBubbleJobId: string,
+  ): Promise<Set<number>> {
+    try {
+      const { data } = await this.supabase
+        .from('messages')
+        .select('metadata')
+        .eq('conversation_id', conversationId)
+        .eq('direction', 'OUTBOUND')
+        .eq('sender', 'AI')
+        .order('created_at', { ascending: false })
+        .limit(30);
+      const sent = new Set<number>();
+      for (const row of data ?? []) {
+        const md = row.metadata as Record<string, unknown> | null;
+        if (!md || md['sendBubbleJobId'] !== sendBubbleJobId) continue;
+        const idx = md['bubbleIndex'];
+        if (typeof idx === 'number' && Number.isFinite(idx)) sent.add(Math.floor(idx));
+      }
+      return sent;
+    } catch {
+      return new Set<number>();
+    }
+  }
+
   private async persistOutboundMessage(params: {
     conversationId: string;
     tenantId: string;
@@ -661,6 +711,8 @@ export class OutboundSendService {
     content: string;
     contentType: string;
     ghlMessageId?: string;
+    sendBubbleJobId?: string;
+    bubbleIndex?: number;
   }): Promise<void> {
     const now = new Date().toISOString();
     const { error: insErr } = await this.supabase.from('messages').insert({
@@ -673,6 +725,8 @@ export class OutboundSendService {
       metadata: {
         ghlMessageId: params.ghlMessageId,
         sentAt: now,
+        ...(params.sendBubbleJobId ? { sendBubbleJobId: params.sendBubbleJobId } : {}),
+        ...(typeof params.bubbleIndex === 'number' ? { bubbleIndex: params.bubbleIndex } : {}),
       },
     });
     if (insErr) {

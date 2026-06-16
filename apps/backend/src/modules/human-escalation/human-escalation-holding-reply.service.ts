@@ -302,8 +302,6 @@ export class HumanEscalationHoldingReplyService {
       replyLatencyTrace: { pipelineWallStartMs: pipelineWallStartMs ?? Date.now() },
     });
 
-    await this.persistLastHoldingMeta(conversationId, holdingReplyType, replyText);
-
     this.logger.log(
       `humanEscalationHoldingReplySent ${JSON.stringify({
         conversationId,
@@ -338,6 +336,28 @@ export class HumanEscalationHoldingReplyService {
         : null;
     const lastText = typeof tx === 'string' && tx.trim() ? tx.trim() : null;
     return { lastSentAtIso, lastType, lastText };
+  }
+
+  /** Persist holding-reply cooldown only after GHL delivery succeeds. */
+  async persistHoldingReplyAfterSuccessfulSend(
+    conversationId: string,
+    replyPlan: { rationale?: string; bubbles?: { text?: string }[] },
+  ): Promise<void> {
+    const rationale = typeof replyPlan.rationale === 'string' ? replyPlan.rationale : '';
+    const prefix = 'human_escalation_holding_reply:';
+    if (!rationale.startsWith(prefix)) return;
+    const holdingReplyType = rationale.slice(prefix.length) as HandoverActiveReplyType;
+    if (
+      holdingReplyType !== 'default' &&
+      holdingReplyType !== 'waiting_time' &&
+      holdingReplyType !== 'extra_context' &&
+      holdingReplyType !== 'frustration'
+    ) {
+      return;
+    }
+    const replyText = replyPlan.bubbles?.[0]?.text?.trim() ?? '';
+    if (!replyText) return;
+    await this.persistLastHoldingMeta(conversationId, holdingReplyType, replyText);
   }
 
   private async persistLastHoldingMeta(

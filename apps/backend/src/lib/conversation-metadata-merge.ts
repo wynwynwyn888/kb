@@ -42,10 +42,10 @@ function shouldPreferCurrentBookingState(
 ): boolean {
   const cur = bookingMergeRank(current);
   const inc = bookingMergeRank(incoming);
-  if (inc.version > cur.version) return false;
-  if (inc.version < cur.version) return true;
   if (cur.confirmedRank > inc.confirmedRank) return true;
   if (inc.confirmedRank > cur.confirmedRank) return false;
+  if (inc.version > cur.version) return false;
+  if (inc.version < cur.version) return true;
   if (cur.confirmedAt > inc.confirmedAt) return true;
   if (inc.confirmedAt > cur.confirmedAt) return false;
   return false;

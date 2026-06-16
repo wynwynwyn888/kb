@@ -25,16 +25,17 @@ describe('WebhooksController signature safe-mode', () => {
     expect(verifier.verify).toHaveBeenCalled();
   });
 
-  it('secret present + invalid → returns 200 but does not process', async () => {
+  it('secret present + invalid → returns 401 and does not process', async () => {
     process.env['WEBHOOK_SIGNATURE_SECRET'] = 'secret';
     const webhooksService = { handleGhlWebhook: jestGlobal.fn(async () => ({ success: true, eventId: 'e1' })) };
     const verifier = { verify: jestGlobal.fn(async () => ({ valid: false, configured: true, reason: 'invalid_signature' })) };
     const controller = new WebhooksController(webhooksService as never, verifier as never);
 
     const body = { locationId: 'loc', event: 'conversation_message_created', data: { id: 'm1', conversationId: 'c1', message: 'Hi' } };
-    const res = await controller.handleWebhook(reqFor(body) as never, body as never, 'bad', '', undefined);
+    await expect(
+      controller.handleWebhook(reqFor(body) as never, body as never, 'bad', '', undefined),
+    ).rejects.toMatchObject({ status: 401 });
     expect(webhooksService.handleGhlWebhook).not.toHaveBeenCalled();
-    expect(res).toEqual(expect.objectContaining({ success: true, skipped: true }));
   });
 
   it('secret present + valid → processes event', async () => {

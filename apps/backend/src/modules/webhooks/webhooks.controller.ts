@@ -7,9 +7,12 @@ import {
   Body,
   Headers,
   HttpCode,
+  HttpException,
   HttpStatus,
+  InternalServerErrorException,
   Logger,
   Req,
+  UnauthorizedException,
 } from '@nestjs/common';
 import type { RawBodyRequest } from '@nestjs/common';
 import { SkipThrottle } from '@nestjs/throttler';
@@ -89,12 +92,10 @@ export class WebhooksController {
           locationId: payload.locationId,
         })}`,
       );
-      return {
-        success: true,
-        message: 'Webhook received',
-        skipped: true,
-        verificationFailed: true,
-      };
+      throw new UnauthorizedException({
+        message: 'Webhook verification failed',
+        reason: verification.reason ?? 'unknown_reason',
+      });
     }
 
     try {
@@ -125,10 +126,10 @@ export class WebhooksController {
       };
     } catch (error) {
       this.logger.error(`Webhook processing error: ${formatPostgrestError(error)}`);
-      return {
-        success: true,
-        message: 'Webhook received (processing deferred)',
-      };
+      if (error instanceof HttpException) {
+        throw error;
+      }
+      throw new InternalServerErrorException('Webhook processing failed');
     }
   }
 }

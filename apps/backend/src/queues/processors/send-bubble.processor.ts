@@ -12,6 +12,7 @@ import { ActionIntentExecutorService } from '../../modules/action-execution/acti
 import { OutboundSafetyGovernorService } from '../../modules/outbound/outbound-safety-governor.service';
 import { FollowUpEngineService } from '../../modules/follow-up-engine/follow-up-engine.service';
 import { HumanEscalationRuntimeService } from '../../modules/human-escalation/human-escalation-runtime.service';
+import { HumanEscalationHoldingReplyService } from '../../modules/human-escalation/human-escalation-holding-reply.service';
 
 export interface SendBubbleJobData {
   conversationId: string;
@@ -36,6 +37,7 @@ export class SendBubbleProcessor extends WorkerHost {
     private readonly outboundSafetyGovernor: OutboundSafetyGovernorService,
     private readonly followUpEngine: FollowUpEngineService,
     private readonly humanEscalationRuntime: HumanEscalationRuntimeService,
+    private readonly humanEscalationHolding: HumanEscalationHoldingReplyService,
   ) {
     super();
   }
@@ -87,7 +89,20 @@ export class SendBubbleProcessor extends WorkerHost {
         `outbound_send_ms=${outbound_send_ms} total_backend_reply_ms=${total_backend_reply_ms ?? 'na'}`,
     );
 
-    if (summary.succeeded > 0) {
+    if (summary.succeeded > 0 && replyPlan.draftProvenance === 'human_escalation') {
+      try {
+        await this.humanEscalationHolding.persistHoldingReplyAfterSuccessfulSend(conversationId, replyPlan);
+      } catch (e) {
+        this.logger.warn(
+          `humanEscalationHoldingMetaAfterSendFailed ${JSON.stringify({
+            conversationId,
+            message: e instanceof Error ? e.message : String(e),
+          })}`,
+        );
+      }
+    }
+
+    if (summary.succeeded > 0 && replyPlan.draftProvenance === 'human_escalation') {
       const channelUsed = summary.bubbleResults.find(b => b.success && b.ghlChannelUsed)?.ghlChannelUsed;
       try {
         const flushResult = await this.humanEscalationRuntime.flushPendingInternalAlert(

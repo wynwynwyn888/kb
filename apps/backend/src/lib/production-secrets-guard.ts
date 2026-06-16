@@ -21,6 +21,11 @@ export function assertProductionSecretsConfigured(): void {
     missing.push('WEBHOOK_SIGNATURE_SECRET');
   }
 
+  const jwtSecret = String(process.env['JWT_SECRET'] ?? '').trim();
+  if (!jwtSecret || jwtSecret === 'supersecret-dev-key') {
+    missing.push('JWT_SECRET');
+  }
+
   if (missing.length > 0) {
     throw new Error(
       `Production boot blocked — configure required secrets: ${missing.join(', ')}`,

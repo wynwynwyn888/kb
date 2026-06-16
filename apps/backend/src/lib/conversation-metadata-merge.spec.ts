@@ -41,6 +41,22 @@ describe('mergeConversationMetadataForPersist', () => {
     expect((merged['aisbp_booking'] as { version: number }).version).toBe(3);
   });
 
+  it('preserves confirmed booking when incoming has higher version but lower status rank', () => {
+    const current = {
+      aisbp_booking: {
+        status: 'confirmed',
+        calendarId: 'c1',
+        version: 2,
+        appointmentId: 'ap1',
+      },
+    };
+    const incoming = {
+      aisbp_booking: { status: 'creating', calendarId: 'c1', version: 5 },
+    };
+    const merged = mergeConversationMetadataForPersist(current, incoming);
+    expect((merged['aisbp_booking'] as { status: string }).status).toBe('confirmed');
+  });
+
   it('preserves current booking when incoming omits aisbp_booking', () => {
     const current = { aisbp_booking: { status: 'confirmed', calendarId: 'c1', version: 2 } };
     const incoming = { outboundChannel: 'SMS' };

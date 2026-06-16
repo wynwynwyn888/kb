@@ -503,7 +503,12 @@ export class WebhooksService {
       .single();
 
     if (error) {
-      this.logger.error(`Failed to persist webhook event: ${formatPostgrestError(error)}`);
+      const msg = formatPostgrestError(error);
+      if (/23505|duplicate key|unique constraint/i.test(msg)) {
+        const existing = await this.findExistingEvent(tenantId, data.externalEventId);
+        if (existing) return existing;
+      }
+      this.logger.error(`Failed to persist webhook event: ${msg}`);
       throw error;
     }
 

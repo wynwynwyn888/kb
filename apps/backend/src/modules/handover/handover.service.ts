@@ -1,8 +1,6 @@
 // Handover service - manages AI-to-human handoff
 
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { InjectQueue } from '@nestjs/bullmq';
-import { Queue } from 'bullmq';
 import { randomUUID } from 'crypto';
 import { getSupabaseService } from '../../lib/supabase';
 import { mergeConversationMetadataForPersist } from '../../lib/conversation-metadata-merge';
@@ -12,7 +10,6 @@ import {
   formatHandoverReasonLabel,
   formatHandoverTypeLabel,
 } from '../../lib/handover-display';
-import { QUEUES } from '../../queues/queue.constants';
 import { GhlService } from '../ghl/ghl.service';
 
 export interface ActiveHandoverListItem {
@@ -39,7 +36,6 @@ export class HandoverService {
   private readonly supabase = getSupabaseService();
 
   constructor(
-    @InjectQueue(QUEUES.HANDOVER_NOTIFY) private readonly handoverQueue: Queue,
     private readonly ghlService: GhlService,
   ) {}
 

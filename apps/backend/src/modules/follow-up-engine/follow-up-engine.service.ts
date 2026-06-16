@@ -250,26 +250,16 @@ export class FollowUpEngineService {
     if (!settings.enabled) return;
     if (!settings.stopOnCustomerReply) return;
 
-    const scheduleVersion = await this.bumpFollowUpScheduleVersion(conversationId, 'customer_reply');
-    const { error } = await this.supabase
-      .from('conversation_follow_up_jobs')
-      .update({
-        status: 'SKIPPED' satisfies FollowUpJobStatus,
-        decided_at: new Date().toISOString(),
-        decision_reason: 'customer_replied',
-        updated_at: new Date().toISOString(),
-      })
-      .eq('conversation_id', conversationId)
-      .eq('status', 'PENDING');
-    if (error) {
-      this.logger.warn(`followUpSkipMarkFailed ${JSON.stringify({ conversationId, err: error.message })}`);
-    }
+    await this.invalidatePendingFollowUpJobs(
+      { tenantId, conversationId },
+      'customer_reply',
+    );
+
     this.logger.log(
       `followUpCustomerReply ${JSON.stringify({
         tenantId,
         conversationId,
         inboundAtIso,
-        scheduleVersion,
         optOutDetected: isOptOut,
       })}`,
     );
@@ -291,7 +281,7 @@ export class FollowUpEngineService {
 
   private async invalidatePendingFollowUpJobs(
     params: { tenantId: string; conversationId: string },
-    reason: 'human_escalated' | 'bot_reset',
+    reason: 'human_escalated' | 'bot_reset' | 'customer_reply',
   ): Promise<void> {
     const { tenantId, conversationId } = params;
     const { data: pendingRows } = await this.supabase

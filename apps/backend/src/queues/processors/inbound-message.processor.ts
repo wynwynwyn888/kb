@@ -378,7 +378,7 @@ export class InboundMessageProcessor extends WorkerHost {
       );
 
       if (webhookEventId) {
-        await this.updateWebhookEventStatus(webhookEventId, 'COMPLETED');
+        await this.updateWebhookEventStatus(webhookEventId, 'ORCHESTRATING');
       }
     } catch (error) {
       const message = formatPostgrestError(error);
@@ -1097,6 +1097,9 @@ export class InboundMessageProcessor extends WorkerHost {
       .single();
     if (cErr || !convRow) {
       this.logger.warn(`Debounce orchestrate: conversation not found ${conversationId}`);
+      if (webhookEventId) {
+        await this.updateWebhookEventStatus(webhookEventId, 'FAILED', 'conversation_not_found');
+      }
       return;
     }
 
@@ -1104,6 +1107,9 @@ export class InboundMessageProcessor extends WorkerHost {
       this.logger.log(
         `Debounce skipped: newer inbound exists conversationId=${conversationId} (jobVersion=${debounceVersion})`,
       );
+      if (webhookEventId) {
+        await this.updateWebhookEventStatus(webhookEventId, 'COMPLETED');
+      }
       return;
     }
 
@@ -1229,6 +1235,9 @@ export class InboundMessageProcessor extends WorkerHost {
         `Orchestration skipped (chat reset command): conversationId=${conversationId} ` +
           `orchestrationSkippedReason=chat_reset_command`,
       );
+      if (webhookEventId) {
+        await this.updateWebhookEventStatus(webhookEventId, 'COMPLETED');
+      }
       return;
     }
 
@@ -1348,6 +1357,10 @@ export class InboundMessageProcessor extends WorkerHost {
         `routingRecommendedModel=${result.routing?.recommendedModel ?? 'n/a'}, ` +
         `generationModelActuallyUsed=${result.replyPlan?.generationModelActuallyUsed ?? result.replyPlan?.generationModel ?? 'n/a'}`,
     );
+
+    if (webhookEventId) {
+      await this.updateWebhookEventStatus(webhookEventId, 'COMPLETED');
+    }
   }
 
   /**

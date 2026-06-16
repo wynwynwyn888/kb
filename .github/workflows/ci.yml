@@ -9,6 +9,11 @@ on:
 jobs:
   test-and-build:
     runs-on: ubuntu-latest
+    env:
+      NODE_ENV: test
+      JWT_SECRET: ci-test-jwt-secret
+      WEBHOOK_SIGNATURE_SECRET: ci-test-webhook-secret
+      ENCRYPTION_KEY: ci-test-encryption-key-32chars!!
     steps:
       - uses: actions/checkout@v4
 

@@ -735,7 +735,7 @@ export class ConversationBookingFlowService {
         } else if (rev.kind === 'time_window_revision') {
           booking.preferredTimeWindow = rev.preferredTimeWindow;
           booking.preferredTime = undefined;
-        } else {
+        } else if (rev.kind === 'date_time_revision') {
           booking.preferredDate = rev.preferredDate;
           if (rev.preferredTime) {
             booking.preferredTime = rev.preferredTime;

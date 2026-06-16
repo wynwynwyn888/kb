@@ -62,6 +62,8 @@ export class WebhooksService {
     duplicate?: boolean;
     /** When duplicate=true: why the skip matched (never `text_only` — body-only dedupe is not used). */
     duplicateReason?: 'provider_event_id' | 'provider_payload_hash';
+    /** When success=true but message was not enqueued (routing miss, duplicate CRM location, etc.). */
+    skippedReason?: string;
   }> {
     // Validate required top-level fields
     if (!payload.locationId || !payload.event) {

@@ -24,6 +24,7 @@ describe('assertProductionSecretsConfigured', () => {
     process.env['NODE_ENV'] = 'production';
     process.env['ENCRYPTION_KEY'] = 'x'.repeat(32);
     process.env['WEBHOOK_SIGNATURE_SECRET'] = 'webhook-secret';
+    process.env['JWT_SECRET'] = 'production-jwt-secret';
     expect(() => assertProductionSecretsConfigured()).not.toThrow();
   });
 

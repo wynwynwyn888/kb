@@ -2,6 +2,10 @@ import { jest as jestGlobal } from '@jest/globals';
 
 import { InboundMessageProcessor } from '../queues/processors/inbound-message.processor';
 import { createMockSupabase } from '../test/mock-supabase';
+import {
+  attachInboundRoutingMockImplementation,
+  defaultConnectedRouting,
+} from '../test/webhook-inbound-routing-mock';
 import { Job } from 'bullmq';
 
 const mockSupabase = createMockSupabase();
@@ -82,13 +86,20 @@ describe('InboundMessageProcessor (happy path)', () => {
 
     mockQueueAdd.mockResolvedValue(undefined);
 
+    attachInboundRoutingMockImplementation(mockSupabase.from as jest.Mock, {
+      connectedMatchRows: [{ tenant_id: 't1', ghl_location_id: 'loc_1', status: 'CONNECTED' }],
+      tenantByIdRow: {
+        id: 't1',
+        ghl_location_id: 'loc_1',
+        bot_enabled: true,
+        handover_paused: false,
+      },
+      legacyByLocationRow: null,
+    });
+    const routingFromImpl = (mockSupabase.from as jest.Mock).getMockImplementation();
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (mockSupabase.from as jest.Mock).mockImplementation((table: string): any => {
-      if (table === 'tenants') {
-        return {
-          select: () => ({ eq: () => ({ single: async () => ({ data: { id: 't1' }, error: null }) }) }),
-        };
-      }
       if (table === 'webhook_events') {
         return {
           insert: jestGlobal.fn(() => ({ select: jestGlobal.fn(() => ({ single: jestGlobal.fn(async () => ({ data: { id: 'evt_new' }, error: null })) })) })),
@@ -115,9 +126,17 @@ describe('InboundMessageProcessor (happy path)', () => {
         };
       }
       if (table === 'messages') {
-        return { insert: jestGlobal.fn(async () => ({ data: null, error: null })) };
+        const chainable: Record<string, unknown> = {};
+        chainable['eq'] = () => chainable;
+        chainable['order'] = () => chainable;
+        chainable['limit'] = () => chainable;
+        chainable['maybeSingle'] = async () => ({ data: null, error: null });
+        return {
+          insert: jestGlobal.fn(async () => ({ data: null, error: null })),
+          select: () => chainable,
+        };
       }
-      return {};
+      return routingFromImpl ? routingFromImpl(table) : {};
     });
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

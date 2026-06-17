@@ -131,6 +131,13 @@ function resolvedQuery<T>(value: T) {
     eq: () => chain,
     order: () => chain,
     limit: () => chain,
+    maybeSingle: async () => {
+      const v = value as { data: unknown; error: unknown };
+      if (v && typeof v === 'object' && 'data' in v && Array.isArray(v.data)) {
+        return { data: v.data[0] ?? null, error: v.error ?? null };
+      }
+      return v as { data: unknown; error: unknown };
+    },
     then(onFulfilled: (v: T) => unknown, onRejected?: (e: unknown) => unknown) {
       return Promise.resolve(value).then(onFulfilled, onRejected);
     },
@@ -169,6 +176,25 @@ function makeConversationsTableMock(externalIdLookup: { id: string } | null) {
         single: async () => ({ data: { id: CONV_ID }, error: null }),
       }),
     }),
+  };
+}
+
+function makeMessagesTableMock(
+  latestInbound: {
+    content?: string;
+    contentType?: string;
+    metadata?: Record<string, unknown>;
+  } | null = null,
+) {
+  const chainable = {
+    eq: () => chainable,
+    order: () => chainable,
+    limit: () => chainable,
+    maybeSingle: async () => ({ data: latestInbound, error: null }),
+  };
+  return {
+    insert: () => ({ error: null }),
+    select: () => chainable,
   };
 }
 
@@ -275,7 +301,7 @@ describe('InboundMessageProcessor', () => {
         return makeConversationsTableMock({ id: CONV_ID });
       }
       if (table === 'messages') {
-        return { insert: () => ({ error: null }) };
+        return makeMessagesTableMock();
       }
       return {} as never;
     });
@@ -327,7 +353,7 @@ describe('InboundMessageProcessor', () => {
         return makeConversationsTableMock({ id: CONV_ID });
       }
       if (table === 'messages') {
-        return { insert: () => ({ error: null }) };
+        return makeMessagesTableMock();
       }
       return {} as never;
     });
@@ -368,7 +394,7 @@ describe('InboundMessageProcessor', () => {
         return makeConversationsTableMock({ id: CONV_ID });
       }
       if (table === 'messages') {
-        return { insert: () => ({ error: null }) };
+        return makeMessagesTableMock();
       }
       return {} as never;
     });
@@ -434,7 +460,7 @@ describe('InboundMessageProcessor', () => {
           }),
         };
       }
-      if (table === 'messages') return { insert: () => ({ error: null }) };
+      if (table === 'messages') return makeMessagesTableMock();
       return {} as never;
     });
 
@@ -1098,7 +1124,7 @@ describe('InboundMessageProcessor', () => {
         return makeConversationsTableMock({ id: CONV_ID });
       }
       if (table === 'messages') {
-        return { insert: () => ({ error: null }) };
+        return makeMessagesTableMock();
       }
       return {} as never;
     });
@@ -1617,7 +1643,7 @@ describe('InboundMessageProcessor', () => {
         return makeConversationsTableMock({ id: CONV_ID });
       }
       if (table === 'messages') {
-        return { insert: () => ({ error: null }) };
+        return makeMessagesTableMock();
       }
       return {} as never;
     });
@@ -2074,7 +2100,7 @@ describe('InboundMessageProcessor', () => {
         };
       }
       if (table === 'conversations') return makeConversationsTableMock({ id: CONV_ID });
-      if (table === 'messages') return { insert: () => ({ error: null }) };
+      if (table === 'messages') return makeMessagesTableMock();
       return {} as never;
     });
 
@@ -2115,7 +2141,7 @@ describe('InboundMessageProcessor', () => {
         };
       }
       if (table === 'conversations') return makeConversationsTableMock({ id: CONV_ID });
-      if (table === 'messages') return { insert: () => ({ error: null }) };
+      if (table === 'messages') return makeMessagesTableMock();
       return {} as never;
     });
 
@@ -2229,7 +2255,7 @@ describe('InboundMessageProcessor', () => {
         return makeConversationsTableMock({ id: CONV_ID });
       }
       if (table === 'messages') {
-        return { insert: () => ({ error: null }) };
+        return makeMessagesTableMock();
       }
       return {} as never;
     });

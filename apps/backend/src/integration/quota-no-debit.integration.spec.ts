@@ -90,6 +90,11 @@ describe('Quota Debit Integration (OutboundSendService)', () => {
       }
       if (table === 'conversations') {
         return {
+          select: () => ({
+            eq: () => ({
+              maybeSingle: async () => ({ data: { metadata: {} }, error: null }),
+            }),
+          }),
           update: jestGlobal.fn(() => ({
             eq: jestGlobal.fn(async () => ({ data: null, error: null })),
           })),
@@ -104,12 +109,25 @@ describe('Quota Debit Integration (OutboundSendService)', () => {
         };
       }
       if (table === 'quota_wallets') {
+        const row = async () => ({
+          data: { id: 'w1', total_quota: 100, used_quota: 50, allow_negative_credits: false, negative_credit_limit: 0 },
+          error: null,
+        });
         return {
           select: () => ({
-            eq: () => ({ single: async () => ({ data: { id: 'w1', total_quota: 100, used_quota: 50, allow_negative_credits: false, negative_credit_limit: 0 }, error: null }) }),
+            eq: () => ({
+              single: row,
+              maybeSingle: row,
+            }),
           }),
           update: jestGlobal.fn(() => ({
-            eq: jestGlobal.fn(async () => ({ data: null, error: null })),
+            eq: jestGlobal.fn(() => ({
+              eq: jestGlobal.fn(() => ({
+                select: jestGlobal.fn(() => ({
+                  maybeSingle: async () => ({ data: { id: 'w1' }, error: null }),
+                })),
+              })),
+            })),
           })),
         };
       }
@@ -198,6 +216,11 @@ describe('Quota Debit Integration (OutboundSendService)', () => {
       }
       if (table === 'conversations') {
         return {
+          select: () => ({
+            eq: () => ({
+              maybeSingle: async () => ({ data: { metadata: {} }, error: null }),
+            }),
+          }),
           update: jestGlobal.fn(() => ({
             eq: jestGlobal.fn(async () => ({ data: null, error: null })),
           })),
@@ -218,12 +241,25 @@ describe('Quota Debit Integration (OutboundSendService)', () => {
         };
       }
       if (table === 'quota_wallets') {
+        const row = async () => ({
+          data: { id: 'w1', total_quota: 100, used_quota: 50, allow_negative_credits: false, negative_credit_limit: 0 },
+          error: null,
+        });
         return {
           select: () => ({
-            eq: () => ({ single: async () => ({ data: { id: 'w1', total_quota: 100, used_quota: 50, allow_negative_credits: false, negative_credit_limit: 0 }, error: null }) }),
+            eq: () => ({
+              single: row,
+              maybeSingle: row,
+            }),
           }),
           update: jestGlobal.fn(() => ({
-            eq: jestGlobal.fn(async () => ({ data: null, error: null })),
+            eq: jestGlobal.fn(() => ({
+              eq: jestGlobal.fn(() => ({
+                select: jestGlobal.fn(() => ({
+                  maybeSingle: async () => ({ data: { id: 'w1' }, error: null }),
+                })),
+              })),
+            })),
           })),
         };
       }

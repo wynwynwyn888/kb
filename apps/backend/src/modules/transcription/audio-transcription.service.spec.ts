@@ -11,10 +11,17 @@ import { AudioTranscriptionService } from './audio-transcription.service';
 describe('AudioTranscriptionService', () => {
   const service = new AudioTranscriptionService();
   const origFetch = global.fetch;
+  const prevMediaHosts = process.env['MEDIA_FETCH_ALLOWED_HOSTS'];
+
+  beforeEach(() => {
+    process.env['MEDIA_FETCH_ALLOWED_HOSTS'] = 'cdn.test';
+  });
 
   afterEach(() => {
     global.fetch = origFetch;
     jestGlobal.clearAllMocks();
+    if (prevMediaHosts === undefined) delete process.env['MEDIA_FETCH_ALLOWED_HOSTS'];
+    else process.env['MEDIA_FETCH_ALLOWED_HOSTS'] = prevMediaHosts;
   });
 
   function mockSupabaseChains() {

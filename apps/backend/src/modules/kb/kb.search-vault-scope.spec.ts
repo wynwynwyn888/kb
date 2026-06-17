@@ -23,8 +23,10 @@ describe('KbService.searchKnowledge vault scope', () => {
       data: [{ id: 'd1', title: 'T', source: 'faq', updated_at: '2020-01-01' }],
       error: null,
     });
+    const limitMock = jestGlobal.fn().mockReturnValue({ eq: eqVault });
+    const orderMock = jestGlobal.fn().mockReturnValue({ limit: limitMock });
     eqTenant.mockReturnValue({ eq: eqStatus });
-    eqStatus.mockReturnValue({ eq: eqVault });
+    eqStatus.mockReturnValue({ order: orderMock });
     const docSelect = jestGlobal.fn().mockReturnValue({ eq: eqTenant });
     fromMock.mockImplementation((table: string) => {
       if (table === 'knowledge_documents') {
@@ -33,18 +35,20 @@ describe('KbService.searchKnowledge vault scope', () => {
       if (table === 'knowledge_chunks') {
         return {
           select: () => ({
-            in: () =>
-              Promise.resolve({
-                data: [
-                  {
-                    id: 'ch1',
-                    document_id: 'd1',
-                    content: 'hello vault phrase',
-                    metadata: {},
-                  },
-                ],
-                error: null,
-              }),
+            in: () => ({
+              limit: () =>
+                Promise.resolve({
+                  data: [
+                    {
+                      id: 'ch1',
+                      document_id: 'd1',
+                      content: 'hello vault phrase',
+                      metadata: {},
+                    },
+                  ],
+                  error: null,
+                }),
+            }),
           }),
         };
       }

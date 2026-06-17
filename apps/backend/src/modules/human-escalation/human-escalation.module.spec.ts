@@ -1,7 +1,9 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
+import { BullModule } from '@nestjs/bullmq';
 import { NestFactory } from '@nestjs/core';
 import { AuthModule } from '../auth/auth.module';
+import { AppCacheModule } from '../../lib/app-cache.module';
 import { HumanEscalationModule } from './human-escalation.module';
 
 describe('HumanEscalationModule wiring', () => {
@@ -21,6 +23,10 @@ describe('HumanEscalationModule wiring', () => {
       isGlobal: true,
       ignoreEnvFile: true,
     }),
+    BullModule.forRoot({
+      connection: { host: '127.0.0.1', port: 6379, maxRetriesPerRequest: null },
+    }),
+    AppCacheModule,
     HumanEscalationModule,
   ],
 })

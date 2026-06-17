@@ -199,11 +199,21 @@ export class OrchestrationGuards {
       .from('quota_wallets')
       .select('total_quota, used_quota, allow_negative_credits, negative_credit_limit')
       .eq('tenant_id', input.tenantId)
-      .single();
+      .maybeSingle();
 
     if (!wallet) {
-      // No wallet means no quota tracking — allow by default
-      return { decision: 'PROCEED', guardName: 'quota_available' };
+      this.logger.warn(
+        `creditBlocked ${JSON.stringify({
+          tenantId: input.tenantId,
+          conversationId: input.conversationId ?? null,
+          reason: 'no_quota_wallet',
+        })}`,
+      );
+      return {
+        decision: 'SKIP_QUOTA_EXHAUSTED',
+        guardName: 'quota_available',
+        reason: 'No quota wallet configured for tenant',
+      };
     }
 
     const balance = wallet.total_quota - wallet.used_quota;

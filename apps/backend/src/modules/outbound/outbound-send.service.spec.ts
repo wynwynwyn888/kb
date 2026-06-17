@@ -69,6 +69,20 @@ function mockOptimisticQuotaWalletUpdate() {
   }));
 }
 
+/** Quota wallet row mock — checkQuotaAvailable uses maybeSingle; debitQuota uses single. */
+function mockQuotaWalletsTable(walletData: Record<string, unknown>) {
+  const row = async () => ({ data: walletData, error: null });
+  return {
+    select: () => ({
+      eq: () => ({
+        single: row,
+        maybeSingle: row,
+      }),
+    }),
+    update: mockOptimisticQuotaWalletUpdate(),
+  } as never;
+}
+
 /** Default agency credit deduction for sendReply tests (PER_LOGICAL_REPLY). */
 function mockTenantAgencyDeduction() {
   return {
@@ -170,12 +184,13 @@ describe('OutboundSendService', () => {
             } as never;
           }
           if (table === 'quota_wallets') {
-            return {
-              select: () => ({
-                eq: () => ({ single: async () => ({ data: { id: 'w1', total_quota: 100, used_quota: 50, allow_negative_credits: false, negative_credit_limit: 0 }, error: null }) }),
-              }),
-              update: mockOptimisticQuotaWalletUpdate(),
-            } as never;
+            return mockQuotaWalletsTable({
+              id: 'w1',
+              total_quota: 100,
+              used_quota: 50,
+              allow_negative_credits: false,
+              negative_credit_limit: 0,
+            });
           }
           if (table === 'quota_ledgers') {
             return {
@@ -242,17 +257,13 @@ describe('OutboundSendService', () => {
             } as never;
           }
           if (table === 'quota_wallets') {
-            return {
-              select: () => ({
-                eq: () => ({
-                  single: async () => ({
-                    data: { id: 'w1', total_quota: 100, used_quota: 1, allow_negative_credits: false, negative_credit_limit: 0 },
-                    error: null,
-                  }),
-                }),
-              }),
-              update: mockOptimisticQuotaWalletUpdate(),
-            } as never;
+            return mockQuotaWalletsTable({
+              id: 'w1',
+              total_quota: 100,
+              used_quota: 1,
+              allow_negative_credits: false,
+              negative_credit_limit: 0,
+            });
           }
           if (table === 'quota_ledgers') {
             return {
@@ -319,17 +330,13 @@ describe('OutboundSendService', () => {
             } as never;
           }
           if (table === 'quota_wallets') {
-            return {
-              select: () => ({
-                eq: () => ({
-                  single: async () => ({
-                    data: { id: 'w1', total_quota: 100, used_quota: 1, allow_negative_credits: false, negative_credit_limit: 0 },
-                    error: null,
-                  }),
-                }),
-              }),
-              update: mockOptimisticQuotaWalletUpdate(),
-            } as never;
+            return mockQuotaWalletsTable({
+              id: 'w1',
+              total_quota: 100,
+              used_quota: 1,
+              allow_negative_credits: false,
+              negative_credit_limit: 0,
+            });
           }
           if (table === 'quota_ledgers') {
             return {
@@ -399,23 +406,13 @@ describe('OutboundSendService', () => {
           } as never;
         }
         if (table === 'quota_wallets') {
-          return {
-            select: () => ({
-              eq: () => ({
-                single: async () => ({
-                  data: {
-                    id: 'w1',
-                    total_quota: 100,
-                    used_quota: 1,
-                    allow_negative_credits: false,
-                    negative_credit_limit: 0,
-                  },
-                  error: null,
-                }),
-              }),
-            }),
-            update: mockOptimisticQuotaWalletUpdate(),
-          } as never;
+          return mockQuotaWalletsTable({
+            id: 'w1',
+            total_quota: 100,
+            used_quota: 1,
+            allow_negative_credits: false,
+            negative_credit_limit: 0,
+          });
         }
         if (table === 'quota_ledgers') {
           return {
@@ -510,7 +507,7 @@ describe('OutboundSendService', () => {
   });
 
   describe('checkQuotaAvailable', () => {
-    it('returns true when no wallet', async () => {
+    it('returns false when no wallet', async () => {
       (mockSupabase.from as jest.Mock).mockImplementation((table: string) => {
         if (table === 'tenants') {
           return {
@@ -522,14 +519,14 @@ describe('OutboundSendService', () => {
         if (table === 'quota_wallets') {
           return {
             select: () => ({
-              eq: () => ({ single: async () => ({ data: null, error: { code: 'PGRST116' } }) }),
+              eq: () => ({ maybeSingle: async () => ({ data: null, error: null }) }),
             }),
           } as never;
         }
         return {} as never;
       });
       const result = await (service as never)['checkQuotaAvailable']('tenant_1', 1);
-      expect(result).toBe(true);
+      expect(result).toBe(false);
     });
 
     it('returns true when sufficient quota', async () => {
@@ -544,7 +541,16 @@ describe('OutboundSendService', () => {
         if (table === 'quota_wallets') {
           return {
             select: () => ({
-              eq: () => ({ single: async () => ({ data: { total_quota: 100, used_quota: 50, allow_negative_credits: false, negative_credit_limit: 0 }, error: null }) }),
+              eq: () => ({
+                single: async () => ({
+                  data: { total_quota: 100, used_quota: 50, allow_negative_credits: false, negative_credit_limit: 0 },
+                  error: null,
+                }),
+                maybeSingle: async () => ({
+                  data: { total_quota: 100, used_quota: 50, allow_negative_credits: false, negative_credit_limit: 0 },
+                  error: null,
+                }),
+              }),
             }),
           } as never;
         }
@@ -566,7 +572,16 @@ describe('OutboundSendService', () => {
         if (table === 'quota_wallets') {
           return {
             select: () => ({
-              eq: () => ({ single: async () => ({ data: { total_quota: 5, used_quota: 5, allow_negative_credits: false, negative_credit_limit: 0 }, error: null }) }),
+              eq: () => ({
+                single: async () => ({
+                  data: { total_quota: 5, used_quota: 5, allow_negative_credits: false, negative_credit_limit: 0 },
+                  error: null,
+                }),
+                maybeSingle: async () => ({
+                  data: { total_quota: 5, used_quota: 5, allow_negative_credits: false, negative_credit_limit: 0 },
+                  error: null,
+                }),
+              }),
             }),
           } as never;
         }
@@ -588,7 +603,16 @@ describe('OutboundSendService', () => {
         if (table === 'quota_wallets') {
           return {
             select: () => ({
-              eq: () => ({ single: async () => ({ data: { total_quota: 0, used_quota: 0, allow_negative_credits: false, negative_credit_limit: 0 }, error: null }) }),
+              eq: () => ({
+                single: async () => ({
+                  data: { total_quota: 0, used_quota: 0, allow_negative_credits: false, negative_credit_limit: 0 },
+                  error: null,
+                }),
+                maybeSingle: async () => ({
+                  data: { total_quota: 0, used_quota: 0, allow_negative_credits: false, negative_credit_limit: 0 },
+                  error: null,
+                }),
+              }),
             }),
           } as never;
         }
@@ -610,12 +634,7 @@ describe('OutboundSendService', () => {
           } as never;
         }
         if (table === 'quota_wallets') {
-          return {
-            select: () => ({
-              eq: () => ({ single: async () => ({ data: { id: 'w1', total_quota: 100, used_quota: 10 }, error: null }) }),
-            }),
-            update: mockOptimisticQuotaWalletUpdate(),
-          } as never;
+          return mockQuotaWalletsTable({ id: 'w1', total_quota: 100, used_quota: 10 });
         }
         if (table === 'quota_ledgers') {
           return {

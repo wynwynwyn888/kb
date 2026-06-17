@@ -437,4 +437,69 @@ describe('WebhooksService', () => {
       );
     });
   });
+
+  describe('skipped routing audit', () => {
+    it('persists SKIPPED webhook event when bot is disabled', async () => {
+      const skippedInserts: unknown[] = [];
+      (mockSupabase.from as jest.Mock).mockImplementation((table: string) => {
+        if (table === 'tenant_ghl_connections') {
+          return {
+            select: () => ({
+              eq: () => ({
+                eq: async () => ({
+                  data: [{ tenant_id: 'tnt_off', ghl_location_id: 'loc_123', status: 'CONNECTED' }],
+                  error: null,
+                }),
+              }),
+            }),
+          };
+        }
+        if (table === 'tenants') {
+          return {
+            select: () => ({
+              eq: (col: string) => {
+                if (col === 'id') {
+                  return {
+                    single: async () => ({
+                      data: {
+                        id: 'tnt_off',
+                        ghl_location_id: 'loc_123',
+                        bot_enabled: false,
+                        handover_paused: false,
+                      },
+                      error: null,
+                    }),
+                  };
+                }
+                return { maybeSingle: async () => ({ data: null, error: null }) };
+              },
+            }),
+          };
+        }
+        if (table === 'webhook_events') {
+          return {
+            insert: (row: unknown) => {
+              skippedInserts.push(row);
+              return Promise.resolve({ error: null });
+            },
+          };
+        }
+        return {};
+      });
+
+      const result = await service.handleGhlWebhook(makePayload());
+
+      expect(result.success).toBe(true);
+      expect(result.skippedReason).toBe('bot_disabled');
+      expect(mockQueue.add).not.toHaveBeenCalled();
+      expect(skippedInserts).toHaveLength(1);
+      expect(skippedInserts[0]).toEqual(
+        expect.objectContaining({
+          tenant_id: 'tnt_off',
+          processing_status: 'SKIPPED',
+          processing_error: 'bot_disabled',
+        }),
+      );
+    });
+  });
 });

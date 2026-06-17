@@ -89,12 +89,26 @@ export class WebhooksService {
             duplicateTenantIds: route.duplicateTenantIds ?? [],
           })}`,
         );
+        const auditTenantId = route.duplicateTenantIds?.[0];
+        if (auditTenantId) {
+          await this.persistSkippedWebhookEvent(auditTenantId, payload, externalEventId, dedupeKey, route.reason);
+        }
         return { success: true, duplicate: false, skippedReason: 'duplicate_crm_location' };
+      }
+      if (route.auditTenantId) {
+        await this.persistSkippedWebhookEvent(
+          route.auditTenantId,
+          payload,
+          externalEventId,
+          dedupeKey,
+          route.reason,
+        );
       }
       this.logger.warn(
         `webhookRoutingFailed ${JSON.stringify({
           reason: route.reason,
           locationId: payload.locationId,
+          auditTenantId: route.auditTenantId ?? null,
         })}`,
       );
       return { success: true, duplicate: false, skippedReason: route.reason };
@@ -473,6 +487,48 @@ export class WebhooksService {
   /**
    * Persist webhook event to database
    */
+  private async persistSkippedWebhookEvent(
+    tenantId: string,
+    payload: GhlWebhookPayload,
+    externalEventId: string,
+    dedupeKey: string,
+    skipReason: string,
+  ): Promise<void> {
+    try {
+      const { error } = await this.supabase.from('webhook_events').insert({
+        id: randomUUID(),
+        tenant_id: tenantId,
+        external_event_id: externalEventId,
+        dedupe_key: dedupeKey,
+        provider: 'GHL',
+        event_type: payload.event,
+        raw_payload_json: payload as unknown as Record<string, unknown>,
+        normalized_payload_json: { skippedReason: skipReason } as Record<string, unknown>,
+        processing_status: 'SKIPPED',
+        processing_error: skipReason,
+        received_at: new Date().toISOString(),
+        processed_at: new Date().toISOString(),
+      });
+      if (error && !/23505|duplicate key|unique constraint/i.test(formatPostgrestError(error))) {
+        this.logger.warn(
+          `webhookSkippedPersistFailed ${JSON.stringify({
+            tenantId,
+            skipReason,
+            message: formatPostgrestError(error),
+          })}`,
+        );
+      }
+    } catch (e) {
+      this.logger.warn(
+        `webhookSkippedPersistFailed ${JSON.stringify({
+          tenantId,
+          skipReason,
+          message: e instanceof Error ? e.message : String(e),
+        })}`,
+      );
+    }
+  }
+
   private async persistWebhookEvent(
     tenantId: string,
     data: {

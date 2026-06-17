@@ -31,6 +31,7 @@ import {
   reconstructEditableNoteFromChunks,
 } from '../../lib/kb-rich-text-source';
 import { KB_VAULT_DELETE_HAS_DOCUMENTS_MSG, kbDuplicateVaultDisplayName } from './kb-vault-messages';
+import { cosineSimilarity, pseudoEmbedFromText, readEmbeddingVector } from '../../lib/kb-vector-score';
 
 const DEFAULT_TOP_K = 5;
 /** Default rows returned for KB search UI (client may display fewer). */
@@ -111,9 +112,27 @@ export class KbService {
 
     const totalConsidered = chunks.length;
 
-    // TODO: Stage 2 — vector search (activate when embeddings exist):
-    // const hasVectors = chunks.some(c => c.embedding != null);
-    // if (hasVectors) { return this.vectorSearch(query, chunks, topK); }
+    const vectorChunks = chunks.filter(c => readEmbeddingVector(c.metadata) !== null);
+    if (vectorChunks.length > 0) {
+      const queryVec = pseudoEmbedFromText(queryText);
+      const scored = vectorChunks
+        .map(c => {
+          const emb = readEmbeddingVector(c.metadata)!;
+          const score = cosineSimilarity(queryVec, emb);
+          return { chunk: c, score };
+        })
+        .sort((a, b) => b.score - a.score);
+      const top = scored.slice(0, topK).map(({ chunk, score }) => this.toRetrievalChunk(chunk, score));
+      this.logger.debug(
+        `KB retrieval completed: tenant=${tenantId}, considered=${totalConsidered}, returned=${top.length}, mode=vector_metadata`,
+      );
+      return {
+        query: queryText,
+        chunks: top,
+        totalConsidered,
+        retrievalMode: 'vector',
+      };
+    }
 
     // Stage 1 — keyword fallback scoring
     const scored = this.keywordScore(queryText, chunks, topK, query.intentHint);

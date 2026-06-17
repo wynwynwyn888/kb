@@ -1570,6 +1570,7 @@ export class ConversationBookingFlowService {
           params.tenantId,
           picked.startIso,
           picked.calendarId,
+          picked.endIso,
         );
         if (slotBookedCount >= effectiveSlotCap) {
           this.logger.log(
@@ -2648,10 +2649,52 @@ export class ConversationBookingFlowService {
     tenantId: string,
     startIso: string,
     calendarId: string,
+    endIso?: string,
   ): Promise<number> {
     let count = await this.countBookingsAtSlotFromActionIntents(tenantId, startIso, calendarId);
     const metadataCount = await this.countConfirmedBookingsAtSlotFromMetadata(tenantId, startIso, calendarId);
-    return Math.max(count, metadataCount);
+    count = Math.max(count, metadataCount);
+    const ghlLive = await this.countGhlLiveBookingsAtSlot(tenantId, calendarId, startIso, endIso);
+    if (ghlLive !== null) {
+      count = Math.max(count, ghlLive);
+    }
+    return count;
+  }
+
+  private async countGhlLiveBookingsAtSlot(
+    tenantId: string,
+    calendarId: string,
+    startIso: string,
+    endIso?: string,
+  ): Promise<number | null> {
+    try {
+      const { client } = await this.ghlService.createGhlClientForConnectedTenantWorkerOrThrow(tenantId);
+      const res = await client.countCalendarEventsAtSlot({
+        calendarId,
+        startIso,
+        endIso,
+      });
+      if (!res.success || typeof res.count !== 'number') {
+        this.logger.warn(
+          `bookingGhlSlotCountSkipped ${JSON.stringify({
+            tenantId,
+            calendarId,
+            error: res.error ?? 'unknown',
+          })}`,
+        );
+        return null;
+      }
+      return res.count;
+    } catch (e) {
+      this.logger.warn(
+        `bookingGhlSlotCountSkipped ${JSON.stringify({
+          tenantId,
+          calendarId,
+          message: e instanceof Error ? e.message : String(e),
+        })}`,
+      );
+      return null;
+    }
   }
 
   private async countBookingsAtSlotFromActionIntents(

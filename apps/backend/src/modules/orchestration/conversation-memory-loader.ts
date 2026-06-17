@@ -9,6 +9,8 @@ import type { ConversationMemory, MemoryEntry } from './dto';
 const MAX_TURNS = 20; // last 20 user turns to load
 /** Upper bound on rows fetched before slicing to turns (inbound + outbound pairs). */
 const MAX_MESSAGE_ROWS = MAX_TURNS * 8;
+/** Gap after which conversation memory starts a fresh session (no prior turns in prompt). */
+export const CONVERSATION_MEMORY_SESSION_GAP_MS = 24 * 60 * 60 * 1000;
 
 @Injectable()
 export class ConversationMemoryLoader {
@@ -58,7 +60,31 @@ export class ConversationMemoryLoader {
 
     const data = [...rawRows].reverse();
 
-    const scoped = data;
+    if (data.length > 0) {
+      const lastRow = data[data.length - 1] as { created_at?: string };
+      const lastMs = lastRow.created_at ? Date.parse(String(lastRow.created_at)) : NaN;
+      if (Number.isFinite(lastMs) && Date.now() - lastMs > CONVERSATION_MEMORY_SESSION_GAP_MS) {
+        this.logger.debug(
+          `Memory session gap reset: conversationId=${conversationId} gapMs=${Date.now() - lastMs}`,
+        );
+        return {
+          conversationId,
+          entries: [],
+          turnCount: 0,
+          sessionStartedAt: null,
+        };
+      }
+    }
+
+    const scoped = data.filter((row, idx) => {
+      if (idx === 0) return true;
+      const prev = data[idx - 1] as { created_at?: string };
+      const cur = row as { created_at?: string };
+      const prevMs = prev.created_at ? Date.parse(String(prev.created_at)) : NaN;
+      const curMs = cur.created_at ? Date.parse(String(cur.created_at)) : NaN;
+      if (!Number.isFinite(prevMs) || !Number.isFinite(curMs)) return true;
+      return curMs - prevMs <= CONVERSATION_MEMORY_SESSION_GAP_MS;
+    });
 
     // Filter to last N user turns and their responses
     const userMessages = scoped.filter(m => m.direction === 'INBOUND');
@@ -84,8 +110,6 @@ export class ConversationMemoryLoader {
 
     const entries: MemoryEntry[] = slice.map(m => this.normalizeMessage(m));
 
-    // TODO: Detect 24h gap for session reset here
-    // For now, sessionStartedAt is set to the oldest loaded message
     const sessionStartedAt =
       entries.length > 0 ? entries[0]!.timestamp : null;
 

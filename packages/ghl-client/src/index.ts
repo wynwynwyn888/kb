@@ -20,7 +20,13 @@ import {
   type GhlFreeSlotsParseResult,
 } from './parse-ghl-free-slots-response.js';
 
+import {
+  countEventsMatchingSlotStart,
+  parseGhlCalendarEventsResponse,
+} from './parse-ghl-calendar-events.js';
+
 export { parseGhlFreeSlotsResponse, isLikelySlotIsoInstant };
+export { parseGhlCalendarEventsResponse, countEventsMatchingSlotStart };
 export type { GhlFreeSlot, GhlFreeSlotsParseResult };
 
 export interface GhlClientConfig {
@@ -1280,6 +1286,48 @@ export class GhlClient {
       return { success: true };
     } catch (error) {
       return { success: false, error: this.extractGhlErrorMessage(error) ?? 'updateAppointmentNotes failed' };
+    }
+  }
+
+  /**
+   * Count live GHL calendar events overlapping a slot start (minute bucket).
+   * GET /calendars/events?locationId&calendarId&startTime&endTime
+   */
+  async countCalendarEventsAtSlot(params: {
+    calendarId: string;
+    startIso: string;
+    endIso?: string;
+  }): Promise<{ success: boolean; count?: number; error?: string }> {
+    const calendarId = params.calendarId.trim();
+    const startIso = params.startIso.trim();
+    if (!calendarId || !startIso) {
+      return { success: false, error: 'calendarId and startIso required' };
+    }
+    const startMs = Date.parse(startIso);
+    const endIso =
+      params.endIso?.trim() ||
+      (Number.isFinite(startMs) ? new Date(startMs + 30 * 60_000).toISOString() : startIso);
+    try {
+      const response = await this.client.get<unknown>('/calendars/events', {
+        params: {
+          locationId: this.locationId,
+          calendarId,
+          startTime: startIso,
+          endTime: endIso,
+        },
+        headers: {
+          Version: GHL_CALENDARS_LIST_API_VERSION,
+          Accept: 'application/json',
+        },
+      });
+      const starts = parseGhlCalendarEventsResponse(response.data);
+      const count = countEventsMatchingSlotStart(starts, startIso);
+      return { success: true, count };
+    } catch (error) {
+      return {
+        success: false,
+        error: this.extractGhlErrorMessage(error) ?? 'countCalendarEventsAtSlot failed',
+      };
     }
   }
 

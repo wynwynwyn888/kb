@@ -995,9 +995,11 @@ enum WebhookProvider {
 enum WebhookProcessingStatus {
   RECEIVED
   PROCESSING
+  ORCHESTRATING
   COMPLETED
   FAILED
   DUPLICATE
+  SKIPPED
 }
 
 model WebhookEvent {

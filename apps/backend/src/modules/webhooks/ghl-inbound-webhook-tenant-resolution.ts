@@ -15,7 +15,13 @@ export type ResolveInboundGhlWebhookTenantResult =
       /** tenants.ghl_location_id at time of resolution (may drift from connection row). */
       tenantLegacyGhlLocationId: string | null;
     }
-  | { ok: false; reason: 'no_match' | 'duplicate_crm_location'; duplicateTenantIds?: string[] };
+  | {
+      ok: false;
+      reason: 'no_match' | 'duplicate_crm_location' | 'bot_disabled' | 'handover_paused';
+      duplicateTenantIds?: string[];
+      /** When routing skipped but tenant is known — for webhook audit rows. */
+      auditTenantId?: string;
+    };
 
 function normLoc(s: string | null | undefined): string {
   return (s ?? '').trim();
@@ -88,8 +94,11 @@ export async function resolveInboundGhlWebhookTenant(params: {
       bot_enabled?: boolean;
       handover_paused?: boolean;
     };
-    if (!t.bot_enabled || t.handover_paused) {
-      return null;
+    if (!t.bot_enabled) {
+      return { ok: false, reason: 'bot_disabled', auditTenantId: t.id };
+    }
+    if (t.handover_paused) {
+      return { ok: false, reason: 'handover_paused', auditTenantId: t.id };
     }
     return {
       ok: true,
@@ -127,8 +136,11 @@ export async function resolveInboundGhlWebhookTenant(params: {
     handover_paused?: boolean;
   };
 
-  if (!lt.bot_enabled || lt.handover_paused) {
-    return { ok: false, reason: 'no_match' };
+  if (!lt.bot_enabled) {
+    return { ok: false, reason: 'bot_disabled', auditTenantId: lt.id };
+  }
+  if (lt.handover_paused) {
+    return { ok: false, reason: 'handover_paused', auditTenantId: lt.id };
   }
 
   logWarn(

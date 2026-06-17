@@ -473,9 +473,9 @@ export class OutboundSendService {
       .from('quota_wallets')
       .select('total_quota, used_quota, allow_negative_credits, negative_credit_limit')
       .eq('tenant_id', tenantId)
-      .single();
+      .maybeSingle();
 
-    if (!wallet) return true; // No wallet = no quota tracking
+    if (!wallet) return false;
     const balance = wallet.total_quota - wallet.used_quota;
     const allowNeg = Boolean(wallet.allow_negative_credits);
     const negLimit = typeof wallet.negative_credit_limit === 'number' ? wallet.negative_credit_limit : 0;

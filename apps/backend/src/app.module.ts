@@ -20,10 +20,6 @@ import { FormatterModule } from './modules/formatter/formatter.module';
 import { OrchestrationModule } from './modules/orchestration/orchestration.module';
 import { HandoverModule } from './modules/handover/handover.module';
 import { QuotasModule } from './modules/quotas/quotas.module';
-import { CalendarsModule } from './modules/calendars/calendars.module';
-import { ContactsModule } from './modules/contacts/contacts.module';
-import { AuditModule } from './modules/audit/audit.module';
-import { NotificationsModule } from './modules/notifications/notifications.module';
 import { QueuesModule } from './queues/queues.module';
 import { ActionIntentsModule } from './modules/action-intents/action-intents.module';
 import { AgencyAiConfigModule } from './modules/agency-ai-config/agency-ai-config.module';
@@ -104,10 +100,6 @@ import { HumanEscalationModule } from './modules/human-escalation/human-escalati
     OrchestrationModule,
     HandoverModule,
     QuotasModule,
-    CalendarsModule,
-    ContactsModule,
-    AuditModule,
-    NotificationsModule,
     QueuesModule,
     ActionIntentsModule,
     AgencyAiConfigModule,

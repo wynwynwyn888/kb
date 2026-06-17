@@ -124,11 +124,12 @@ describe('OrchestrationGuards', () => {
   });
 
   describe('checkQuotaAvailable', () => {
-    it('returns PROCEED when no wallet', async () => {
+    it('returns SKIP_QUOTA_EXHAUSTED when no wallet', async () => {
       const input = makeInput();
+      mockFrom(mockSupabase, 'tenants', { credits_unlimited: false });
       mockFrom(mockSupabase, 'quota_wallets', null, { code: 'PGRST116' });
       const result = await (guards as never)['checkQuotaAvailable'](input);
-      expect(result.decision).toBe('PROCEED');
+      expect(result.decision).toBe('SKIP_QUOTA_EXHAUSTED');
     });
 
     it('returns PROCEED when remaining > 0', async () => {

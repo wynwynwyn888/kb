@@ -65,6 +65,15 @@ export function detectLiveBookingInterest(combinedText: string): boolean {
   return true;
 }
 
+/** After a confirmed booking, only explicit rebook/reschedule language should restart intake. */
+export function detectConfirmedRebookIntent(combinedText: string): boolean {
+  const t = combinedText.trim();
+  if (!t) return false;
+  return /\b(reschedule|rebook|book\s+again|another\s+(appointment|booking|time|slot)|new\s+(appointment|booking|time)|book(?:\s+me|\s+an|\s+a)?\s+(?:another\s+)?(?:appointment|slot|time|visit))\b/i.test(
+    t,
+  );
+}
+
 export function resolveRelativeDayPhrase(text: string, todayYmd: string): string | undefined {
   const t = text.toLowerCase();
   const base = parseYmd(todayYmd);

@@ -1886,8 +1886,26 @@ export class InboundMessageProcessor extends WorkerHost {
     const { error } = await this.supabase.from('webhook_events').update(updateData).eq('id', webhookEventRowId);
 
     if (error) {
+      if (status === 'ORCHESTRATING' && this.isUnknownWebhookStatusError(error)) {
+        const { error: fallbackErr } = await this.supabase
+          .from('webhook_events')
+          .update({ ...updateData, processing_status: 'PROCESSING' })
+          .eq('id', webhookEventRowId);
+        if (fallbackErr) {
+          this.logger.warn(
+            `Webhook event status fallback failed (id=${webhookEventRowId}): ${formatPostgrestError(fallbackErr)}`,
+          );
+        }
+        return;
+      }
       this.logger.warn(`Webhook event status update failed (id=${webhookEventRowId}): ${formatPostgrestError(error)}`);
     }
+  }
+
+  /** True when DB enum has not yet picked up ORCHESTRATING/SKIPPED migration values. */
+  private isUnknownWebhookStatusError(error: unknown): boolean {
+    const msg = formatPostgrestError(error).toLowerCase();
+    return msg.includes('invalid input value') || msg.includes('webhookprocessingstatus');
   }
 
   @OnWorkerEvent('completed')

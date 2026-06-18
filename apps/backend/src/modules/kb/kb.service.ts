@@ -31,7 +31,7 @@ import {
   reconstructEditableNoteFromChunks,
 } from '../../lib/kb-rich-text-source';
 import { KB_VAULT_DELETE_HAS_DOCUMENTS_MSG, kbDuplicateVaultDisplayName } from './kb-vault-messages';
-import { cosineSimilarity, pseudoEmbedFromText, readEmbeddingVector } from '../../lib/kb-vector-score';
+import { cosineSimilarity, hasPseudoCompatibleEmbedding, pseudoEmbedFromText, readEmbeddingVector, PSEUDO_EMBED_DIMS } from '../../lib/kb-vector-score';
 
 const DEFAULT_TOP_K = 5;
 /** Default rows returned for KB search UI (client may display fewer). */
@@ -112,9 +112,9 @@ export class KbService {
 
     const totalConsidered = chunks.length;
 
-    const vectorChunks = chunks.filter(c => readEmbeddingVector(c.metadata) !== null);
+    const vectorChunks = chunks.filter(c => hasPseudoCompatibleEmbedding(c.metadata));
     if (vectorChunks.length > 0) {
-      const queryVec = pseudoEmbedFromText(queryText);
+      const queryVec = pseudoEmbedFromText(queryText, PSEUDO_EMBED_DIMS);
       const scored = vectorChunks
         .map(c => {
           const emb = readEmbeddingVector(c.metadata)!;
@@ -167,10 +167,26 @@ export class KbService {
   }): Promise<KbSearchResponse> {
     const topK = Math.min(50, Math.max(1, Math.floor(params.topK ?? KB_SEARCH_DEFAULT_TOP_K)));
     const chunks = await this.loadTenantChunks(params.tenantId, undefined, params.vaultId?.trim() || undefined);
-    const ranked = rankChunksForKbSearch(params.query, chunks as ScorableChunk[], {
-      intentHint: params.intentHint,
-      topK,
-    });
+    const vectorChunks = chunks.filter(c => hasPseudoCompatibleEmbedding(c.metadata));
+    let ranked: Array<{ chunk: ScorableChunk; score: number; bestEffort?: boolean }>;
+    let retrievalMode: 'keyword' | 'vector' = 'keyword';
+    if (vectorChunks.length > 0) {
+      const queryVec = pseudoEmbedFromText(params.query, PSEUDO_EMBED_DIMS);
+      ranked = vectorChunks
+        .map(chunk => ({
+          chunk: chunk as ScorableChunk,
+          score: cosineSimilarity(queryVec, readEmbeddingVector(chunk.metadata)!),
+          bestEffort: false,
+        }))
+        .sort((a, b) => b.score - a.score)
+        .slice(0, topK);
+      retrievalMode = 'vector';
+    } else {
+      ranked = rankChunksForKbSearch(params.query, chunks as ScorableChunk[], {
+        intentHint: params.intentHint,
+        topK,
+      });
+    }
     const normalized = normalizeKbSearchScores(ranked);
     const hits: KbSearchHit[] = normalized.map(({ chunk, score, bestEffort }) => {
       const st = chunk.metadata['sectionTitle'];
@@ -214,7 +230,7 @@ export class KbService {
       query: params.query,
       hits,
       totalConsidered: chunks.length,
-      retrievalMode: 'keyword',
+      retrievalMode,
     };
   }
 

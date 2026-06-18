@@ -26,6 +26,7 @@ import {
 } from './conversation-booking-state';
 import {
   addCalendarDaysUtcYmd,
+  detectConfirmedRebookIntent,
   detectLiveBookingInterest,
   extractEmail,
   extractFirstVisit,
@@ -494,23 +495,24 @@ export class ConversationBookingFlowService {
         };
       }
       const wantsNewBooking = detectLiveBookingInterest(combined);
+      const wantsExplicitRebook = detectConfirmedRebookIntent(combined);
       const wantsCancelOnly =
         (/\bcancel(\s+my)?(\s+(appointment|booking))?\b/i.test(combined) ||
           /\b(delete|remove)(\s+my)?(\s+(appointment|booking))?\b/i.test(combined)) &&
         !/\b(reschedule|rebook|change\s+my\s+(appointment|booking))\b/i.test(combined);
       const wantsReschedule = /\b(reschedule|rebook|change\s+my\s+(appointment|booking))\b/i.test(combined);
-      if (!wantsNewBooking && !wantsReschedule && !wantsCancelOnly) {
+      if (!wantsReschedule && !wantsCancelOnly && !(wantsNewBooking && wantsExplicitRebook)) {
         return { handled: false };
       }
       let priorAppointmentId = booking.appointmentId?.trim();
-      if (!priorAppointmentId && (wantsReschedule || wantsCancelOnly || wantsNewBooking)) {
+      if (!priorAppointmentId && (wantsReschedule || wantsCancelOnly)) {
         priorAppointmentId = await this.resolvePriorAppointmentIdForCancel({
           tenantId: params.tenantId,
           conversationId: params.conversationId,
           booking,
         });
       }
-      if (priorAppointmentId && (wantsReschedule || wantsCancelOnly || wantsNewBooking)) {
+      if (priorAppointmentId && (wantsReschedule || wantsCancelOnly)) {
         const cancelRes = await this.cancelGhlAppointmentBestEffort(params.tenantId, priorAppointmentId);
         if (!cancelRes.success) {
           return this.returnBookingCancelFailure({
@@ -534,7 +536,7 @@ export class ConversationBookingFlowService {
           appointmentId: undefined,
         });
       }
-      if (wantsCancelOnly && !wantsNewBooking) {
+      if (wantsCancelOnly) {
         const reset = {
           ...emptyBookingState(),
           calendarId: settings.defaultGhlCalendarId!.trim(),

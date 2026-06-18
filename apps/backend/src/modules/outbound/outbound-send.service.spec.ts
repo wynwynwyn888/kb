@@ -507,7 +507,7 @@ describe('OutboundSendService', () => {
   });
 
   describe('checkQuotaAvailable', () => {
-    it('returns false when no wallet', async () => {
+    it('returns true when no wallet (credits not tracked yet)', async () => {
       (mockSupabase.from as jest.Mock).mockImplementation((table: string) => {
         if (table === 'tenants') {
           return {
@@ -526,7 +526,7 @@ describe('OutboundSendService', () => {
         return {} as never;
       });
       const result = await (service as never)['checkQuotaAvailable']('tenant_1', 1);
-      expect(result).toBe(false);
+      expect(result).toBe(true);
     });
 
     it('returns true when sufficient quota', async () => {

@@ -475,7 +475,7 @@ export class OutboundSendService {
       .eq('tenant_id', tenantId)
       .maybeSingle();
 
-    if (!wallet) return false;
+    if (!wallet) return true;
     const balance = wallet.total_quota - wallet.used_quota;
     const allowNeg = Boolean(wallet.allow_negative_credits);
     const negLimit = typeof wallet.negative_credit_limit === 'number' ? wallet.negative_credit_limit : 0;

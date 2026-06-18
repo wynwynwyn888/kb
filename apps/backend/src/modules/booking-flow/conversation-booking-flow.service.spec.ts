@@ -2126,9 +2126,34 @@ describe('ConversationBookingFlowService', () => {
       expect(r.handled).toBe(true);
       expect(cancelMock).toHaveBeenCalledWith('appt_cancel_1');
       if (r.handled) {
+        expect(r.replyPlan.bubbles[0]?.text).toMatch(/cancelled your appointment/i);
         const bookingMeta = (r.persistMetadata as Record<string, unknown>).aisbp_booking as Record<string, unknown>;
         expect(bookingMeta.status).not.toBe('confirmed');
       }
+    });
+
+    it('does not cancel when confirmed user asks availability without rebook intent', async () => {
+      const cancelMock = jest.fn(async () => ({ success: true }));
+      const booking = { getBookingSettings: jest.fn(async () => baseSettings) } as unknown as BookingSettingsService;
+      const ghl = {
+        createGhlClientForConnectedTenantWorkerOrThrow: jest.fn(async () => ({
+          client: { cancelCalendarEvent: cancelMock },
+          ghlLocationId: 'loc_1',
+        })),
+      } as unknown as GhlService;
+
+      const r = await svc(booking, ghl).maybeHandleConversationBookingTurn({
+        tenantId: 't1',
+        conversationId: 'c_slots',
+        contactId: 'ct1',
+        channel: 'SMS',
+        combinedInboundText: 'what slots are available tomorrow?',
+        latestInboundText: 'what slots are available tomorrow?',
+        metadata: confirmedMeta as Record<string, unknown>,
+      });
+
+      expect(r.handled).toBe(false);
+      expect(cancelMock).not.toHaveBeenCalled();
     });
 
     it('fail-closed when confirmed cancel cannot resolve appointment id', async () => {

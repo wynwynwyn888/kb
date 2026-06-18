@@ -202,18 +202,8 @@ export class OrchestrationGuards {
       .maybeSingle();
 
     if (!wallet) {
-      this.logger.warn(
-        `creditBlocked ${JSON.stringify({
-          tenantId: input.tenantId,
-          conversationId: input.conversationId ?? null,
-          reason: 'no_quota_wallet',
-        })}`,
-      );
-      return {
-        decision: 'SKIP_QUOTA_EXHAUSTED',
-        guardName: 'quota_available',
-        reason: 'No quota wallet configured for tenant',
-      };
+      // Align with QuotasService.checkQuota: no wallet row means credits are not tracked yet.
+      return { decision: 'PROCEED', guardName: 'quota_available' };
     }
 
     const balance = wallet.total_quota - wallet.used_quota;

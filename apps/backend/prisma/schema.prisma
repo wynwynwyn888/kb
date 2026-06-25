@@ -1078,3 +1078,30 @@ model Notification {
   @@index([profileId])
   @@map("notifications")
 }
+
+// ============================================================================
+// OUTBOUND SEND IDEMPOTENCY LEDGER
+// ============================================================================
+
+model OutboundSend {
+  id                          String    @id @default(uuid())
+  tenantId                    String    @map("tenant_id")
+  conversationId              String    @map("conversation_id")
+  replyId                     String    @map("reply_id")
+  bubbleSequence              Int       @map("bubble_sequence")
+  ghlLocationId               String    @map("ghl_location_id")
+  contentHash                 String    @map("content_hash")
+  status                      String    @default("pending") @map("status")
+  providerMessageId           String?   @map("provider_message_id")
+  attempt                     Int       @default(0)
+  lastErrorCode               String?   @map("last_error_code")
+  lastErrorMessage            String?   @map("last_error_message")
+  createdAt                   DateTime  @default(now()) @map("created_at")
+  updatedAt                   DateTime  @updatedAt @map("updated_at")
+  sentAt                      DateTime? @map("sent_at")
+
+  @@unique([tenantId, conversationId, replyId, bubbleSequence])
+  @@index([tenantId, createdAt])
+  @@index([conversationId, replyId, bubbleSequence])
+  @@map("outbound_sends")
+}

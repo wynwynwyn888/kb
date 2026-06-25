@@ -50,6 +50,8 @@ export interface ReplyDecision {
   rationale: string;
   bubbles: ReplyBubbleDraft[];
   suggestedActions: SuggestedAction[];
+  /** Stable id for this AI reply (minted per orchestration cycle). Used for outbound idempotency. */
+  replyId?: string;
   /** When true, outbound copy promises human/team follow-up (orchestration may escalate). */
   botHumanEscalationLanguageDetected?: boolean;
   draftProvenance?:

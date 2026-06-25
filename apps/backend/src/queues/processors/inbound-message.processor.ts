@@ -1300,6 +1300,7 @@ export class InboundMessageProcessor extends WorkerHost {
     const agencyPolicy = await this.orchestrationService.loadAgencyPolicy(tenantId);
     const conversationRecord = await this.orchestrationService.loadConversation(conversationId);
 
+
     const orchestrationInput = {
       tenantId,
       conversationId,
@@ -1331,6 +1332,11 @@ export class InboundMessageProcessor extends WorkerHost {
         pipelineWallStartMs: pipelineWallStartMs ?? null,
       });
     } else if (result.outcome === 'PROCEED' && result.replyPlan && result.replyPlan.bubbles.length > 0) {
+      const replyId = randomUUID();
+      if (result.replyPlan) result.replyPlan.replyId = replyId;
+      const latestInboundMsgIdAtStart = (await this.fetchLatestInboundOrchestrationContext(conversationId)).id ?? '';
+      const aiJobStartedAt = pipelineWallStartMs;
+
       const mode = tenantContext?.botMode ?? 'autopilot';
       if (mode === 'suggestive') {
         this.logger.log(
@@ -1343,6 +1349,10 @@ export class InboundMessageProcessor extends WorkerHost {
           contactId: ghlContactId,
           ghlLocationId: locationId,
           replyPlanJson: JSON.stringify(result.replyPlan),
+          replyId,
+          bubbleSequence: 0,
+          latestInboundMsgIdAtStart,
+          aiJobStartedAt,
           replyLatencyTrace: { pipelineWallStartMs: pipelineWallStartMs ?? Date.now() },
         });
 
@@ -1469,13 +1479,14 @@ export class InboundMessageProcessor extends WorkerHost {
   }
 
   private async fetchLatestInboundOrchestrationContext(conversationId: string): Promise<{
+    id: string | null;
     messageType: InboundMessageJobData['messageType'];
     imageMediaUrl: string | null;
     preferredMessageId: string | null;
   }> {
     const { data, error } = await this.supabase
       .from('messages')
-      .select('content, contentType, metadata')
+      .select('id, content, contentType, metadata')
       .eq('conversation_id', conversationId)
       .eq('direction', 'INBOUND')
       .eq('sender', 'CONTACT')
@@ -1483,8 +1494,9 @@ export class InboundMessageProcessor extends WorkerHost {
       .limit(1)
       .maybeSingle();
     if (error || !data) {
-      return { messageType: 'text', imageMediaUrl: null, preferredMessageId: null };
+      return { id: null, messageType: 'text', imageMediaUrl: null, preferredMessageId: null };
     }
+    const id = typeof data.id === 'string' ? data.id : null;
     const content = typeof data.content === 'string' ? data.content : '';
     const ct = String(data.contentType ?? 'TEXT').toUpperCase();
     let messageType: InboundMessageJobData['messageType'] =
@@ -1504,7 +1516,7 @@ export class InboundMessageProcessor extends WorkerHost {
       typeof meta['ghlInboundMessageId'] === 'string' && meta['ghlInboundMessageId'].trim()
         ? meta['ghlInboundMessageId'].trim()
         : null;
-    return { messageType, imageMediaUrl, preferredMessageId };
+    return { id, messageType, imageMediaUrl, preferredMessageId };
   }
 
   private async fetchRecentStoredInboundImageUrl(conversationId: string): Promise<string | null> {

@@ -1,7 +1,15 @@
-# Deploy Redis + Nest + Next to Hostinger KVM (Docker) via Hostinger API.
-# Prerequisites: VPS with Docker; hPanel API token; VM ID; GitHub secrets (see infra/vps/HOSTINGER.md).
+# Deploy Nest + Next + Redis to Hostinger KVM (Docker) via SSH.
+# Replaces hostinger/deploy-on-vps@v2 which reported success but did not
+# reliably pull code or rebuild containers on the VPS.
 #
-# Do not commit API tokens. Rotate any token that was ever pasted into chat or logs.
+# Prerequisites (one-time VPS setup):
+#   1. GitHub Actions deploy key added to VPS ~/.ssh/authorized_keys (Key Pair A)
+#   2. GitHub repo deploy key added to VPS ~/.ssh/kb_github_deploy (Key Pair B)
+#   3. VPS git remote set to git@github.com:wynwynwyn888/kb.git
+#   4. VPS SSH config uses kb_github_deploy for github.com
+#   5. .env.production present at /root/aisbp/.env.production
+#
+# Secrets: VPS_HOST, VPS_USER, VPS_SSH_KEY, VPS_PORT
 
 name: Deploy Hostinger VPS
 
@@ -19,24 +27,40 @@ jobs:
     needs: test-and-build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Deploy to Hostinger VPS
-        uses: hostinger/deploy-on-vps@v2
+      - name: SSH deploy to VPS
+        uses: appleboy/ssh-action@v1
         with:
-          api-key: ${{ secrets.HOSTINGER_API_KEY }}
-          virtual-machine: ${{ vars.HOSTINGER_VM_ID }}
-          project-name: aisbp
-          docker-compose-path: docker-compose.hostinger.yml
-          environment-variables: |
-            DATABASE_URL=${{ secrets.DATABASE_URL }}
-            SUPABASE_URL=${{ secrets.SUPABASE_URL }}
-            SUPABASE_ANON_KEY=${{ secrets.SUPABASE_ANON_KEY }}
-            SUPABASE_SERVICE_ROLE_KEY=${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-            JWT_SECRET=${{ secrets.JWT_SECRET }}
-            ENCRYPTION_KEY=${{ secrets.ENCRYPTION_KEY }}
-            WEBHOOK_SIGNATURE_SECRET=${{ secrets.WEBHOOK_SIGNATURE_SECRET }}
-            INVITE_APP_BASE_URL=${{ secrets.INVITE_APP_BASE_URL }}
-            CORS_ORIGIN=${{ secrets.CORS_ORIGIN }}
-            NEXT_PUBLIC_SUPABASE_URL=${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
-            NEXT_PUBLIC_SUPABASE_ANON_KEY=${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          script: |
+            set -e
+            cd /root/aisbp
+
+            echo "=== PULLING LATEST MAIN ==="
+            git fetch origin main
+            git checkout main
+            git pull --ff-only origin main
+
+            echo "=== VERIFY COMMIT ==="
+            VPS_COMMIT=$(git rev-parse HEAD)
+            echo "VPS commit: $VPS_COMMIT"
+            echo "Pushed commit: ${{ github.sha }}"
+
+            if [ "$VPS_COMMIT" != "${{ github.sha }}" ]; then
+              echo "ERROR: VPS commit ($VPS_COMMIT) does not match pushed commit (${{ github.sha }})"
+              exit 1
+            fi
+            echo "OK: VPS is running the pushed commit"
+
+            echo "=== BUILD AND DEPLOY BACKEND ==="
+            docker compose -f docker-compose.hostinger.yml --env-file .env.production up -d --build backend
+
+            echo "=== RESTART FRONTEND ==="
+            docker compose -f docker-compose.hostinger.yml --env-file .env.production restart frontend
+
+            echo "=== HEALTH CHECK ==="
+            docker ps --filter name=aisbp --format 'table {{.Names}}\t{{.Status}}'
+            sleep 5
+            docker logs aisbp-backend-1 --tail 3

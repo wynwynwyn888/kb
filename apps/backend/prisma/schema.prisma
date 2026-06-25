@@ -310,6 +310,7 @@ model TenantBookingSettings {
   /// Per core field: `{ "name": { "enabled": true, "required": true }, ... }`
   coreFieldsJson           Json        @default("{}") @map("core_fields_json")
   customFieldsJson         Json        @default("[]") @map("custom_fields_json")
+  serviceMenuOptions       Json?       @map("service_menu_options")
   maxBookingsPerSlot       Int         @default(1) @map("max_bookings_per_slot")
   /// After live booking confirms, send booking summary SMS to this staff number (GHL).
   internalBookingAlertEnabled Boolean @default(false) @map("internal_booking_alert_enabled")

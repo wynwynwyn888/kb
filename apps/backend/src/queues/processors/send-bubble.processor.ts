@@ -1,9 +1,10 @@
 // Send Bubble Processor
 // Consumes send-bubble queue jobs and dispatches reply bubbles via GHL.
 
-import { Processor, WorkerHost, OnWorkerEvent } from '@nestjs/bullmq';
-import { Injectable, Logger } from '@nestjs/common';
-import { Job } from 'bullmq';
+import { Processor, WorkerHost, OnWorkerEvent, InjectQueue } from '@nestjs/bullmq';
+import { Injectable, Logger, Optional } from '@nestjs/common';
+import { Job, Queue } from 'bullmq';
+import { randomUUID } from 'crypto';
 import { QUEUES } from '../queue.constants';
 import { OutboundSendService, SendSummary } from '../../modules/outbound/outbound-send.service';
 import { ConversationsService } from '../../modules/conversations/conversations.service';
@@ -13,6 +14,7 @@ import { OutboundSafetyGovernorService } from '../../modules/outbound/outbound-s
 import { FollowUpEngineService } from '../../modules/follow-up-engine/follow-up-engine.service';
 import { HumanEscalationRuntimeService } from '../../modules/human-escalation/human-escalation-runtime.service';
 import { HumanEscalationHoldingReplyService } from '../../modules/human-escalation/human-escalation-holding-reply.service';
+import { AppCacheService } from '../../lib/app-cache.service';
 
 export interface SendBubbleJobData {
   conversationId: string;
@@ -20,6 +22,14 @@ export interface SendBubbleJobData {
   contactId: string;
   ghlLocationId: string;
   replyPlanJson: string; // JSON-serialized ReplyDecision
+  /** Stable id for this AI reply (per-send idempotency key component). */
+  replyId: string;
+  /** 0-based bubble index within the reply (parallels ReplyBubbleDraft.index). */
+  bubbleSequence: number;
+  /** Latest inbound message id at the moment AI generation started (stale check). */
+  latestInboundMsgIdAtStart: string;
+  /** Wall-clock ms when the AI orchestration job began (stale check). */
+  aiJobStartedAt: number;
   /** Worker wall-clock start for downstream latency logs (omit for manual/controller enqueues). */
   replyLatencyTrace?: { pipelineWallStartMs: number };
 }
@@ -38,12 +48,14 @@ export class SendBubbleProcessor extends WorkerHost {
     private readonly followUpEngine: FollowUpEngineService,
     private readonly humanEscalationRuntime: HumanEscalationRuntimeService,
     private readonly humanEscalationHolding: HumanEscalationHoldingReplyService,
+    @InjectQueue(QUEUES.INBOUND_MESSAGE_PROCESSOR) private readonly inboundQueue: Queue,
+    @Optional() private readonly appCache?: AppCacheService,
   ) {
     super();
   }
 
   async process(job: Job<SendBubbleJobData>): Promise<SendSummary> {
-    const { conversationId, tenantId, contactId, ghlLocationId, replyPlanJson, replyLatencyTrace } =
+    const { conversationId, tenantId, contactId, ghlLocationId, replyPlanJson, replyId, replyLatencyTrace, latestInboundMsgIdAtStart, aiJobStartedAt } =
       job.data;
 
     this.logger.log(
@@ -70,16 +82,111 @@ export class SendBubbleProcessor extends WorkerHost {
     });
     const safety_governor_ms = Date.now() - govStarted;
 
-    const sendStarted = Date.now();
-    const summary = await this.outboundSend.sendReply({
-      tenantId,
-      conversationId,
-      contactId,
-      replyPlan,
-      ghlLocationId,
-      sendBubbleJobId: String(job.id ?? ''),
-    });
-    const outbound_send_ms = Date.now() - sendStarted;
+    // Tenant active-job cap — send class
+    const capsEnabled = process.env['AISBP_TENANT_CAPS_ENABLED'] === 'true' && !!this.appCache;
+    let semAcquired = false;
+    if (capsEnabled) {
+      const sendCap = parseInt(process.env['AISBP_TENANT_CAP_SEND'] ?? '5', 10);
+      const semKey = `sem:${tenantId}:send`;
+      if (!(await this.appCache!.acquireSemaphore(semKey, String(job.id ?? ''), sendCap))) {
+        this.logger.log(`tenantCapFull: tenantId=${tenantId} class=send — delaying`);
+        return {
+          conversationId, tenantId, totalBubbles: 0, succeeded: 0, failed: 0,
+          bubbleResults: [], quotaDebited: 0,
+        };
+      }
+      semAcquired = true;
+    }
+
+    // Per-conversation ordering lock
+    const lockKey = `lock:conv:${conversationId}`;
+    const ownerToken = randomUUID();
+    const orderingEnabled = process.env['AISBP_CONV_ORDERING_ENABLED'] === 'true' && !!this.appCache;
+    let lockAcquired = false;
+    if (orderingEnabled) {
+      const lockResult = await this.appCache!.acquireLock(lockKey, ownerToken, 30);
+      if (lockResult !== 'acquired') {
+        this.logger.log(`conversationLockHeld: conversationId=${conversationId} — requeuing`);
+        return {
+          conversationId, tenantId, totalBubbles: 0, succeeded: 0, failed: 0,
+          bubbleResults: [], quotaDebited: 0,
+        };
+      }
+      lockAcquired = true;
+    }
+
+    let summary: SendSummary | undefined;
+    let outbound_send_ms = 0;
+    try {
+      // Stale check
+      const staleEnabled = process.env['AISBP_STALE_SEND_CHECK_ENABLED'] === 'true';
+      if (staleEnabled && latestInboundMsgIdAtStart) {
+        const isStale = await this.outboundSend.isReplyStale(conversationId, latestInboundMsgIdAtStart);
+        if (isStale) {
+          this.logger.log(
+            `staleReplyCancelled: conversationId=${conversationId} replyId=${replyId} — newer inbound detected, requeuing orchestration`,
+          );
+          await this.inboundQueue.add('orchestrate', {
+            conversationId, tenantId, ghlLocationId, contactId,
+            debounceVersion: 0,
+            aiJobStartedAt: Date.now(),
+          } as any);
+          return {
+            conversationId, tenantId, totalBubbles: 0, succeeded: 0, failed: 0,
+            bubbleResults: [], quotaDebited: 0,
+          };
+        }
+      }
+
+      // Prior-bubble gate (inside lock)
+      if (orderingEnabled) {
+        const bubbles = (replyPlan as any)?.bubbles as Array<{ index: number }> | undefined;
+        for (const bubble of (bubbles ?? [])) {
+          const decision = await this.outboundSend.checkPriorBubble(
+            tenantId, conversationId, replyId, bubble.index,
+          );
+          if (decision === 'wait') {
+            this.logger.log(`bubbleSequenceBlocked: conversationId=${conversationId} bubble=${bubble.index} — predecessor pending, requeuing`);
+            return {
+              conversationId, tenantId, totalBubbles: 0, succeeded: 0, failed: 0,
+              bubbleResults: [], quotaDebited: 0,
+            };
+          }
+          if (decision === 'cancel') {
+            this.logger.log(`bubbleSequenceCancelledDueToPrior: conversationId=${conversationId} bubble=${bubble.index}`);
+            return {
+              conversationId, tenantId, totalBubbles: 0, succeeded: 0, failed: 0,
+              bubbleResults: [], quotaDebited: 0,
+            };
+          }
+        }
+      }
+
+      const sendStarted = Date.now();
+      summary = await this.outboundSend.sendReply({
+        tenantId,
+        conversationId,
+        contactId,
+        replyPlan,
+        ghlLocationId,
+        replyId,
+        sendBubbleJobId: String(job.id ?? ''),
+      });
+      outbound_send_ms = Date.now() - sendStarted;
+    } finally {
+      if (lockAcquired) {
+        await this.appCache!.releaseLock(lockKey, ownerToken);
+      }
+      if (semAcquired) {
+        await this.appCache!.releaseSemaphore(`sem:${tenantId}:send`, String(job.id ?? ''));
+      }
+    }
+
+    if (!summary) {
+      // All paths should have returned inside the try block if send was skipped.
+      // This is a safety guard for unexpected flow.
+      return {} as SendSummary;
+    }
 
     const total_backend_reply_ms = replyLatencyTrace?.pipelineWallStartMs
       ? Date.now() - replyLatencyTrace.pipelineWallStartMs

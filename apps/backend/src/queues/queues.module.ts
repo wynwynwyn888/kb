@@ -26,6 +26,7 @@ import { FollowUpQueueModule } from './follow-up-queue.module';
 import { HumanEscalationHoldingReplyService } from '../modules/human-escalation/human-escalation-holding-reply.service';
 import { HumanEscalationModule } from '../modules/human-escalation/human-escalation.module';
 import { ConversationMemoryModule } from '../modules/orchestration/conversation-memory.module';
+import { AppCacheModule } from '../lib/app-cache.module';
 
 @Module({
   imports: [
@@ -49,6 +50,7 @@ import { ConversationMemoryModule } from '../modules/orchestration/conversation-
     FollowUpEngineModule,
     HumanEscalationModule,
     ConversationMemoryModule,
+    AppCacheModule,
   ],
   providers: [
     HumanEscalationHoldingReplyService,

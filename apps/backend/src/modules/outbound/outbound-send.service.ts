@@ -83,8 +83,10 @@ export class OutboundSendService {
     ghlLocationId: string;
     /** Stable worker job id for idempotent credit debits. */
     sendBubbleJobId?: string;
+    /** Stable id for this AI reply (per-send idempotency key component). */
+    replyId?: string;
   }): Promise<SendSummary> {
-    const { tenantId, conversationId, contactId, replyPlan, ghlLocationId, sendBubbleJobId } = params;
+    const { tenantId, conversationId, contactId, replyPlan, ghlLocationId, sendBubbleJobId, replyId } = params;
 
     // Skip if no bubbles or handover mode
     if (replyPlan.bubbles.length === 0 || replyPlan.planStatus === 'HANDOVER') {
@@ -194,6 +196,31 @@ export class OutboundSendService {
 
     for (let i = 0; i < physicalBubbles.length; i++) {
       const bubble = physicalBubbles[i]!;
+
+      // Idempotency guard: check ledger first (feature-flagged, off by default)
+      if (replyId) {
+        const claimed = await this.claimOutboundSend({
+          tenantId,
+          conversationId,
+          ghlLocationId,
+          replyId,
+          bubbleSequence: bubble.index,
+          content: bubble.text,
+          sendBubbleJobId: jobId,
+        });
+        if (claimed === null && process.env['AISBP_OUTBOUND_IDEMPOTENCY_ENABLED'] === 'true') {
+          bubbleResults.push({
+            index: bubble.index,
+            text: bubble.text,
+            success: true,
+            skippedDuplicate: true,
+          });
+          succeeded++;
+          continue;
+        }
+      }
+
+      // Fallback: existing soft-dedup (active regardless of flag)
       if (alreadySent.has(bubble.index)) {
         bubbleResults.push({
           index: bubble.index,
@@ -229,8 +256,22 @@ export class OutboundSendService {
           sendBubbleJobId: jobId || undefined,
           bubbleIndex: bubble.index,
         });
+        if (replyId) {
+          await this.updateOutboundSendResult({
+            tenantId, conversationId, replyId, bubbleSequence: bubble.index,
+            status: 'sent',
+            providerMessageId: result.ghlMessageId,
+          });
+        }
       } else {
         failed++;
+        if (replyId) {
+          await this.updateOutboundSendResult({
+            tenantId, conversationId, replyId, bubbleSequence: bubble.index,
+            status: 'failed_provider_rejected',
+            errorCode: result.error ?? undefined,
+          });
+        }
         this.logger.warn(
           `Outbound bubble[${bubble.index}] send failed for conversation=${conversationId}: ${result.error}`,
         );
@@ -366,6 +407,19 @@ export class OutboundSendService {
         message: bubble.text,
         channel: ch,
       });
+
+      // 429 rate-limit: log and abort (BullMQ retries with backoff)
+      if (response.error?.includes('Rate limited')) {
+        this.logger.warn(
+          `ghl429RateLimited: locationId=${locationId} channel=${ch}`,
+        );
+        return {
+          index: bubble.index,
+          text: bubble.text,
+          success: false,
+          error: 'Rate limited by GHL API',
+        };
+      }
 
       if (response.success && response.messageId) {
         if (ch !== ghlChannel) {
@@ -746,4 +800,160 @@ export class OutboundSendService {
       );
     }
   }
+
+  /**
+   * Try to claim a send slot in the outbound idempotency ledger.
+   * Returns null if this bubble was already sent (duplicate prevented).
+   * Returns the row id if a new pending row was created (proceed to send).
+   */
+  private async claimOutboundSend(params: {
+    tenantId: string;
+    conversationId: string;
+    ghlLocationId: string;
+    replyId: string;
+    bubbleSequence: number;
+    content: string;
+    sendBubbleJobId: string;
+  }): Promise<{ id: string; status: string } | null> {
+    if (process.env['AISBP_OUTBOUND_IDEMPOTENCY_ENABLED'] !== 'true') return null;
+    try {
+      const { error: insErr } = await this.supabase.from('outbound_sends').insert({
+        id: randomUUID(),
+        tenant_id: params.tenantId,
+        conversation_id: params.conversationId,
+        reply_id: params.replyId,
+        bubble_sequence: params.bubbleSequence,
+        ghl_location_id: params.ghlLocationId,
+        content_hash: params.content.slice(0, 64),
+        status: 'pending',
+        job_id: params.sendBubbleJobId,
+        attempt: 1,
+      });
+      if (insErr) {
+        const msg = formatPostgrestError(insErr);
+        if (msg.includes('unique') || msg.includes('23505') || msg.includes('conflict')) {
+          const { data: existing } = await this.supabase
+            .from('outbound_sends')
+            .select('status')
+            .eq('tenant_id', params.tenantId)
+            .eq('conversation_id', params.conversationId)
+            .eq('reply_id', params.replyId)
+            .eq('bubble_sequence', params.bubbleSequence)
+            .maybeSingle();
+          const status = existing?.status ?? 'duplicate_prevented';
+          this.logger.log(
+            `outboundIdempotencyDuplicate: tenantId=${params.tenantId} conversationId=${params.conversationId} replyId=${params.replyId} bubble=${params.bubbleSequence} status=${status}`,
+          );
+          return null;
+        }
+        this.logger.error(`claimOutboundSend insert error: ${msg}`);
+        return null;
+      }
+      return { id: '', status: 'pending' };
+    } catch (e) {
+      this.logger.warn(`claimOutboundSend catch: ${e instanceof Error ? e.message : String(e)}`);
+      return null;
+    }
+  }
+
+  private async updateOutboundSendResult(params: {
+    tenantId: string;
+    conversationId: string;
+    replyId: string;
+    bubbleSequence: number;
+    status: string;
+    providerMessageId?: string;
+    errorCode?: string;
+    errorMessage?: string;
+  }): Promise<void> {
+    if (process.env['AISBP_OUTBOUND_IDEMPOTENCY_ENABLED'] !== 'true') return;
+    try {
+      const update: Record<string, unknown> = {
+        status: params.status,
+        updated_at: new Date().toISOString(),
+        ...(params.providerMessageId ? { provider_message_id: params.providerMessageId } : {}),
+        ...(params.errorCode ? { last_error_code: params.errorCode } : {}),
+        ...(params.errorMessage ? { last_error_message: params.errorMessage } : {}),
+      };
+      if (params.status === 'sent') {
+        update['sent_at'] = new Date().toISOString();
+      }
+      const { error } = await this.supabase
+        .from('outbound_sends')
+        .update(update)
+        .eq('tenant_id', params.tenantId)
+        .eq('conversation_id', params.conversationId)
+        .eq('reply_id', params.replyId)
+        .eq('bubble_sequence', params.bubbleSequence);
+      if (error) {
+        this.logger.warn(`updateOutboundSendResult error: ${formatPostgrestError(error)}`);
+      }
+    } catch (e) {
+      this.logger.warn(`updateOutboundSendResult catch: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  /**
+   * Send-time stale reply check (feature-flagged, off by default).
+   * Returns true if a newer inbound message arrived after AI generation started.
+   */
+  async isReplyStale(
+    conversationId: string,
+    latestInboundMsgIdAtStart: string,
+  ): Promise<boolean> {
+    if (!latestInboundMsgIdAtStart) return false;
+    if (process.env['AISBP_STALE_SEND_CHECK_ENABLED'] !== 'true') return false;
+    try {
+      const { data, error } = await this.supabase
+        .from('messages')
+        .select('id')
+        .eq('conversation_id', conversationId)
+        .eq('direction', 'INBOUND')
+        .eq('sender', 'CONTACT')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (error || !data) return false;
+      const latestId = typeof data.id === 'string' ? data.id : '';
+      return latestId !== '' && latestId !== latestInboundMsgIdAtStart;
+    } catch (e) {
+      this.logger.warn(`isReplyStale check failed: ${e instanceof Error ? e.message : String(e)}`);
+      return false;
+    }
+  }
+
+  /**
+   * Check prior-bubble status for per-conversation ordering.
+   * Returns null if this bubble can proceed (predecessor is 'sent' or this is bubble 0).
+   * Returns 'wait' if predecessor is still pending/processing (should retry after delay).
+   * Returns 'cancel' if predecessor is stale/cancelled/dead-lettered (should cancel this bubble too).
+   */
+  async checkPriorBubble(
+    tenantId: string,
+    conversationId: string,
+    replyId: string,
+    bubbleSequence: number,
+  ): Promise<'proceed' | 'wait' | 'cancel'> {
+    if (bubbleSequence === 0) return 'proceed';
+    try {
+      const { data, error } = await this.supabase
+        .from('outbound_sends')
+        .select('status')
+        .eq('tenant_id', tenantId)
+        .eq('conversation_id', conversationId)
+        .eq('reply_id', replyId)
+        .eq('bubble_sequence', bubbleSequence - 1)
+        .maybeSingle();
+      if (error || !data) return 'wait'; // predecessor not yet created
+      const status = data.status as string;
+      if (status === 'sent') return 'proceed';
+      if (['pending', 'processing', 'failed_before_provider', 'failed_provider_rejected'].includes(status)) return 'wait';
+      // stale, cancelled, dead_lettered, unknown → cancel this bubble too
+      return 'cancel';
+    } catch (e) {
+      this.logger.warn(`checkPriorBubble error: ${e instanceof Error ? e.message : String(e)}`);
+      return 'wait';
+    }
+  }
 }
+

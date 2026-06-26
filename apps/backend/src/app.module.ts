@@ -31,6 +31,7 @@ import { FollowUpEngineModule } from './modules/follow-up-engine/follow-up-engin
 import { AppCacheModule } from './lib/app-cache.module';
 import { MetricsModule } from './lib/metrics.module';
 import { AuditModule } from './modules/audit/audit.module';
+import { OpsModule } from './modules/ops/ops.module';
 import { HumanEscalationModule } from './modules/human-escalation/human-escalation.module';
 
 @Module({
@@ -112,6 +113,7 @@ import { HumanEscalationModule } from './modules/human-escalation/human-escalati
     FollowUpEngineModule,
     HumanEscalationModule,
     AuditModule,
+    OpsModule,
     MetricsModule,
   ],
   providers: [

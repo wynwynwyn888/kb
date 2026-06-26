@@ -17,6 +17,11 @@ import { CreateClientDto } from './dto/create-client.dto';
 import { UpdateClientDto } from './dto/update-client.dto';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
+import { ApproveSectionDto } from './dto/approve-section.dto';
+import { RequestChangesDto } from './dto/request-changes.dto';
+import { RejectProjectDto } from './dto/reject-project.dto';
+import { ApproveProjectDto } from './dto/approve-project.dto';
+import { VALID_SECTION_NAMES } from './utils/approval';
 
 @ApiTags('onboard')
 @ApiBearerAuth()
@@ -113,5 +118,71 @@ export class OnboardController {
   ) {
     if (!user?.id) throw new BadRequestException('Authentication required');
     return this.onboardService.updateProject(onboardingProjectId, body, user.id);
+  }
+
+  // ==========================================================================
+  // REVIEW / APPROVAL (PR 6)
+  // ==========================================================================
+
+  @Post('projects/:onboardingProjectId/sections/:sectionName/approve')
+  @ApiOperation({ summary: 'Approve a project section (operator only). Section must be COMPLETE.' })
+  async approveSection(
+    @Param('onboardingProjectId') onboardingProjectId: string,
+    @Param('sectionName') sectionName: string,
+    @CurrentUser() user: SessionUser,
+    @Body() body: ApproveSectionDto,
+  ) {
+    if (!user?.id) throw new BadRequestException('Authentication required');
+    if (!VALID_SECTION_NAMES.includes(sectionName as never)) {
+      throw new BadRequestException(`Invalid section: ${sectionName}. Valid: ${VALID_SECTION_NAMES.join(', ')}`);
+    }
+    return this.onboardService.approveSection(onboardingProjectId, sectionName, user.id, body.comment);
+  }
+
+  @Post('projects/:onboardingProjectId/request-changes')
+  @ApiOperation({ summary: 'Request changes on a project (operator only). Comment required.' })
+  async requestChanges(
+    @Param('onboardingProjectId') onboardingProjectId: string,
+    @CurrentUser() user: SessionUser,
+    @Body() body: RequestChangesDto,
+  ) {
+    if (!user?.id) throw new BadRequestException('Authentication required');
+    return this.onboardService.requestChanges(onboardingProjectId, user.id, body.comment, body.rejectedSections);
+  }
+
+  @Post('projects/:onboardingProjectId/reject')
+  @ApiOperation({ summary: 'Reject a project (operator only). Comment required.' })
+  async rejectProject(
+    @Param('onboardingProjectId') onboardingProjectId: string,
+    @CurrentUser() user: SessionUser,
+    @Body() body: RejectProjectDto,
+  ) {
+    if (!user?.id) throw new BadRequestException('Authentication required');
+    return this.onboardService.rejectProject(onboardingProjectId, user.id, body.comment);
+  }
+
+  @Post('projects/:onboardingProjectId/approve')
+  @ApiOperation({ summary: 'Approve a project (operator only). All required sections must be approved first.' })
+  async approveProject(
+    @Param('onboardingProjectId') onboardingProjectId: string,
+    @CurrentUser() user: SessionUser,
+    @Body() body: ApproveProjectDto,
+  ) {
+    if (!user?.id) throw new BadRequestException('Authentication required');
+    return this.onboardService.approveProject(onboardingProjectId, user.id, body.comment);
+  }
+
+  @Get('projects/:onboardingProjectId/approval-events')
+  @ApiOperation({ summary: 'Get approval events for a project' })
+  async getApprovalEvents(@Param('onboardingProjectId') onboardingProjectId: string) {
+    return this.onboardService.getApprovalEvents(onboardingProjectId);
+  }
+
+  @Get('projects/:onboardingProjectId/audit')
+  @ApiOperation({ summary: 'Get audit events for a project' })
+  async getAuditEvents(@Param('onboardingProjectId') onboardingProjectId: string) {
+    const project = await this.onboardService.getProject(onboardingProjectId);
+    if (!project) throw new BadRequestException('Project not found');
+    return this.onboardService.getAuditEvents(onboardingProjectId);
   }
 }

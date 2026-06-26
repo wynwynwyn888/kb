@@ -1,8 +1,17 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { getSupabaseService } from '../../lib/supabase';
 import { randomUUID } from 'node:crypto';
 import { maskPhone, formatDisplayLabel, formatShortId } from './utils/identifiers';
 import { OnboardAuditService } from './utils/audit';
+import {
+  VALID_SECTION_NAMES,
+  isValidSection,
+  SECTION_TABLE_MAP,
+  ALLOWED_APPROVAL_TRANSITIONS,
+  ALLOWED_PROJECT_TRANSITIONS,
+  REQUIRED_SECTIONS_FOR_APPROVAL,
+  type SectionName,
+} from './utils/approval';
 
 export interface OnboardClientSummary {
   id: string;
@@ -287,6 +296,289 @@ export class OnboardService {
     });
 
     return existing;
+  }
+
+  // ==========================================================================
+  // REVIEW / APPROVAL (PR 6)
+  // ==========================================================================
+
+  async getSectionStatus(projectId: string, sectionName: string): Promise<string> {
+    if (!isValidSection(sectionName)) {
+      throw new BadRequestException(`Invalid section: ${sectionName}. Valid: ${VALID_SECTION_NAMES.join(', ')}`);
+    }
+    const project = await this.getProject(projectId);
+    if (!project) throw new NotFoundException('Project not found');
+
+    const supabase = getSupabaseService();
+    const table = SECTION_TABLE_MAP[sectionName as SectionName];
+
+    const { data } = await supabase.from(table).select('section_status').eq('project_id', projectId).maybeSingle();
+    return data?.['section_status'] ?? 'EMPTY';
+  }
+
+  async approveSection(
+    projectId: string,
+    sectionName: string,
+    actorId: string,
+    comment?: string,
+  ): Promise<{ sectionName: string; status: string; approvedBy: string }> {
+    if (!isValidSection(sectionName)) {
+      throw new BadRequestException(`Invalid section: ${sectionName}`);
+    }
+
+    const project = await this.getProject(projectId);
+    if (!project) throw new NotFoundException('Project not found');
+
+    const currentStatus = await this.getSectionStatus(projectId, sectionName);
+    const allowed = ALLOWED_APPROVAL_TRANSITIONS[currentStatus];
+    if (!allowed || !allowed.includes('APPROVED')) {
+      throw new BadRequestException(
+        `Cannot approve section "${sectionName}" with status "${currentStatus}". Section must be COMPLETE.`,
+      );
+    }
+
+    const supabase = getSupabaseService();
+    const table = SECTION_TABLE_MAP[sectionName as SectionName];
+
+    const { error } = await supabase.from(table).update({ section_status: 'APPROVED' }).eq('project_id', projectId);
+    if (error) throw new BadRequestException(`Failed to approve section: ${error.message}`);
+
+    this.audit.log({
+      projectId,
+      actorId,
+      actorType: 'OPERATOR',
+      action: 'section.approve',
+      resourceType: 'section',
+      resourceId: `${projectId}:${sectionName}`,
+      changes: { sectionName, previousStatus: currentStatus, newStatus: 'APPROVED', comment },
+    });
+
+    // Write approval_event
+    await supabase.from('approval_events').insert({
+      id: randomUUID(),
+      project_id: projectId,
+      actor_id: actorId,
+      actor_type: 'OPERATOR',
+      action: 'APPROVE_SECTION',
+      target_type: 'SECTION',
+      target_id: sectionName,
+      comment: comment ?? null,
+      previous_status: currentStatus,
+      new_status: 'APPROVED',
+    });
+
+    return { sectionName, status: 'APPROVED', approvedBy: actorId };
+  }
+
+  async requestChanges(
+    projectId: string,
+    actorId: string,
+    comment: string,
+    rejectedSections?: string[],
+  ): Promise<{ projectId: string; status: string }> {
+    const project = await this.getProject(projectId);
+    if (!project) throw new NotFoundException('Project not found');
+
+    const currentStatus = project.status;
+    const allowed = ALLOWED_PROJECT_TRANSITIONS[currentStatus] || [];
+    if (!allowed.includes('CHANGES_REQUESTED')) {
+      throw new BadRequestException(
+        `Cannot request changes on project with status "${currentStatus}". Current status does not allow changes.`,
+      );
+    }
+
+    const supabase = getSupabaseService();
+    const prevStatus = currentStatus;
+
+    // Update project status
+    const { error: projError } = await supabase
+      .from('onboarding_projects')
+      .update({ status: 'CHANGES_REQUESTED', version: project.version + 1 })
+      .eq('id', projectId);
+
+    if (projError) throw new BadRequestException(`Failed to update project: ${projError.message}`);
+
+    // If specific sections are rejected, update their status too
+    if (rejectedSections && rejectedSections.length > 0) {
+      for (const sectionName of rejectedSections) {
+        if (isValidSection(sectionName)) {
+          const table = SECTION_TABLE_MAP[sectionName as SectionName];
+          await supabase.from(table).update({ section_status: 'REJECTED' }).eq('project_id', projectId);
+
+          await supabase.from('approval_events').insert({
+            id: randomUUID(),
+            project_id: projectId,
+            actor_id: actorId,
+            actor_type: 'OPERATOR',
+            action: 'REJECT_SECTION',
+            target_type: 'SECTION',
+            target_id: sectionName,
+            comment,
+            previous_status: null,
+            new_status: 'REJECTED',
+          });
+        }
+      }
+    }
+
+    this.audit.log({
+      projectId,
+      actorId,
+      actorType: 'OPERATOR',
+      action: 'project.request_changes',
+      resourceType: 'onboarding_project',
+      resourceId: projectId,
+      changes: { previousStatus: prevStatus, newStatus: 'CHANGES_REQUESTED', comment, rejectedSections },
+    });
+
+    await supabase.from('approval_events').insert({
+      id: randomUUID(),
+      project_id: projectId,
+      actor_id: actorId,
+      actor_type: 'OPERATOR',
+      action: 'REQUEST_CHANGES',
+      target_type: 'PROJECT',
+      target_id: projectId,
+      comment,
+      previous_status: prevStatus,
+      new_status: 'CHANGES_REQUESTED',
+    });
+
+    return { projectId, status: 'CHANGES_REQUESTED' };
+  }
+
+  async rejectProject(
+    projectId: string,
+    actorId: string,
+    comment: string,
+  ): Promise<{ projectId: string; status: string }> {
+    const project = await this.getProject(projectId);
+    if (!project) throw new NotFoundException('Project not found');
+
+    const prevStatus = project.status;
+    const allowed = ALLOWED_PROJECT_TRANSITIONS[prevStatus] || [];
+    if (!allowed.includes('REJECTED')) {
+      throw new BadRequestException(`Cannot reject project with status "${prevStatus}".`);
+    }
+
+    const supabase = getSupabaseService();
+    const { error } = await supabase
+      .from('onboarding_projects')
+      .update({ status: 'REJECTED' })
+      .eq('id', projectId);
+
+    if (error) throw new BadRequestException(`Failed to reject project: ${error.message}`);
+
+    this.audit.log({
+      projectId,
+      actorId,
+      actorType: 'OPERATOR',
+      action: 'project.reject',
+      resourceType: 'onboarding_project',
+      resourceId: projectId,
+      changes: { previousStatus: prevStatus, newStatus: 'REJECTED', comment },
+    });
+
+    await supabase.from('approval_events').insert({
+      id: randomUUID(),
+      project_id: projectId,
+      actor_id: actorId,
+      actor_type: 'OPERATOR',
+      action: 'REJECT_PROJECT',
+      target_type: 'PROJECT',
+      target_id: projectId,
+      comment,
+      previous_status: prevStatus,
+      new_status: 'REJECTED',
+    });
+
+    return { projectId, status: 'REJECTED' };
+  }
+
+  async approveProject(
+    projectId: string,
+    actorId: string,
+    comment?: string,
+  ): Promise<{ projectId: string; status: string; approvedBy: string }> {
+    const project = await this.getProject(projectId);
+    if (!project) throw new NotFoundException('Project not found');
+
+    const prevStatus = project.status;
+    const allowed = ALLOWED_PROJECT_TRANSITIONS[prevStatus] || [];
+    if (!allowed.includes('APPROVED')) {
+      throw new BadRequestException(`Cannot approve project with status "${prevStatus}".`);
+    }
+
+    // Check required sections
+    for (const sectionName of REQUIRED_SECTIONS_FOR_APPROVAL) {
+      const status = await this.getSectionStatus(projectId, sectionName);
+      if (status !== 'APPROVED') {
+        throw new BadRequestException(
+          `Required section "${sectionName}" is not approved (current status: ${status}). Approve all required sections first.`,
+        );
+      }
+    }
+
+    const supabase = getSupabaseService();
+    const now = new Date().toISOString();
+
+    const { error } = await supabase
+      .from('onboarding_projects')
+      .update({
+        status: 'APPROVED',
+        approved_at: now,
+        approved_by: actorId,
+      })
+      .eq('id', projectId);
+
+    if (error) throw new BadRequestException(`Failed to approve project: ${error.message}`);
+
+    this.audit.log({
+      projectId,
+      actorId,
+      actorType: 'OPERATOR',
+      action: 'project.approve',
+      resourceType: 'onboarding_project',
+      resourceId: projectId,
+      changes: { previousStatus: prevStatus, newStatus: 'APPROVED', comment },
+    });
+
+    await supabase.from('approval_events').insert({
+      id: randomUUID(),
+      project_id: projectId,
+      actor_id: actorId,
+      actor_type: 'OPERATOR',
+      action: 'APPROVE_PROJECT',
+      target_type: 'PROJECT',
+      target_id: projectId,
+      comment: comment ?? null,
+      previous_status: prevStatus,
+      new_status: 'APPROVED',
+    });
+
+    return { projectId, status: 'APPROVED', approvedBy: actorId };
+  }
+
+  async getApprovalEvents(projectId: string): Promise<Record<string, unknown>[]> {
+    const supabase = getSupabaseService();
+    const { data } = await supabase
+      .from('approval_events')
+      .select('*')
+      .eq('project_id', projectId)
+      .order('created_at', { ascending: false });
+
+    return (data || []) as Record<string, unknown>[];
+  }
+
+  async getAuditEvents(projectId: string): Promise<Record<string, unknown>[]> {
+    const supabase = getSupabaseService();
+    const { data } = await supabase
+      .from('audit_events')
+      .select('*')
+      .eq('project_id', projectId)
+      .order('created_at', { ascending: false });
+
+    return (data || []) as Record<string, unknown>[];
   }
 
   // ==========================================================================

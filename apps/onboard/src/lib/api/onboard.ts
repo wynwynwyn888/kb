@@ -49,6 +49,8 @@ import type {
   UpdateClientInput,
   CreateProjectInput,
   UpdateProjectInput,
+  ApprovalEvent,
+  SectionStatus,
 } from '@/types/onboard';
 
 export function createOnboardApi(token: string) {
@@ -94,6 +96,37 @@ export function createOnboardApi(token: string) {
         method: 'PATCH',
         body: JSON.stringify(input),
       }),
+
+    // Approval (PR 6)
+    approveSection: (projectId: string, sectionName: string, comment?: string) =>
+      apiRequest<{ sectionName: string; status: string; approvedBy: string }>(
+        `/onboard/projects/${projectId}/sections/${sectionName}/approve`,
+        { token, method: 'POST', body: JSON.stringify({ comment }) },
+      ),
+
+    requestChanges: (projectId: string, comment: string, rejectedSections?: string[]) =>
+      apiRequest<{ projectId: string; status: string }>(
+        `/onboard/projects/${projectId}/request-changes`,
+        { token, method: 'POST', body: JSON.stringify({ comment, rejectedSections }) },
+      ),
+
+    rejectProject: (projectId: string, comment: string) =>
+      apiRequest<{ projectId: string; status: string }>(
+        `/onboard/projects/${projectId}/reject`,
+        { token, method: 'POST', body: JSON.stringify({ comment }) },
+      ),
+
+    approveProject: (projectId: string, comment?: string) =>
+      apiRequest<{ projectId: string; status: string; approvedBy: string }>(
+        `/onboard/projects/${projectId}/approve`,
+        { token, method: 'POST', body: JSON.stringify({ comment }) },
+      ),
+
+    getApprovalEvents: (projectId: string) =>
+      apiRequest<ApprovalEvent[]>(`/onboard/projects/${projectId}/approval-events`, { token }),
+
+    getAuditEvents: (projectId: string) =>
+      apiRequest<ApprovalEvent[]>(`/onboard/projects/${projectId}/audit`, { token }),
   };
 }
 

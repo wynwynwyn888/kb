@@ -15,6 +15,7 @@ import { FollowUpEngineService } from '../../modules/follow-up-engine/follow-up-
 import { HumanEscalationRuntimeService } from '../../modules/human-escalation/human-escalation-runtime.service';
 import { HumanEscalationHoldingReplyService } from '../../modules/human-escalation/human-escalation-holding-reply.service';
 import { AppCacheService } from '../../lib/app-cache.service';
+import { MetricsService } from '../../lib/metrics.service';
 
 export interface SendBubbleJobData {
   conversationId: string;
@@ -50,6 +51,7 @@ export class SendBubbleProcessor extends WorkerHost {
     private readonly humanEscalationHolding: HumanEscalationHoldingReplyService,
     @InjectQueue(QUEUES.INBOUND_MESSAGE_PROCESSOR) private readonly inboundQueue: Queue,
     @Optional() private readonly appCache?: AppCacheService,
+    @Optional() private readonly metrics?: MetricsService,
   ) {
     super();
   }
@@ -89,6 +91,7 @@ export class SendBubbleProcessor extends WorkerHost {
       const sendCap = parseInt(process.env['AISBP_TENANT_CAP_SEND'] ?? '5', 10);
       const semKey = `sem:${tenantId}:send`;
       if (!(await this.appCache!.acquireSemaphore(semKey, String(job.id ?? ''), sendCap))) {
+        this.metrics?.emit({ tenantId, conversationId, eventType: 'tenant_cap_blocked', eventSource: 'send-bubble', severity: 'warn', metadata: { cap: sendCap, class: 'send' } });
         this.logger.log(`tenantCapFull: tenantId=${tenantId} class=send — delaying`);
         return {
           conversationId, tenantId, totalBubbles: 0, succeeded: 0, failed: 0,
@@ -96,6 +99,7 @@ export class SendBubbleProcessor extends WorkerHost {
         };
       }
       semAcquired = true;
+      this.metrics?.emit({ tenantId, conversationId, eventType: 'tenant_cap_acquired', eventSource: 'send-bubble', metadata: { cap: sendCap, class: 'send' } });
     }
 
     // Per-conversation ordering lock
@@ -106,6 +110,7 @@ export class SendBubbleProcessor extends WorkerHost {
     if (orderingEnabled) {
       const lockResult = await this.appCache!.acquireLock(lockKey, ownerToken, 30);
       if (lockResult !== 'acquired') {
+        this.metrics?.emit({ tenantId, conversationId, eventType: 'conv_ordering_blocked', eventSource: 'send-bubble', severity: 'warn', metadata: { replyId } });
         this.logger.log(`conversationLockHeld: conversationId=${conversationId} — requeuing`);
         return {
           conversationId, tenantId, totalBubbles: 0, succeeded: 0, failed: 0,
@@ -122,7 +127,8 @@ export class SendBubbleProcessor extends WorkerHost {
       const staleEnabled = process.env['AISBP_STALE_SEND_CHECK_ENABLED'] === 'true';
       if (staleEnabled && latestInboundMsgIdAtStart) {
         const isStale = await this.outboundSend.isReplyStale(conversationId, latestInboundMsgIdAtStart);
-        if (isStale) {
+          if (isStale) {
+          this.metrics?.emit({ tenantId, conversationId, eventType: 'stale_send_cancelled', eventSource: 'send-bubble', severity: 'warn', metadata: { replyId, latestInboundMsgIdAtStart } });
           this.logger.log(
             `staleReplyCancelled: conversationId=${conversationId} replyId=${replyId} — newer inbound detected, requeuing orchestration`,
           );
@@ -146,6 +152,7 @@ export class SendBubbleProcessor extends WorkerHost {
             tenantId, conversationId, replyId, bubble.index,
           );
           if (decision === 'wait') {
+            this.metrics?.emit({ tenantId, conversationId, eventType: 'conv_ordering_wait', eventSource: 'send-bubble', severity: 'warn', metadata: { replyId, bubbleSequence: bubble.index } });
             this.logger.log(`bubbleSequenceBlocked: conversationId=${conversationId} bubble=${bubble.index} — predecessor pending, requeuing`);
             return {
               conversationId, tenantId, totalBubbles: 0, succeeded: 0, failed: 0,
@@ -153,6 +160,7 @@ export class SendBubbleProcessor extends WorkerHost {
             };
           }
           if (decision === 'cancel') {
+            this.metrics?.emit({ tenantId, conversationId, eventType: 'conv_ordering_cancelled', eventSource: 'send-bubble', severity: 'warn', metadata: { replyId, bubbleSequence: bubble.index } });
             this.logger.log(`bubbleSequenceCancelledDueToPrior: conversationId=${conversationId} bubble=${bubble.index}`);
             return {
               conversationId, tenantId, totalBubbles: 0, succeeded: 0, failed: 0,
@@ -179,6 +187,7 @@ export class SendBubbleProcessor extends WorkerHost {
       }
       if (semAcquired) {
         await this.appCache!.releaseSemaphore(`sem:${tenantId}:send`, String(job.id ?? ''));
+        this.metrics?.emit({ tenantId, conversationId, eventType: 'tenant_cap_released', eventSource: 'send-bubble', metadata: { class: 'send' } });
       }
     }
 

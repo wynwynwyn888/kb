@@ -58,7 +58,8 @@ export function validateNoGhlMutation(data: Record<string, unknown>): FixtureSaf
   }
 
   // Flag only actual GHL mutation operations — not descriptive text
-  if (json.includes('ghl_contacts') || json.includes('ghl_opportunities') || json.includes('ghl_workflows')) {
+  const hasGhlTables = json.includes('ghl_contacts') || json.includes('ghl_opportunities') || json.includes('ghl_workflows');
+  if (hasGhlTables) {
     result.safe = false;
     result.issues.push('GHL mutation table reference found without safety flag');
   }
@@ -69,27 +70,27 @@ export function validateNoExecution(data: Record<string, unknown>): FixtureSafet
   const result: FixtureSafetyResult = { name: 'Execution safety check', safe: true, issues: [] };
   const json = JSON.stringify(data);
 
-  if (json.includes('"outboundEnabled": true')) {
+  if (/"outboundEnabled"\s*:\s*true/.test(json)) {
     result.safe = false;
     result.issues.push('outboundEnabled is true');
   }
-  if (json.includes('"botProfileActive": true')) {
+  if (/"botProfileActive"\s*:\s*true/.test(json)) {
     result.safe = false;
     result.issues.push('botProfileActive is true');
   }
-  if (json.includes('"followUpEnabled": true') || json.includes('"followUpExecutionEnabled": true')) {
+  if (/"followUpEnabled"\s*:\s*true/.test(json) || /"followUpExecutionEnabled"\s*:\s*true/.test(json)) {
     result.safe = false;
     result.issues.push('Follow-up execution is enabled');
   }
-  if (json.includes('"bookingEnabled": true')) {
+  if (/"bookingEnabled"\s*:\s*true/.test(json)) {
     result.safe = false;
     result.issues.push('Booking execution is enabled');
   }
-  if (json.includes('"handoverEnabled": true')) {
+  if (/"handoverEnabled"\s*:\s*true/.test(json)) {
     result.safe = false;
     result.issues.push('Handover execution is enabled');
   }
-  if (json.includes('"noMessagesSent": false')) {
+  if (/"noMessagesSent"\s*:\s*false/.test(json)) {
     result.safe = false;
     result.issues.push('Messages sent flag is not true');
   }

@@ -1,0 +1,201 @@
+{
+  "_comment": "AISBP-Onboard generated pilot data. All fake. No real PII. No secrets. example.com only. Masked phones only.",
+  "generatedAt": "2026-06-27T00:00:00Z",
+  "pilot": {
+    "client": {
+      "clientKey": "pilot-test",
+      "displayName": "Pilot Test Business",
+      "contactName": "Test Owner",
+      "contactPhone": "+6500001111",
+      "contactPhoneMasked": "+65****1111",
+      "contactEmail": "test@example.com",
+      "industry": "Testing",
+      "websiteUrl": "https://example.com",
+      "timezone": "Asia/Singapore",
+      "status": "ACTIVE"
+    },
+    "project": {
+      "id": "00000000-1111-2222-3333-444444444444",
+      "status": "APPROVED",
+      "currentPhase": "REVIEW",
+      "version": 1,
+      "displayLabel": "Pilot Test Business · pilot-test"
+    },
+    "identityMap": {
+      "projectId": "00000000-1111-2222-3333-444444444444",
+      "kbTenantId": null,
+      "ghlocationId": "ghl-pilot-001"
+    },
+    "businessProfile": {
+      "businessName": "Pilot Test Business",
+      "description": "A test business for AISBP-Onboard controlled pilot.",
+      "services": [
+        { "name": "Basic Service", "price": "$10", "duration": "30 min" },
+        { "name": "Premium Service", "price": "$50", "duration": "60 min" }
+      ],
+      "pricingPolicy": "Prices vary by service.",
+      "openingHours": {
+        "mon": "09:00-17:00",
+        "tue": "09:00-17:00",
+        "wed": "09:00-17:00",
+        "thu": "09:00-17:00",
+        "fri": "09:00-17:00",
+        "sat": "closed",
+        "sun": "closed"
+      },
+      "sectionStatus": "APPROVED"
+    },
+    "salesProcess": {
+      "leadSources": ["website", "whatsapp"],
+      "conversationGoal": "BOOK_APPOINTMENT",
+      "primaryCta": "Book a test appointment",
+      "bookingLink": "https://example.com/book",
+      "sectionStatus": "APPROVED"
+    },
+    "faqItems": [
+      { "category": "PRICING", "question": "What are your prices?", "answer": "Our services range from $10 to $50.", "status": "APPROVED" },
+      { "category": "BOOKING", "question": "How do I book?", "answer": "Book through our website at example.com.", "status": "APPROVED" },
+      { "category": "SERVICES", "question": "What services do you offer?", "answer": "We offer Basic ($10) and Premium ($50) services.", "status": "APPROVED" }
+    ],
+    "promptConfig": {
+      "persona": "You are a friendly and professional assistant for Pilot Test Business.",
+      "toneOfVoice": "FRIENDLY",
+      "conversationGoals": ["book_appointment", "answer_faqs"],
+      "businessNotes": "Test business for controlled pilot.",
+      "language": "english",
+      "sectionStatus": "APPROVED"
+    },
+    "handoverRules": {
+      "handoverContactName": "Test Owner",
+      "handoverMethod": "WHATSAPP",
+      "triggers": ["customer_angry", "refund_request", "customer_asks_for_human"],
+      "sectionStatus": "APPROVED"
+    },
+    "followUpRules": {
+      "enabled": false,
+      "goal": "Remind about appointments",
+      "cadenceHours": 24,
+      "sectionStatus": "APPROVED"
+    },
+    "recommendations": [
+      {
+        "title": "Auto-reply to new WhatsApp leads",
+        "description": "Instantly respond with qualifying questions.",
+        "recommendationType": "FOLLOW_UP",
+        "riskLevel": "LOW",
+        "status": "SUGGESTED",
+        "source": "AI_ANALYSIS"
+      },
+      {
+        "title": "Enable automated booking",
+        "description": "Let leads book appointments directly from conversation.",
+        "recommendationType": "BOOKING",
+        "riskLevel": "LOW",
+        "status": "SUGGESTED",
+        "source": "AI_ANALYSIS"
+      }
+    ]
+  },
+  "kbSync": {
+    "dryRun": {
+      "syncRunId": "dddddddd-1111-2222-3333-444444444444",
+      "status": "DRY_RUN_PASSED",
+      "sourceSnapshotHash": "a1b2c3d4",
+      "noGhlMutation": true,
+      "noMessagesSent": true,
+      "outboundEnabled": false
+    },
+    "applyScopes": {
+      "TENANT_IDENTITY_ONLY": {
+        "applied": true,
+        "tenantCreated": true,
+        "skipped": ["BOT_PROFILE", "PROMPT_CONFIG", "FAQ", "BOOKING", "HANDOVER", "FOLLOW_UP", "GHL", "OUTBOUND"],
+        "noMessagesSent": true,
+        "noGhlSync": true,
+        "outboundEnabled": false,
+        "botConfigSynced": false
+      },
+      "BOT_PROFILE_PROMPT_ONLY": {
+        "applied": true,
+        "botProfileCreated": true,
+        "botProfileActive": false,
+        "activationDeferred": true,
+        "noMessagesSent": true,
+        "noGhlSync": true,
+        "outboundEnabled": false
+      },
+      "FAQ_KNOWLEDGE_ONLY": {
+        "applied": true,
+        "faqCreated": 3,
+        "knowledgeSynced": true,
+        "knowledgeStatus": "READY",
+        "knowledgeActivationSafe": true,
+        "noMessagesSent": true,
+        "noGhlSync": true,
+        "outboundEnabled": false
+      },
+      "BOOKING_HANDOVER_ONLY": {
+        "applied": true,
+        "bookingSettingsSynced": true,
+        "bookingEnabled": false,
+        "handoverSettingsSynced": true,
+        "handoverEnabled": false,
+        "noMessagesSent": true,
+        "noGhlSync": true,
+        "outboundEnabled": false
+      },
+      "FOLLOW_UP_SETTINGS_ONLY": {
+        "applied": true,
+        "followUpSettingsSynced": true,
+        "followUpPlanStored": true,
+        "followUpEnabled": false,
+        "followUpExecutionEnabled": false,
+        "noQueueJobsCreated": true,
+        "noMessagesSent": true,
+        "noGhlSync": true,
+        "outboundEnabled": false
+      }
+    }
+  },
+  "ghlValidation": {
+    "validate": {
+      "valid": true,
+      "checks": ["project_exists", "identity_map_exists", "ghl_location_present"],
+      "blockers": [],
+      "noGhlMutation": true,
+      "noGhlApiCalls": true,
+      "noMessagesSent": true,
+      "noOutboundEnabled": true
+    },
+    "dryRun": {
+      "dryRun": true,
+      "operationCount": 7,
+      "proposedOperations": [
+        { "operation": "validate_location", "dryRun": true, "noWrite": true, "disabledForNow": true },
+        { "operation": "map_contact", "dryRun": true, "noWrite": true, "disabledForNow": true },
+        { "operation": "map_conversation", "dryRun": true, "noWrite": true, "disabledForNow": true },
+        { "operation": "create_contact", "dryRun": true, "noWrite": true, "disabledForNow": true },
+        { "operation": "map_calendar", "dryRun": true, "noWrite": true, "disabledForNow": true },
+        { "operation": "map_workflow", "dryRun": true, "noWrite": true, "disabledForNow": true },
+        { "operation": "map_pipeline", "dryRun": true, "noWrite": true, "disabledForNow": true }
+      ],
+      "noGhlMutation": true,
+      "noMessagesSent": true,
+      "noWorkflowTriggered": true,
+      "noAppointmentCreated": true,
+      "noOutboundEnabled": true,
+      "noGhlApiCalls": true
+    }
+  },
+  "safetyFlags": {
+    "botActive": false,
+    "outboundEnabled": false,
+    "ghlSyncEnabled": false,
+    "messagesSent": false,
+    "queueJobsCreated": false,
+    "fullPhoneExposed": false,
+    "secretsExposed": false,
+    "agentCanApprove": false,
+    "agentCanSync": false
+  }
+}

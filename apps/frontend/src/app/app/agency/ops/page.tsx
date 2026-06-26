@@ -60,8 +60,8 @@ const kpiFigure: CSSProperties = {
   lineHeight: 1.05, color: 'var(--aisbp-text-heading, #0f172a)', margin: '0.15rem 0 0',
 };
 const tabBarStyle: CSSProperties = {
-  display: 'flex', gap: '0.25rem', marginBottom: '1.25rem',
-  borderBottom: '1px solid var(--aisbp-border, #e2e8f0)', overflowX: 'auto', flexWrap: 'nowrap',
+  display: 'flex', gap: '0.1rem', marginBottom: '1.25rem',
+  borderBottom: '1px solid var(--aisbp-border, #e2e8f0)', flexWrap: 'nowrap',
 };
 const thStyle: CSSProperties = {
   padding: '0.5rem 0.55rem', fontWeight: 700, fontSize: '0.7rem',
@@ -219,7 +219,7 @@ export default function OpsDashboardPage() {
                 style={{
                   border: 'none', background: active ? 'var(--aisbp-tenant-nav-active-bg, rgba(15,98,254,0.1))' : 'transparent',
                   color: active ? 'var(--aisbp-tenant-nav-active-text, #0f62fe)' : 'var(--aisbp-muted, #64748b)',
-                  padding: '0.5rem 0.85rem', borderRadius: '10px 10px 0 0', fontSize: '0.82rem',
+                  padding: '0.4rem 0.5rem', borderRadius: '10px 10px 0 0', fontSize: '0.75rem', whiteSpace: 'nowrap', flexShrink: 0,
                   fontWeight: active ? 700 : 500, cursor: 'pointer',
                   borderBottom: active ? '2px solid var(--aisbp-tenant-nav-active-text, #0f62fe)' : '2px solid transparent',
                   marginBottom: '-1px',

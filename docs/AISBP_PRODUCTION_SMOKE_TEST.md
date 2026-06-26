@@ -21,6 +21,34 @@ This describes a **manual** check of the live loop using a controlled webhook PO
 
 No AISBP secrets are sent in the webhook helper; the Private Integration token is used **server-side** when AISBP calls GHL outbound.
 
+## Production Auth Notes
+
+**When `WEBHOOK_SIGNATURE_SECRET` is configured on the backend**, unsigned webhook POSTs return `401 {"message":"Webhook verification failed","reason":"missing_signature"}`. This is **correct and expected** — the backend must not accept unsigned webhooks in production.
+
+To run a production smoke test, provide auth credentials via the helper scripts:
+
+### Static token (simplest)
+```bash
+# Via CLI flag (NOT recommended for committing):
+./infra/vps/scripts/smoke-ghl-webhook.sh --location-id "xxx" --contact-id "yyy" --webhook-token "your-secret"
+
+# Via env var (recommended — never committed):
+export AISBP_WEBHOOK_TOKEN="your-secret"
+./infra/vps/scripts/smoke-ghl-webhook.sh --location-id "xxx" --contact-id "yyy"
+```
+
+### HMAC-SHA256 signature
+```bash
+# Via env var (recommended):
+export WEBHOOK_SIGNATURE_SECRET="your-secret"
+./infra/vps/scripts/smoke-ghl-webhook.sh --location-id "xxx" --contact-id "yyy"
+```
+The script computes the correct `x-ghl-signature` header automatically. The secret is never printed.
+
+**Never commit real secrets.** Use environment variables only. The scripts accept `AISBP_WEBHOOK_TOKEN` and `WEBHOOK_SIGNATURE_SECRET` env vars as fallbacks.
+
+Without auth (local/dev): unsigned webhooks are accepted when the backend secret is not configured. No flags or env changes needed.
+
 ## Helper scripts (from repo root)
 
 **PowerShell** (Windows or cross-platform `pwsh`):

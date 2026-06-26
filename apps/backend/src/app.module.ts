@@ -33,6 +33,7 @@ import { MetricsModule } from './lib/metrics.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { OpsModule } from './modules/ops/ops.module';
 import { HumanEscalationModule } from './modules/human-escalation/human-escalation.module';
+import { OnboardModule } from './modules/onboard/onboard.module';
 
 @Module({
   imports: [
@@ -112,6 +113,7 @@ import { HumanEscalationModule } from './modules/human-escalation/human-escalati
     FollowUpSettingsModule,
     FollowUpEngineModule,
     HumanEscalationModule,
+    OnboardModule,
     AuditModule,
     OpsModule,
     MetricsModule,

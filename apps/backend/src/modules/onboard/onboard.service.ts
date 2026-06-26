@@ -1,6 +1,7 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { getSupabaseService } from '../../lib/supabase';
 import { randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { maskPhone, formatDisplayLabel, formatShortId } from './utils/identifiers';
 import { OnboardAuditService } from './utils/audit';
 import {
@@ -1064,34 +1065,9 @@ export class OnboardService {
     }
 
     const supabase = getSupabaseService();
+    const now = new Date().toISOString();
 
-    // Idempotency: check if dry-run already exists for this project
-    const idKey = idempotencyKey || `dry-run-${projectId}`;
-    const { data: existingRun } = await supabase
-      .from('sync_runs')
-      .select('id, status, response_payload')
-      .eq('project_id', projectId)
-      .eq('target_system', 'KB')
-      .eq('mode', 'DRY_RUN')
-      .eq('status', 'DRY_RUN_PASSED')
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (existingRun) {
-      return {
-        syncRunId: existingRun['id'],
-        dryRun: true,
-        idempotent: true,
-        targetSystem: 'KB',
-        mode: 'DRY_RUN',
-        status: existingRun['status'],
-        payloadPreview: existingRun['response_payload'] ?? {},
-        nextAllowedAction: 'KB apply sync is future PR 10 and remains disabled.',
-      };
-    }
-
-    // Gather data for preview
+    // Gather fresh source data
     const client = await this.getClient(project.onboardClientId);
 
     const { data: bizProfile } = await supabase
@@ -1136,7 +1112,68 @@ export class OnboardService {
       .eq('project_id', projectId)
       .eq('status', 'SUGGESTED');
 
-    // Build sections included
+    // Build stable source snapshot (excludes volatile fields: timestamps, actorId)
+    const sourceSnapshot = {
+      projectId,
+      onboardClientId: project.onboardClientId,
+      clientKey: client?.clientKey ?? null,
+      displayName: client?.displayName ?? null,
+      projectStatus: project.status,
+      projectVersion: project.version,
+      businessProfile: bizProfile ? {
+        businessName: bizProfile['business_name'],
+        sectionStatus: bizProfile['section_status'],
+        services: bizProfile['services'] ?? [],
+      } : null,
+      salesProcess: salesMap ? {
+        conversationGoal: salesMap['conversation_goal'],
+        sectionStatus: salesMap['section_status'],
+      } : null,
+      faqApprovedCount: (faqItems || []).length,
+      promptConfig: promptCfg ? {
+        persona: promptCfg['persona'],
+        toneOfVoice: promptCfg['tone_of_voice'],
+        sectionStatus: promptCfg['section_status'],
+      } : null,
+      handoverRules: handover ? { sectionStatus: handover['section_status'] } : null,
+      followUpRules: followUp ? { sectionStatus: followUp['section_status'] } : null,
+      recommendationCount: (recs || []).length,
+      recommendationTitles: (recs || []).map((r: Record<string, unknown>) => r['title']),
+    };
+
+    const sourceSnapshotHash = createHash('sha256')
+      .update(JSON.stringify(sourceSnapshot))
+      .digest('hex');
+
+    // Check latest dry-run for this project — only reuse if snapshot hasn't changed
+    const { data: latestRun } = await supabase
+      .from('sync_runs')
+      .select('id, status, response_payload, request_payload')
+      .eq('project_id', projectId)
+      .eq('target_system', 'KB')
+      .eq('mode', 'DRY_RUN')
+      .eq('status', 'DRY_RUN_PASSED')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const cachedHash = latestRun?.['request_payload']?.['sourceSnapshotHash'];
+    if (cachedHash && cachedHash === sourceSnapshotHash) {
+      return {
+        syncRunId: latestRun['id'],
+        dryRun: true,
+        idempotent: true,
+        fresh: true,
+        sourceSnapshotHash: sourceSnapshotHash.slice(0, 8),
+        targetSystem: 'KB',
+        mode: 'DRY_RUN',
+        status: latestRun['status'],
+        payloadPreview: latestRun['response_payload'] ?? {},
+        nextAllowedAction: 'KB apply sync is future PR 10 and remains disabled. Apply requires matching snapshot hash.',
+      };
+    }
+
+    // Build sections/blockers/warnings
     const sectionsIncluded: string[] = [];
     const missingFields: string[] = [];
     const warnings: string[] = [];
@@ -1227,10 +1264,9 @@ export class OnboardService {
       })),
     };
 
-    // Generate sync_run
+    // Generate sync_run with snapshot hash
     const syncRunId = randomUUID();
     const status = blockers.length > 0 ? 'DRY_RUN_FAILED' : 'DRY_RUN_PASSED';
-    const now = new Date().toISOString();
 
     await supabase.from('sync_runs').insert({
       id: syncRunId,
@@ -1238,8 +1274,13 @@ export class OnboardService {
       target_system: 'KB',
       mode: 'DRY_RUN',
       status,
-      idempotency_key: idKey,
-      request_payload: { projectId, clientKey: client?.clientKey },
+      idempotency_key: idempotencyKey || `dry-run-${projectId}-${sourceSnapshotHash.slice(0, 8)}`,
+      request_payload: {
+        projectId,
+        clientKey: client?.clientKey,
+        sourceSnapshotHash,
+        generatedAt: now,
+      },
       response_payload: payloadPreview,
       triggered_by: actorId,
       version: 1,
@@ -1254,12 +1295,22 @@ export class OnboardService {
       action: 'sync.kb.dry_run',
       resourceType: 'sync_run',
       resourceId: syncRunId,
-      changes: { status, sectionsIncluded, blockers, warnings },
+      changes: {
+        status,
+        sectionsIncluded,
+        blockers,
+        warnings,
+        sourceSnapshotHash: sourceSnapshotHash.slice(0, 8),
+      },
     });
 
     return {
       syncRunId,
       dryRun: true,
+      idempotent: cachedHash !== undefined && cachedHash !== sourceSnapshotHash ? false : undefined,
+      fresh: cachedHash === undefined || cachedHash !== sourceSnapshotHash,
+      sourceSnapshotHash: sourceSnapshotHash.slice(0, 8),
+      previousRunStale: cachedHash !== undefined && cachedHash !== sourceSnapshotHash,
       targetSystem: 'KB',
       mode: 'DRY_RUN',
       status,
@@ -1285,7 +1336,7 @@ export class OnboardService {
         noMessagesSent: true,
         payloadSanitized: true,
       },
-      nextAllowedAction: 'KB apply sync is future PR 10 and remains disabled.',
+      nextAllowedAction: 'KB apply sync is future PR 10 and remains disabled. Apply requires matching snapshot hash.',
     };
   }
 

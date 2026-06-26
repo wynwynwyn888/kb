@@ -85,6 +85,16 @@ export default function SyncPreviewPage() {
                   Idempotent (cached)
                 </span>
               )}
+              {result?.['previousRunStale'] === true && (
+                <span style={{ fontSize: '0.78rem', padding: '0.15rem 0.5rem', borderRadius: 999, background: '#FEF3C7', color: '#D97706', fontWeight: 600 }}>
+                  Previous run stale — fresh generated
+                </span>
+              )}
+              {Boolean(result?.['sourceSnapshotHash']) && (
+                <span style={{ fontSize: '0.75rem', color: 'var(--aisbp-muted, #64748b)', fontFamily: 'monospace' }}>
+                  Hash: {asStr(result?.['sourceSnapshotHash'])}
+                </span>
+              )}
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1rem' }}>

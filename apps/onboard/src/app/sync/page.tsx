@@ -137,9 +137,9 @@ export default function SyncPreviewPage() {
             )}
           </PlaceholderCard>
 
-          <PlaceholderCard title="Apply KB Tenant + Identity Only">
+          <PlaceholderCard title="Apply KB Bot Profile + Prompt Config Only">
             <div style={{ marginBottom: '1rem', padding: '0.5rem 0.75rem', background: '#FEF3C7', borderRadius: 8, fontSize: '0.8rem', color: '#92400E' }}>
-              This creates/updates the KB tenant shell only. Bot profile, prompt config, FAQ, booking, handover, follow-up, GHL sync, and outbound sending are not synced in this step. AISBP_OUTBOUND_THROUGH_KB_ENABLED remains false.
+              Profile will be saved as inactive/draft. This does not activate the bot. FAQ, booking, handover, follow-up, GHL sync, and outbound sending are not synced. Bot activation is deferred to a future controlled go-live PR.
             </div>
             {result?.['syncRunId'] && result?.['status'] === 'DRY_RUN_PASSED' ? (
               <ApplyForm

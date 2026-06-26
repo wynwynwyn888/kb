@@ -1626,17 +1626,29 @@ export class OnboardService {
 
       let botProfileCreated = false;
       try {
-        await this.botProfilesService.createBotProfile(actorId, kbTenantId, {
-          name: 'Onboard Config',
-          persona: promptCfg['persona'] ?? '',
-          conversationGoals: Array.isArray(promptCfg['conversation_goals'])
-            ? (promptCfg['conversation_goals'] as string[]).join('\n')
-            : (promptCfg['conversation_goals'] ?? ''),
-          businessNotes: promptCfg['business_notes'] ?? '',
-          toneRules: promptCfg['tone_of_voice'] ?? '',
-          setActive: true,
-        });
-        botProfileCreated = true;
+        // Check for existing Onboard-created bot profile to avoid duplicates
+        const { data: existingProfile } = await supabase
+          .from('tenant_bot_profiles')
+          .select('id')
+          .eq('tenant_id', kbTenantId)
+          .eq('name', 'Onboard Config')
+          .maybeSingle();
+
+        if (existingProfile) {
+          botProfileCreated = false;
+        } else {
+          await this.botProfilesService.createBotProfile(actorId, kbTenantId, {
+            name: 'Onboard Config',
+            persona: promptCfg['persona'] ?? '',
+            conversationGoals: Array.isArray(promptCfg['conversation_goals'])
+              ? (promptCfg['conversation_goals'] as string[]).join('\n')
+              : (promptCfg['conversation_goals'] ?? ''),
+            businessNotes: promptCfg['business_notes'] ?? '',
+            toneRules: promptCfg['tone_of_voice'] ?? '',
+            setActive: false,
+          });
+          botProfileCreated = true;
+        }
       } catch (err) {
         const reason = `BOT_PROFILE_CREATE_FAILED: ${err instanceof Error ? err.message : String(err)}`;
         await supabase.from('sync_runs').insert({
@@ -1660,8 +1672,11 @@ export class OnboardService {
         },
         response_payload: {
           appliedScope: 'BOT_PROFILE_PROMPT_ONLY', kbTenantId,
-          botProfileCreated, promptConfigSynced: true,
-          skipped: ['FAQ_KNOWLEDGE', 'BOOKING_SETTINGS', 'HANDOVER_SETTINGS', 'FOLLOW_UP_SETTINGS', 'GHL_SYNC', 'OUTBOUND_SENDING'],
+          botProfileCreated, botProfileReused: !botProfileCreated,
+          promptConfigSynced: true,
+          botProfileActive: false,
+          activationDeferred: true,
+          skipped: ['FAQ_KNOWLEDGE', 'BOOKING_SETTINGS', 'HANDOVER_SETTINGS', 'FOLLOW_UP_SETTINGS', 'GHL_SYNC', 'OUTBOUND_SENDING', 'BOT_ACTIVATION'],
           noMessagesSent: true, noGhlSync: true, outboundEnabled: false,
         },
         triggered_by: actorId, version: 1, duration_ms: null, completed_at: now,
@@ -1671,12 +1686,13 @@ export class OnboardService {
 
       return {
         syncRunId: applyRunId, applied: true, appliedScope: 'BOT_PROFILE_PROMPT_ONLY', status: 'APPLIED',
-        kbTenantId, botProfileCreated, promptConfigSynced: true,
-        skipped: ['FAQ_KNOWLEDGE', 'BOOKING_SETTINGS', 'HANDOVER_SETTINGS', 'FOLLOW_UP_SETTINGS', 'GHL_SYNC', 'OUTBOUND_SENDING'],
+        kbTenantId, botProfileCreated, botProfileReused: !botProfileCreated,
+        promptConfigSynced: true, botProfileActive: false, activationDeferred: true,
+        skipped: ['FAQ_KNOWLEDGE', 'BOOKING_SETTINGS', 'HANDOVER_SETTINGS', 'FOLLOW_UP_SETTINGS', 'GHL_SYNC', 'OUTBOUND_SENDING', 'BOT_ACTIVATION'],
         noMessagesSent: true, noGhlSync: true, outboundEnabled: false,
         dryRunSyncRunId: syncRunId, sourceSnapshotHash: dryRunSnapshotHash.slice(0, 8),
         appliedAt: now, appliedBy: actorId,
-        message: 'Bot profile and prompt config synced. FAQ, follow-up, handover, booking, GHL, and outbound are not synced yet.',
+        message: 'Bot profile and prompt config synced as inactive/draft. Activation is deferred to a future controlled go-live PR.',
       };
     }
 

@@ -1,0 +1,57 @@
+export const SAMPLE_GHL_VALIDATE_RESPONSE = {
+  valid: true,
+  targetSystem: 'GHL',
+  mode: 'VALIDATE',
+  projectId: '00000000-0000-0000-0000-000000000001',
+  ghlLocationId: 'ghl12345',
+  checks: [
+    'project_exists',
+    'identity_map_exists',
+    'ghl_location_present',
+    'kb_tenant_id_present',
+    'kb_ghl_connection_exists',
+    'kb_ghl_connection_connected',
+  ],
+  missingFields: [],
+  blockers: [],
+  warnings: [],
+  noGhlMutation: true,
+  noMessagesSent: true,
+  noOutboundEnabled: true,
+  noGhlApiCalls: true,
+  note: 'Local validation only. No GHL API calls made.',
+};
+
+export const SAMPLE_GHL_DRY_RUN_RESPONSE = {
+  dryRun: true,
+  targetSystem: 'GHL',
+  mode: 'DRY_RUN',
+  projectId: '00000000-0000-0000-0000-000000000001',
+  operationCount: 7,
+  wouldValidate: [
+    { operation: 'validate_location', dryRun: true, noWrite: true, disabledForNow: true },
+    { operation: 'map_contact', dryRun: true, noWrite: true, disabledForNow: true },
+  ],
+  wouldCreate: [
+    { operation: 'create_contact', dryRun: true, noWrite: true, disabledForNow: true, note: 'Future' },
+  ],
+  proposedOperations: [
+    { operation: 'validate_location', dryRun: true, noWrite: true, disabledForNow: true, note: 'Verify GHL location' },
+    { operation: 'map_contact', dryRun: true, noWrite: true, disabledForNow: true, note: 'Map existing GHL test contact' },
+    { operation: 'map_conversation', dryRun: true, noWrite: true, disabledForNow: true, note: 'Map test conversation' },
+    { operation: 'create_contact', dryRun: true, noWrite: true, disabledForNow: true, note: 'Future: create test contact' },
+    { operation: 'map_calendar', dryRun: true, noWrite: true, disabledForNow: true, note: 'Future: link GHL calendar' },
+    { operation: 'map_workflow', dryRun: true, noWrite: true, disabledForNow: true, note: 'Future: configure workflows' },
+    { operation: 'map_pipeline', dryRun: true, noWrite: true, disabledForNow: true, note: 'Future: link pipeline stages' },
+  ],
+  safetyChecks: {
+    noGhlMutation: true,
+    noMessagesSent: true,
+    noWorkflowTriggered: true,
+    noAppointmentCreated: true,
+    noOutboundEnabled: true,
+    noGhlApiCalls: true,
+  },
+  nextAllowedAction: 'GHL apply sync is not implemented.',
+  note: 'No GHL API calls made. Local plan preview only.',
+};

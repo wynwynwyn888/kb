@@ -1,0 +1,88 @@
+export const SAMPLE_KB_DRY_RUN_RESPONSE = {
+  syncRunId: 'dddddddd-1111-2222-3333-444444444444',
+  dryRun: true,
+  targetSystem: 'KB',
+  mode: 'DRY_RUN',
+  status: 'DRY_RUN_PASSED',
+  onboardingProjectId: '00000000-0000-0000-0000-000000000001',
+  onboardClientId: 'cccccccc-1111-2222-3333-444444444444',
+  clientKey: 'pilot-test',
+  displayName: 'Pilot Test Business',
+  displayLabel: 'Pilot Test Business · pilot-test',
+  sourceSnapshotHash: 'a1b2c3d4',
+  sectionsIncluded: ['business_profile', 'sales_process', 'prompt_config'],
+  missingFields: ['faq_items (none approved)', 'handover_rules', 'follow_up_rules'],
+  blockers: [],
+  warnings: [],
+  wouldCreate: true,
+  payloadPreview: {
+    tenantIdentity: {
+      displayName: 'Pilot Test Business',
+      clientKey: 'pilot-test',
+      contactPhoneMasked: '+65****1111',
+      contactEmail: 'test@example.com',
+    },
+    businessProfile: { businessName: 'Pilot Test Business' },
+    promptConfig: { persona: 'Friendly and professional test assistant.' },
+    aiRecommendationsForReview: [
+      {
+        title: 'Auto-reply to new WhatsApp leads',
+        recommendationType: 'FOLLOW_UP',
+        riskLevel: 'LOW',
+        status: 'SUGGESTED',
+        note: 'AI-suggested recommendation. Review and approve before future sync.',
+      },
+    ],
+  },
+  safetyChecks: {
+    noKbMutation: true,
+    noGhlMutation: true,
+    noTenantCreation: true,
+    noMessagesSent: true,
+    payloadSanitized: true,
+  },
+  nextAllowedAction: 'KB apply sync is future PR 10 and remains disabled. Apply requires matching snapshot hash.',
+};
+
+export const SAMPLE_KB_APPLY_RESPONSE = {
+  syncRunId: 'eeeeeeee-1111-2222-3333-444444444444',
+  applied: true,
+  appliedScope: 'TENANT_IDENTITY_ONLY',
+  status: 'APPLIED',
+  kbTenantId: 'tttttttt-1111-2222-3333-444444444444',
+  tenantCreated: true,
+  tenantReused: false,
+  identityMapUpdated: true,
+  skipped: [
+    'BOT_PROFILE',
+    'PROMPT_CONFIG',
+    'FAQ_KNOWLEDGE',
+    'BOOKING_SETTINGS',
+    'HANDOVER_SETTINGS',
+    'FOLLOW_UP_SETTINGS',
+    'GHL_SYNC',
+    'OUTBOUND_SENDING',
+  ],
+  noMessagesSent: true,
+  noGhlSync: true,
+  outboundEnabled: false,
+  botConfigSynced: false,
+  sourceSnapshotHash: 'a1b2c3d4',
+};
+
+export const SAMPLE_SYNC_RUNS = [
+  {
+    syncRunId: 'dddddddd-1111-2222-3333-444444444444',
+    targetSystem: 'KB',
+    mode: 'DRY_RUN',
+    status: 'DRY_RUN_PASSED',
+    createdAt: '2026-06-27T10:00:00Z',
+  },
+  {
+    syncRunId: 'eeeeeeee-1111-2222-3333-444444444444',
+    targetSystem: 'KB',
+    mode: 'APPLY',
+    status: 'APPLIED',
+    createdAt: '2026-06-27T10:05:00Z',
+  },
+];

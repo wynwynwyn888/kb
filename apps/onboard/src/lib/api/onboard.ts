@@ -34,7 +34,10 @@ async function apiRequest<T>(path: string, options: RequestInit & { token?: stri
   if (!res.ok) {
     let body: unknown = null;
     try { body = await res.json(); } catch { /* ignore */ }
-    throw new ApiHttpError(res.status, `API error ${res.status}`, body);
+    const message = res.status === 403
+      ? 'You are signed in but do not have AISBP-Onboard operator access.'
+      : `API error ${res.status}`;
+    throw new ApiHttpError(res.status, message, body);
   }
 
   const text = await res.text();

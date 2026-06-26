@@ -40,6 +40,7 @@ export interface PaginatedResponse<T> {
 export interface OutboundSendRow {
   id: string;
   tenantId: string;
+  tenantName: string | null;
   conversationId: string;
   replyId: string;
   bubbleSequence: number;
@@ -55,6 +56,7 @@ export interface OutboundSendRow {
 export interface ConversationHealthRow {
   id: string;
   tenantId: string;
+  tenantName: string | null;
   contactId: string;
   lastMessageAt: string | null;
   outboundSentCount: number;
@@ -67,6 +69,7 @@ export interface ConversationHealthRow {
 export interface GhlSyncRow {
   conversationId: string;
   tenantId: string;
+  tenantName: string | null;
   eventType: string;
   metadata: Record<string, unknown> | null;
   createdAt: string;
@@ -75,6 +78,7 @@ export interface GhlSyncRow {
 export interface ErrorEventRow {
   id: string;
   tenantId: string | null;
+  tenantName: string | null;
   conversationId: string | null;
   eventType: string;
   eventSource: string;
@@ -183,21 +187,26 @@ export class OpsService {
       return { data: [], total: 0, page, pageSize };
     }
 
+    const tenantNames = await this.loadTenantNames();
     return {
-      data: ((data ?? []) as Record<string, unknown>[]).map(r => ({
-        id: String(r['id'] ?? ''),
-        tenantId: String(r['tenant_id'] ?? ''),
-        conversationId: String(r['conversation_id'] ?? ''),
-        replyId: String(r['reply_id'] ?? ''),
-        bubbleSequence: Number(r['bubble_sequence'] ?? 0),
-        status: String(r['status'] ?? ''),
-        providerMessageId: r['provider_message_id'] ? String(r['provider_message_id']) : null,
-        attempt: Number(r['attempt'] ?? 0),
-        lastErrorCode: r['last_error_code'] ? String(r['last_error_code']) : null,
-        lastErrorMessage: r['last_error_message'] ? String(r['last_error_message']) : null,
-        sentAt: r['sent_at'] ? String(r['sent_at']) : null,
-        createdAt: String(r['created_at'] ?? ''),
-      })),
+      data: ((data ?? []) as Record<string, unknown>[]).map(r => {
+        const tid = String(r['tenant_id'] ?? '');
+        return {
+          id: String(r['id'] ?? ''),
+          tenantId: tid,
+          tenantName: tenantNames.get(tid) ?? null,
+          conversationId: String(r['conversation_id'] ?? ''),
+          replyId: String(r['reply_id'] ?? ''),
+          bubbleSequence: Number(r['bubble_sequence'] ?? 0),
+          status: String(r['status'] ?? ''),
+          providerMessageId: r['provider_message_id'] ? String(r['provider_message_id']) : null,
+          attempt: Number(r['attempt'] ?? 0),
+          lastErrorCode: r['last_error_code'] ? String(r['last_error_code']) : null,
+          lastErrorMessage: r['last_error_message'] ? String(r['last_error_message']) : null,
+          sentAt: r['sent_at'] ? String(r['sent_at']) : null,
+          createdAt: String(r['created_at'] ?? ''),
+        };
+      }),
       total: count ?? 0,
       page,
       pageSize,
@@ -228,14 +237,17 @@ export class OpsService {
       return { data: [], total: 0, page, pageSize };
     }
 
+    const tenantNames = await this.loadTenantNames();
     const rows: ConversationHealthRow[] = [];
     for (const c of (data ?? []) as Record<string, unknown>[]) {
       const conversationId = String(c['id'] ?? '');
+      const tid = String(c['tenant_id'] ?? '');
       const staleSkipped = await this.countMetricsByType(conversationId, 'stale_send_cancelled');
       const duplicateSkipped = await this.countMetricsByType(conversationId, 'duplicate_send_prevented');
       rows.push({
         id: conversationId,
-        tenantId: String(c['tenant_id'] ?? ''),
+        tenantId: tid,
+        tenantName: tenantNames.get(tid) ?? null,
         contactId: String(c['contact_id'] ?? ''),
         lastMessageAt: c['last_message_at'] ? String(c['last_message_at']) : null,
         outboundSentCount: 0,
@@ -265,13 +277,18 @@ export class OpsService {
       return [];
     }
 
-    return ((data ?? []) as Record<string, unknown>[]).map(r => ({
-      conversationId: r['conversation_id'] ? String(r['conversation_id']) : '',
-      tenantId: r['tenant_id'] ? String(r['tenant_id']) : '',
-      eventType: String(r['event_type'] ?? ''),
-      metadata: (r['metadata'] as Record<string, unknown>) ?? null,
-      createdAt: String(r['created_at'] ?? ''),
-    }));
+    const tenantNames = await this.loadTenantNames();
+    return ((data ?? []) as Record<string, unknown>[]).map(r => {
+      const tid = r['tenant_id'] ? String(r['tenant_id']) : '';
+      return {
+        conversationId: r['conversation_id'] ? String(r['conversation_id']) : '',
+        tenantId: tid,
+        tenantName: tenantNames.get(tid) ?? null,
+        eventType: String(r['event_type'] ?? ''),
+        metadata: (r['metadata'] as Record<string, unknown>) ?? null,
+        createdAt: String(r['created_at'] ?? ''),
+      };
+    });
   }
 
   async getErrors(params: {
@@ -299,17 +316,22 @@ export class OpsService {
       return { data: [], total: 0, page, pageSize };
     }
 
+    const tenantNames = await this.loadTenantNames();
     return {
-      data: ((data ?? []) as Record<string, unknown>[]).map(r => ({
-        id: String(r['id'] ?? ''),
-        tenantId: r['tenant_id'] ? String(r['tenant_id']) : null,
-        conversationId: r['conversation_id'] ? String(r['conversation_id']) : null,
-        eventType: String(r['event_type'] ?? ''),
-        eventSource: String(r['event_source'] ?? ''),
-        severity: String(r['severity'] ?? ''),
-        metadata: (r['metadata'] as Record<string, unknown>) ?? null,
-        createdAt: String(r['created_at'] ?? ''),
-      })),
+      data: ((data ?? []) as Record<string, unknown>[]).map(r => {
+        const tid = r['tenant_id'] ? String(r['tenant_id']) : null;
+        return {
+          id: String(r['id'] ?? ''),
+          tenantId: tid,
+          tenantName: tid ? (tenantNames.get(tid) ?? null) : null,
+          conversationId: r['conversation_id'] ? String(r['conversation_id']) : null,
+          eventType: String(r['event_type'] ?? ''),
+          eventSource: String(r['event_source'] ?? ''),
+          severity: String(r['severity'] ?? ''),
+          metadata: (r['metadata'] as Record<string, unknown>) ?? null,
+          createdAt: String(r['created_at'] ?? ''),
+        };
+      }),
       total: count ?? 0,
       page,
       pageSize,
@@ -338,17 +360,22 @@ export class OpsService {
       return { data: [], total: 0, page, pageSize };
     }
 
+    const tenantNames2 = await this.loadTenantNames();
     return {
-      data: ((data ?? []) as Record<string, unknown>[]).map(r => ({
-        id: String(r['id'] ?? ''),
-        tenantId: r['tenant_id'] ? String(r['tenant_id']) : null,
-        conversationId: r['conversation_id'] ? String(r['conversation_id']) : null,
-        eventType: String(r['event_type'] ?? ''),
-        eventSource: String(r['event_source'] ?? ''),
-        severity: String(r['severity'] ?? ''),
-        metadata: (r['metadata'] as Record<string, unknown>) ?? null,
-        createdAt: String(r['created_at'] ?? ''),
-      })),
+      data: ((data ?? []) as Record<string, unknown>[]).map(r => {
+        const tid = r['tenant_id'] ? String(r['tenant_id']) : null;
+        return {
+          id: String(r['id'] ?? ''),
+          tenantId: tid,
+          tenantName: tid ? (tenantNames2.get(tid) ?? null) : null,
+          conversationId: r['conversation_id'] ? String(r['conversation_id']) : null,
+          eventType: String(r['event_type'] ?? ''),
+          eventSource: String(r['event_source'] ?? ''),
+          severity: String(r['severity'] ?? ''),
+          metadata: (r['metadata'] as Record<string, unknown>) ?? null,
+          createdAt: String(r['created_at'] ?? ''),
+        };
+      }),
       total: count ?? 0,
       page,
       pageSize,
@@ -423,6 +450,26 @@ export class OpsService {
       }
     }
     return results;
+  }
+
+  /**
+   * Load all tenant names into a map for batch enrichment of API responses.
+   * Called once per request, not per row.
+   */
+  private async loadTenantNames(): Promise<Map<string, string>> {
+    const map = new Map<string, string>();
+    try {
+      const { data } = await this.supabase
+        .from('tenants')
+        .select('id, name')
+        .limit(500);
+      for (const row of (data ?? []) as Array<{ id: string; name: string }>) {
+        map.set(row.id, row.name);
+      }
+    } catch (e) {
+      this.logger.warn(`loadTenantNames error: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    return map;
   }
 
   private async countMetricsByType(conversationId: string, eventType: string): Promise<number> {

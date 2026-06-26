@@ -2240,6 +2240,7 @@ export interface OpsFlag {
 export interface OpsOutboundSend {
   id: string;
   tenantId: string;
+  tenantName: string | null;
   conversationId: string;
   replyId: string;
   bubbleSequence: number;
@@ -2262,6 +2263,7 @@ export interface OpsPaginated<T> {
 export interface OpsConversationHealth {
   id: string;
   tenantId: string;
+  tenantName: string | null;
   contactId: string;
   lastMessageAt: string | null;
   outboundSentCount: number;
@@ -2274,6 +2276,7 @@ export interface OpsConversationHealth {
 export interface OpsGhlSync {
   conversationId: string;
   tenantId: string;
+  tenantName: string | null;
   eventType: string;
   metadata: Record<string, unknown> | null;
   createdAt: string;
@@ -2282,6 +2285,7 @@ export interface OpsGhlSync {
 export interface OpsErrorEvent {
   id: string;
   tenantId: string | null;
+  tenantName: string | null;
   conversationId: string | null;
   eventType: string;
   eventSource: string;

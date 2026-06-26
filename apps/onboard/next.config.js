@@ -3,6 +3,15 @@ const nextConfig = {
   reactStrictMode: true,
   output: 'standalone',
   transpilePackages: [],
+  async rewrites() {
+    const backend = process.env['BACKEND_URL'] || 'http://127.0.0.1:3001';
+    return [
+      {
+        source: '/api/v1/:path*',
+        destination: `${backend}/api/v1/:path*`,
+      },
+    ];
+  },
   async headers() {
     const securityHeaders = [
       { key: 'X-Frame-Options', value: 'DENY' },

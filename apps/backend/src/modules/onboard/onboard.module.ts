@@ -8,9 +8,10 @@ import { AgentTokenGuard } from './agent/agent-token.guard';
 import { AuthModule } from '../auth/auth.module';
 import { TenantsModule } from '../tenants/tenants.module';
 import { PromptsModule } from '../prompts/prompts.module';
+import { KbModule } from '../kb/kb.module';
 
 @Module({
-  imports: [AuthModule, forwardRef(() => TenantsModule), PromptsModule],
+  imports: [AuthModule, forwardRef(() => TenantsModule), PromptsModule, KbModule],
   controllers: [OnboardController, AgentController],
   providers: [OnboardService, OnboardAuditService, OnboardOperatorGuard, AgentTokenGuard],
   exports: [OnboardService],

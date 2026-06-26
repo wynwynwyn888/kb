@@ -16,6 +16,7 @@ import {
 import { mapOnboardToKbPlan } from './kb-sync/onboard-kb-sync.mapper';
 import { TenantsService } from '../tenants/tenants.service';
 import { BotProfilesService } from '../prompts/bot-profiles.service';
+import { KbService } from '../kb/kb.service';
 
 export interface OnboardClientSummary {
   id: string;
@@ -58,6 +59,7 @@ export class OnboardService {
     private readonly audit: OnboardAuditService,
     private readonly tenantsService: TenantsService,
     private readonly botProfilesService: BotProfilesService,
+    private readonly kbService: KbService,
   ) {}
 
   // ==========================================================================
@@ -1606,6 +1608,93 @@ export class OnboardService {
 
         throw new BadRequestException(reason);
       }
+    }
+
+    // ===== FAQ / Knowledge apply (PR 10F) =====
+    if (applyScope === 'FAQ_KNOWLEDGE_ONLY') {
+      if (!kbTenantId) {
+        throw new BadRequestException('No KB tenant found. Apply tenant identity first (PR 10D).');
+      }
+
+      const { data: faqItems } = await supabase
+        .from('faq_items')
+        .select('*')
+        .eq('project_id', projectId)
+        .eq('status', 'APPROVED');
+
+      if (!faqItems || faqItems.length === 0) {
+        throw new BadRequestException('No approved FAQ items found. Approve FAQ items first.');
+      }
+
+      let faqCreated = 0;
+      let faqSkipped = 0;
+      try {
+        for (const item of faqItems) {
+          const question = String(item['question'] ?? '');
+          const answer = String(item['answer'] ?? '');
+          if (!question || !answer) { faqSkipped++; continue; }
+
+          // Check for duplicate FAQ by question text within tenant
+          const { data: existingDoc } = await supabase
+            .from('knowledge_documents')
+            .select('id')
+            .eq('tenant_id', kbTenantId)
+            .eq('source', 'faq')
+            .eq('title', `FAQ: ${question.slice(0, 200)}`)
+            .maybeSingle();
+
+          if (existingDoc) {
+            faqSkipped++;
+            continue;
+          }
+
+          await this.kbService.createFaq(kbTenantId, question, answer);
+          faqCreated++;
+        }
+      } catch (err) {
+        const reason = `FAQ_CREATE_FAILED: ${err instanceof Error ? err.message : String(err)}`;
+        await supabase.from('sync_runs').insert({
+          id: applyRunId, project_id: projectId, target_system: 'KB', mode: 'APPLY',
+          status: 'APPLY_FAILED', idempotency_key: idempotencyKey,
+          request_payload: { parentDryRunId: syncRunId, appliedScope: 'FAQ_KNOWLEDGE_ONLY' },
+          response_payload: { reason, faqCreated, faqSkipped },
+          error_message: reason, triggered_by: actorId, version: 1, completed_at: now,
+        });
+        this.audit.log({ projectId, actorId, actorType: 'OPERATOR', action: 'sync.kb.apply_failed', resourceType: 'sync_run', resourceId: applyRunId, changes: { reason } });
+        throw new BadRequestException(reason);
+      }
+
+      await supabase.from('sync_runs').insert({
+        id: applyRunId, project_id: projectId, target_system: 'KB', mode: 'APPLY',
+        status: 'APPLIED', idempotency_key: idempotencyKey,
+        request_payload: {
+          parentDryRunId: syncRunId, dryRunSchemaVersion: schemaVersion,
+          sourceSnapshotHash: dryRunSnapshotHash, confirmedBy: actorId,
+          appliedScope: 'FAQ_KNOWLEDGE_ONLY',
+        },
+        response_payload: {
+          appliedScope: 'FAQ_KNOWLEDGE_ONLY', kbTenantId,
+          faqCreated, faqUpdated: 0, faqSkipped,
+          knowledgeSynced: true,
+          botProfileActive: false, activationDeferred: true,
+          skipped: ['BOOKING_SETTINGS', 'HANDOVER_SETTINGS', 'FOLLOW_UP_SETTINGS', 'GHL_SYNC', 'OUTBOUND_SENDING', 'BOT_ACTIVATION'],
+          noMessagesSent: true, noGhlSync: true, outboundEnabled: false,
+        },
+        triggered_by: actorId, version: 1, duration_ms: null, completed_at: now,
+      });
+
+      this.audit.log({ projectId, actorId, actorType: 'OPERATOR', action: 'sync.kb.apply_succeeded', resourceType: 'sync_run', resourceId: applyRunId, changes: { scope: 'FAQ_KNOWLEDGE_ONLY', kbTenantId: kbTenantId.slice(0, 8), faqCreated } });
+
+      return {
+        syncRunId: applyRunId, applied: true, appliedScope: 'FAQ_KNOWLEDGE_ONLY', status: 'APPLIED',
+        kbTenantId, faqCreated, faqUpdated: 0, faqSkipped,
+        knowledgeSynced: true, botProfileActive: false, activationDeferred: true,
+        skipped: ['BOOKING_SETTINGS', 'HANDOVER_SETTINGS', 'FOLLOW_UP_SETTINGS', 'GHL_SYNC', 'OUTBOUND_SENDING', 'BOT_ACTIVATION'],
+        noMessagesSent: true, noGhlSync: true, outboundEnabled: false,
+        dryRunSyncRunId: syncRunId, sourceSnapshotHash: dryRunSnapshotHash.slice(0, 8),
+        appliedAt: now, appliedBy: actorId,
+        message: 'FAQ / knowledge synced. Bot activation, booking, follow-up, handover, GHL, and outbound are not synced.',
+      };
     }
 
     // ===== Bot Profile + Prompt Config apply (PR 10E) =====

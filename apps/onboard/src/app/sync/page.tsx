@@ -209,7 +209,9 @@ function ApplyForm({ projectId, syncRunId, api, onChecked }: {
 
   const scopeLabel = scope === 'BOT_PROFILE_PROMPT_ONLY'
     ? 'Bot Profile + Prompt Config'
-    : 'Tenant + Identity Only';
+    : scope === 'FAQ_KNOWLEDGE_ONLY'
+      ? 'FAQ / Knowledge'
+      : 'Tenant + Identity Only';
 
   return (
     <div>
@@ -222,6 +224,7 @@ function ApplyForm({ projectId, syncRunId, api, onChecked }: {
             style={{ width: '100%', padding: '0.45rem 0.65rem', borderRadius: 8, border: '1px solid var(--aisbp-border, #e2e8f0)', fontSize: '0.85rem', background: 'var(--aisbp-surface, #fff)', color: 'var(--aisbp-text, #0f172a)', boxSizing: 'border-box' }}>
             <option value="">Tenant + Identity Only (default)</option>
             <option value="BOT_PROFILE_PROMPT_ONLY">Bot Profile + Prompt Config</option>
+            <option value="FAQ_KNOWLEDGE_ONLY">FAQ / Knowledge</option>
           </select>
         </div>
         <div>

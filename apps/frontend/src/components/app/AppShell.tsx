@@ -407,6 +407,9 @@ export function AppShell({ children }: { children: ReactNode }) {
                   <Link href="/app/agency/team" style={linkStyle(pathname === '/app/agency/team')}>
                     Team
                   </Link>
+                  <Link href="/app/agency/ops" style={linkStyle(pathname === '/app/agency/ops')}>
+                    Operations
+                  </Link>
                 </nav>
               )}
 

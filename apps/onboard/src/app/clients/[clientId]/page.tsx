@@ -8,7 +8,7 @@ import { StatusPill } from '@/components/StatusPill';
 import { IdentifierLabel } from '@/components/IdentifierLabel';
 import { SafetyBanner } from '@/components/SafetyBanner';
 import { useAuth } from '@/contexts/AuthContext';
-import type { OnboardClient, OnboardProject, UpdateClientInput, ApprovalEvent } from '@/types/onboard';
+import type { OnboardClient, OnboardProject, UpdateClientInput, ApprovalEvent, ProjectAnalysis, AutomationRecommendation } from '@/types/onboard';
 import { SECTION_LABELS } from '@/types/onboard';
 import { formatShortId } from '@/lib/identifiers';
 
@@ -49,6 +49,10 @@ export default function ClientDetailPage() {
   const [showReject, setShowReject] = useState(false);
   const [approving, setApproving] = useState(false);
 
+  // Analysis & Recommendations
+  const [analysis, setAnalysis] = useState<ProjectAnalysis | null>(null);
+  const [recommendations, setRecommendations] = useState<AutomationRecommendation[]>([]);
+
   const fetchData = useCallback(() => {
     if (!api) return;
     setLoading(true);
@@ -66,8 +70,9 @@ export default function ClientDetailPage() {
   const fetchApprovalData = useCallback((projectId: string) => {
     if (!api) return;
     api.getApprovalEvents(projectId).then(setApprovalEvents).catch(() => {});
-    // Fetch section statuses — backend endpoint is available via getSectionStatus
-    // For now, set all to 'PENDING' as placeholder; actual section data comes from section tables
+    api.getProjectAnalysis(projectId).then(setAnalysis).catch(() => {});
+    api.getProjectRecommendations(projectId).then(setRecommendations).catch(() => {});
+    // Fetch section statuses
     setSectionStatuses(Object.fromEntries(ALL_SECTIONS.map(s => [s, 'EMPTY'])));
   }, [api]);
 
@@ -372,6 +377,75 @@ export default function ClientDetailPage() {
                 </span>
                 <span style={{ flex: 1, color: 'var(--aisbp-text, #0f172a)' }}>{event.action.replace(/_/g, ' ')}</span>
                 <span style={{ color: 'var(--aisbp-muted, #64748b)' }}>{event.target_id}</span>
+              </div>
+            ))}
+          </div>
+        </PlaceholderCard>
+      )}
+
+      {/* AI Analysis */}
+      {analysis && (
+        <PlaceholderCard title="AI Workflow Analysis">
+          <div style={{ padding: '0.65rem 0.85rem', background: '#FEF3C7', borderRadius: 10, fontSize: '0.8rem', color: '#92400E', marginBottom: '1rem' }}>
+            AI recommendations are drafts only. No KB/GHL sync is active.
+          </div>
+          {analysis.leadSources && analysis.leadSources.length > 0 && (
+            <div style={{ marginBottom: '0.75rem' }}>
+              <span style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--aisbp-muted, #64748b)' }}>Lead Sources: </span>
+              <span style={{ fontSize: '0.85rem', color: 'var(--aisbp-text, #0f172a)' }}>{analysis.leadSources.join(', ')}</span>
+            </div>
+          )}
+          {analysis.conversationGoal && (
+            <div style={{ marginBottom: '0.75rem' }}>
+              <span style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--aisbp-muted, #64748b)' }}>Goal: </span>
+              <span style={{ fontSize: '0.85rem', color: 'var(--aisbp-text, #0f172a)' }}>{analysis.conversationGoal.replace(/_/g, ' ')}</span>
+            </div>
+          )}
+          {analysis.primaryCta && (
+            <div style={{ marginBottom: '0.75rem' }}>
+              <span style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--aisbp-muted, #64748b)' }}>Primary CTA: </span>
+              <span style={{ fontSize: '0.85rem', color: 'var(--aisbp-text, #0f172a)' }}>{analysis.primaryCta}</span>
+            </div>
+          )}
+          {analysis.conflictingWorkflows && analysis.conflictingWorkflows.length > 0 && (
+            <div style={{ marginBottom: '0.75rem' }}>
+              <span style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--aisbp-muted, #64748b)' }}>Pain Points: </span>
+              <span style={{ fontSize: '0.85rem', color: 'var(--aisbp-text, #0f172a)' }}>{analysis.conflictingWorkflows.join(', ')}</span>
+            </div>
+          )}
+        </PlaceholderCard>
+      )}
+
+      {/* Automation Recommendations */}
+      {recommendations.length > 0 && (
+        <PlaceholderCard title="Automation Recommendations">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            {recommendations.map(rec => (
+              <div
+                key={rec.id}
+                style={{
+                  padding: '0.85rem', borderRadius: 10,
+                  border: '1px solid var(--aisbp-border, #e2e8f0)',
+                  background: 'var(--aisbp-surface, #fff)',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.4rem' }}>
+                  <span style={{ fontSize: '0.9rem', fontWeight: 700, color: 'var(--aisbp-text, #0f172a)' }}>{rec.title}</span>
+                  <StatusPill status={rec.status} />
+                  <span style={{
+                    padding: '0.1rem 0.45rem', borderRadius: 999, fontSize: '0.7rem', fontWeight: 700,
+                    background: rec.riskLevel === 'LOW' ? '#DCFCE7' : rec.riskLevel === 'MEDIUM' ? '#FEF3C7' : '#FEE2E2',
+                    color: rec.riskLevel === 'LOW' ? '#16A34A' : rec.riskLevel === 'MEDIUM' ? '#D97706' : '#DC2626',
+                  }}>
+                    {rec.riskLevel} risk
+                  </span>
+                </div>
+                <p style={{ fontSize: '0.84rem', color: 'var(--aisbp-text-secondary, #334155)', margin: '0 0 0.4rem' }}>
+                  {rec.description}
+                </p>
+                <span style={{ fontSize: '0.75rem', color: 'var(--aisbp-muted, #64748b)' }}>
+                  Type: {rec.recommendationType.replace(/_/g, ' ')} · Source: {rec.source.replace(/_/g, ' ')}
+                </span>
               </div>
             ))}
           </div>

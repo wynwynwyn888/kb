@@ -54,6 +54,8 @@ import type {
   UpdateProjectInput,
   ApprovalEvent,
   SectionStatus,
+  ProjectAnalysis,
+  AutomationRecommendation,
 } from '@/types/onboard';
 
 export function createOnboardApi(token: string) {
@@ -130,6 +132,13 @@ export function createOnboardApi(token: string) {
 
     getAuditEvents: (projectId: string) =>
       apiRequest<ApprovalEvent[]>(`/onboard/projects/${projectId}/audit`, { token }),
+
+    // Analysis & Recommendations (PR 8)
+    getProjectAnalysis: (projectId: string) =>
+      apiRequest<ProjectAnalysis | null>(`/onboard/projects/${projectId}/analysis`, { token }),
+
+    getProjectRecommendations: (projectId: string) =>
+      apiRequest<AutomationRecommendation[]>(`/onboard/projects/${projectId}/recommendations`, { token }),
   };
 }
 

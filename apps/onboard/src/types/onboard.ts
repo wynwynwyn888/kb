@@ -92,3 +92,24 @@ export const SECTION_LABELS: Record<string, string> = {
   handover: 'Handover Rules',
   follow_up: 'Follow-Up Rules',
 };
+
+export interface ProjectAnalysis {
+  id: string;
+  leadSources: string[];
+  conversationGoal: string | null;
+  primaryCta: string | null;
+  conflictingWorkflows: string[];
+  sectionStatus: string;
+}
+
+export interface AutomationRecommendation {
+  id: string;
+  title: string;
+  description: string;
+  recommendationType: string;
+  riskLevel: string;
+  suggestedConfig: Record<string, unknown>;
+  status: string;
+  source: string;
+  createdAt: string;
+}

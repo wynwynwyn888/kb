@@ -173,6 +173,18 @@ export class OnboardController {
     return this.onboardService.approveProject(onboardingProjectId, user.id, body.comment);
   }
 
+  @Get('projects/:onboardingProjectId/analysis')
+  @ApiOperation({ summary: 'Get project workflow analysis (read-only)' })
+  async getProjectAnalysis(@Param('onboardingProjectId') onboardingProjectId: string) {
+    return this.onboardService.getProjectAnalysis(onboardingProjectId);
+  }
+
+  @Get('projects/:onboardingProjectId/recommendations')
+  @ApiOperation({ summary: 'Get project automation recommendations (read-only)' })
+  async getProjectRecommendations(@Param('onboardingProjectId') onboardingProjectId: string) {
+    return this.onboardService.getProjectRecommendations(onboardingProjectId);
+  }
+
   @Get('projects/:onboardingProjectId/approval-events')
   @ApiOperation({ summary: 'Get approval events for a project' })
   async getApprovalEvents(@Param('onboardingProjectId') onboardingProjectId: string) {

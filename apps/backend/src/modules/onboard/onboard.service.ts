@@ -855,6 +855,157 @@ export class OnboardService {
     return { projectId, status: 'SUBMITTED', submittedAt: now };
   }
 
+  async agentSubmitAnalysis(
+    projectId: string,
+    analysis: {
+      summary: string;
+      currentSalesWorkflow?: string;
+      leadSources?: string[];
+      qualificationProcess?: string;
+      bookingProcess?: string;
+      followUpProcess?: string;
+      handoverProcess?: string;
+      painPoints?: string[];
+      conversionRisks?: string[];
+      recommendedFocus?: string;
+      confidence?: number;
+      recommendations?: Array<{
+        title: string;
+        description: string;
+        type: string;
+        riskLevel: string;
+        businessValue?: string;
+        suggestedTrigger?: string;
+        suggestedAction?: string;
+      }>;
+    },
+    agentId: string,
+  ): Promise<{ analysisStored: boolean; recommendationsStored: number; recommendationIds: string[] }> {
+    const project = await this.getProject(projectId);
+    if (!project) throw new NotFoundException('Project not found');
+
+    const supabase = getSupabaseService();
+
+    // Upsert sales_process_maps with analysis data
+    const { data: existingMap } = await supabase
+      .from('sales_process_maps')
+      .select('id')
+      .eq('project_id', projectId)
+      .maybeSingle();
+
+    if (existingMap) {
+      await supabase
+        .from('sales_process_maps')
+        .update({
+          lead_sources: analysis.leadSources ?? [],
+          conversation_goal: mapConversationGoal(analysis.recommendedFocus),
+          primary_cta: analysis.recommendedFocus ?? null,
+          conflicting_workflows: analysis.painPoints ?? [],
+          section_status: 'COMPLETE',
+        })
+        .eq('id', existingMap['id']);
+    } else {
+      await supabase.from('sales_process_maps').insert({
+        id: randomUUID(),
+        project_id: projectId,
+        lead_sources: analysis.leadSources ?? [],
+        conversation_goal: mapConversationGoal(analysis.recommendedFocus),
+        primary_cta: analysis.recommendedFocus ?? null,
+        conflicting_workflows: analysis.painPoints ?? [],
+        section_status: 'COMPLETE',
+      });
+    }
+
+    // Store recommendations
+    const recommendationIds: string[] = [];
+    if (analysis.recommendations && analysis.recommendations.length > 0) {
+      for (const rec of analysis.recommendations) {
+        const recId = randomUUID();
+        // Map type to valid enum
+        const recType = mapRecommendationType(rec.type);
+        const recRisk = mapRiskLevel(rec.riskLevel);
+
+        await supabase.from('automation_recommendations').insert({
+          id: recId,
+          project_id: projectId,
+          title: rec.title,
+          description: rec.description,
+          recommendation_type: recType,
+          risk_level: recRisk,
+          suggested_config: {
+            businessValue: rec.businessValue,
+            suggestedTrigger: rec.suggestedTrigger,
+            suggestedAction: rec.suggestedAction,
+          },
+          status: 'SUGGESTED',
+          source: 'AI_ANALYSIS',
+        });
+        recommendationIds.push(recId);
+      }
+    }
+
+    this.audit.log({
+      projectId,
+      actorId: agentId,
+      actorType: 'AGENT',
+      action: 'analysis.submit',
+      resourceType: 'sales_process_map',
+      resourceId: projectId,
+      changes: {
+        summary: analysis.summary,
+        leadSources: analysis.leadSources,
+        recommendationCount: analysis.recommendations?.length ?? 0,
+        confidence: analysis.confidence,
+      },
+    });
+
+    return {
+      analysisStored: true,
+      recommendationsStored: recommendationIds.length,
+      recommendationIds,
+    };
+  }
+
+  async getProjectAnalysis(projectId: string): Promise<Record<string, unknown> | null> {
+    const supabase = getSupabaseService();
+    const { data } = await supabase
+      .from('sales_process_maps')
+      .select('*')
+      .eq('project_id', projectId)
+      .maybeSingle();
+
+    if (!data) return null;
+    return {
+      id: data['id'],
+      leadSources: data['lead_sources'] ?? [],
+      conversationGoal: data['conversation_goal'] ?? null,
+      primaryCta: data['primary_cta'] ?? null,
+      conflictingWorkflows: data['conflicting_workflows'] ?? [],
+      sectionStatus: data['section_status'] ?? 'EMPTY',
+    };
+  }
+
+  async getProjectRecommendations(projectId: string): Promise<Record<string, unknown>[]> {
+    const supabase = getSupabaseService();
+    const { data } = await supabase
+      .from('automation_recommendations')
+      .select('*')
+      .eq('project_id', projectId)
+      .order('created_at', { ascending: false });
+
+    return (data || []).map((r: Record<string, unknown>) => ({
+      id: r['id'],
+      title: r['title'],
+      description: r['description'],
+      recommendationType: r['recommendation_type'],
+      riskLevel: r['risk_level'],
+      suggestedConfig: r['suggested_config'] ?? {},
+      status: r['status'],
+      source: r['source'],
+      createdAt: r['created_at'],
+    }));
+  }
+
   // ==========================================================================
   // PRIVATE HELPERS
   // ==========================================================================
@@ -905,4 +1056,26 @@ export class OnboardService {
       updatedAt: new Date(String(row['updated_at'] ?? Date.now())),
     };
   }
+}
+
+function mapConversationGoal(focus?: string): string | null {
+  if (!focus) return null;
+  const lower = focus.toLowerCase();
+  if (lower.includes('book') || lower.includes('appointment')) return 'BOOK_APPOINTMENT';
+  if (lower.includes('lead') || lower.includes('qualify')) return 'QUALIFY_LEAD';
+  if (lower.includes('faq') || lower.includes('answer')) return 'ANSWER_FAQS';
+  if (lower.includes('human') || lower.includes('route')) return 'ROUTE_TO_HUMAN';
+  return 'OTHER';
+}
+
+function mapRecommendationType(type: string): string {
+  const upper = type.toUpperCase().replace(/[\s-]/g, '_');
+  const valid = ['BOOKING', 'HANDOVER', 'FOLLOW_UP', 'TAGGING', 'PROMPT', 'KNOWLEDGE'];
+  return valid.includes(upper) ? upper : 'OTHER';
+}
+
+function mapRiskLevel(level: string): string {
+  const upper = level.toUpperCase();
+  const valid = ['LOW', 'MEDIUM', 'HIGH'];
+  return valid.includes(upper) ? upper : 'MEDIUM';
 }

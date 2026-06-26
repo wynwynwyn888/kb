@@ -13,6 +13,7 @@ import { AgentTokenGuard } from './agent-token.guard';
 import { OnboardService } from '../onboard.service';
 import { CreateSessionDto } from './dto/create-session.dto';
 import { SubmitAnswersDto } from './dto/submit-answers.dto';
+import { SubmitAnalysisDto } from './dto/submit-analysis.dto';
 import type { Request } from 'express';
 
 @ApiTags('onboard-agent')
@@ -70,6 +71,17 @@ export class AgentController {
   ) {
     const agentId = this.getAgentId(req);
     return this.onboardService.agentRequestReview(projectId, agentId);
+  }
+
+  @Post('projects/:projectId/analysis')
+  @ApiOperation({ summary: 'Submit AI workflow analysis and automation recommendations' })
+  async submitAnalysis(
+    @Req() req: Request,
+    @Param('projectId') projectId: string,
+    @Body() body: SubmitAnalysisDto,
+  ) {
+    const agentId = this.getAgentId(req);
+    return this.onboardService.agentSubmitAnalysis(projectId, body, agentId);
   }
 
   @Get('projects/:projectId/status')

@@ -51,42 +51,42 @@ enum InvitationStatus {
 }
 
 model Agency {
-  id        String   @id @default(uuid())
-  name      String
-  settings  Json     @default("{}")
+  id                                        String                @id @default(uuid())
+  name                                      String
+  settings                                  Json                  @default("{}")
   /// Which provider row in agency_model_providers is used for generation (OPENAI, MINIMAX, …).
-  activeAiProvider AiProvider @default(OPENAI) @map("active_ai_provider")
+  activeAiProvider                          AiProvider            @default(OPENAI) @map("active_ai_provider")
   /// Credits applied to new subaccount wallets when created (period total baseline).
-  defaultSubaccountQuota Int @default(10000) @map("default_subaccount_quota")
+  defaultSubaccountQuota                    Int                   @default(10000) @map("default_subaccount_quota")
   /// How outbound assistant sends consume credits for workspaces under this agency (runtime reads via tenant → agency).
-  creditDeductionMethod CreditDeductionMethod @default(PER_LOGICAL_REPLY) @map("credit_deduction_method")
+  creditDeductionMethod                     CreditDeductionMethod @default(PER_LOGICAL_REPLY) @map("credit_deduction_method")
   /// Applied to new workspace `quota_wallets` rows when the workspace is created.
-  defaultAllowTemporaryOverage Boolean @default(false) @map("default_allow_temporary_overage")
-  defaultOverageLimitCredits     Int     @default(0) @map("default_overage_limit_credits")
-  defaultLowCreditWarningEnabled Boolean @default(false) @map("default_low_credit_warning_enabled")
-  defaultLowCreditWarningLevelCredits Int @default(0) @map("default_low_credit_warning_level_credits")
+  defaultAllowTemporaryOverage              Boolean               @default(false) @map("default_allow_temporary_overage")
+  defaultOverageLimitCredits                Int                   @default(0) @map("default_overage_limit_credits")
+  defaultLowCreditWarningEnabled            Boolean               @default(false) @map("default_low_credit_warning_enabled")
+  defaultLowCreditWarningLevelCredits       Int                   @default(0) @map("default_low_credit_warning_level_credits")
   /// Enabled credit thresholds (descending integers) used by automated low-credit warning sender.
-  lowCreditWarningThresholdsJson Json @default("[2000, 1000, 500, 200]") @map("low_credit_warning_thresholds_json")
+  lowCreditWarningThresholdsJson            Json                  @default("[2000, 1000, 500, 200]") @map("low_credit_warning_thresholds_json")
   /// Customizable warning template; supports {{clientName}}, {{workspaceName}}, {{remainingCredits}}, {{threshold}}, {{agencyName}}, {{resetDate}}.
-  lowCreditWarningMessageTemplate String @default("") @map("low_credit_warning_message_template") @db.Text
+  lowCreditWarningMessageTemplate           String                @default("") @map("low_credit_warning_message_template") @db.Text
   /// When true, the automated send uses the agency system workspace CRM connection.
-  lowCreditWarningSendViaAgencyWorkspace Boolean @default(true) @map("low_credit_warning_send_via_agency_workspace")
-  creditResetReminderEnabled Boolean @default(false) @map("credit_reset_reminder_enabled")
-  creditResetReminderDaysJson Json @default("[30, 14, 7, 3, 1]") @map("credit_reset_reminder_days_json")
-  creditResetReminderMessageTemplate String @default("") @map("credit_reset_reminder_message_template") @db.Text
-  creditResetReminderSendViaAgencyWorkspace Boolean @default(true) @map("credit_reset_reminder_send_via_agency_workspace")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  lowCreditWarningSendViaAgencyWorkspace    Boolean               @default(true) @map("low_credit_warning_send_via_agency_workspace")
+  creditResetReminderEnabled                Boolean               @default(false) @map("credit_reset_reminder_enabled")
+  creditResetReminderDaysJson               Json                  @default("[30, 14, 7, 3, 1]") @map("credit_reset_reminder_days_json")
+  creditResetReminderMessageTemplate        String                @default("") @map("credit_reset_reminder_message_template") @db.Text
+  creditResetReminderSendViaAgencyWorkspace Boolean               @default(true) @map("credit_reset_reminder_send_via_agency_workspace")
+  createdAt                                 DateTime              @default(now()) @map("created_at")
+  updatedAt                                 DateTime              @updatedAt @map("updated_at")
 
   // Relations
-  users          AgencyUser[]
-  tenants        Tenant[]
-  modelProviders AgencyModelProvider[]
-  systemPolicies AgencySystemPolicy[]
-  auditLogs      AuditLog[]
-  quotaAuditLogs QuotaAuditLog[]
-  userInvitations UserInvitation[]
-  workspaceCreditWarningEvents WorkspaceCreditWarningEvent[]
+  users                              AgencyUser[]
+  tenants                            Tenant[]
+  modelProviders                     AgencyModelProvider[]
+  systemPolicies                     AgencySystemPolicy[]
+  auditLogs                          AuditLog[]
+  quotaAuditLogs                     QuotaAuditLog[]
+  userInvitations                    UserInvitation[]
+  workspaceCreditWarningEvents       WorkspaceCreditWarningEvent[]
   workspaceCreditResetReminderEvents WorkspaceCreditResetReminderEvent[]
 
   @@map("agencies")
@@ -94,20 +94,20 @@ model Agency {
 
 /// Pending or completed invite for agency or workspace membership (Supabase Auth magic link).
 model UserInvitation {
-  id                   String           @id @default(uuid())
-  emailNormalized      String           @map("email_normalized")
-  emailOriginal        String           @map("email_original")
-  scope                InvitationScope
-  agencyId             String           @map("agency_id")
-  tenantId             String?          @map("tenant_id")
-  role                 String
-  invitedByProfileId   String           @map("invited_by_profile_id")
-  status               InvitationStatus @default(PENDING)
-  expiresAt            DateTime         @map("expires_at")
-  acceptedAt           DateTime?        @map("accepted_at")
-  acceptedProfileId    String?          @map("accepted_profile_id")
-  createdAt            DateTime         @default(now()) @map("created_at")
-  updatedAt            DateTime         @updatedAt @map("updated_at")
+  id                 String           @id @default(uuid())
+  emailNormalized    String           @map("email_normalized")
+  emailOriginal      String           @map("email_original")
+  scope              InvitationScope
+  agencyId           String           @map("agency_id")
+  tenantId           String?          @map("tenant_id")
+  role               String
+  invitedByProfileId String           @map("invited_by_profile_id")
+  status             InvitationStatus @default(PENDING)
+  expiresAt          DateTime         @map("expires_at")
+  acceptedAt         DateTime?        @map("accepted_at")
+  acceptedProfileId  String?          @map("accepted_profile_id")
+  createdAt          DateTime         @default(now()) @map("created_at")
+  updatedAt          DateTime         @updatedAt @map("updated_at")
 
   agency Agency  @relation(fields: [agencyId], references: [id], onDelete: Cascade)
   tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -147,50 +147,50 @@ model AgencyUser {
 // ============================================================================
 
 model Tenant {
-  id            String   @id @default(uuid())
-  agencyId      String   @map("agency_id")
-  name          String
+  id                 String   @id @default(uuid())
+  agencyId           String   @map("agency_id")
+  name               String
   /// Compatibility mirror of `tenant_ghl_connections.ghl_location_id` when CRM is connected; not authoritative for webhook routing.
-  ghlLocationId String?  @map("ghl_location_id")
-  status        String   @default("pending") // active, suspended, pending
-  settings      Json     @default("{}")
-  botEnabled    Boolean  @default(true)  @map("bot_enabled")
-  handoverPaused Boolean @default(false) @map("handover_paused")
+  ghlLocationId      String?  @map("ghl_location_id")
+  status             String   @default("pending") // active, suspended, pending
+  settings           Json     @default("{}")
+  botEnabled         Boolean  @default(true) @map("bot_enabled")
+  handoverPaused     Boolean  @default(false) @map("handover_paused")
   /// True for the single internal agency workspace per agency (not a billable client workspace).
-  isAgencyWorkspace Boolean @default(false) @map("is_agency_workspace")
+  isAgencyWorkspace  Boolean  @default(false) @map("is_agency_workspace")
   /// Bypasses credit enforcement (used by the agency system workspace).
-  creditsUnlimited  Boolean @default(false) @map("credits_unlimited")
+  creditsUnlimited   Boolean  @default(false) @map("credits_unlimited")
   /// Client contact profile used by automated low-credit warning send (phone is the SMS recipient).
-  clientContactName  String? @map("client_contact_name")
-  clientContactPhone String? @map("client_contact_phone")
-  clientContactEmail String? @map("client_contact_email")
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt @map("updated_at")
+  clientContactName  String?  @map("client_contact_name")
+  clientContactPhone String?  @map("client_contact_phone")
+  clientContactEmail String?  @map("client_contact_email")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
 
   // Relations
-  agency         Agency                @relation(fields: [agencyId], references: [id], onDelete: Cascade)
-  users          TenantUser[]
-  ghlConnection  TenantGhlConnection?
-  promptConfigs  TenantPromptConfig[]
-  modelOverrides TenantModelOverride[]
-  documents      KnowledgeDocument[]
-  conversations  Conversation[]
-  quotaWallet    QuotaWallet?
-  actionLogs     ActionLog[]
-  actionIntents  ActionIntent[]
-  auditLogs      AuditLog[]
-  webhookEvents  WebhookEvent[]
-  orchestrationLogs OrchestrationLog[]
-  quotaAuditLogs    QuotaAuditLog[]
-  userInvitations   UserInvitation[]
-  bookingSettings    TenantBookingSettings?
-  taggingSettings    TenantTaggingSettings?
-  tagRules           TenantTagRule[]
-  followUpSettings   TenantFollowUpSettings?
-  humanEscalationSettings TenantHumanEscalationSettings?
-  botProfiles        TenantBotProfile[]
-  knowledgeVaults  KnowledgeVault[]
-  creditWarningEvents WorkspaceCreditWarningEvent[]
+  agency                    Agency                              @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  users                     TenantUser[]
+  ghlConnection             TenantGhlConnection?
+  promptConfigs             TenantPromptConfig[]
+  modelOverrides            TenantModelOverride[]
+  documents                 KnowledgeDocument[]
+  conversations             Conversation[]
+  quotaWallet               QuotaWallet?
+  actionLogs                ActionLog[]
+  actionIntents             ActionIntent[]
+  auditLogs                 AuditLog[]
+  webhookEvents             WebhookEvent[]
+  orchestrationLogs         OrchestrationLog[]
+  quotaAuditLogs            QuotaAuditLog[]
+  userInvitations           UserInvitation[]
+  bookingSettings           TenantBookingSettings?
+  taggingSettings           TenantTaggingSettings?
+  tagRules                  TenantTagRule[]
+  followUpSettings          TenantFollowUpSettings?
+  humanEscalationSettings   TenantHumanEscalationSettings?
+  botProfiles               TenantBotProfile[]
+  knowledgeVaults           KnowledgeVault[]
+  creditWarningEvents       WorkspaceCreditWarningEvent[]
   creditResetReminderEvents WorkspaceCreditResetReminderEvent[]
 
   @@unique([ghlLocationId])
@@ -201,20 +201,20 @@ model Tenant {
 /// Tracking log of automated low-credit warning send attempts (SENT / SKIPPED / FAILED).
 /// One SENT per workspace + threshold + billing period is enforced via partial unique index.
 model WorkspaceCreditWarningEvent {
-  id                  String   @id @default(uuid())
-  agencyId            String   @map("agency_id")
-  tenantId            String   @map("tenant_id")
-  threshold           Int
-  balanceAtSend       Int      @map("balance_at_send")
+  id                 String    @id @default(uuid())
+  agencyId           String    @map("agency_id")
+  tenantId           String    @map("tenant_id")
+  threshold          Int
+  balanceAtSend      Int       @map("balance_at_send")
   /// SENT | SKIPPED | FAILED — enforced by DB CHECK constraint.
-  status              String
+  status             String
   /// Short reason code (e.g. agency_workspace_crm_not_connected, client_phone_missing, send_failed_*).
-  reason              String?
+  reason             String?
   /// First ~500 chars of the message (no tokens / no PII keys).
-  messagePreview      String?  @map("message_preview")
-  billingPeriodStart  DateTime? @map("billing_period_start")
-  billingPeriodEnd    DateTime? @map("billing_period_end")
-  createdAt           DateTime @default(now()) @map("created_at")
+  messagePreview     String?   @map("message_preview")
+  billingPeriodStart DateTime? @map("billing_period_start")
+  billingPeriodEnd   DateTime? @map("billing_period_end")
+  createdAt          DateTime  @default(now()) @map("created_at")
 
   agency Agency @relation(fields: [agencyId], references: [id], onDelete: Cascade)
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -226,17 +226,17 @@ model WorkspaceCreditWarningEvent {
 
 /// Tracking log of automated credit reset / expiry reminder send attempts.
 model WorkspaceCreditResetReminderEvent {
-  id                  String   @id @default(uuid())
-  agencyId            String   @map("agency_id")
-  tenantId            String   @map("tenant_id")
-  daysBeforeReset     Int      @map("days_before_reset")
-  balanceAtSend       Int      @map("balance_at_send")
-  status              String
-  reason              String?
-  messagePreview      String?  @map("message_preview")
-  billingPeriodStart  DateTime? @map("billing_period_start")
-  billingPeriodEnd    DateTime? @map("billing_period_end")
-  createdAt           DateTime @default(now()) @map("created_at")
+  id                 String    @id @default(uuid())
+  agencyId           String    @map("agency_id")
+  tenantId           String    @map("tenant_id")
+  daysBeforeReset    Int       @map("days_before_reset")
+  balanceAtSend      Int       @map("balance_at_send")
+  status             String
+  reason             String?
+  messagePreview     String?   @map("message_preview")
+  billingPeriodStart DateTime? @map("billing_period_start")
+  billingPeriodEnd   DateTime? @map("billing_period_end")
+  createdAt          DateTime  @default(now()) @map("created_at")
 
   agency Agency @relation(fields: [agencyId], references: [id], onDelete: Cascade)
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -254,10 +254,10 @@ enum BookingMode {
 
 /// Master toggle for CRM automatic tagging (subaccount).
 model TenantTaggingSettings {
-  tenantId                  String   @id @map("tenant_id")
-  automaticTaggingEnabled   Boolean  @default(false) @map("automatic_tagging_enabled")
-  createdAt                 DateTime @default(now()) @map("created_at")
-  updatedAt                 DateTime @updatedAt @map("updated_at")
+  tenantId                String   @id @map("tenant_id")
+  automaticTaggingEnabled Boolean  @default(false) @map("automatic_tagging_enabled")
+  createdAt               DateTime @default(now()) @map("created_at")
+  updatedAt               DateTime @updatedAt @map("updated_at")
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
@@ -278,21 +278,21 @@ enum ConfidenceThreshold {
 
 /// Configurable CRM tag rules (AI/classifier matches rule IDs only; never invent tags).
 model TenantTagRule {
-  id                      String               @id @default(uuid())
-  tenantId                String               @map("tenant_id")
-  enabled                 Boolean              @default(true)
-  autoApply               Boolean              @default(false) @map("auto_apply")
-  ruleName                String               @map("rule_name")
-  ruleDescription         String               @map("rule_description") @db.Text
+  id                  String              @id @default(uuid())
+  tenantId            String              @map("tenant_id")
+  enabled             Boolean             @default(true)
+  autoApply           Boolean             @default(false) @map("auto_apply")
+  ruleName            String              @map("rule_name")
+  ruleDescription     String              @map("rule_description") @db.Text
   /// Optional explicit phrases for KEYWORD / HYBRID (otherwise description tokens are used).
-  keywordsJson            Json                 @default("[]") @map("keywords_json")
-  crmTagId                String?              @map("crm_tag_id")
-  crmTagName              String               @map("crm_tag_name")
-  matchMode               TagMatchMode         @default(AI) @map("match_mode")
-  confidenceThreshold     ConfidenceThreshold  @default(NORMAL) @map("confidence_threshold")
-  priority                Int                  @default(0)
-  createdAt               DateTime             @default(now()) @map("created_at")
-  updatedAt               DateTime             @updatedAt @map("updated_at")
+  keywordsJson        Json                @default("[]") @map("keywords_json")
+  crmTagId            String?             @map("crm_tag_id")
+  crmTagName          String              @map("crm_tag_name")
+  matchMode           TagMatchMode        @default(AI) @map("match_mode")
+  confidenceThreshold ConfidenceThreshold @default(NORMAL) @map("confidence_threshold")
+  priority            Int                 @default(0)
+  createdAt           DateTime            @default(now()) @map("created_at")
+  updatedAt           DateTime            @updatedAt @map("updated_at")
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
@@ -302,23 +302,23 @@ model TenantTagRule {
 
 /// Subaccount automation: CRM calendar + booking field configuration (settings only until flows ship).
 model TenantBookingSettings {
-  tenantId                 String      @id @map("tenant_id")
-  enabled                  Boolean     @default(false)
-  bookingMode              BookingMode @default(COLLECT_DETAILS_ONLY) @map("booking_mode")
-  defaultGhlCalendarId     String?     @map("default_ghl_calendar_id")
-  defaultGhlCalendarName   String?     @map("default_ghl_calendar_name")
+  tenantId                     String      @id @map("tenant_id")
+  enabled                      Boolean     @default(false)
+  bookingMode                  BookingMode @default(COLLECT_DETAILS_ONLY) @map("booking_mode")
+  defaultGhlCalendarId         String?     @map("default_ghl_calendar_id")
+  defaultGhlCalendarName       String?     @map("default_ghl_calendar_name")
   /// Per core field: `{ "name": { "enabled": true, "required": true }, ... }`
-  coreFieldsJson           Json        @default("{}") @map("core_fields_json")
-  customFieldsJson         Json        @default("[]") @map("custom_fields_json")
-  serviceMenuOptions       Json?       @map("service_menu_options")
-  maxBookingsPerSlot       Int         @default(1) @map("max_bookings_per_slot")
+  coreFieldsJson               Json        @default("{}") @map("core_fields_json")
+  customFieldsJson             Json        @default("[]") @map("custom_fields_json")
+  serviceMenuOptions           Json?       @map("service_menu_options")
+  maxBookingsPerSlot           Int         @default(1) @map("max_bookings_per_slot")
   /// After live booking confirms, send booking summary SMS to this staff number (GHL).
-  internalBookingAlertEnabled Boolean @default(false) @map("internal_booking_alert_enabled")
-  internalBookingAlertNumber  String? @map("internal_booking_alert_number")
-  internalBookingAlertChannel String @default("GHL_MESSAGE") @map("internal_booking_alert_channel")
-  internalBookingAlertTemplate String? @map("internal_booking_alert_template")
-  createdAt                DateTime    @default(now()) @map("created_at")
-  updatedAt                DateTime    @updatedAt @map("updated_at")
+  internalBookingAlertEnabled  Boolean     @default(false) @map("internal_booking_alert_enabled")
+  internalBookingAlertNumber   String?     @map("internal_booking_alert_number")
+  internalBookingAlertChannel  String      @default("GHL_MESSAGE") @map("internal_booking_alert_channel")
+  internalBookingAlertTemplate String?     @map("internal_booking_alert_template")
+  createdAt                    DateTime    @default(now()) @map("created_at")
+  updatedAt                    DateTime    @updatedAt @map("updated_at")
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
@@ -327,21 +327,21 @@ model TenantBookingSettings {
 
 /// Follow-up automation settings (stored only; scheduler in a later milestone).
 model TenantFollowUpSettings {
-  tenantId                  String   @id @map("tenant_id")
-  enabled                   Boolean  @default(false)
-  maxFollowUps              Int      @default(3) @map("max_follow_ups")
-  stopOnCustomerReply       Boolean  @default(true) @map("stop_on_customer_reply")
-  stopOnBookingCompleted    Boolean  @default(true) @map("stop_on_booking_completed")
-  stopOnEscalated           Boolean  @default(true) @map("stop_on_escalated")
-  stopOnOptOut              Boolean  @default(true) @map("stop_on_opt_out")
-  businessHoursOnly         Boolean  @default(false) @map("business_hours_only")
+  tenantId                String   @id @map("tenant_id")
+  enabled                 Boolean  @default(false)
+  maxFollowUps            Int      @default(3) @map("max_follow_ups")
+  stopOnCustomerReply     Boolean  @default(true) @map("stop_on_customer_reply")
+  stopOnBookingCompleted  Boolean  @default(true) @map("stop_on_booking_completed")
+  stopOnEscalated         Boolean  @default(true) @map("stop_on_escalated")
+  stopOnOptOut            Boolean  @default(true) @map("stop_on_opt_out")
+  businessHoursOnly       Boolean  @default(false) @map("business_hours_only")
   /// BUSINESS (agency/workspace TZ) or CONTACT — stored for future scheduler.
-  activeHoursTimezoneMode   String   @default("BUSINESS") @map("active_hours_timezone_mode")
+  activeHoursTimezoneMode String   @default("BUSINESS") @map("active_hours_timezone_mode")
   /// Per weekday windows: `{ "mon": { "enabled", "start", "end" }, ... }`
-  activeHoursWindowsJson    Json     @default("{}") @map("active_hours_windows_json")
-  stepsJson                 Json     @default("[]") @map("steps_json")
-  createdAt                 DateTime @default(now()) @map("created_at")
-  updatedAt                 DateTime @updatedAt @map("updated_at")
+  activeHoursWindowsJson  Json     @default("{}") @map("active_hours_windows_json")
+  stepsJson               Json     @default("[]") @map("steps_json")
+  createdAt               DateTime @default(now()) @map("created_at")
+  updatedAt               DateTime @updatedAt @map("updated_at")
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
@@ -350,12 +350,12 @@ model TenantFollowUpSettings {
 
 /// Human escalation: internal team notify + runtime handover when customer asks for a person.
 model TenantHumanEscalationSettings {
-  tenantId                 String   @id @map("tenant_id")
-  enabled                  Boolean  @default(false)
-  teamNotificationNumber   String?  @map("team_notification_number")
-  optionalMessagePrefix    String?  @map("optional_message_prefix")
-  createdAt                DateTime @default(now()) @map("created_at")
-  updatedAt                DateTime @updatedAt @map("updated_at")
+  tenantId               String   @id @map("tenant_id")
+  enabled                Boolean  @default(false)
+  teamNotificationNumber String?  @map("team_notification_number")
+  optionalMessagePrefix  String?  @map("optional_message_prefix")
+  createdAt              DateTime @default(now()) @map("created_at")
+  updatedAt              DateTime @updatedAt @map("updated_at")
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
@@ -364,25 +364,25 @@ model TenantHumanEscalationSettings {
 
 /// Per-conversation scheduled follow-up jobs (worker-driven).
 model ConversationFollowUpJob {
-  id              String   @id @default(uuid())
-  tenantId        String   @map("tenant_id")
-  conversationId  String   @map("conversation_id")
-  contactId       String   @map("contact_id")
-  ghlLocationId   String   @map("ghl_location_id")
-  stepNumber      Int      @map("step_number")
-  scheduleVersion Int      @map("schedule_version")
-  scheduledAt     DateTime @map("scheduled_at")
-  dueAt           DateTime @map("due_at")
-  status          String   @default("PENDING")
-  decidedAt       DateTime? @map("decided_at")
-  sentAt          DateTime? @map("sent_at")
-  decisionReason  String?  @map("decision_reason")
-  decisionMeta    Json     @default("{}") @map("decision_meta")
-  lastDeferReason String?  @map("last_defer_reason")
-  lastDeferMeta   Json     @default("{}") @map("last_defer_meta")
-  stepSnapshotJson Json    @default("{}") @map("step_snapshot_json")
-  createdAt       DateTime @default(now()) @map("created_at")
-  updatedAt       DateTime @updatedAt @map("updated_at")
+  id               String    @id @default(uuid())
+  tenantId         String    @map("tenant_id")
+  conversationId   String    @map("conversation_id")
+  contactId        String    @map("contact_id")
+  ghlLocationId    String    @map("ghl_location_id")
+  stepNumber       Int       @map("step_number")
+  scheduleVersion  Int       @map("schedule_version")
+  scheduledAt      DateTime  @map("scheduled_at")
+  dueAt            DateTime  @map("due_at")
+  status           String    @default("PENDING")
+  decidedAt        DateTime? @map("decided_at")
+  sentAt           DateTime? @map("sent_at")
+  decisionReason   String?   @map("decision_reason")
+  decisionMeta     Json      @default("{}") @map("decision_meta")
+  lastDeferReason  String?   @map("last_defer_reason")
+  lastDeferMeta    Json      @default("{}") @map("last_defer_meta")
+  stepSnapshotJson Json      @default("{}") @map("step_snapshot_json")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
 
   @@index([tenantId])
   @@index([conversationId])
@@ -407,12 +407,12 @@ enum GhlConnectionStatus {
 }
 
 model TenantUser {
-  id        String    @id @default(uuid())
-  tenantId  String    @map("tenant_id")
-  profileId String    @map("profile_id")
+  id        String     @id @default(uuid())
+  tenantId  String     @map("tenant_id")
+  profileId String     @map("profile_id")
   role      TenantRole @default(VIEWER)
-  createdAt DateTime  @default(now()) @map("created_at")
-  updatedAt DateTime  @updatedAt @map("updated_at")
+  createdAt DateTime   @default(now()) @map("created_at")
+  updatedAt DateTime   @updatedAt @map("updated_at")
 
   // Relations
   tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -431,31 +431,31 @@ model TenantUser {
 /// Partial unique index `tenant_ghl_connections_connected_location_uidx` (migration 20260511143000)
 /// enforces at most one CONNECTED row per non-empty `ghl_location_id`.
 model TenantGhlConnection {
-  id                     String            @id @default(uuid())
-  tenantId               String            @unique @map("tenant_id")
-  ghlLocationId          String            @map("ghl_location_id")
+  id            String @id @default(uuid())
+  tenantId      String @unique @map("tenant_id")
+  ghlLocationId String @map("ghl_location_id")
 
   // Private Integration token - stored encrypted
   // TODO: Implement proper encryption at rest (e.g., Supabase Vault, AWS KMS, or app-level AES)
   // For now, base64 encoding as placeholder - DO NOT use in production without real encryption
-  privateTokenEncrypted  String            @map("private_token_encrypted")
+  privateTokenEncrypted String @map("private_token_encrypted")
 
   // Token metadata (non-secret, stored plaintext)
-  scopesSnapshot         String?           @map("scopes_snapshot")
-  tokenIssuedAt          DateTime?         @map("token_issued_at")
-  tokenExpiresAt         DateTime?         @map("token_expires_at")
+  scopesSnapshot String?   @map("scopes_snapshot")
+  tokenIssuedAt  DateTime? @map("token_issued_at")
+  tokenExpiresAt DateTime? @map("token_expires_at")
 
   // Connection state
-  status                 GhlConnectionStatus @default(DISCONNECTED)
-  verifiedAt             DateTime?         @map("verified_at")
-  lastHealthCheckAt      DateTime?         @map("last_health_check_at")
-  lastError              String?           @map("last_error")
+  status            GhlConnectionStatus @default(DISCONNECTED)
+  verifiedAt        DateTime?           @map("verified_at")
+  lastHealthCheckAt DateTime?           @map("last_health_check_at")
+  lastError         String?             @map("last_error")
 
   // Safe metadata (non-secret)
-  metadata               Json             @default("{}")
+  metadata Json @default("{}")
 
-  createdAt              DateTime          @default(now()) @map("created_at")
-  updatedAt              DateTime          @updatedAt @map("updated_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   // Relations
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -514,7 +514,7 @@ model TenantPromptConfig {
   id              String   @id @default(uuid())
   tenantId        String   @map("tenant_id")
   name            String
-  systemPrompt    String   @db.Text @map("system_prompt")
+  systemPrompt    String   @map("system_prompt") @db.Text
   temperature     Float    @default(0.7)
   modelOverride   String?  @map("model_override")
   maxTokens       Int?     @map("max_tokens")
@@ -534,24 +534,24 @@ model TenantPromptConfig {
 
 /// Per-workspace assistant / bot profile (persona, goals, notes, behavior). One active per tenant.
 model TenantBotProfile {
-  id                        String   @id @default(uuid())
-  tenantId                  String   @map("tenant_id")
-  name                      String
-  description               String   @default("") @db.Text
-  persona                   String   @default("") @db.Text
-  conversationGoals         String   @default("") @map("conversation_goals") @db.Text
-  businessNotes             String   @default("") @map("business_notes") @db.Text
-  toneRules                 String   @default("") @map("tone_rules") @db.Text
-  bookingBehaviorNotes      String   @default("") @map("booking_behavior_notes") @db.Text
-  escalationBehaviorNotes   String   @default("") @map("escalation_behavior_notes") @db.Text
-  knowledgeScopeNotes       String   @default("") @map("knowledge_scope_notes") @db.Text
+  id                      String   @id @default(uuid())
+  tenantId                String   @map("tenant_id")
+  name                    String
+  description             String   @default("") @db.Text
+  persona                 String   @default("") @db.Text
+  conversationGoals       String   @default("") @map("conversation_goals") @db.Text
+  businessNotes           String   @default("") @map("business_notes") @db.Text
+  toneRules               String   @default("") @map("tone_rules") @db.Text
+  bookingBehaviorNotes    String   @default("") @map("booking_behavior_notes") @db.Text
+  escalationBehaviorNotes String   @default("") @map("escalation_behavior_notes") @db.Text
+  knowledgeScopeNotes     String   @default("") @map("knowledge_scope_notes") @db.Text
   /// all_workspace_knowledge | selected_collections (legacy; use knowledgeAccessMode for vaults)
-  knowledgeScopeMode        String   @default("all_workspace_knowledge") @map("knowledge_scope_mode")
+  knowledgeScopeMode      String   @default("all_workspace_knowledge") @map("knowledge_scope_mode")
   /// all_vaults | selected_vaults — controls KB retrieval for this profile when active
-  knowledgeAccessMode       String   @default("all_vaults") @map("knowledge_access_mode")
-  isActive                  Boolean  @default(false) @map("is_active")
-  createdAt                 DateTime @default(now()) @map("created_at")
-  updatedAt                 DateTime @updatedAt @map("updated_at")
+  knowledgeAccessMode     String   @default("all_vaults") @map("knowledge_access_mode")
+  isActive                Boolean  @default(false) @map("is_active")
+  createdAt               DateTime @default(now()) @map("created_at")
+  updatedAt               DateTime @updatedAt @map("updated_at")
 
   tenant              Tenant                           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   promptConfig        TenantPromptConfig?
@@ -563,14 +563,14 @@ model TenantBotProfile {
 }
 
 model TenantModelOverride {
-  id        String     @id @default(uuid())
-  tenantId  String     @map("tenant_id")
-  provider  AiProvider
-  model     String
-  temperature Float?   @map("temperature")
-  maxTokens Int?       @map("max_tokens")
-  createdAt DateTime   @default(now()) @map("created_at")
-  updatedAt DateTime   @updatedAt @map("updated_at")
+  id          String     @id @default(uuid())
+  tenantId    String     @map("tenant_id")
+  provider    AiProvider
+  model       String
+  temperature Float?     @map("temperature")
+  maxTokens   Int?       @map("max_tokens")
+  createdAt   DateTime   @default(now()) @map("created_at")
+  updatedAt   DateTime   @updatedAt @map("updated_at")
 
   // Relations
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -623,19 +623,19 @@ enum DocumentStatus {
 
 /// Explicit KB entry kind for APIs (faq | rich_text | file | manual | …).
 model KnowledgeDocument {
-  id        String         @id @default(uuid())
-  tenantId  String         @map("tenant_id")
-  vaultId   String         @map("vault_id")
-  title     String
-  source    String
-  mimeType  String         @map("mime_type")
-  size      Int
+  id           String         @id @default(uuid())
+  tenantId     String         @map("tenant_id")
+  vaultId      String         @map("vault_id")
+  title        String
+  source       String
+  mimeType     String         @map("mime_type")
+  size         Int
   /// faq | rich_text | file | manual | …
-  documentKind String      @default("manual") @map("document_kind")
-  status    DocumentStatus @default(PENDING)
-  metadata  Json           @default("{}")
-  createdAt DateTime       @default(now()) @map("created_at")
-  updatedAt DateTime       @updatedAt @map("updated_at")
+  documentKind String         @default("manual") @map("document_kind")
+  status       DocumentStatus @default(PENDING)
+  metadata     Json           @default("{}")
+  createdAt    DateTime       @default(now()) @map("created_at")
+  updatedAt    DateTime       @updatedAt @map("updated_at")
 
   // Relations
   tenant Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -650,12 +650,12 @@ model KnowledgeDocument {
 // Note: embedding column will be added later when pgvector is enabled
 // For now, we store chunks without vectors
 model KnowledgeChunk {
-  id          String   @id @default(uuid())
-  documentId  String   @map("document_id")
-  content     String   @db.Text
-  tokenCount  Int      @map("token_count")
-  metadata    Json     @default("{}")
-  createdAt   DateTime @default(now()) @map("created_at")
+  id         String   @id @default(uuid())
+  documentId String   @map("document_id")
+  content    String   @db.Text
+  tokenCount Int      @map("token_count")
+  metadata   Json     @default("{}")
+  createdAt  DateTime @default(now()) @map("created_at")
 
   // Relations
   document KnowledgeDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
@@ -696,11 +696,11 @@ model Conversation {
   updatedAt         DateTime            @updatedAt @map("updated_at")
 
   // Relations
-  tenant     Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  messages   Message[]
-  handovers  HandoverEvent[]
-  actionLogs ActionLog[]
-  actionIntents ActionIntent[]
+  tenant           Tenant                        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  messages         Message[]
+  handovers        HandoverEvent[]
+  actionLogs       ActionLog[]
+  actionIntents    ActionIntent[]
   automationEvents ConversationAutomationEvent[]
 
   @@unique([ghlConversationId])
@@ -730,14 +730,14 @@ enum ContentType {
 }
 
 model Message {
-  id             String          @id @default(uuid())
-  conversationId String          @map("conversation_id")
+  id             String           @id @default(uuid())
+  conversationId String           @map("conversation_id")
   direction      MessageDirection
   sender         MessageSender
-  content        String          @db.Text
-  contentType    ContentType     @default(TEXT)
-  metadata       Json            @default("{}")
-  createdAt      DateTime        @default(now()) @map("created_at")
+  content        String           @db.Text
+  contentType    ContentType      @default(TEXT)
+  metadata       Json             @default("{}")
+  createdAt      DateTime         @default(now()) @map("created_at")
 
   // Relations
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
@@ -763,15 +763,15 @@ enum HandoverStatus {
 }
 
 model HandoverEvent {
-  id            String         @id @default(uuid())
-  conversationId String        @map("conversation_id")
-  type          HandoverType
-  status        HandoverStatus @default(ACTIVE)
-  initiatedBy   String         @map("initiated_by") // contact, ai, agent
-  note          String?
+  id             String         @id @default(uuid())
+  conversationId String         @map("conversation_id")
+  type           HandoverType
+  status         HandoverStatus @default(ACTIVE)
+  initiatedBy    String         @map("initiated_by") // contact, ai, agent
+  note           String?
   resumedAt      DateTime?      @map("resumed_at")
-  createdAt     DateTime       @default(now()) @map("created_at")
-  updatedAt     DateTime       @updatedAt @map("updated_at")
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt @map("updated_at")
 
   // Relations
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
@@ -786,14 +786,14 @@ model HandoverEvent {
 // ============================================================================
 
 model ConversationAutomationEvent {
-  id             String    @id @default(uuid())
-  conversationId String    @map("conversation_id")
-  previousState  String?   @map("previous_state")
-  newState       String    @map("new_state")
-  actorId        String?   @map("actor_id")
-  actorEmail     String?   @map("actor_email")
+  id             String   @id @default(uuid())
+  conversationId String   @map("conversation_id")
+  previousState  String?  @map("previous_state")
+  newState       String   @map("new_state")
+  actorId        String?  @map("actor_id")
+  actorEmail     String?  @map("actor_email")
   reason         String?
-  createdAt      DateTime  @default(now()) @map("created_at")
+  createdAt      DateTime @default(now()) @map("created_at")
 
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
@@ -806,20 +806,20 @@ model ConversationAutomationEvent {
 // ============================================================================
 
 model QuotaWallet {
-  id          String   @id @default(uuid())
-  tenantId    String   @unique @map("tenant_id")
-  totalQuota  Int      @default(0) @map("total_quota")
-  usedQuota   Int      @default(0) @map("used_quota")
+  id                   String   @id @default(uuid())
+  tenantId             String   @unique @map("tenant_id")
+  totalQuota           Int      @default(0) @map("total_quota")
+  usedQuota            Int      @default(0) @map("used_quota")
   /// Allow balance to go below zero (credits model).
-  allowNegativeCredits Boolean @default(false) @map("allow_negative_credits")
+  allowNegativeCredits Boolean  @default(false) @map("allow_negative_credits")
   /// Minimum allowed balance (negative). Block when balance <= limit.
-  negativeCreditLimit  Int     @default(0) @map("negative_credit_limit")
+  negativeCreditLimit  Int      @default(0) @map("negative_credit_limit")
   /// When balance <= threshold, surface warning in UI.
-  lowCreditThreshold   Int     @default(0) @map("low_credit_threshold")
-  periodStart DateTime @map("period_start")
-  periodEnd   DateTime @map("period_end")
-  createdAt   DateTime @default(now()) @map("created_at")
-  updatedAt   DateTime @updatedAt @map("updated_at")
+  lowCreditThreshold   Int      @default(0) @map("low_credit_threshold")
+  periodStart          DateTime @map("period_start")
+  periodEnd            DateTime @map("period_end")
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
 
   // Relations
   tenant Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -834,21 +834,21 @@ enum QuotaTransactionType {
 }
 
 model QuotaLedger {
-  id            String              @id @default(uuid())
-  walletId      String              @map("wallet_id")
-  amount        Int
-  type          QuotaTransactionType
+  id              String               @id @default(uuid())
+  walletId        String               @map("wallet_id")
+  amount          Int
+  type            QuotaTransactionType
   /// Higher-level movement category for Credits UI + reporting.
-  movementType  String?             @map("movement_type")
+  movementType    String?              @map("movement_type")
   /// Wallet balance after this movement (optional for legacy rows).
-  balanceAfter  Int?                @map("balance_after")
+  balanceAfter    Int?                 @map("balance_after")
   /// Idempotency key to prevent double-debits on retries.
-  idempotencyKey String?            @map("idempotency_key")
-  description   String
-  conversationId String?            @map("conversation_id")
-  metadata      Json?               @map("metadata")
-  createdByUserId String?           @map("created_by_user_id")
-  createdAt     DateTime            @default(now()) @map("created_at")
+  idempotencyKey  String?              @map("idempotency_key")
+  description     String
+  conversationId  String?              @map("conversation_id")
+  metadata        Json?                @map("metadata")
+  createdByUserId String?              @map("created_by_user_id")
+  createdAt       DateTime             @default(now()) @map("created_at")
 
   // Relations
   wallet QuotaWallet @relation(fields: [walletId], references: [id], onDelete: Cascade)
@@ -919,7 +919,7 @@ model ActionLog {
   createdAt      DateTime     @default(now()) @map("created_at")
 
   // Relations
-  tenant      Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
 
   @@index([tenantId])
@@ -931,7 +931,7 @@ model ActionIntent {
   tenantId       String             @map("tenant_id")
   conversationId String?            @map("conversation_id")
   actionType     ActionType         @map("action_type")
-  source         String             @default("AI")       @map("source")
+  source         String             @default("AI") @map("source")
   status         ActionIntentStatus @default(SUGGESTED) @map("status")
   params         Json               @default("{}")
   reason         String?
@@ -939,7 +939,7 @@ model ActionIntent {
   executedAt     DateTime?          @map("executed_at")
   createdAt      DateTime           @default(now()) @map("created_at")
 
-  tenant      Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   conversation Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
 
   @@unique([tenantId, conversationId, actionType, source])
@@ -954,16 +954,16 @@ model ActionIntent {
 // ============================================================================
 
 model AuditLog {
-  id          String   @id @default(uuid())
-  agencyId    String   @map("agency_id")
-  profileId   String   @map("profile_id")
-  tenantId    String?  @map("tenant_id")
-  action      String
-  resource    String
-  resourceId  String?  @map("resource_id")
-  changes     Json     @default("{}")
-  ipAddress   String?  @map("ip_address")
-  createdAt   DateTime @default(now()) @map("created_at")
+  id         String   @id @default(uuid())
+  agencyId   String   @map("agency_id")
+  profileId  String   @map("profile_id")
+  tenantId   String?  @map("tenant_id")
+  action     String
+  resource   String
+  resourceId String?  @map("resource_id")
+  changes    Json     @default("{}")
+  ipAddress  String?  @map("ip_address")
+  createdAt  DateTime @default(now()) @map("created_at")
 
   // Relations
   agency Agency  @relation(fields: [agencyId], references: [id], onDelete: Cascade)
@@ -1004,21 +1004,21 @@ enum WebhookProcessingStatus {
 }
 
 model WebhookEvent {
-  id                    String                   @id @default(uuid())
-  tenantId              String                   @map("tenant_id")
-  externalEventId       String                   @map("external_event_id")
-  dedupeKey             String                   @map("dedupe_key")
+  id                    String                  @id @default(uuid())
+  tenantId              String                  @map("tenant_id")
+  externalEventId       String                  @map("external_event_id")
+  dedupeKey             String                  @map("dedupe_key")
   provider              WebhookProvider         @default(GHL)
-  eventType             String                   @map("event_type")
-  rawPayloadJson        Json                     @map("raw_payload_json")
-  normalizedPayloadJson Json?                    @map("normalized_payload_json")
+  eventType             String                  @map("event_type")
+  rawPayloadJson        Json                    @map("raw_payload_json")
+  normalizedPayloadJson Json?                   @map("normalized_payload_json")
   processingStatus      WebhookProcessingStatus @default(RECEIVED) @map("processing_status")
-  processingError       String?                  @map("processing_error")
-  receivedAt            DateTime                 @default(now()) @map("received_at")
-  processedAt           DateTime?                @map("processed_at")
-  createdAt             DateTime                 @default(now()) @map("created_at")
+  processingError       String?                 @map("processing_error")
+  receivedAt            DateTime                @default(now()) @map("received_at")
+  processedAt           DateTime?               @map("processed_at")
+  createdAt             DateTime                @default(now()) @map("created_at")
 
-  tenant                Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@unique([tenantId, externalEventId])
   @@index([tenantId])
@@ -1044,21 +1044,21 @@ enum OrchestrationOutcome {
 }
 
 model OrchestrationLog {
-  id             String               @id @default(uuid())
-  tenantId       String               @map("tenant_id")
-  conversationId String               @map("conversation_id")
-  webhookEventId String?              @map("webhook_event_id")
-  outcome        OrchestrationOutcome @default(ERROR)
-  guardReason    String?              @map("guard_reason")
-  modelChosen    String?              @map("model_chosen")
-  responseMode   String?              @map("response_mode")
-  draftReply     String?              @map("draft_reply")
-  handoverRecommended Boolean          @default(false) @map("handover_recommended")
-  confidence     Float?
-  metadata       Json                 @default("{}")
-  createdAt      DateTime             @default(now()) @map("created_at")
+  id                  String               @id @default(uuid())
+  tenantId            String               @map("tenant_id")
+  conversationId      String               @map("conversation_id")
+  webhookEventId      String?              @map("webhook_event_id")
+  outcome             OrchestrationOutcome @default(ERROR)
+  guardReason         String?              @map("guard_reason")
+  modelChosen         String?              @map("model_chosen")
+  responseMode        String?              @map("response_mode")
+  draftReply          String?              @map("draft_reply")
+  handoverRecommended Boolean              @default(false) @map("handover_recommended")
+  confidence          Float?
+  metadata            Json                 @default("{}")
+  createdAt           DateTime             @default(now()) @map("created_at")
 
-  tenant         Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@index([tenantId])
   @@index([conversationId])
@@ -1084,21 +1084,21 @@ model Notification {
 // ============================================================================
 
 model OutboundSend {
-  id                          String    @id @default(uuid())
-  tenantId                    String    @map("tenant_id")
-  conversationId              String    @map("conversation_id")
-  replyId                     String    @map("reply_id")
-  bubbleSequence              Int       @map("bubble_sequence")
-  ghlLocationId               String    @map("ghl_location_id")
-  contentHash                 String    @map("content_hash")
-  status                      String    @default("pending") @map("status")
-  providerMessageId           String?   @map("provider_message_id")
-  attempt                     Int       @default(0)
-  lastErrorCode               String?   @map("last_error_code")
-  lastErrorMessage            String?   @map("last_error_message")
-  createdAt                   DateTime  @default(now()) @map("created_at")
-  updatedAt                   DateTime  @updatedAt @map("updated_at")
-  sentAt                      DateTime? @map("sent_at")
+  id                String    @id @default(uuid())
+  tenantId          String    @map("tenant_id")
+  conversationId    String    @map("conversation_id")
+  replyId           String    @map("reply_id")
+  bubbleSequence    Int       @map("bubble_sequence")
+  ghlLocationId     String    @map("ghl_location_id")
+  contentHash       String    @map("content_hash")
+  status            String    @default("pending") @map("status")
+  providerMessageId String?   @map("provider_message_id")
+  attempt           Int       @default(0)
+  lastErrorCode     String?   @map("last_error_code")
+  lastErrorMessage  String?   @map("last_error_message")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+  sentAt            DateTime? @map("sent_at")
 
   @@unique([tenantId, conversationId, replyId, bubbleSequence])
   @@index([tenantId, createdAt])
@@ -1125,4 +1125,579 @@ model MetricsEvent {
   @@index([conversationId, createdAt(sort: Desc)])
   @@index([severity, createdAt(sort: Desc)])
   @@map("metrics_events")
+}
+
+// ============================================================================
+// AISBP-ONBOARD — Onboarding control app tables (PR 3)
+// Tables are prefixed with onboard_ to avoid collision with KB tables.
+// All future DB access goes through backend HTTP API — frontend never uses
+// Prisma directly. KB/GHL sync is deferred to PR 8+.
+// ============================================================================
+
+// ONBOARD STATUS ENUMS
+
+enum OnboardClientStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  ARCHIVED
+}
+
+enum OnboardProjectStatus {
+  DRAFT
+  SUBMITTED
+  IN_REVIEW
+  CHANGES_REQUESTED
+  APPROVED
+  SYNCING
+  LIVE
+  PAUSED
+  ARCHIVED
+}
+
+enum OnboardProjectPhase {
+  INTAKE
+  ANALYSIS
+  REVIEW
+  SYNC
+  LIVE
+}
+
+enum OnboardSectionStatus {
+  EMPTY
+  PARTIAL
+  COMPLETE
+  APPROVED
+  REJECTED
+}
+
+enum OnboardAnswerSource {
+  AGENT
+  CLIENT_DIRECT
+  OPERATOR_MANUAL
+}
+
+enum OnboardFaqStatus {
+  DRAFT
+  APPROVED
+  REJECTED
+}
+
+enum OnboardFaqSource {
+  AGENT
+  OPERATOR
+  CLIENT
+}
+
+enum OnboardFaqCategory {
+  PRICING
+  SERVICES
+  BOOKING
+  OBJECTION
+  LOCATION_HOURS
+  PAYMENT
+  COMPETITOR
+  OTHER
+}
+
+enum OnboardRecommendationType {
+  BOOKING
+  HANDOVER
+  FOLLOW_UP
+  TAGGING
+  PROMPT
+  KNOWLEDGE
+  OTHER
+}
+
+enum OnboardRecommendationRiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum OnboardRecommendationStatus {
+  SUGGESTED
+  ACCEPTED
+  REJECTED
+  MODIFIED
+}
+
+enum OnboardRecommendationSource {
+  AI_ANALYSIS
+  OPERATOR_MANUAL
+}
+
+enum OnboardSessionAgentType {
+  WHATSAPP_AI
+  WEB_CHAT
+  OTHER
+}
+
+enum OnboardSessionStatus {
+  ACTIVE
+  PAUSED
+  COMPLETED
+  EXPIRED
+}
+
+enum OnboardApprovalAction {
+  APPROVE_SECTION
+  REJECT_SECTION
+  REQUEST_CHANGES
+  APPROVE_PROJECT
+  REJECT_PROJECT
+  TRIGGER_SYNC
+}
+
+enum OnboardApprovalTargetType {
+  SECTION
+  PROJECT
+}
+
+enum OnboardActorType {
+  OPERATOR
+  AGENT
+  ADMIN
+  SERVICE
+  VIEWER
+}
+
+enum OnboardSyncTargetSystem {
+  KB
+  GHL
+}
+
+enum OnboardSyncMode {
+  DRY_RUN
+  APPLY
+  ROLLBACK
+}
+
+enum OnboardSyncStatus {
+  PENDING
+  DRY_RUN_PASSED
+  DRY_RUN_FAILED
+  APPLIED
+  APPLY_FAILED
+  ROLLED_BACK
+}
+
+enum OnboardConversationGoal {
+  BOOK_APPOINTMENT
+  COLLECT_LEAD
+  ANSWER_FAQS
+  QUALIFY_LEAD
+  ROUTE_TO_HUMAN
+  SEND_BOOKING_LINK
+  OTHER
+}
+
+enum OnboardChannelPreference {
+  WHATSAPP
+  SMS
+  BOTH
+}
+
+enum OnboardToneOfVoice {
+  FRIENDLY
+  PROFESSIONAL
+  CASUAL
+  FORMAL
+}
+
+enum OnboardHandoverMethod {
+  SMS
+  WHATSAPP
+  CALL
+}
+
+// ============================================================================
+// ONBOARD CLIENTS
+// ============================================================================
+
+model OnboardClient {
+  id            String              @id @default(uuid())
+  clientKey     String              @unique @map("client_key")
+  displayName   String              @map("display_name")
+  contactName   String?             @map("contact_name")
+  contactPhone  String?             @map("contact_phone")
+  contactEmail  String?             @map("contact_email")
+  whatsappPhone String?             @map("whatsapp_phone")
+  industry      String?
+  websiteUrl    String?             @map("website_url")
+  timezone      String?             @default("Asia/Singapore")
+  status        OnboardClientStatus @default(DRAFT)
+  createdAt     DateTime            @default(now()) @map("created_at")
+  updatedAt     DateTime            @updatedAt @map("updated_at")
+
+  projects     OnboardingProject[]
+  identityMaps OnboardingIdentityMap[]
+
+  @@index([status])
+  @@map("onboard_clients")
+}
+
+// ============================================================================
+// ONBOARDING PROJECTS
+// ============================================================================
+
+model OnboardingProject {
+  id              String               @id @default(uuid())
+  clientId        String               @map("client_id")
+  status          OnboardProjectStatus @default(DRAFT)
+  currentPhase    OnboardProjectPhase  @default(INTAKE) @map("current_phase")
+  submittedAt     DateTime?            @map("submitted_at")
+  approvedAt      DateTime?            @map("approved_at")
+  approvedBy      String?              @map("approved_by")
+  syncStartedAt   DateTime?            @map("sync_started_at")
+  syncCompletedAt DateTime?            @map("sync_completed_at")
+  version         Int                  @default(1)
+  metadata        Json                 @default("{}")
+  createdAt       DateTime             @default(now()) @map("created_at")
+  updatedAt       DateTime             @updatedAt @map("updated_at")
+
+  client            OnboardClient              @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  businessProfile   BusinessProfile?
+  salesProcessMap   SalesProcessMap?
+  faqItems          FaqItem[]
+  promptConfig      PromptConfig?
+  handoverRule      HandoverRule?
+  followUpRule      FollowUpRule?
+  recommendations   AutomationRecommendation[]
+  interviewSessions AgentInterviewSession[]
+  interviewAnswers  AgentInterviewAnswer[]
+  approvalEvents    ApprovalEvent[]
+  syncRuns          SyncRun[]
+  auditEvents       AuditEvent[]
+  identityMaps      OnboardingIdentityMap[]
+
+  @@index([clientId])
+  @@index([status])
+  @@index([clientId, status])
+  @@map("onboarding_projects")
+}
+
+// ============================================================================
+// ONBOARDING IDENTITY MAP
+// ============================================================================
+
+model OnboardingIdentityMap {
+  id                String   @id @default(uuid())
+  projectId         String   @unique @map("project_id")
+  onboardClientId   String   @map("onboard_client_id")
+  kbTenantId        String?  @map("kb_tenant_id")
+  ghlLocationId     String?  @map("ghl_location_id")
+  ghlContactId      String?  @map("ghl_contact_id")
+  ghlConversationId String?  @map("ghl_conversation_id")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  project OnboardingProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  client  OnboardClient     @relation(fields: [onboardClientId], references: [id], onDelete: Cascade)
+
+  @@index([kbTenantId])
+  @@map("onboarding_identity_map")
+}
+
+// ============================================================================
+// BUSINESS PROFILES
+// ============================================================================
+
+model BusinessProfile {
+  id              String               @id @default(uuid())
+  projectId       String               @unique @map("project_id")
+  sectionStatus   OnboardSectionStatus @default(EMPTY) @map("section_status")
+  businessName    String               @map("business_name")
+  description     String?              @db.Text
+  services        Json                 @default("[]")
+  products        Json                 @default("[]")
+  pricingPolicy   String?              @map("pricing_policy") @db.Text
+  depositPolicy   String?              @map("deposit_policy") @db.Text
+  openingHours    Json                 @default("{}") @map("opening_hours")
+  targetCustomer  String?              @map("target_customer") @db.Text
+  serviceArea     String?              @map("service_area")
+  forbiddenTopics Json                 @default("[]") @map("forbidden_topics")
+  forbiddenClaims Json                 @default("[]") @map("forbidden_claims")
+  createdAt       DateTime             @default(now()) @map("created_at")
+  updatedAt       DateTime             @updatedAt @map("updated_at")
+
+  project OnboardingProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("business_profiles")
+}
+
+// ============================================================================
+// SALES PROCESS MAPS
+// ============================================================================
+
+model SalesProcessMap {
+  id                        String                    @id @default(uuid())
+  projectId                 String                    @unique @map("project_id")
+  sectionStatus             OnboardSectionStatus      @default(EMPTY) @map("section_status")
+  leadSources               Json                      @default("[]") @map("lead_sources")
+  conversationGoal          OnboardConversationGoal?  @map("conversation_goal")
+  primaryCta                String?                   @map("primary_cta") @db.Text
+  bookingLink               String?                   @map("booking_link")
+  leadFieldsToCollect       Json                      @default("[]") @map("lead_fields_to_collect")
+  maxQuestionsBeforeBooking Int?                      @map("max_questions_before_booking")
+  channelPreference         OnboardChannelPreference? @map("channel_preference")
+  pipelineName              String?                   @map("pipeline_name")
+  pipelineStages            Json                      @default("[]") @map("pipeline_stages")
+  conflictingWorkflows      Json                      @default("[]") @map("conflicting_workflows")
+  createdAt                 DateTime                  @default(now()) @map("created_at")
+  updatedAt                 DateTime                  @updatedAt @map("updated_at")
+
+  project OnboardingProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("sales_process_maps")
+}
+
+// ============================================================================
+// FAQ ITEMS
+// ============================================================================
+
+model FaqItem {
+  id         String             @id @default(uuid())
+  projectId  String             @map("project_id")
+  category   OnboardFaqCategory
+  question   String             @db.Text
+  answer     String             @db.Text
+  sortOrder  Int?               @map("sort_order")
+  source     OnboardFaqSource   @default(AGENT)
+  status     OnboardFaqStatus   @default(DRAFT)
+  approvedBy String?            @map("approved_by")
+  createdAt  DateTime           @default(now()) @map("created_at")
+  updatedAt  DateTime           @updatedAt @map("updated_at")
+
+  project OnboardingProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, category])
+  @@index([status])
+  @@map("faq_items")
+}
+
+// ============================================================================
+// PROMPT CONFIGS
+// ============================================================================
+
+model PromptConfig {
+  id                String               @id @default(uuid())
+  projectId         String               @unique @map("project_id")
+  sectionStatus     OnboardSectionStatus @default(EMPTY) @map("section_status")
+  persona           String?              @db.Text
+  toneOfVoice       OnboardToneOfVoice?  @map("tone_of_voice")
+  conversationGoals Json                 @default("[]") @map("conversation_goals")
+  businessNotes     String?              @map("business_notes") @db.Text
+  language          String?
+  useSinglish       Boolean              @default(false) @map("use_singlish")
+  maxReplyLength    Int?                 @map("max_reply_length")
+  exampleGoodReply  String?              @map("example_good_reply") @db.Text
+  exampleBadReply   String?              @map("example_bad_reply") @db.Text
+  greetings         Json                 @default("[]")
+  signOffs          Json                 @default("[]") @map("sign_offs")
+  createdAt         DateTime             @default(now()) @map("created_at")
+  updatedAt         DateTime             @updatedAt @map("updated_at")
+
+  project OnboardingProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("prompt_configs")
+}
+
+// ============================================================================
+// HANDOVER RULES
+// ============================================================================
+
+model HandoverRule {
+  id                   String                 @id @default(uuid())
+  projectId            String                 @unique @map("project_id")
+  sectionStatus        OnboardSectionStatus   @default(EMPTY) @map("section_status")
+  handoverContactName  String?                @map("handover_contact_name")
+  handoverContactPhone String?                @map("handover_contact_phone")
+  handoverMethod       OnboardHandoverMethod? @map("handover_method")
+  handoverAvailability String?                @map("handover_availability")
+  emergencyContact     String?                @map("emergency_contact")
+  triggers             Json                   @default("[]")
+  createdAt            DateTime               @default(now()) @map("created_at")
+  updatedAt            DateTime               @updatedAt @map("updated_at")
+
+  project OnboardingProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("handover_rules")
+}
+
+// ============================================================================
+// FOLLOW-UP RULES
+// ============================================================================
+
+model FollowUpRule {
+  id                  String               @id @default(uuid())
+  projectId           String               @unique @map("project_id")
+  sectionStatus       OnboardSectionStatus @default(EMPTY) @map("section_status")
+  enabled             Boolean              @default(false)
+  goal                String?              @db.Text
+  tone                String?
+  cadenceHours        Int?                 @map("cadence_hours")
+  stopConditions      Json                 @default("[]") @map("stop_conditions")
+  doNotMessageRules   Json                 @default("[]") @map("do_not_message_rules")
+  dormantReactivation Boolean              @default(false) @map("dormant_reactivation")
+  createdAt           DateTime             @default(now()) @map("created_at")
+  updatedAt           DateTime             @updatedAt @map("updated_at")
+
+  project OnboardingProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@map("follow_up_rules")
+}
+
+// ============================================================================
+// AUTOMATION RECOMMENDATIONS
+// ============================================================================
+
+model AutomationRecommendation {
+  id                 String                         @id @default(uuid())
+  projectId          String                         @map("project_id")
+  recommendationType OnboardRecommendationType      @map("recommendation_type")
+  title              String
+  description        String                         @db.Text
+  rationale          String?                        @db.Text
+  riskLevel          OnboardRecommendationRiskLevel @map("risk_level")
+  suggestedConfig    Json                           @default("{}") @map("suggested_config")
+  status             OnboardRecommendationStatus    @default(SUGGESTED)
+  reviewedBy         String?                        @map("reviewed_by")
+  reviewedAt         DateTime?                      @map("reviewed_at")
+  source             OnboardRecommendationSource    @default(AI_ANALYSIS)
+  createdAt          DateTime                       @default(now()) @map("created_at")
+  updatedAt          DateTime                       @updatedAt @map("updated_at")
+
+  project OnboardingProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, recommendationType])
+  @@index([status])
+  @@map("automation_recommendations")
+}
+
+// ============================================================================
+// AGENT INTERVIEW SESSIONS
+// ============================================================================
+
+model AgentInterviewSession {
+  id          String                  @id @default(uuid())
+  projectId   String                  @map("project_id")
+  agentType   OnboardSessionAgentType @default(WHATSAPP_AI) @map("agent_type")
+  status      OnboardSessionStatus    @default(ACTIVE)
+  currentStep String?                 @map("current_step")
+  totalSteps  Int?                    @map("total_steps")
+  expiresAt   DateTime?               @map("expires_at")
+  metadata    Json                    @default("{}")
+  createdAt   DateTime                @default(now()) @map("created_at")
+  updatedAt   DateTime                @updatedAt @map("updated_at")
+
+  project OnboardingProject      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  answers AgentInterviewAnswer[]
+
+  @@index([projectId, status])
+  @@map("agent_interview_sessions")
+}
+
+// ============================================================================
+// AGENT INTERVIEW ANSWERS
+// ============================================================================
+
+model AgentInterviewAnswer {
+  id             String              @id @default(uuid())
+  sessionId      String              @map("session_id")
+  projectId      String              @map("project_id")
+  section        String
+  questionKey    String              @map("question_key")
+  questionLabel  String?             @map("question_label")
+  answerValue    Json                @map("answer_value")
+  confidence     Float?
+  source         OnboardAnswerSource @default(AGENT)
+  idempotencyKey String?             @unique @map("idempotency_key")
+  createdAt      DateTime            @default(now()) @map("created_at")
+  updatedAt      DateTime            @updatedAt @map("updated_at")
+
+  session AgentInterviewSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  project OnboardingProject     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, section, questionKey])
+  @@index([sessionId, section])
+  @@map("agent_interview_answers")
+}
+
+// ============================================================================
+// APPROVAL EVENTS
+// ============================================================================
+
+model ApprovalEvent {
+  id             String                    @id @default(uuid())
+  projectId      String                    @map("project_id")
+  actorId        String                    @map("actor_id")
+  actorType      OnboardActorType          @map("actor_type")
+  action         OnboardApprovalAction
+  targetType     OnboardApprovalTargetType @map("target_type")
+  targetId       String                    @map("target_id")
+  comment        String?                   @db.Text
+  previousStatus String?                   @map("previous_status")
+  newStatus      String?                   @map("new_status")
+  createdAt      DateTime                  @default(now()) @map("created_at")
+
+  project OnboardingProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId, createdAt])
+  @@index([actorId])
+  @@map("approval_events")
+}
+
+// ============================================================================
+// SYNC RUNS
+// ============================================================================
+
+model SyncRun {
+  id              String                  @id @default(uuid())
+  projectId       String                  @map("project_id")
+  targetSystem    OnboardSyncTargetSystem @map("target_system")
+  mode            OnboardSyncMode
+  status          OnboardSyncStatus       @default(PENDING)
+  idempotencyKey  String                  @unique @map("idempotency_key")
+  requestPayload  Json?                   @map("request_payload")
+  responsePayload Json?                   @map("response_payload")
+  errorMessage    String?                 @map("error_message") @db.Text
+  triggeredBy     String                  @map("triggered_by")
+  version         Int                     @default(1)
+  durationMs      Int?                    @map("duration_ms")
+  createdAt       DateTime                @default(now()) @map("created_at")
+  completedAt     DateTime?               @map("completed_at")
+
+  project OnboardingProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@index([targetSystem, status])
+  @@map("sync_runs")
+}
+
+// ============================================================================
+// AUDIT EVENTS
+// ============================================================================
+
+model AuditEvent {
+  id            String           @id @default(uuid())
+  projectId     String?          @map("project_id")
+  actorId       String           @map("actor_id")
+  actorType     OnboardActorType @map("actor_type")
+  action        String
+  resourceType  String           @map("resource_type")
+  resourceId    String           @map("resource_id")
+  changes       Json             @default("{}")
+  ipAddress     String?          @map("ip_address")
+  userAgent     String?          @map("user_agent") @db.Text
+  correlationId String?          @map("correlation_id")
+  createdAt     DateTime         @default(now()) @map("created_at")
+
+  project OnboardingProject? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  @@index([projectId, createdAt])
+  @@index([actorId])
+  @@index([action])
+  @@map("audit_events")
 }

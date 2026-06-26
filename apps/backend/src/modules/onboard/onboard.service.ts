@@ -13,6 +13,7 @@ import {
   REQUIRED_SECTIONS_FOR_APPROVAL,
   type SectionName,
 } from './utils/approval';
+import { mapOnboardToKbPlan } from './kb-sync/onboard-kb-sync.mapper';
 
 export interface OnboardClientSummary {
   id: string;
@@ -1671,6 +1672,128 @@ export class OnboardService {
     };
 
     return createHash('sha256').update(JSON.stringify(sourceSnapshot)).digest('hex');
+  }
+
+  async kbPlanPreview(projectId: string): Promise<Record<string, unknown>> {
+    const project = await this.getProject(projectId);
+    if (!project) throw new NotFoundException('Project not found');
+
+    const supabase = getSupabaseService();
+    const client = await this.getClient(project.onboardClientId);
+
+    let persona: string | null = null;
+    let conversationGoals: string | null = null;
+    let businessNotes: string | null = null;
+    let toneRules: string | null = null;
+    let maxReplyTokens: number | null = null;
+
+    const { data: promptCfg } = await supabase
+      .from('prompt_configs')
+      .select('*')
+      .eq('project_id', projectId)
+      .maybeSingle();
+
+    if (promptCfg) {
+      persona = promptCfg['persona'] ?? null;
+      const goals = promptCfg['conversation_goals'];
+      conversationGoals = Array.isArray(goals) ? (goals as string[]).join(', ') : null;
+      businessNotes = promptCfg['business_notes'] ?? null;
+      toneRules = promptCfg['tone_of_voice'] ?? null;
+      maxReplyTokens = promptCfg['max_reply_length'] ?? null;
+    }
+
+    const { data: faqItems } = await supabase
+      .from('faq_items')
+      .select('*')
+      .eq('project_id', projectId)
+      .eq('status', 'APPROVED');
+
+    const { data: salesMap } = await supabase
+      .from('sales_process_maps')
+      .select('*')
+      .eq('project_id', projectId)
+      .maybeSingle();
+
+    const { data: followUp } = await supabase
+      .from('follow_up_rules')
+      .select('*')
+      .eq('project_id', projectId)
+      .maybeSingle();
+
+    const { data: handover } = await supabase
+      .from('handover_rules')
+      .select('*')
+      .eq('project_id', projectId)
+      .maybeSingle();
+
+    const plans = mapOnboardToKbPlan({
+      tenantName: client?.displayName ?? 'Unnamed',
+      agencyId: 'operator-agency', // Placeholder — actual agency from operator's session in real apply
+      clientContactName: client?.contactName ?? null,
+      clientContactPhone: client?.contactPhoneMasked ?? null,
+      clientContactEmail: client?.contactEmail ?? null,
+      persona,
+      conversationGoals,
+      businessNotes,
+      toneRules,
+      maxReplyTokens,
+      faqItems: (faqItems || []).map((f: Record<string, unknown>) => ({
+        question: String(f['question'] ?? ''),
+        answer: String(f['answer'] ?? ''),
+        category: f['category'] ? String(f['category']) : undefined,
+      })),
+      bookingEnabled: Boolean(salesMap),
+      bookingLink: salesMap?.['booking_link'] ?? null,
+      leadFields: ['name', 'phone'],
+      followUpEnabled: followUp?.['enabled'] ?? false,
+      followUpGoal: followUp?.['goal'] ?? null,
+      followUpCadenceHours: followUp?.['cadence_hours'] ?? null,
+      handoverEnabled: handover?.['section_status'] === 'APPROVED',
+      handoverPhone: handover?.['handover_contact_phone'] ?? null,
+    });
+
+    const totalOps = plans.reduce((sum, p) => sum + p.operations.length, 0);
+    const allTables = plans.flatMap(p => p.operations.map(o => o.table));
+
+    const blockers: string[] = [];
+    const warnings: string[] = [];
+
+    if (!client?.displayName) blockers.push('Missing client displayName');
+    if (!persona) warnings.push('No prompt config persona set');
+    if (!faqItems || faqItems.length === 0) warnings.push('No approved FAQ items');
+
+    return {
+      dryRun: true,
+      noWrite: true,
+      projectId,
+      displayName: client?.displayName ?? null,
+      operationCount: totalOps,
+      phaseCount: plans.length,
+      phases: plans.map(p => ({
+        phase: p.phase,
+        name: p.phaseName,
+        operationCount: p.operations.length,
+        operations: p.operations.map(o => ({
+          table: o.table,
+          operation: o.operation,
+          notes: o.notes,
+        })),
+      })),
+      targetTables: [...new Set(allTables)],
+      wouldCreate: totalOps,
+      wouldUpdate: 0,
+      wouldSkip: 0,
+      blockers,
+      warnings,
+      safetyChecks: {
+        noKbMutation: true,
+        noGhlMutation: true,
+        noMessagesSent: true,
+        noOutboundEnabled: true,
+        secretsExcluded: true,
+        fullPhoneExcluded: true,
+      },
+    };
   }
 
   // ==========================================================================

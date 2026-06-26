@@ -226,6 +226,12 @@ export class OnboardController {
   // KB SYNC APPLY (PR 10)
   // ==========================================================================
 
+  @Get('projects/:onboardingProjectId/sync/kb/plan-preview')
+  @ApiOperation({ summary: 'Preview mapped KB write plan without applying (no-write)' })
+  async kbPlanPreview(@Param('onboardingProjectId') onboardingProjectId: string) {
+    return this.onboardService.kbPlanPreview(onboardingProjectId);
+  }
+
   @Post('projects/:onboardingProjectId/sync/kb/apply')
   @ApiOperation({ summary: 'Apply approved KB dry-run config. Requires feature flag, approval, and snapshot match.' })
   async kbApply(

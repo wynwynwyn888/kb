@@ -15,7 +15,7 @@ export class KbApplyDto {
 
   @IsOptional()
   @IsString()
-  @IsIn(['BOT_PROFILE_PROMPT_ONLY', 'FAQ_KNOWLEDGE_ONLY', 'BOOKING_HANDOVER_ONLY'])
+  @IsIn(['BOT_PROFILE_PROMPT_ONLY', 'FAQ_KNOWLEDGE_ONLY', 'BOOKING_HANDOVER_ONLY', 'FOLLOW_UP_SETTINGS_ONLY'])
   applyScope?: string;
 
   @IsOptional()

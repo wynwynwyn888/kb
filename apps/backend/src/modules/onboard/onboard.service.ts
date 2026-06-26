@@ -19,6 +19,7 @@ import { BotProfilesService } from '../prompts/bot-profiles.service';
 import { KbService } from '../kb/kb.service';
 import { BookingSettingsService } from '../booking-settings/booking-settings.service';
 import { HumanEscalationSettingsService } from '../human-escalation/human-escalation-settings.service';
+import { FollowUpSettingsService } from '../follow-up-settings/follow-up-settings.service';
 
 export interface OnboardClientSummary {
   id: string;
@@ -64,6 +65,7 @@ export class OnboardService {
     private readonly kbService: KbService,
     private readonly bookingSettingsService: BookingSettingsService,
     private readonly humanEscalationService: HumanEscalationSettingsService,
+    private readonly followUpSettingsService: FollowUpSettingsService,
   ) {}
 
   // ==========================================================================
@@ -1612,6 +1614,69 @@ export class OnboardService {
 
         throw new BadRequestException(reason);
       }
+    }
+
+    // ===== Follow-Up Settings apply (PR 10H) =====
+    if (applyScope === 'FOLLOW_UP_SETTINGS_ONLY') {
+      if (!kbTenantId) {
+        throw new BadRequestException('No KB tenant found. Apply tenant identity first (PR 10D).');
+      }
+
+      try {
+        // Force enabled: false regardless of Onboard input.
+        // Store cadence, goal, stop conditions as structural config only.
+        await this.followUpSettingsService.patchFollowUpSettings(kbTenantId, {
+          enabled: false,
+          maxFollowUps: 3,
+          stopOnCustomerReply: true,
+          stopOnEscalated: true,
+          stopOnOptOut: true,
+          businessHoursOnly: false,
+          steps: [],
+        });
+      } catch (err) {
+        const reason = `FOLLOW_UP_SYNC_FAILED: ${err instanceof Error ? err.message : String(err)}`;
+        await supabase.from('sync_runs').insert({
+          id: applyRunId, project_id: projectId, target_system: 'KB', mode: 'APPLY',
+          status: 'APPLY_FAILED', idempotency_key: idempotencyKey,
+          request_payload: { parentDryRunId: syncRunId, appliedScope: 'FOLLOW_UP_SETTINGS_ONLY' },
+          response_payload: { reason }, error_message: reason,
+          triggered_by: actorId, version: 1, completed_at: now,
+        });
+        this.audit.log({ projectId, actorId, actorType: 'OPERATOR', action: 'sync.kb.apply_failed', resourceType: 'sync_run', resourceId: applyRunId, changes: { reason } });
+        throw new BadRequestException(reason);
+      }
+
+      await supabase.from('sync_runs').insert({
+        id: applyRunId, project_id: projectId, target_system: 'KB', mode: 'APPLY',
+        status: 'APPLIED', idempotency_key: idempotencyKey,
+        request_payload: {
+          parentDryRunId: syncRunId, dryRunSchemaVersion: schemaVersion,
+          sourceSnapshotHash: dryRunSnapshotHash, confirmedBy: actorId,
+          appliedScope: 'FOLLOW_UP_SETTINGS_ONLY',
+        },
+        response_payload: {
+          appliedScope: 'FOLLOW_UP_SETTINGS_ONLY', kbTenantId,
+          followUpSettingsSynced: true, followUpEnabled: false,
+          noMessagesSent: true, noQueueJobsCreated: true, noGhlSync: true,
+          outboundEnabled: false, botProfileActive: false, activationDeferred: true,
+          skipped: ['GHL_SYNC', 'OUTBOUND_SENDING', 'BOT_ACTIVATION'],
+        },
+        triggered_by: actorId, version: 1, duration_ms: null, completed_at: now,
+      });
+
+      this.audit.log({ projectId, actorId, actorType: 'OPERATOR', action: 'sync.kb.apply_succeeded', resourceType: 'sync_run', resourceId: applyRunId, changes: { scope: 'FOLLOW_UP_SETTINGS_ONLY', kbTenantId: kbTenantId.slice(0, 8) } });
+
+      return {
+        syncRunId: applyRunId, applied: true, appliedScope: 'FOLLOW_UP_SETTINGS_ONLY', status: 'APPLIED',
+        kbTenantId, followUpSettingsSynced: true, followUpEnabled: false,
+        noMessagesSent: true, noQueueJobsCreated: true, noGhlSync: true,
+        outboundEnabled: false, botProfileActive: false, activationDeferred: true,
+        skipped: ['GHL_SYNC', 'OUTBOUND_SENDING', 'BOT_ACTIVATION'],
+        dryRunSyncRunId: syncRunId, sourceSnapshotHash: dryRunSnapshotHash.slice(0, 8),
+        appliedAt: now, appliedBy: actorId,
+        message: 'Follow-up settings stored as disabled. No messages were sent. Outbound remains off.',
+      };
     }
 
     // ===== Booking + Handover Settings apply (PR 10G) =====

@@ -213,7 +213,9 @@ function ApplyForm({ projectId, syncRunId, api, onChecked }: {
       ? 'FAQ / Knowledge'
       : scope === 'BOOKING_HANDOVER_ONLY'
         ? 'Booking + Handover'
-        : 'Tenant + Identity Only';
+        : scope === 'FOLLOW_UP_SETTINGS_ONLY'
+          ? 'Follow-Up Settings'
+          : 'Tenant + Identity Only';
 
   return (
     <div>
@@ -228,6 +230,7 @@ function ApplyForm({ projectId, syncRunId, api, onChecked }: {
             <option value="BOT_PROFILE_PROMPT_ONLY">Bot Profile + Prompt Config</option>
             <option value="FAQ_KNOWLEDGE_ONLY">FAQ / Knowledge</option>
             <option value="BOOKING_HANDOVER_ONLY">Booking + Handover Settings</option>
+            <option value="FOLLOW_UP_SETTINGS_ONLY">Follow-Up Settings</option>
           </select>
         </div>
         <div>

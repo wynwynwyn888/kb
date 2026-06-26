@@ -139,6 +139,17 @@ export function createOnboardApi(token: string) {
 
     getProjectRecommendations: (projectId: string) =>
       apiRequest<AutomationRecommendation[]>(`/onboard/projects/${projectId}/recommendations`, { token }),
+
+    // Sync (PR 9)
+    kbDryRun: (projectId: string, idempotencyKey?: string) =>
+      apiRequest<Record<string, unknown>>(`/onboard/projects/${projectId}/sync/kb/dry-run`, {
+        token,
+        method: 'POST',
+        body: JSON.stringify({ idempotencyKey }),
+      }),
+
+    getSyncRuns: (projectId: string) =>
+      apiRequest<Record<string, unknown>[]>(`/onboard/projects/${projectId}/sync-runs`, { token }),
   };
 }
 

@@ -22,6 +22,7 @@ import { ApproveSectionDto } from './dto/approve-section.dto';
 import { RequestChangesDto } from './dto/request-changes.dto';
 import { RejectProjectDto } from './dto/reject-project.dto';
 import { ApproveProjectDto } from './dto/approve-project.dto';
+import { KbDryRunDto } from './dto/kb-dry-run.dto';
 import { VALID_SECTION_NAMES } from './utils/approval';
 
 @ApiTags('onboard')
@@ -197,5 +198,26 @@ export class OnboardController {
     const project = await this.onboardService.getProject(onboardingProjectId);
     if (!project) throw new BadRequestException('Project not found');
     return this.onboardService.getAuditEvents(onboardingProjectId);
+  }
+
+  // ==========================================================================
+  // KB SYNC DRY RUN (PR 9)
+  // ==========================================================================
+
+  @Post('projects/:onboardingProjectId/sync/kb/dry-run')
+  @ApiOperation({ summary: 'KB sync dry run — preview only. No KB mutation.' })
+  async kbDryRun(
+    @Param('onboardingProjectId') onboardingProjectId: string,
+    @CurrentUser() user: SessionUser,
+    @Body() body: KbDryRunDto,
+  ) {
+    if (!user?.id) throw new BadRequestException('Authentication required');
+    return this.onboardService.kbDryRun(onboardingProjectId, user.id, body.idempotencyKey);
+  }
+
+  @Get('projects/:onboardingProjectId/sync-runs')
+  @ApiOperation({ summary: 'Get sync run history for a project' })
+  async getSyncRuns(@Param('onboardingProjectId') onboardingProjectId: string) {
+    return this.onboardService.getSyncRuns(onboardingProjectId);
   }
 }

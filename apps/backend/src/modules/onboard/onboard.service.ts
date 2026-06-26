@@ -1045,6 +1045,272 @@ export class OnboardService {
   }
 
   // ==========================================================================
+  // KB SYNC DRY RUN (PR 9)
+  // Dry run only — no KB mutation, no tenant creation, no messages.
+  // ==========================================================================
+
+  async kbDryRun(
+    projectId: string,
+    actorId: string,
+    idempotencyKey?: string,
+  ): Promise<Record<string, unknown>> {
+    const project = await this.getProject(projectId);
+    if (!project) throw new NotFoundException('Project not found');
+
+    if (project.status !== 'APPROVED') {
+      throw new BadRequestException(
+        `Project must be APPROVED for dry-run. Current status: ${project.status}.`,
+      );
+    }
+
+    const supabase = getSupabaseService();
+
+    // Idempotency: check if dry-run already exists for this project
+    const idKey = idempotencyKey || `dry-run-${projectId}`;
+    const { data: existingRun } = await supabase
+      .from('sync_runs')
+      .select('id, status, response_payload')
+      .eq('project_id', projectId)
+      .eq('target_system', 'KB')
+      .eq('mode', 'DRY_RUN')
+      .eq('status', 'DRY_RUN_PASSED')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (existingRun) {
+      return {
+        syncRunId: existingRun['id'],
+        dryRun: true,
+        idempotent: true,
+        targetSystem: 'KB',
+        mode: 'DRY_RUN',
+        status: existingRun['status'],
+        payloadPreview: existingRun['response_payload'] ?? {},
+        nextAllowedAction: 'KB apply sync is future PR 10 and remains disabled.',
+      };
+    }
+
+    // Gather data for preview
+    const client = await this.getClient(project.onboardClientId);
+
+    const { data: bizProfile } = await supabase
+      .from('business_profiles')
+      .select('*')
+      .eq('project_id', projectId)
+      .maybeSingle();
+
+    const { data: salesMap } = await supabase
+      .from('sales_process_maps')
+      .select('*')
+      .eq('project_id', projectId)
+      .maybeSingle();
+
+    const { data: faqItems } = await supabase
+      .from('faq_items')
+      .select('*')
+      .eq('project_id', projectId)
+      .eq('status', 'APPROVED');
+
+    const { data: promptCfg } = await supabase
+      .from('prompt_configs')
+      .select('*')
+      .eq('project_id', projectId)
+      .maybeSingle();
+
+    const { data: handover } = await supabase
+      .from('handover_rules')
+      .select('*')
+      .eq('project_id', projectId)
+      .maybeSingle();
+
+    const { data: followUp } = await supabase
+      .from('follow_up_rules')
+      .select('*')
+      .eq('project_id', projectId)
+      .maybeSingle();
+
+    const { data: recs } = await supabase
+      .from('automation_recommendations')
+      .select('*')
+      .eq('project_id', projectId)
+      .eq('status', 'SUGGESTED');
+
+    // Build sections included
+    const sectionsIncluded: string[] = [];
+    const missingFields: string[] = [];
+    const warnings: string[] = [];
+    const blockers: string[] = [];
+
+    if (!client) {
+      blockers.push('No onboard client found');
+    } else {
+      if (!client.displayName) missingFields.push('Client displayName');
+      if (!client.clientKey) missingFields.push('Client clientKey');
+    }
+
+    if (bizProfile) {
+      sectionsIncluded.push('business_profile');
+      if (bizProfile['section_status'] !== 'APPROVED') {
+        warnings.push('Business profile is not yet approved');
+      }
+    } else {
+      missingFields.push('business_profile');
+    }
+
+    if (salesMap) sectionsIncluded.push('sales_process');
+
+    if (faqItems && faqItems.length > 0) {
+      sectionsIncluded.push(`faq (${faqItems.length} items)`);
+    } else {
+      missingFields.push('faq_items (none approved)');
+    }
+
+    if (promptCfg) {
+      sectionsIncluded.push('prompt_config');
+      if (promptCfg['section_status'] !== 'APPROVED') {
+        warnings.push('Prompt config is not yet approved');
+      }
+    } else {
+      missingFields.push('prompt_config');
+    }
+
+    if (handover) sectionsIncluded.push('handover_rules');
+    else missingFields.push('handover_rules');
+    if (followUp) sectionsIncluded.push('follow_up_rules');
+    else missingFields.push('follow_up_rules');
+
+    // Build payload preview (safe, non-mutating)
+    const payloadPreview = {
+      tenantIdentity: client ? {
+        displayName: client.displayName,
+        clientKey: client.clientKey,
+        contactPhoneMasked: client.contactPhoneMasked,
+        contactEmail: client.contactEmail ?? null,
+        industry: client.industry ?? null,
+        timezone: client.timezone ?? 'Asia/Singapore',
+      } : null,
+      businessProfile: bizProfile ? {
+        businessName: bizProfile['business_name'],
+        description: bizProfile['description'] ?? null,
+        services: bizProfile['services'] ?? [],
+        openingHours: bizProfile['opening_hours'] ?? {},
+      } : null,
+      salesProcess: salesMap ? {
+        conversationGoal: salesMap['conversation_goal'] ?? null,
+        primaryCta: salesMap['primary_cta'] ?? null,
+        leadSources: salesMap['lead_sources'] ?? [],
+      } : null,
+      faqItems: (faqItems || []).map((f: Record<string, unknown>) => ({
+        category: f['category'],
+        question: f['question'],
+      })),
+      promptConfig: promptCfg ? {
+        persona: promptCfg['persona'] ?? null,
+        toneOfVoice: promptCfg['tone_of_voice'] ?? null,
+        language: promptCfg['language'] ?? null,
+      } : null,
+      handoverRules: handover ? {
+        handoverMethod: handover['handover_method'] ?? null,
+        triggers: handover['triggers'] ?? [],
+      } : null,
+      followUpRules: followUp ? {
+        enabled: followUp['enabled'] ?? false,
+        goal: followUp['goal'] ?? null,
+      } : null,
+      aiRecommendationsForReview: (recs || []).map((r: Record<string, unknown>) => ({
+        title: r['title'],
+        recommendationType: r['recommendation_type'],
+        riskLevel: r['risk_level'],
+        status: r['status'],
+        note: 'AI-suggested recommendation. Review and approve before future sync.',
+      })),
+    };
+
+    // Generate sync_run
+    const syncRunId = randomUUID();
+    const status = blockers.length > 0 ? 'DRY_RUN_FAILED' : 'DRY_RUN_PASSED';
+    const now = new Date().toISOString();
+
+    await supabase.from('sync_runs').insert({
+      id: syncRunId,
+      project_id: projectId,
+      target_system: 'KB',
+      mode: 'DRY_RUN',
+      status,
+      idempotency_key: idKey,
+      request_payload: { projectId, clientKey: client?.clientKey },
+      response_payload: payloadPreview,
+      triggered_by: actorId,
+      version: 1,
+      duration_ms: null,
+      completed_at: now,
+    });
+
+    this.audit.log({
+      projectId,
+      actorId,
+      actorType: 'OPERATOR',
+      action: 'sync.kb.dry_run',
+      resourceType: 'sync_run',
+      resourceId: syncRunId,
+      changes: { status, sectionsIncluded, blockers, warnings },
+    });
+
+    return {
+      syncRunId,
+      dryRun: true,
+      targetSystem: 'KB',
+      mode: 'DRY_RUN',
+      status,
+      onboardingProjectId: projectId,
+      onboardClientId: project.onboardClientId,
+      clientKey: client?.clientKey ?? null,
+      displayName: client?.displayName ?? null,
+      displayLabel: client?.displayLabel ?? null,
+      generatedAt: now,
+      generatedBy: actorId,
+      payloadPreview,
+      sectionsIncluded,
+      missingFields,
+      blockers,
+      warnings,
+      wouldCreate: blockers.length === 0,
+      wouldUpdate: false,
+      wouldSkip: blockers.length > 0,
+      safetyChecks: {
+        noKbMutation: true,
+        noGhlMutation: true,
+        noTenantCreation: true,
+        noMessagesSent: true,
+        payloadSanitized: true,
+      },
+      nextAllowedAction: 'KB apply sync is future PR 10 and remains disabled.',
+    };
+  }
+
+  async getSyncRuns(projectId: string): Promise<Record<string, unknown>[]> {
+    const supabase = getSupabaseService();
+    const { data } = await supabase
+      .from('sync_runs')
+      .select('*')
+      .eq('project_id', projectId)
+      .order('created_at', { ascending: false });
+
+    return (data || []).map((r: Record<string, unknown>) => ({
+      syncRunId: r['id'],
+      targetSystem: r['target_system'],
+      mode: r['mode'],
+      status: r['status'],
+      triggeredBy: r['triggered_by'],
+      durationMs: r['duration_ms'],
+      responsePayload: r['response_payload'],
+      createdAt: r['created_at'],
+      completedAt: r['completed_at'],
+    }));
+  }
+
+  // ==========================================================================
   // PRIVATE HELPERS
   // ==========================================================================
 

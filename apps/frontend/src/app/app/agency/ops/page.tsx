@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useState, type CSSProperties } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   ErrorBanner,
@@ -309,7 +309,7 @@ export default function OpsDashboardPage() {
                   </tbody>
                 </table>
               </div>
-              {renderPaginator(outboundPage, outboundTotal, (p) => { setOutboundPage(p); setTimeout(fetchOutbound, 0); })}
+              {renderPaginator(outboundPage, outboundTotal, setOutboundPage)}
             </>
           )}
         </SectionCard>
@@ -363,7 +363,7 @@ export default function OpsDashboardPage() {
                   </tbody>
                 </table>
               </div>
-              {renderPaginator(convPage, convTotal, (p) => { setConvPage(p); setTimeout(fetchConversations, 0); })}
+              {renderPaginator(convPage, convTotal, setConvPage)}
             </>
           )}
         </SectionCard>
@@ -420,7 +420,7 @@ export default function OpsDashboardPage() {
                   </tbody>
                 </table>
               </div>
-              {renderPaginator(errorsPage, errorsTotal, (p) => { setErrorsPage(p); setTimeout(fetchErrors, 0); })}
+              {renderPaginator(errorsPage, errorsTotal, setErrorsPage)}
             </>
           )}
         </SectionCard>
@@ -447,7 +447,7 @@ export default function OpsDashboardPage() {
                   </tbody>
                 </table>
               </div>
-              {renderPaginator(auditPage, auditTotal, (p) => { setAuditPage(p); setTimeout(fetchAudit, 0); })}
+              {renderPaginator(auditPage, auditTotal, setAuditPage)}
             </>
           )}
         </SectionCard>

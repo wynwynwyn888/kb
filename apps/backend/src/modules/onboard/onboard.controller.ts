@@ -244,14 +244,22 @@ export class OnboardController {
 
   @Post('projects/:onboardingProjectId/sync/ghl/validate')
   @ApiOperation({ summary: 'Validate GHL readiness — local checks only, no GHL API calls' })
-  async ghlValidate(@Param('onboardingProjectId') onboardingProjectId: string) {
-    return this.onboardService.ghlValidate(onboardingProjectId);
+  async ghlValidate(
+    @Param('onboardingProjectId') onboardingProjectId: string,
+    @CurrentUser() user: SessionUser,
+  ) {
+    if (!user?.id) throw new BadRequestException('Authentication required');
+    return this.onboardService.ghlValidate(onboardingProjectId, user.id);
   }
 
   @Post('projects/:onboardingProjectId/sync/ghl/dry-run')
   @ApiOperation({ summary: 'Generate no-write GHL sync plan preview' })
-  async ghlDryRun(@Param('onboardingProjectId') onboardingProjectId: string) {
-    return this.onboardService.ghlDryRun(onboardingProjectId);
+  async ghlDryRun(
+    @Param('onboardingProjectId') onboardingProjectId: string,
+    @CurrentUser() user: SessionUser,
+  ) {
+    if (!user?.id) throw new BadRequestException('Authentication required');
+    return this.onboardService.ghlDryRun(onboardingProjectId, user.id);
   }
 
   // ==========================================================================

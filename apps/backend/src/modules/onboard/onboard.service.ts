@@ -952,7 +952,7 @@ export class OnboardService {
           .eq('source', 'AI_ANALYSIS')
           .eq('status', 'SUGGESTED');
 
-        return {
+    const result = {
           analysisStored: false,
           recommendationsStored: existingRecs?.length ?? 0,
           recommendationIds: (existingRecs || []).map((r: Record<string, unknown>) => String(r['id'] ?? '')),
@@ -2332,11 +2332,12 @@ export class OnboardService {
   // Local checks only — no GHL API calls, no mutation.
   // ==========================================================================
 
-  async ghlValidate(projectId: string): Promise<Record<string, unknown>> {
+  async ghlValidate(projectId: string, actorId: string): Promise<Record<string, unknown>> {
     const project = await this.getProject(projectId);
     if (!project) throw new NotFoundException('Project not found');
 
     const supabase = getSupabaseService();
+    const now = new Date().toISOString();
     const { data: identityMap } = await supabase
       .from('onboarding_identity_map')
       .select('ghl_location_id, kb_tenant_id')
@@ -2392,6 +2393,23 @@ export class OnboardService {
 
     const valid = blockers.length === 0;
 
+    // Record sync_run
+    const syncRunId = randomUUID();
+    await supabase.from('sync_runs').insert({
+      id: syncRunId, project_id: projectId, target_system: 'GHL',
+      mode: 'DRY_RUN', status: valid ? 'DRY_RUN_PASSED' : 'DRY_RUN_FAILED',
+      idempotency_key: `ghl-validate-${projectId}-${now}`,
+      request_payload: { projectId, validationType: 'GHL_VALIDATE' },
+      response_payload: { checks, blockers, warnings, missingFields, noGhlMutation: true, noMessagesSent: true },
+      triggered_by: actorId, version: 1, completed_at: now,
+    });
+
+    this.audit.log({
+      projectId, actorId, actorType: 'OPERATOR', action: 'sync.ghl.validate',
+      resourceType: 'sync_run', resourceId: syncRunId,
+      changes: { valid, checks, blockers },
+    });
+
     return {
       valid,
       targetSystem: 'GHL',
@@ -2410,8 +2428,8 @@ export class OnboardService {
     };
   }
 
-  async ghlDryRun(projectId: string): Promise<Record<string, unknown>> {
-    const validation = await this.ghlValidate(projectId);
+  async ghlDryRun(projectId: string, actorId: string): Promise<Record<string, unknown>> {
+    const validation = await this.ghlValidate(projectId, actorId);
     const supabase = getSupabaseService();
     const now = new Date().toISOString();
 
@@ -2461,7 +2479,7 @@ export class OnboardService {
       { operation: 'map_pipeline', table: 'ghl_pipelines', dryRun: true, noWrite: true, disabledForNow: true, note: 'Future: link GHL pipeline stages' },
     );
 
-    return {
+    const result = {
       dryRun: true,
       targetSystem: 'GHL',
       mode: 'DRY_RUN',
@@ -2486,6 +2504,31 @@ export class OnboardService {
       note: 'No GHL API calls made. Local plan preview only.',
       generatedAt: now,
     };
+
+    // Record sync_run for GHL dry-run
+    const syncRunIdGhl = randomUUID();
+    await supabase.from('sync_runs').insert({
+      id: syncRunIdGhl, project_id: projectId, target_system: 'GHL',
+      mode: 'DRY_RUN', status: 'DRY_RUN_PASSED',
+      idempotency_key: `ghl-dry-run-${projectId}-${now}`,
+      request_payload: { projectId, dryRun: true, noWrite: true, noGhlApiCalls: true },
+      response_payload: {
+        dryRun: true, noWrite: true,
+        proposedOperations: proposedOps,
+        blockers: validation['blockers'] ?? [],
+        warnings: validation['warnings'] ?? [],
+        noGhlMutation: true, noMessagesSent: true,
+      },
+      triggered_by: actorId, version: 1, completed_at: now,
+    });
+
+    this.audit.log({
+      projectId, actorId, actorType: 'OPERATOR', action: 'sync.ghl.dry_run',
+      resourceType: 'sync_run', resourceId: syncRunIdGhl,
+      changes: { operationCount: proposedOps.length },
+    });
+
+    return result;
   }
 
   // ==========================================================================

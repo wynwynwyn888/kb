@@ -2218,3 +2218,174 @@ export async function probeAiRouterRoute(
     body: JSON.stringify(body),
   });
 }
+
+// ── Ops Dashboard APIs (read-only) ──────────────────────────────────────────
+
+export interface OpsHealth {
+  backend: string;
+  frontend: string;
+  redis: string;
+  bookingSave: string;
+  vpsCommit: string;
+  stableTag: string;
+  uptimeSec: number;
+  nodeEnv: string;
+}
+
+export interface OpsFlag {
+  key: string;
+  value: string;
+}
+
+export interface OpsOutboundSend {
+  id: string;
+  tenantId: string;
+  conversationId: string;
+  replyId: string;
+  bubbleSequence: number;
+  status: string;
+  providerMessageId: string | null;
+  attempt: number;
+  lastErrorCode: string | null;
+  lastErrorMessage: string | null;
+  sentAt: string | null;
+  createdAt: string;
+}
+
+export interface OpsPaginated<T> {
+  data: T[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export interface OpsConversationHealth {
+  id: string;
+  tenantId: string;
+  contactId: string;
+  lastMessageAt: string | null;
+  outboundSentCount: number;
+  outboundFailedCount: number;
+  staleSkipped: number;
+  duplicateSkipped: number;
+  status: string;
+}
+
+export interface OpsGhlSync {
+  conversationId: string;
+  tenantId: string;
+  eventType: string;
+  metadata: Record<string, unknown> | null;
+  createdAt: string;
+}
+
+export interface OpsErrorEvent {
+  id: string;
+  tenantId: string | null;
+  conversationId: string | null;
+  eventType: string;
+  eventSource: string;
+  severity: string;
+  metadata: Record<string, unknown> | null;
+  createdAt: string;
+}
+
+export type OpsAuditEvent = OpsErrorEvent;
+
+export interface OpsTenantReadiness {
+  id: string;
+  name: string;
+  ghlLocationId: string | null;
+  botEnabled: boolean;
+  ghlConnectionStatus: string | null;
+  lastSuccessfulSendAt: string | null;
+  lastFailedSendAt: string | null;
+  badContactIdCount: number;
+  syncEnabled: boolean;
+}
+
+export interface OpsQueueHealth {
+  queue: string;
+  waiting: number;
+  active: number;
+  completed: number;
+  failed: number;
+  delayed: number;
+}
+
+export async function getOpsHealth(token: string): Promise<OpsHealth> {
+  return apiRequest<OpsHealth>('/ops/health', { token });
+}
+
+export async function getOpsFlags(token: string): Promise<OpsFlag[]> {
+  return apiRequest<OpsFlag[]>('/ops/flags', { token });
+}
+
+export async function getOpsOutboundSends(
+  token: string,
+  params?: { tenantId?: string; status?: string; page?: number; pageSize?: number },
+): Promise<OpsPaginated<OpsOutboundSend>> {
+  const qs = new URLSearchParams();
+  if (params?.tenantId) qs.set('tenantId', params.tenantId);
+  if (params?.status) qs.set('status', params.status);
+  if (params?.page) qs.set('page', String(params.page));
+  if (params?.pageSize) qs.set('pageSize', String(params.pageSize));
+  const query = qs.toString();
+  return apiRequest<OpsPaginated<OpsOutboundSend>>(`/ops/outbound-sends${query ? '?' + query : ''}`, { token });
+}
+
+export async function getOpsConversations(
+  token: string,
+  params?: { tenantId?: string; page?: number; pageSize?: number },
+): Promise<OpsPaginated<OpsConversationHealth>> {
+  const qs = new URLSearchParams();
+  if (params?.tenantId) qs.set('tenantId', params.tenantId);
+  if (params?.page) qs.set('page', String(params.page));
+  if (params?.pageSize) qs.set('pageSize', String(params.pageSize));
+  const query = qs.toString();
+  return apiRequest<OpsPaginated<OpsConversationHealth>>(`/ops/conversations${query ? '?' + query : ''}`, { token });
+}
+
+export async function getOpsGhlSync(
+  token: string,
+  params?: { conversationId?: string; limit?: number },
+): Promise<OpsGhlSync[]> {
+  const qs = new URLSearchParams();
+  if (params?.conversationId) qs.set('conversationId', params.conversationId);
+  if (params?.limit) qs.set('limit', String(params.limit));
+  const query = qs.toString();
+  return apiRequest<OpsGhlSync[]>(`/ops/ghl-sync${query ? '?' + query : ''}`, { token });
+}
+
+export async function getOpsErrors(
+  token: string,
+  params?: { tenantId?: string; severity?: string; page?: number; pageSize?: number },
+): Promise<OpsPaginated<OpsErrorEvent>> {
+  const qs = new URLSearchParams();
+  if (params?.tenantId) qs.set('tenantId', params.tenantId);
+  if (params?.severity) qs.set('severity', params.severity);
+  if (params?.page) qs.set('page', String(params.page));
+  if (params?.pageSize) qs.set('pageSize', String(params.pageSize));
+  const query = qs.toString();
+  return apiRequest<OpsPaginated<OpsErrorEvent>>(`/ops/errors${query ? '?' + query : ''}`, { token });
+}
+
+export async function getOpsAuditEvents(
+  token: string,
+  params?: { tenantId?: string; page?: number; pageSize?: number },
+): Promise<OpsPaginated<OpsAuditEvent>> {
+  const qs = new URLSearchParams();
+  if (params?.tenantId) qs.set('tenantId', params.tenantId);
+  if (params?.page) qs.set('page', String(params.page));
+  if (params?.pageSize) qs.set('pageSize', String(params.pageSize));
+  const query = qs.toString();
+  return apiRequest<OpsPaginated<OpsAuditEvent>>(`/ops/audit-events${query ? '?' + query : ''}`, { token });
+}
+
+export async function getOpsTenants(token: string): Promise<OpsTenantReadiness[]> {
+  return apiRequest<OpsTenantReadiness[]>('/ops/tenants', { token });
+}
+
+export async function getOpsQueues(token: string): Promise<OpsQueueHealth[]> {
+  return apiRequest<OpsQueueHealth[]>('/ops/queues', { token });
+}

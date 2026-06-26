@@ -1,37 +1,47 @@
-// Audit service - handles audit logging
+import { Injectable, Logger } from '@nestjs/common';
+import { getSupabaseService } from '../../lib/supabase';
+import { randomUUID } from 'crypto';
 
-import { Injectable } from '@nestjs/common';
+export interface AuditEntry {
+  agencyId: string;
+  profileId: string;
+  tenantId?: string;
+  action: string;
+  resource: string;
+  resourceId?: string;
+  changes?: Record<string, unknown>;
+  ipAddress?: string;
+}
 
 @Injectable()
 export class AuditService {
-  // TODO: Implement audit logging
-  // - Log all user actions with before/after state
-  // - Filter by agency, tenant, user, date range
-  // - Pagination support
-  // - Immutable log entries
+  private readonly logger = new Logger(AuditService.name);
 
-  async log(entry: {
-    agencyId: string;
-    userId: string;
-    tenantId?: string;
-    action: string;
-    resource: string;
-    resourceId?: string;
-    changes?: Record<string, { before?: unknown; after?: unknown }>;
-    ipAddress?: string;
-  }) {
-    throw new Error('Not implemented');
+  /**
+   * Fire-and-forget audit log write. Never throws — failures are logged at warn level.
+   * Callers must NOT await this in a way that blocks business operations.
+   */
+  log(entry: AuditEntry): void {
+    void this.doLog(entry).catch((e) => {
+      this.logger.warn(`audit_log_failed: ${e instanceof Error ? e.message : String(e)}`);
+    });
   }
 
-  async query(filters: {
-    agencyId: string;
-    tenantId?: string;
-    userId?: string;
-    startDate?: Date;
-    endDate?: Date;
-    page?: number;
-    pageSize?: number;
-  }) {
-    throw new Error('Not implemented');
+  private async doLog(entry: AuditEntry): Promise<void> {
+    const supabase = getSupabaseService();
+    const { error } = await supabase.from('audit_logs').insert({
+      id: randomUUID(),
+      agency_id: entry.agencyId,
+      profile_id: entry.profileId,
+      tenant_id: entry.tenantId ?? null,
+      action: entry.action,
+      resource: entry.resource,
+      resource_id: entry.resourceId ?? null,
+      changes: entry.changes ?? {},
+      ip_address: entry.ipAddress ?? null,
+    });
+    if (error) {
+      this.logger.warn(`audit_log_insert_error: action=${entry.action} resource=${entry.resource} err=${String(error)}`);
+    }
   }
 }

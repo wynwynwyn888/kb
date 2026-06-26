@@ -20,6 +20,7 @@ import { decrypt } from '../../lib/encryption';
 import { isProductionEnv, safeTextPreviewForLog } from '../../lib/safe-text-preview-for-log';
 import type { ReplyDecision, ReplyBubbleDraft } from '../reply-planning/dto';
 import { CreditWarningsService } from '../credit-warnings/credit-warnings.service';
+import { MetricsService } from '../../lib/metrics.service';
 import {
   ghlOutboundExpandChannelAttempts,
   ghlOutboundFallbackChannels,
@@ -67,7 +68,10 @@ export class OutboundSendService {
 
   // Optional so existing tests that `new OutboundSendService()` continue to pass without
   // wiring the warning service; production wires it via Nest DI from OutboundModule.
-  constructor(@Optional() private readonly creditWarnings?: CreditWarningsService) {}
+  constructor(
+    @Optional() private readonly creditWarnings?: CreditWarningsService,
+    @Optional() private readonly metrics?: MetricsService,
+  ) {}
 
   /**
    * Send all bubbles for a ReplyDecision to GHL.
@@ -208,7 +212,8 @@ export class OutboundSendService {
           content: bubble.text,
           sendBubbleJobId: jobId,
         });
-        if (claimed === null && process.env['AISBP_OUTBOUND_IDEMPOTENCY_ENABLED'] === 'true') {
+          if (claimed === null && process.env['AISBP_OUTBOUND_IDEMPOTENCY_ENABLED'] === 'true') {
+          this.metrics?.emit({ tenantId, conversationId, eventType: 'duplicate_send_prevented', eventSource: 'outbound-send', metadata: { replyId, bubbleSequence: bubble.index } });
           bubbleResults.push({
             index: bubble.index,
             text: bubble.text,
@@ -243,6 +248,7 @@ export class OutboundSendService {
 
       if (result.success) {
         succeeded++;
+        this.metrics?.emit({ tenantId, conversationId, eventType: 'outbound_send_sent', eventSource: 'outbound-send', metadata: { replyId: replyId ?? undefined, bubbleSequence: bubble.index, ghlChannel: result.ghlChannelUsed, ghlMessageId: result.ghlMessageId } });
         if (result.ghlChannelUsed) {
           await this.persistConversationOutboundChannel(conversationId, result.ghlChannelUsed);
         }
@@ -265,6 +271,7 @@ export class OutboundSendService {
         }
       } else {
         failed++;
+        this.metrics?.emit({ tenantId, conversationId, eventType: 'outbound_send_failed', eventSource: 'outbound-send', severity: 'error', metadata: { replyId: replyId ?? undefined, bubbleSequence: bubble.index, error: result.error } });
         if (replyId) {
           await this.updateOutboundSendResult({
             tenantId, conversationId, replyId, bubbleSequence: bubble.index,
@@ -412,6 +419,7 @@ export class OutboundSendService {
 
       // 429 rate-limit: log and abort (BullMQ retries with backoff)
       if (response.error?.includes('Rate limited')) {
+        this.metrics?.emit({ eventType: 'ghl_api_rate_limited', eventSource: 'outbound-send', severity: 'warn', metadata: { locationId, channel: ch } });
         this.logger.warn(
           `ghl429RateLimited: locationId=${locationId} channel=${ch}`,
         );
@@ -491,6 +499,7 @@ export class OutboundSendService {
       this.logger.log(
         `contactIdPhoneResolved: contactId=${contactId.trim()} → ghlContactId=${result.contact.id}`,
       );
+      this.metrics?.emit({ eventType: 'contact_id_phone_fallback_resolved', eventSource: 'outbound-send', metadata: { locationId, resolvedId: result.contact.id } });
       return result.contact.id;
     } catch (e) {
       this.logger.warn(

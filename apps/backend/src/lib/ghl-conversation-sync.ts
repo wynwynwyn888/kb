@@ -22,6 +22,7 @@ export async function syncGhlConversationContext(params: {
   ghlLocationId: string;
   conversationId: string;
   contactId: string;
+  onMessageImported?: (event: { direction: string; sender: string; source: string }) => void;
 }): Promise<SyncResult> {
   const { supabase, tenantId, ghlLocationId, conversationId, contactId } = params;
   const t0 = Date.now();
@@ -153,6 +154,7 @@ export async function syncGhlConversationContext(params: {
       logger.warn(`messages_insert_error: ghlMessageId=${msg.id} err=${String(insErr)}`);
     } else {
       result.synced++;
+      params.onMessageImported?.({ direction, sender, source: msg.source });
     }
   }
 

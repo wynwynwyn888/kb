@@ -1105,3 +1105,24 @@ model OutboundSend {
   @@index([conversationId, replyId, bubbleSequence])
   @@map("outbound_sends")
 }
+
+// ============================================================================
+// METRICS EVENTS
+// ============================================================================
+
+model MetricsEvent {
+  id             String   @id @default(uuid())
+  tenantId       String?  @map("tenant_id")
+  conversationId String?  @map("conversation_id")
+  eventType      String   @map("event_type")
+  eventSource    String   @map("event_source")
+  severity       String   @default("info")
+  metadata       Json?    @map("metadata")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@index([tenantId, createdAt(sort: Desc)])
+  @@index([eventType, createdAt(sort: Desc)])
+  @@index([conversationId, createdAt(sort: Desc)])
+  @@index([severity, createdAt(sort: Desc)])
+  @@map("metrics_events")
+}

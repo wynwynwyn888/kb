@@ -29,6 +29,8 @@ import { IntentTagsModule } from './modules/intent-tags/intent-tags.module';
 import { FollowUpSettingsModule } from './modules/follow-up-settings/follow-up-settings.module';
 import { FollowUpEngineModule } from './modules/follow-up-engine/follow-up-engine.module';
 import { AppCacheModule } from './lib/app-cache.module';
+import { MetricsModule } from './lib/metrics.module';
+import { AuditModule } from './modules/audit/audit.module';
 import { HumanEscalationModule } from './modules/human-escalation/human-escalation.module';
 
 @Module({
@@ -109,6 +111,8 @@ import { HumanEscalationModule } from './modules/human-escalation/human-escalati
     FollowUpSettingsModule,
     FollowUpEngineModule,
     HumanEscalationModule,
+    AuditModule,
+    MetricsModule,
   ],
   providers: [
     // Global rate limit guard

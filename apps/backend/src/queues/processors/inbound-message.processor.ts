@@ -5,7 +5,7 @@
 
 import { Processor, WorkerHost, OnWorkerEvent, InjectQueue } from '@nestjs/bullmq';
 import type { Job, Queue } from 'bullmq';
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import { formatPostgrestError } from '../../lib/format-postgrest-error';
 import { getSupabaseService } from '../../lib/supabase';
@@ -47,6 +47,7 @@ import { FollowUpEngineService } from '../../modules/follow-up-engine/follow-up-
 import { HumanEscalationHoldingReplyService } from '../../modules/human-escalation/human-escalation-holding-reply.service';
 import { MediaTranscriptionQueueService } from '../media-transcription-queue.service';
 import { syncGhlConversationContext } from '../../lib/ghl-conversation-sync';
+import { MetricsService } from '../../lib/metrics.service';
 
 export interface InboundMessageJobData {
   locationId: string;
@@ -128,6 +129,7 @@ export class InboundMessageProcessor extends WorkerHost {
     private readonly humanEscalationHolding: HumanEscalationHoldingReplyService,
     @InjectQueue(QUEUES.SEND_BUBBLE) private readonly sendBubbleQueue: Queue,
     @InjectQueue(QUEUES.INBOUND_MESSAGE_PROCESSOR) private readonly inboundQueue: Queue,
+    @Optional() private readonly metrics?: MetricsService,
   ) {
     super();
   }
@@ -1304,14 +1306,22 @@ export class InboundMessageProcessor extends WorkerHost {
     // Pre-reply GHL context sync (feature-flagged, default OFF)
     if (process.env['GHL_PRE_REPLY_CONTEXT_SYNC'] === 'true') {
       try {
-        await syncGhlConversationContext({
+        this.metrics?.emit({ tenantId, conversationId, eventType: 'ghl_sync_started', eventSource: 'inbound-processor' });
+        const syncResult = await syncGhlConversationContext({
           supabase: this.supabase,
           tenantId,
           ghlLocationId: locationId,
           conversationId,
           contactId: ghlContactId,
+          onMessageImported: ({ direction, sender, source }) => {
+            if (direction === 'OUTBOUND' && sender !== 'AI') {
+              this.metrics?.emit({ tenantId, conversationId, eventType: 'ghl_message_imported', eventSource: 'ghl-conversation-sync', metadata: { sender, source } });
+            }
+          },
         });
+        this.metrics?.emit({ tenantId, conversationId, eventType: 'ghl_sync_completed', eventSource: 'inbound-processor', metadata: { fetched: syncResult.synced + syncResult.deduped + syncResult.appSkipped, inserted: syncResult.synced, deduped: syncResult.deduped, appSkipped: syncResult.appSkipped, latencyMs: syncResult.latencyMs } });
       } catch (e) {
+        this.metrics?.emit({ tenantId, conversationId, eventType: 'ghl_sync_failed', eventSource: 'inbound-processor', severity: 'error', metadata: { error: e instanceof Error ? e.message : String(e) } });
         this.logger.warn(`context_sync_failed: ${e instanceof Error ? e.message : String(e)}`);
       }
     }

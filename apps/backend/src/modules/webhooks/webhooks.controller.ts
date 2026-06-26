@@ -153,8 +153,11 @@ export class WebhooksController {
       hmacSignature: undefined,
       staticToken: webhookToken,
     });
-    if (!authResult) {
-      throw new UnauthorizedException('Invalid webhook token');
+    if (!authResult.valid) {
+      throw new UnauthorizedException({
+        message: 'Webhook verification failed',
+        reason: authResult.reason ?? 'invalid_token',
+      });
     }
 
     // Accept GHL standard fields: contact_id (preferred) or phone, location.id

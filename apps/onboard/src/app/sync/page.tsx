@@ -166,18 +166,33 @@ export default function SyncPreviewPage() {
 
       {syncRuns.length > 0 && (
         <PlaceholderCard title="Sync Run History">
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-            {syncRuns.map((run, i) => (
-              <div key={i} style={{ display: 'flex', gap: '1rem', padding: '0.4rem 0', borderBottom: '1px solid var(--aisbp-border, #e2e8f0)', fontSize: '0.82rem', alignItems: 'center' }}>
-                <span style={{ color: 'var(--aisbp-muted, #64748b)', minWidth: 80 }}>{asStr(run['targetSystem'])}</span>
-                <span style={{ color: 'var(--aisbp-muted, #64748b)', minWidth: 70 }}>{asStr(run['mode']).replace('_', ' ')}</span>
-                <StatusPill status={asStr(run['status'])} />
-                <span style={{ color: 'var(--aisbp-muted, #64748b)', fontSize: '0.75rem' }}>
-                  {asStr(run['createdAt']) ? new Date(asStr(run['createdAt'])).toLocaleString() : ''}
-                </span>
-              </div>
-            ))}
+          <div style={{ padding: '0.5rem 0.75rem', background: '#DBEAFE', borderRadius: 8, fontSize: '0.78rem', color: '#1E40AF', marginBottom: '0.75rem' }}>
+            Grouped by target system. GHL records show validation/dry-run only — no GHL writes, no workflows, no appointments, no messages.
           </div>
+          {['KB', 'GHL'].map(target => {
+            const runs = syncRuns.filter(r => asStr(r['targetSystem']) === target);
+            if (runs.length === 0) return null;
+            return (
+              <div key={target} style={{ marginBottom: target === 'GHL' ? 0 : '1rem' }}>
+                <h3 style={{ fontSize: '0.88rem', fontWeight: 700, margin: '0 0 0.5rem', color: 'var(--aisbp-text, #0f172a)' }}>
+                  {target === 'GHL' ? 'GHL Validation / Dry Run' : 'KB Sync'}
+                </h3>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                  {runs.map((run, i) => (
+                    <div key={i} style={{ display: 'flex', gap: '1rem', padding: '0.4rem 0', borderBottom: '1px solid var(--aisbp-border, #e2e8f0)', fontSize: '0.82rem', alignItems: 'center' }}>
+                      <span style={{ color: 'var(--aisbp-muted, #64748b)', minWidth: 100 }}>
+                        {asStr((run['responsePayload'] as Record<string, unknown>)?.['validationType']) === 'GHL_VALIDATE' ? 'Validate' : asStr(run['mode']).replace('_', ' ')}
+                      </span>
+                      <StatusPill status={asStr(run['status'])} />
+                      <span style={{ color: 'var(--aisbp-muted, #64748b)', fontSize: '0.75rem' }}>
+                        {asStr(run['createdAt']) ? new Date(asStr(run['createdAt'])).toLocaleString() : ''}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
         </PlaceholderCard>
       )}
 
@@ -186,7 +201,11 @@ export default function SyncPreviewPage() {
         <div style={{ padding: '0.5rem 0.75rem', background: '#FEF3C7', borderRadius: 8, fontSize: '0.8rem', color: '#92400E', marginBottom: '1rem' }}>
           No GHL writes. No workflow triggers. No appointments. No messages. No outbound. Local checks only — no GHL API calls made.
         </div>
-        <GhlSection projectId={projectId} api={api} />
+        <GhlSection projectId={projectId} api={api} onHistoryRefresh={() => {
+          if (projectId.trim()) {
+            api?.getSyncRuns(projectId.trim()).then(r => setSyncRuns(r)).catch(() => {});
+          }
+        }} />
       </PlaceholderCard>
     </OnboardChrome>
   );
@@ -270,7 +289,7 @@ function ApplyForm({ projectId, syncRunId, api, onChecked }: {
   );
 }
 
-function GhlSection({ projectId, api }: { projectId: string; api: OnboardApi | null }) {
+function GhlSection({ projectId, api, onHistoryRefresh }: { projectId: string; api: OnboardApi | null; onHistoryRefresh: () => void }) {
   const [validating, setValidating] = useState(false);
   const [dryRunning, setDryRunning] = useState(false);
   const [ghlResult, setGhlResult] = useState<Record<string, unknown> | null>(null);
@@ -279,7 +298,7 @@ function GhlSection({ projectId, api }: { projectId: string; api: OnboardApi | n
   const handleValidate = async () => {
     if (!api || !projectId.trim()) return;
     setValidating(true); setGhlError(null); setGhlResult(null);
-    try { setGhlResult(await api.ghlValidate(projectId.trim())); }
+    try { setGhlResult(await api.ghlValidate(projectId.trim())); onHistoryRefresh(); }
     catch (e) { setGhlError(e instanceof Error ? e.message : 'Failed'); }
     finally { setValidating(false); }
   };
@@ -287,7 +306,7 @@ function GhlSection({ projectId, api }: { projectId: string; api: OnboardApi | n
   const handleDryRun = async () => {
     if (!api || !projectId.trim()) return;
     setDryRunning(true); setGhlError(null); setGhlResult(null);
-    try { setGhlResult(await api.ghlDryRun(projectId.trim())); }
+    try { setGhlResult(await api.ghlDryRun(projectId.trim())); onHistoryRefresh(); }
     catch (e) { setGhlError(e instanceof Error ? e.message : 'Failed'); }
     finally { setDryRunning(false); }
   };

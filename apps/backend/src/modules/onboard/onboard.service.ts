@@ -2264,6 +2264,69 @@ export class OnboardService {
     };
   }
 
+  async getReviewAlerts(): Promise<Record<string, unknown>> {
+    const supabase = getSupabaseService();
+    const now = new Date().toISOString();
+
+    // Projects needing review
+    const { data: reviewProjects } = await supabase
+      .from('onboarding_projects')
+      .select('id, client_id, status, current_phase, submitted_at, updated_at, onboard_clients(client_key, display_name)')
+      .in('status', ['SUBMITTED', 'IN_REVIEW', 'CHANGES_REQUESTED'])
+      .order('submitted_at', { ascending: false });
+
+    // Projects with stale sync runs (dry-run older than 7 days)
+    const { data: staleRuns } = await supabase
+      .from('sync_runs')
+      .select('id, project_id, target_system, mode, status, created_at')
+      .eq('status', 'DRY_RUN_PASSED')
+      .lt('created_at', new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString())
+      .order('created_at', { ascending: false })
+      .limit(20);
+
+    // Blocked apply attempts
+    const { data: blockedApplies } = await supabase
+      .from('sync_runs')
+      .select('id, project_id, status, error_message, created_at')
+      .in('status', ['APPLY_FAILED'])
+      .order('created_at', { ascending: false })
+      .limit(20);
+
+    const projectsNeedingReview = (reviewProjects || []).map(p => {
+      const client = (p as Record<string, unknown>)['onboard_clients'] as Record<string, unknown> | null;
+      return {
+        projectId: p['id'],
+        clientKey: client?.['client_key'] ?? null,
+        displayName: client?.['display_name'] ?? null,
+        displayLabel: client ? `${client['display_name']} · ${client['client_key']}` : null,
+        status: p['status'],
+        currentPhase: p['current_phase'],
+        submittedAt: p['submitted_at'],
+      };
+    });
+
+    return {
+      totalNeedsReview: projectsNeedingReview.length,
+      projectsNeedingReview,
+      staleDryRuns: (staleRuns || []).map((r: Record<string, unknown>) => ({
+        syncRunId: r['id'],
+        projectId: r['project_id'],
+        targetSystem: r['target_system'],
+        status: r['status'],
+        createdAt: r['created_at'],
+      })),
+      blockedApplyAttempts: (blockedApplies || []).map((r: Record<string, unknown>) => ({
+        syncRunId: r['id'],
+        projectId: r['project_id'],
+        status: r['status'],
+        errorMessage: r['error_message'],
+        createdAt: r['created_at'],
+      })),
+      generatedAt: now,
+      noExternalNotificationsSent: true,
+    };
+  }
+
   // ==========================================================================
   // PRIVATE HELPERS
   // ==========================================================================

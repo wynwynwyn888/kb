@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import type { CSSProperties, ReactNode, FormEvent } from 'react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { SafetyBanner } from '@/components/SafetyBanner';
 
@@ -35,8 +35,16 @@ function navLinkStyle(active: boolean): CSSProperties {
 }
 
 export function OnboardChrome({ children }: { children: ReactNode }) {
-  const { user, loading, error, token, login, logout } = useAuth();
+  const { user, loading, error, token, api, login, logout } = useAuth();
   const pathname = usePathname();
+  const [reviewCount, setReviewCount] = useState(0);
+
+  useEffect(() => {
+    if (!api) return;
+    api.getReviewAlerts().then(a => {
+      setReviewCount(Number(a?.['totalNeedsReview'] ?? 0));
+    }).catch(() => {});
+  }, [api]);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loginError, setLoginError] = useState<string | null>(null);
@@ -150,6 +158,11 @@ export function OnboardChrome({ children }: { children: ReactNode }) {
               <Link key={item.href} href={item.href} style={navLinkStyle(active)} aria-current={active ? 'page' : undefined}>
                 <span style={{ fontSize: '1rem' }}>{item.icon}</span>
                 <span>{item.label}</span>
+                {item.label === 'Review Queue' && reviewCount > 0 && (
+                  <span style={{ marginLeft: 'auto', background: '#FEF3C7', color: '#D97706', fontSize: '0.7rem', fontWeight: 700, padding: '0.1rem 0.4rem', borderRadius: 999 }}>
+                    {reviewCount}
+                  </span>
+                )}
               </Link>
             );
           })}

@@ -140,6 +140,10 @@ export function createOnboardApi(token: string) {
     getProjectRecommendations: (projectId: string) =>
       apiRequest<AutomationRecommendation[]>(`/onboard/projects/${projectId}/recommendations`, { token }),
 
+    // Notifications (PR 11)
+    getReviewAlerts: () =>
+      apiRequest<Record<string, unknown>>('/onboard/notifications/review-alerts', { token }),
+
     // Sync (PR 9)
     kbDryRun: (projectId: string, idempotencyKey?: string) =>
       apiRequest<Record<string, unknown>>(`/onboard/projects/${projectId}/sync/kb/dry-run`, {

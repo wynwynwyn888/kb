@@ -223,14 +223,24 @@ export class OnboardController {
   }
 
   // ==========================================================================
-  // KB SYNC APPLY (PR 10)
+  // NOTIFICATIONS / REVIEW ALERTS (PR 11)
   // ==========================================================================
 
   @Get('projects/:onboardingProjectId/sync/kb/plan-preview')
-  @ApiOperation({ summary: 'Preview mapped KB write plan without applying (no-write)' })
+  @ApiOperation({ summary: 'Preview mapped KB write plan (no-write)' })
   async kbPlanPreview(@Param('onboardingProjectId') onboardingProjectId: string) {
     return this.onboardService.kbPlanPreview(onboardingProjectId);
   }
+
+  @Get('notifications/review-alerts')
+  @ApiOperation({ summary: 'Get review alerts and in-app notification summary (operator only)' })
+  async getReviewAlerts() {
+    return this.onboardService.getReviewAlerts();
+  }
+
+  // ==========================================================================
+  // KB SYNC APPLY (PR 10)
+  // ==========================================================================
 
   @Post('projects/:onboardingProjectId/sync/kb/apply')
   @ApiOperation({ summary: 'Apply approved KB dry-run config. Requires feature flag, approval, and snapshot match.' })

@@ -15,11 +15,24 @@ export default function DashboardPage() {
   const [clients, setClients] = useState<OnboardClient[]>([]);
   const [projects, setProjects] = useState<OnboardProject[]>([]);
   const [loading, setLoading] = useState(true);
+  const [needsReview, setNeedsReview] = useState(0);
+  const [staleRuns, setStaleRuns] = useState(0);
+  const [blockedApplies, setBlockedApplies] = useState(0);
 
   useEffect(() => {
     if (!api) return;
-    Promise.all([api.listClients(), api.listProjects()])
-      .then(([c, p]) => { setClients(c); setProjects(p); })
+    Promise.all([
+      api.listClients(),
+      api.listProjects(),
+      api.getReviewAlerts(),
+    ])
+      .then(([c, p, alerts]) => {
+        setClients(c);
+        setProjects(p);
+        setNeedsReview(Number(alerts?.['totalNeedsReview'] ?? 0));
+        setStaleRuns((alerts?.['staleDryRuns'] as unknown[] ?? []).length);
+        setBlockedApplies((alerts?.['blockedApplyAttempts'] as unknown[] ?? []).length);
+      })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [api]);
@@ -44,10 +57,23 @@ export default function DashboardPage() {
         <>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '1rem', marginBottom: '2rem' }}>
             <StatCard label="Projects" value={projects.length} color="#2563EB" />
-            <StatCard label="Needs Review" value={pendingReview.length} color="#D97706" />
+            <StatCard label="Needs Review" value={needsReview} color={needsReview > 0 ? '#D97706' : '#64748B'} />
             <StatCard label="Live Clients" value={liveCount} color="#16A34A" />
             <StatCard label="Clients" value={clients.length} color="#0F62FE" />
           </div>
+
+          {(needsReview > 0 || staleRuns > 0 || blockedApplies > 0) && (
+            <div style={{ marginBottom: '1.5rem', padding: '0.75rem 1rem', background: '#FEF3C7', borderRadius: 10, border: '1px solid #FCD34D' }}>
+              <div style={{ fontSize: '0.9rem', fontWeight: 700, color: '#92400E', marginBottom: '0.35rem' }}>
+                In-app alert only. No WhatsApp/email/SMS notification sent.
+              </div>
+              <div style={{ display: 'flex', gap: '1.5rem', fontSize: '0.82rem', color: '#92400E', flexWrap: 'wrap' }}>
+                {needsReview > 0 && <span>🟡 {needsReview} project{needsReview > 1 ? 's' : ''} need{needsReview === 1 ? 's' : ''} review</span>}
+                {staleRuns > 0 && <span>⚠ {staleRuns} stale dry-run{staleRuns > 1 ? 's' : ''}</span>}
+                {blockedApplies > 0 && <span>🔴 {blockedApplies} blocked apply attempt{blockedApplies > 1 ? 's' : ''}</span>}
+              </div>
+            </div>
+          )}
 
           <PlaceholderCard title="Projects">
             {projects.length > 0 ? (

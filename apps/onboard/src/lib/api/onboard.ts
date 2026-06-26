@@ -144,6 +144,13 @@ export function createOnboardApi(token: string) {
     getReviewAlerts: () =>
       apiRequest<Record<string, unknown>>('/onboard/notifications/review-alerts', { token }),
 
+    // GHL Validation / Dry Run (PR 12)
+    ghlValidate: (projectId: string) =>
+      apiRequest<Record<string, unknown>>(`/onboard/projects/${projectId}/sync/ghl/validate`, { token, method: 'POST' }),
+
+    ghlDryRun: (projectId: string) =>
+      apiRequest<Record<string, unknown>>(`/onboard/projects/${projectId}/sync/ghl/dry-run`, { token, method: 'POST' }),
+
     // Sync (PR 9)
     kbDryRun: (projectId: string, idempotencyKey?: string) =>
       apiRequest<Record<string, unknown>>(`/onboard/projects/${projectId}/sync/kb/dry-run`, {

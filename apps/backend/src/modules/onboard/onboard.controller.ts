@@ -239,6 +239,22 @@ export class OnboardController {
   }
 
   // ==========================================================================
+  // GHL VALIDATION / DRY RUN (PR 12)
+  // ==========================================================================
+
+  @Post('projects/:onboardingProjectId/sync/ghl/validate')
+  @ApiOperation({ summary: 'Validate GHL readiness — local checks only, no GHL API calls' })
+  async ghlValidate(@Param('onboardingProjectId') onboardingProjectId: string) {
+    return this.onboardService.ghlValidate(onboardingProjectId);
+  }
+
+  @Post('projects/:onboardingProjectId/sync/ghl/dry-run')
+  @ApiOperation({ summary: 'Generate no-write GHL sync plan preview' })
+  async ghlDryRun(@Param('onboardingProjectId') onboardingProjectId: string) {
+    return this.onboardService.ghlDryRun(onboardingProjectId);
+  }
+
+  // ==========================================================================
   // KB SYNC APPLY (PR 10)
   // ==========================================================================
 

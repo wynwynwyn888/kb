@@ -2328,6 +2328,167 @@ export class OnboardService {
   }
 
   // ==========================================================================
+  // GHL VALIDATION / DRY RUN (PR 12)
+  // Local checks only — no GHL API calls, no mutation.
+  // ==========================================================================
+
+  async ghlValidate(projectId: string): Promise<Record<string, unknown>> {
+    const project = await this.getProject(projectId);
+    if (!project) throw new NotFoundException('Project not found');
+
+    const supabase = getSupabaseService();
+    const { data: identityMap } = await supabase
+      .from('onboarding_identity_map')
+      .select('ghl_location_id, kb_tenant_id')
+      .eq('project_id', projectId)
+      .maybeSingle();
+
+    const checks: string[] = [];
+    const missingFields: string[] = [];
+    const blockers: string[] = [];
+    const warnings: string[] = [];
+
+    checks.push('project_exists');
+
+    if (!identityMap) {
+      blockers.push('No identity map — run tenant identity sync first (PR 10D)');
+    } else {
+      const ghlLocationId = identityMap['ghl_location_id'] as string | null;
+      const kbTenantId = identityMap['kb_tenant_id'] as string | null;
+
+      checks.push('identity_map_exists');
+
+      if (ghlLocationId) {
+        checks.push('ghl_location_present');
+      } else {
+        missingFields.push('ghlLocationId — fill in client setup or GHL connection');
+        warnings.push('GHL location ID not yet mapped');
+      }
+
+      if (kbTenantId) {
+        checks.push('kb_tenant_id_present');
+
+        // Check KB tenant_ghl_connections (read-only)
+        const { data: ghlConn } = await supabase
+          .from('tenant_ghl_connections')
+          .select('status, ghl_location_id')
+          .eq('tenant_id', kbTenantId)
+          .maybeSingle();
+
+        if (ghlConn) {
+          checks.push('kb_ghl_connection_exists');
+          if (ghlConn['status'] === 'CONNECTED') {
+            checks.push('kb_ghl_connection_connected');
+          } else {
+            warnings.push(`KB GHL connection status: ${ghlConn['status']}`);
+          }
+        } else {
+          warnings.push('No KB GHL connection found for this tenant');
+        }
+      } else {
+        missingFields.push('kbTenantId — run tenant identity sync first (PR 10D)');
+      }
+    }
+
+    const valid = blockers.length === 0;
+
+    return {
+      valid,
+      targetSystem: 'GHL',
+      mode: 'VALIDATE',
+      projectId,
+      ghlLocationId: identityMap?.['ghl_location_id'] ? String(identityMap['ghl_location_id']).slice(0, 8) : null,
+      checks,
+      missingFields,
+      blockers,
+      warnings,
+      noGhlMutation: true,
+      noMessagesSent: true,
+      noOutboundEnabled: true,
+      noGhlApiCalls: true,
+      note: 'Local validation only. No GHL API calls made.',
+    };
+  }
+
+  async ghlDryRun(projectId: string): Promise<Record<string, unknown>> {
+    const validation = await this.ghlValidate(projectId);
+    const supabase = getSupabaseService();
+    const now = new Date().toISOString();
+
+    const { data: identityMapGhl } = await supabase
+      .from('onboarding_identity_map')
+      .select('ghl_location_id, ghl_contact_id, ghl_conversation_id')
+      .eq('project_id', projectId)
+      .maybeSingle();
+
+    const proposedOps = [
+      {
+        operation: 'validate_location',
+        table: 'tenant_ghl_connections',
+        dryRun: true,
+        noWrite: true,
+        disabledForNow: true,
+        note: 'Verify GHL location exists and connection is valid',
+      },
+    ];
+
+    if (identityMapGhl?.['ghl_contact_id']) {
+      proposedOps.push({
+        operation: 'map_contact',
+        table: 'conversations',
+        dryRun: true,
+        noWrite: true,
+        disabledForNow: true,
+        note: 'Map existing GHL test contact to KB tenant',
+      });
+    }
+
+    if (identityMapGhl?.['ghl_conversation_id']) {
+      proposedOps.push({
+        operation: 'map_conversation',
+        table: 'conversations',
+        dryRun: true,
+        noWrite: true,
+        disabledForNow: true,
+        note: 'Map existing GHL test conversation to KB tenant',
+      });
+    }
+
+    proposedOps.push(
+      { operation: 'create_contact', table: 'contacts', dryRun: true, noWrite: true, disabledForNow: true, note: 'Future: create test contact if needed' },
+      { operation: 'map_calendar', table: 'tenant_booking_settings', dryRun: true, noWrite: true, disabledForNow: true, note: 'Future: link GHL calendar for booking' },
+      { operation: 'map_workflow', table: 'ghl_workflows', dryRun: true, noWrite: true, disabledForNow: true, note: 'Future: configure GHL workflows' },
+      { operation: 'map_pipeline', table: 'ghl_pipelines', dryRun: true, noWrite: true, disabledForNow: true, note: 'Future: link GHL pipeline stages' },
+    );
+
+    return {
+      dryRun: true,
+      targetSystem: 'GHL',
+      mode: 'DRY_RUN',
+      projectId,
+      operationCount: proposedOps.length,
+      wouldValidate: proposedOps.filter(o => o.operation.includes('validate') || o.operation.includes('map_contact') || o.operation.includes('map_conversation')),
+      wouldCreate: proposedOps.filter(o => o.operation.includes('create')),
+      wouldUpdate: [],
+      wouldSkip: [],
+      proposedOperations: proposedOps,
+      blockers: validation['blockers'] ?? [],
+      warnings: validation['warnings'] ?? [],
+      safetyChecks: {
+        noGhlMutation: true,
+        noMessagesSent: true,
+        noWorkflowTriggered: true,
+        noAppointmentCreated: true,
+        noOutboundEnabled: true,
+        noGhlApiCalls: true,
+      },
+      nextAllowedAction: 'GHL apply sync is not implemented. All operations are proposed only.',
+      note: 'No GHL API calls made. Local plan preview only.',
+      generatedAt: now,
+    };
+  }
+
+  // ==========================================================================
   // PRIVATE HELPERS
   // ==========================================================================
 

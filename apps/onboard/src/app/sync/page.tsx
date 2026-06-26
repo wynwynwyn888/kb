@@ -180,6 +180,14 @@ export default function SyncPreviewPage() {
           </div>
         </PlaceholderCard>
       )}
+
+      {/* GHL Validation / Dry Run */}
+      <PlaceholderCard title="GHL Validation / Dry Run">
+        <div style={{ padding: '0.5rem 0.75rem', background: '#FEF3C7', borderRadius: 8, fontSize: '0.8rem', color: '#92400E', marginBottom: '1rem' }}>
+          No GHL writes. No workflow triggers. No appointments. No messages. No outbound. Local checks only — no GHL API calls made.
+        </div>
+        <GhlSection projectId={projectId} api={api} />
+      </PlaceholderCard>
     </OnboardChrome>
   );
 }
@@ -258,6 +266,70 @@ function ApplyForm({ projectId, syncRunId, api, onChecked }: {
         }}>
         {checking ? 'Applying...' : `Apply ${scopeLabel}`}
       </button>
+    </div>
+  );
+}
+
+function GhlSection({ projectId, api }: { projectId: string; api: OnboardApi | null }) {
+  const [validating, setValidating] = useState(false);
+  const [dryRunning, setDryRunning] = useState(false);
+  const [ghlResult, setGhlResult] = useState<Record<string, unknown> | null>(null);
+  const [ghlError, setGhlError] = useState<string | null>(null);
+
+  const handleValidate = async () => {
+    if (!api || !projectId.trim()) return;
+    setValidating(true); setGhlError(null); setGhlResult(null);
+    try { setGhlResult(await api.ghlValidate(projectId.trim())); }
+    catch (e) { setGhlError(e instanceof Error ? e.message : 'Failed'); }
+    finally { setValidating(false); }
+  };
+
+  const handleDryRun = async () => {
+    if (!api || !projectId.trim()) return;
+    setDryRunning(true); setGhlError(null); setGhlResult(null);
+    try { setGhlResult(await api.ghlDryRun(projectId.trim())); }
+    catch (e) { setGhlError(e instanceof Error ? e.message : 'Failed'); }
+    finally { setDryRunning(false); }
+  };
+
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1rem' }}>
+        <button type="button" onClick={handleValidate} disabled={validating || !projectId.trim()}
+          style={{ padding: '0.45rem 1rem', borderRadius: 10, border: '1px solid var(--aisbp-border, #e2e8f0)', background: 'var(--aisbp-surface, #fff)', color: 'var(--aisbp-text, #0f172a)', fontWeight: 600, fontSize: '0.82rem', cursor: validating ? 'not-allowed' : 'pointer' }}>
+          {validating ? 'Validating...' : 'Validate GHL'}
+        </button>
+        <button type="button" onClick={handleDryRun} disabled={dryRunning || !projectId.trim()}
+          style={{ padding: '0.45rem 1rem', borderRadius: 10, border: 'none', background: '#2563EB', color: '#fff', fontWeight: 600, fontSize: '0.82rem', cursor: dryRunning ? 'not-allowed' : 'pointer' }}>
+          {dryRunning ? 'Running...' : 'GHL Dry-Run'}
+        </button>
+      </div>
+
+      {ghlError && <div style={{ padding: '0.5rem 0.75rem', background: '#FEE2E2', borderRadius: 8, fontSize: '0.82rem', color: '#DC2626', marginBottom: '1rem' }}>{ghlError}</div>}
+
+      {ghlResult && (
+        <div style={{ fontSize: '0.85rem' }}>
+          <div style={{ display: 'flex', gap: '1rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
+            <StatusPill status={asStr(ghlResult['valid']) === 'true' ? 'valid' : 'invalid'} />
+            <span style={{ color: 'var(--aisbp-muted, #64748b)' }}>
+              {ghlResult['mode'] === 'DRY_RUN' ? `Operations: ${ghlResult['operationCount']}` : `Checks: ${(ghlResult['checks'] as string[] ?? []).length}`}
+            </span>
+          </div>
+          {Boolean(ghlResult['blockers']) && (ghlResult['blockers'] as string[]).length > 0 && (
+            <div style={{ color: '#DC2626', marginBottom: '0.5rem' }}>
+              Blockers: {(ghlResult['blockers'] as string[]).join(', ')}
+            </div>
+          )}
+          {Boolean(ghlResult['warnings']) && (ghlResult['warnings'] as string[]).length > 0 && (
+            <div style={{ color: '#D97706', marginBottom: '0.5rem' }}>
+              Warnings: {(ghlResult['warnings'] as string[]).join(', ')}
+            </div>
+          )}
+          <div style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)' }}>
+            {asStr(ghlResult['note'])}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

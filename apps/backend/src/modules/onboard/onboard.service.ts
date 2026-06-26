@@ -1616,15 +1616,37 @@ export class OnboardService {
       }
     }
 
-    // ===== Follow-Up Settings apply (PR 10H) =====
+    // ===== Follow-Up Settings apply (PR 10H/10H-A) =====
     if (applyScope === 'FOLLOW_UP_SETTINGS_ONLY') {
       if (!kbTenantId) {
         throw new BadRequestException('No KB tenant found. Apply tenant identity first (PR 10D).');
       }
 
+      const { data: followUp } = await supabase
+        .from('follow_up_rules')
+        .select('*')
+        .eq('project_id', projectId)
+        .maybeSingle();
+
+      let followUpPlanStored = false;
+      let stepsStoredCount = 0;
+
       try {
-        // Force enabled: false regardless of Onboard input.
-        // Store cadence, goal, stop conditions as structural config only.
+        // Build disabled follow-up steps from Onboard data
+        const steps: Array<Record<string, unknown>> = [];
+        if (followUp?.['goal'] || followUp?.['cadence_hours']) {
+          steps.push({
+            stepNumber: 1,
+            delayAmount: followUp['cadence_hours'] ?? 24,
+            delayUnit: 'hours',
+            mode: 'ai_decides',
+            aiInstruction: followUp['goal'] ?? 'Follow up with lead.',
+            enabled: false,
+          });
+          stepsStoredCount = 1;
+          followUpPlanStored = true;
+        }
+
         await this.followUpSettingsService.patchFollowUpSettings(kbTenantId, {
           enabled: false,
           maxFollowUps: 3,
@@ -1632,7 +1654,7 @@ export class OnboardService {
           stopOnEscalated: true,
           stopOnOptOut: true,
           businessHoursOnly: false,
-          steps: [],
+          steps,
         });
       } catch (err) {
         const reason = `FOLLOW_UP_SYNC_FAILED: ${err instanceof Error ? err.message : String(err)}`;
@@ -1657,25 +1679,31 @@ export class OnboardService {
         },
         response_payload: {
           appliedScope: 'FOLLOW_UP_SETTINGS_ONLY', kbTenantId,
-          followUpSettingsSynced: true, followUpEnabled: false,
-          noMessagesSent: true, noQueueJobsCreated: true, noGhlSync: true,
-          outboundEnabled: false, botProfileActive: false, activationDeferred: true,
+          followUpSettingsSynced: true, followUpPlanStored,
+          followUpEnabled: false, followUpExecutionEnabled: false,
+          stepsStoredCount, noQueueJobsCreated: true, noMessagesSent: true,
+          noGhlSync: true, outboundEnabled: false,
+          botProfileActive: false, activationDeferred: true,
           skipped: ['GHL_SYNC', 'OUTBOUND_SENDING', 'BOT_ACTIVATION'],
         },
         triggered_by: actorId, version: 1, duration_ms: null, completed_at: now,
       });
 
-      this.audit.log({ projectId, actorId, actorType: 'OPERATOR', action: 'sync.kb.apply_succeeded', resourceType: 'sync_run', resourceId: applyRunId, changes: { scope: 'FOLLOW_UP_SETTINGS_ONLY', kbTenantId: kbTenantId.slice(0, 8) } });
+      this.audit.log({ projectId, actorId, actorType: 'OPERATOR', action: 'sync.kb.apply_succeeded', resourceType: 'sync_run', resourceId: applyRunId, changes: { scope: 'FOLLOW_UP_SETTINGS_ONLY', kbTenantId: kbTenantId.slice(0, 8), followUpPlanStored, stepsStoredCount } });
 
       return {
         syncRunId: applyRunId, applied: true, appliedScope: 'FOLLOW_UP_SETTINGS_ONLY', status: 'APPLIED',
-        kbTenantId, followUpSettingsSynced: true, followUpEnabled: false,
-        noMessagesSent: true, noQueueJobsCreated: true, noGhlSync: true,
-        outboundEnabled: false, botProfileActive: false, activationDeferred: true,
+        kbTenantId, followUpSettingsSynced: true, followUpPlanStored,
+        followUpEnabled: false, followUpExecutionEnabled: false,
+        stepsStoredCount, noQueueJobsCreated: true, noMessagesSent: true,
+        noGhlSync: true, outboundEnabled: false,
+        botProfileActive: false, activationDeferred: true,
         skipped: ['GHL_SYNC', 'OUTBOUND_SENDING', 'BOT_ACTIVATION'],
         dryRunSyncRunId: syncRunId, sourceSnapshotHash: dryRunSnapshotHash.slice(0, 8),
         appliedAt: now, appliedBy: actorId,
-        message: 'Follow-up settings stored as disabled. No messages were sent. Outbound remains off.',
+        message: followUpPlanStored
+          ? 'Follow-up plan stored as disabled. No messages will be sent.'
+          : 'Follow-up execution disabled. No follow-up plan data available in Onboard.',
       };
     }
 

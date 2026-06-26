@@ -869,6 +869,7 @@ export class OnboardService {
       conversionRisks?: string[];
       recommendedFocus?: string;
       confidence?: number;
+      idempotencyKey?: string;
       recommendations?: Array<{
         title: string;
         description: string;
@@ -880,7 +881,7 @@ export class OnboardService {
       }>;
     },
     agentId: string,
-  ): Promise<{ analysisStored: boolean; recommendationsStored: number; recommendationIds: string[] }> {
+  ): Promise<{ analysisStored: boolean; recommendationsStored: number; recommendationIds: string[]; idempotent?: boolean }> {
     const project = await this.getProject(projectId);
     if (!project) throw new NotFoundException('Project not found');
 
@@ -916,12 +917,48 @@ export class OnboardService {
       });
     }
 
-    // Store recommendations
+    // Idempotency: check if this analysis was already submitted
+    if (analysis.idempotencyKey) {
+      const { data: existingAudit } = await supabase
+        .from('audit_events')
+        .select('id')
+        .eq('project_id', projectId)
+        .eq('action', 'analysis.submit')
+        .eq('correlation_id', analysis.idempotencyKey)
+        .maybeSingle();
+
+      if (existingAudit) {
+        // Return existing recommendations for this project
+        const { data: existingRecs } = await supabase
+          .from('automation_recommendations')
+          .select('id')
+          .eq('project_id', projectId)
+          .eq('source', 'AI_ANALYSIS')
+          .eq('status', 'SUGGESTED');
+
+        return {
+          analysisStored: false,
+          recommendationsStored: existingRecs?.length ?? 0,
+          recommendationIds: (existingRecs || []).map((r: Record<string, unknown>) => String(r['id'] ?? '')),
+          idempotent: true,
+        };
+      }
+    }
+
+    // Replace draft AI-generated recommendations: delete existing SUGGESTED
+    // AI_ANALYSIS recommendations, preserve operator-modified/approved/rejected ones.
+    await supabase
+      .from('automation_recommendations')
+      .delete()
+      .eq('project_id', projectId)
+      .eq('source', 'AI_ANALYSIS')
+      .eq('status', 'SUGGESTED');
+
+    // Store new recommendations
     const recommendationIds: string[] = [];
     if (analysis.recommendations && analysis.recommendations.length > 0) {
       for (const rec of analysis.recommendations) {
         const recId = randomUUID();
-        // Map type to valid enum
         const recType = mapRecommendationType(rec.type);
         const recRisk = mapRiskLevel(rec.riskLevel);
 
@@ -957,6 +994,7 @@ export class OnboardService {
         recommendationCount: analysis.recommendations?.length ?? 0,
         confidence: analysis.confidence,
       },
+      correlationId: analysis.idempotencyKey ?? undefined,
     });
 
     return {

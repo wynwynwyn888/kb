@@ -114,6 +114,17 @@ export class WebhooksService {
       return { success: true, duplicate: false, skippedReason: route.reason };
     }
 
+    const tenantId = route.tenantId;
+
+    // Route OutboundMessage events: record only, don't trigger AI
+    const eventLower = (payload.event || '').trim().toLowerCase();
+    if (eventLower === 'outboundmessage') {
+      await this.handleOutboundMessageWebhook(payload, tenantId, externalEventId, dedupeKey);
+      return { success: true, eventId: externalEventId, duplicate: false };
+    }
+
+    // --- Inbound message processing continues below ---
+
     if (route.routeSource === 'tenant_ghl_connection') {
       const legacy = (route.tenantLegacyGhlLocationId ?? '').trim();
       const conn = (route.connectionLocationId ?? '').trim();
@@ -625,4 +636,186 @@ export class WebhooksService {
       `Enqueued inbound message job: conversationId=${payload.ghlConversationId}`,
     );
   }
+
+  /** Resolve internal conversation id from GHL conversation id for a given tenant. */
+  async resolveConversationFromGhl(tenantId: string, ghlConversationId: string): Promise<{ data: { id: string } | null; error: unknown }> {
+    const { data, error } = await this.supabase
+      .from('conversations')
+      .select('id')
+      .eq('tenant_id', tenantId)
+      .eq('ghl_conversation_id', ghlConversationId)
+      .maybeSingle();
+    return { data: data as { id: string } | null, error };
+  }
+
+  /** Resolve tenant id from a GHL location id. */
+  async resolveTenantFromLocation(ghlLocationId: string): Promise<string | null> {
+    const { data } = await this.supabase
+      .from('tenant_ghl_connections')
+      .select('tenant_id')
+      .eq('ghl_location_id', ghlLocationId)
+      .eq('status', 'CONNECTED')
+      .maybeSingle();
+    return data && typeof (data as Record<string,unknown>)['tenant_id'] === 'string'
+      ? (data as Record<string,unknown>)['tenant_id'] as string
+      : null;
+  }
+
+  /** Find or return the conversation for a contact (by phone) under a tenant+location. Uses KB's conversation identity derivation. */
+  async resolveConversationForContact(tenantId: string, ghlLocationId: string, phone: string): Promise<string> {
+    // Use the same derivation as the inbound path: derive by key
+    const identity = await this.deriveConversationKey(tenantId, { phone, channel: 'sms' });
+    const { data: existing } = await this.supabase
+      .from('conversations')
+      .select('id')
+      .eq('tenant_id', tenantId)
+      .eq('ghl_conversation_id', identity.derivedConversationKey)
+      .maybeSingle();
+    if (existing) return (existing as { id: string }).id;
+
+    // Create new conversation
+    const newId = randomUUID();
+    const now = new Date().toISOString();
+    await this.supabase.from('conversations').insert({
+      id: newId,
+      tenant_id: tenantId,
+      ghl_conversation_id: identity.derivedConversationKey,
+      contact_id: identity.contactId ?? '',
+      channel: 'SMS',
+      status: 'ACTIVE',
+      last_message_at: now,
+      updated_at: now,
+      metadata: { locationId: ghlLocationId },
+    });
+    return newId;
+  }
+
+  private async deriveConversationKey(
+    tenantId: string,
+    params: { phone?: string; channel?: string },
+  ): Promise<{ derivedConversationKey: string; contactId: string }> {
+    const contactId = params.phone?.trim() || params.channel || 'unknown';
+    return {
+      derivedConversationKey: `aisbp:conv:sms:${tenantId}:${contactId}`,
+      contactId,
+    };
+  }
+
+  /** Validate that a tenant owns the given GHL location. */
+  async validateTenantOwnsLocation(tenantId: string, ghlLocationId: string): Promise<boolean> {
+    const { data } = await this.supabase
+      .from('tenant_ghl_connections')
+      .select('id')
+      .eq('tenant_id', tenantId)
+      .eq('ghl_location_id', ghlLocationId)
+      .eq('status', 'CONNECTED')
+      .maybeSingle();
+    return !!data;
+  }
+
+  /**
+   * Record an outbound-through-KB message: persist the workflow-originated message
+   * into the conversation so the AI has full context when replying.
+   * Returns the newly created message id.
+   */
+  async recordOutboundThroughKb(params: {
+    tenantId: string;
+    ghlLocationId: string;
+    conversationId: string;
+    contactId: string;
+    messageContent: string;
+    metadata?: Record<string, unknown>;
+  }): Promise<{ id: string }> {
+    const now = new Date().toISOString();
+    const msgId = randomUUID();
+    const { error: insErr } = await this.supabase.from('messages').insert({
+      id: msgId,
+      conversation_id: params.conversationId,
+      direction: 'OUTBOUND',
+      sender: 'SYSTEM',
+      content: params.messageContent,
+      contentType: 'TEXT',
+      metadata: {
+        sentAt: now,
+        source: 'outbound_through_kb',
+        ...(params.metadata ?? {}),
+      },
+    });
+    if (insErr) {
+      this.logger.error(`recordOutboundThroughKb insert failed: ${formatPostgrestError(insErr)}`);
+      throw new BadRequestException(`Failed to record outbound message: ${formatPostgrestError(insErr)}`);
+    }
+    const { error: convErr } = await this.supabase
+      .from('conversations')
+      .update({ last_message_at: now, updated_at: now })
+      .eq('id', params.conversationId);
+    if (convErr) {
+      this.logger.warn(`recordOutboundThroughKb conversation touch failed: ${formatPostgrestError(convErr)}`);
+    }
+    this.logger.log(`outboundThroughKbRecorded: conversationId=${params.conversationId} messageId=${msgId}`);
+    return { id: msgId };
+  }
+
+  /**
+   * Handle native GHL OutboundMessage webhook events.
+   * Records the outbound message into the conversation so the AI has full context.
+   * Does NOT trigger AI — the message was already sent by GHL.
+   */
+  private async handleOutboundMessageWebhook(
+    payload: GhlWebhookPayload,
+    tenantId: string,
+    externalEventId: string,
+    dedupeKeyActual: string,
+  ): Promise<void> {
+    const data = payload.data ?? {};
+    const contactId = (data as any)?.contactId as string | undefined ?? '';
+    const messageText = (data as any)?.message as string | undefined
+      ?? (data as any)?.body as string | undefined
+      ?? '';
+    const conversationId = (data as any)?.conversationId as string | undefined ?? '';
+
+    if (!messageText || !contactId) {
+      this.logger.warn(`outboundMessageWebhook skipped: no message or contact tenantId=${tenantId}`);
+      return;
+    }
+
+    // Resolve internal conversation
+    let internalConvId: string;
+    if (conversationId) {
+      const { data: conv } = await this.resolveConversationFromGhl(tenantId, conversationId);
+      internalConvId = conv?.id ?? '';
+    } else {
+      internalConvId = await this.resolveConversationForContact(tenantId, payload.locationId, contactId);
+    }
+
+    if (!internalConvId) {
+      this.logger.warn(`outboundMessageWebhook: no conversation found tenantId=${tenantId} contactId=${contactId}`);
+      return;
+    }
+
+    // Record the outbound message (dedup via webhook_events)
+    const msgId = randomUUID();
+    const now = new Date().toISOString();
+    const { error: insErr } = await this.supabase.from('messages').insert({
+      id: msgId,
+      conversation_id: internalConvId,
+      direction: 'OUTBOUND',
+      sender: 'SYSTEM',
+      content: messageText,
+      contentType: 'TEXT',
+      metadata: {
+        sentAt: now,
+        source: 'ghl_outbound_message_webhook',
+        ghlMessageId: payload.data?.id ?? '',
+        externalEventId,
+        dedupeKey: dedupeKeyActual,
+      },
+    });
+    if (insErr) {
+      this.logger.warn(`outboundMessageWebhook insert failed: ${formatPostgrestError(insErr)}`);
+      return;
+    }
+    this.logger.log(`outboundMessageRecorded: conversationId=${internalConvId} messageId=${msgId} contentPreview=${String(messageText).slice(0,80)}`);
+  }
+
 }

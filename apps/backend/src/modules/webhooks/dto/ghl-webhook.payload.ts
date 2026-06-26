@@ -56,3 +56,13 @@ export interface NormalizedWebhookPayload {
   contactPhone?: string | null;
   contactEmail?: string | null;
 }
+
+/** Payload for GHL workflow-originated outbound messages recorded through KB. */
+export interface GhlOutboundThroughKbPayload {
+  tenantId: string;
+  ghlLocationId: string;
+  ghlConversationId: string;
+  contactId: string;
+  messageContent: string;
+  metadata?: Record<string, unknown>;
+}

@@ -1610,7 +1610,7 @@ export class OnboardService {
       }
     }
 
-    // ===== FAQ / Knowledge apply (PR 10F) =====
+    // ===== FAQ / Knowledge apply (PR 10F/10F-A) =====
     if (applyScope === 'FAQ_KNOWLEDGE_ONLY') {
       if (!kbTenantId) {
         throw new BadRequestException('No KB tenant found. Apply tenant identity first (PR 10D).');
@@ -1626,43 +1626,73 @@ export class OnboardService {
         throw new BadRequestException('No approved FAQ items found. Approve FAQ items first.');
       }
 
+      // Fetch all existing FAQ docs for this tenant for normalized matching
+      const { data: existingDocs } = await supabase
+        .from('knowledge_documents')
+        .select('id, title, source, metadata')
+        .eq('tenant_id', kbTenantId)
+        .eq('source', 'faq');
+
       let faqCreated = 0;
-      let faqSkipped = 0;
+      let faqUpdated = 0;
+      let faqReused = 0;
+      let faqBlocked = 0;
+
       try {
         for (const item of faqItems) {
-          const question = String(item['question'] ?? '');
-          const answer = String(item['answer'] ?? '');
-          if (!question || !answer) { faqSkipped++; continue; }
+          const question = String(item['question'] ?? '').trim();
+          const answer = String(item['answer'] ?? '').trim();
+          if (!question || !answer) { faqBlocked++; continue; }
 
-          // Check for duplicate FAQ by question text within tenant
-          const { data: existingDoc } = await supabase
-            .from('knowledge_documents')
-            .select('id')
-            .eq('tenant_id', kbTenantId)
-            .eq('source', 'faq')
-            .eq('title', `FAQ: ${question.slice(0, 200)}`)
-            .maybeSingle();
+          const normQ = question.toLowerCase().replace(/\s+/g, ' ');
+          const expectedTitle = `FAQ: ${question.slice(0, 200)}`;
+
+          // Find existing FAQ doc by normalized title match
+          const existingDoc = (existingDocs || []).find((d: Record<string, unknown>) => {
+            const docTitle = String(d['title'] ?? '').toLowerCase().replace(/\s+/g, ' ');
+            return docTitle === normQ || docTitle === `faq: ${normQ}`.toLowerCase();
+          });
 
           if (existingDoc) {
-            faqSkipped++;
-            continue;
-          }
+            const docId = String(existingDoc['id'] ?? '');
 
-          await this.kbService.createFaq(kbTenantId, question, answer);
-          faqCreated++;
+            // Fetch current chunk to compare answer
+            const { data: existingChunks } = await supabase
+              .from('knowledge_chunks')
+              .select('content')
+              .eq('document_id', docId);
+
+            const existingAnswer = (existingChunks?.[0]?.['content'] ?? '').trim();
+            const normExisting = existingAnswer.toLowerCase().replace(/\s+/g, ' ');
+            const normNew = answer.toLowerCase().replace(/\s+/g, ' ');
+
+            if (normExisting === normNew) {
+              faqReused++;
+            } else {
+              await this.kbService.updateFaq(kbTenantId, docId, question, answer);
+              faqUpdated++;
+            }
+          } else {
+            await this.kbService.createFaq(kbTenantId, question, answer);
+            faqCreated++;
+          }
         }
       } catch (err) {
-        const reason = `FAQ_CREATE_FAILED: ${err instanceof Error ? err.message : String(err)}`;
+        const reason = `FAQ_SYNC_FAILED: ${err instanceof Error ? err.message : String(err)}`;
         await supabase.from('sync_runs').insert({
           id: applyRunId, project_id: projectId, target_system: 'KB', mode: 'APPLY',
           status: 'APPLY_FAILED', idempotency_key: idempotencyKey,
           request_payload: { parentDryRunId: syncRunId, appliedScope: 'FAQ_KNOWLEDGE_ONLY' },
-          response_payload: { reason, faqCreated, faqSkipped },
+          response_payload: { reason, faqCreated, faqUpdated, faqReused, faqBlocked },
           error_message: reason, triggered_by: actorId, version: 1, completed_at: now,
         });
         this.audit.log({ projectId, actorId, actorType: 'OPERATOR', action: 'sync.kb.apply_failed', resourceType: 'sync_run', resourceId: applyRunId, changes: { reason } });
         throw new BadRequestException(reason);
       }
+
+      // READY status is the only status supported by createFaq() and updateFaq().
+      // This is safe because: bot profile is inactive, tenant is controlled by
+      // Onboard, no GHL sync, no outbound, and AISBP_OUTBOUND_THROUGH_KB_ENABLED=false.
 
       await supabase.from('sync_runs').insert({
         id: applyRunId, project_id: projectId, target_system: 'KB', mode: 'APPLY',
@@ -1674,8 +1704,10 @@ export class OnboardService {
         },
         response_payload: {
           appliedScope: 'FAQ_KNOWLEDGE_ONLY', kbTenantId,
-          faqCreated, faqUpdated: 0, faqSkipped,
+          faqCreated, faqUpdated, faqReused, faqBlocked,
           knowledgeSynced: true,
+          knowledgeStatus: 'READY',
+          knowledgeActivationSafe: true,
           botProfileActive: false, activationDeferred: true,
           skipped: ['BOOKING_SETTINGS', 'HANDOVER_SETTINGS', 'FOLLOW_UP_SETTINGS', 'GHL_SYNC', 'OUTBOUND_SENDING', 'BOT_ACTIVATION'],
           noMessagesSent: true, noGhlSync: true, outboundEnabled: false,
@@ -1683,12 +1715,13 @@ export class OnboardService {
         triggered_by: actorId, version: 1, duration_ms: null, completed_at: now,
       });
 
-      this.audit.log({ projectId, actorId, actorType: 'OPERATOR', action: 'sync.kb.apply_succeeded', resourceType: 'sync_run', resourceId: applyRunId, changes: { scope: 'FAQ_KNOWLEDGE_ONLY', kbTenantId: kbTenantId.slice(0, 8), faqCreated } });
+      this.audit.log({ projectId, actorId, actorType: 'OPERATOR', action: 'sync.kb.apply_succeeded', resourceType: 'sync_run', resourceId: applyRunId, changes: { scope: 'FAQ_KNOWLEDGE_ONLY', kbTenantId: kbTenantId.slice(0, 8), faqCreated, faqUpdated, faqReused, faqBlocked } });
 
       return {
         syncRunId: applyRunId, applied: true, appliedScope: 'FAQ_KNOWLEDGE_ONLY', status: 'APPLIED',
-        kbTenantId, faqCreated, faqUpdated: 0, faqSkipped,
-        knowledgeSynced: true, botProfileActive: false, activationDeferred: true,
+        kbTenantId, faqCreated, faqUpdated, faqReused, faqBlocked,
+        knowledgeSynced: true, knowledgeStatus: 'READY', knowledgeActivationSafe: true,
+        botProfileActive: false, activationDeferred: true,
         skipped: ['BOOKING_SETTINGS', 'HANDOVER_SETTINGS', 'FOLLOW_UP_SETTINGS', 'GHL_SYNC', 'OUTBOUND_SENDING', 'BOT_ACTIVATION'],
         noMessagesSent: true, noGhlSync: true, outboundEnabled: false,
         dryRunSyncRunId: syncRunId, sourceSnapshotHash: dryRunSnapshotHash.slice(0, 8),

@@ -1112,33 +1112,100 @@ export class OnboardService {
       .eq('project_id', projectId)
       .eq('status', 'SUGGESTED');
 
-    // Build stable source snapshot (excludes volatile fields: timestamps, actorId)
+    // Build stable source snapshot — full sanitized content that would
+    // materially change the KB dry-run payload if modified.
+    // Excludes: secrets, full phones, volatile timestamps, actorId, syncRunId.
     const sourceSnapshot = {
+      schemaVersion: 'kb-dry-run-v1',
       projectId,
       onboardClientId: project.onboardClientId,
       clientKey: client?.clientKey ?? null,
       displayName: client?.displayName ?? null,
+      clientStatus: client?.status ?? null,
       projectStatus: project.status,
       projectVersion: project.version,
+      // Business profile — full content
       businessProfile: bizProfile ? {
         businessName: bizProfile['business_name'],
-        sectionStatus: bizProfile['section_status'],
+        description: bizProfile['description'] ?? null,
         services: bizProfile['services'] ?? [],
+        products: bizProfile['products'] ?? [],
+        pricingPolicy: bizProfile['pricing_policy'] ?? null,
+        depositPolicy: bizProfile['deposit_policy'] ?? null,
+        openingHours: bizProfile['opening_hours'] ?? {},
+        targetCustomer: bizProfile['target_customer'] ?? null,
+        serviceArea: bizProfile['service_area'] ?? null,
+        forbiddenTopics: bizProfile['forbidden_topics'] ?? [],
+        forbiddenClaims: bizProfile['forbidden_claims'] ?? [],
+        sectionStatus: bizProfile['section_status'],
       } : null,
+      // Sales process — full content
       salesProcess: salesMap ? {
+        leadSources: salesMap['lead_sources'] ?? [],
         conversationGoal: salesMap['conversation_goal'],
+        primaryCta: salesMap['primary_cta'] ?? null,
+        bookingLink: salesMap['booking_link'] ?? null,
+        leadFieldsToCollect: salesMap['lead_fields_to_collect'] ?? [],
+        maxQuestionsBeforeBooking: salesMap['max_questions_before_booking'],
+        channelPreference: salesMap['channel_preference'],
+        pipelineName: salesMap['pipeline_name'] ?? null,
+        pipelineStages: salesMap['pipeline_stages'] ?? [],
+        conflictingWorkflows: salesMap['conflicting_workflows'] ?? [],
         sectionStatus: salesMap['section_status'],
       } : null,
-      faqApprovedCount: (faqItems || []).length,
+      // FAQ items — full content (questions + answers), sorted by order
+      faqItems: (faqItems || []).map((f: Record<string, unknown>) => ({
+        category: f['category'],
+        question: f['question'],
+        answer: f['answer'],
+        sortOrder: f['sort_order'],
+        status: f['status'],
+      })).sort((a, b) => (Number(a.sortOrder) || 0) - (Number(b.sortOrder) || 0)),
+      // Prompt config — full content
       promptConfig: promptCfg ? {
         persona: promptCfg['persona'],
         toneOfVoice: promptCfg['tone_of_voice'],
+        conversationGoals: promptCfg['conversation_goals'] ?? [],
+        businessNotes: promptCfg['business_notes'] ?? null,
+        language: promptCfg['language'] ?? null,
+        useSinglish: promptCfg['use_singlish'],
+        maxReplyLength: promptCfg['max_reply_length'],
+        exampleGoodReply: promptCfg['example_good_reply'] ?? null,
+        exampleBadReply: promptCfg['example_bad_reply'] ?? null,
+        greetings: promptCfg['greetings'] ?? [],
+        signOffs: promptCfg['sign_offs'] ?? [],
         sectionStatus: promptCfg['section_status'],
       } : null,
-      handoverRules: handover ? { sectionStatus: handover['section_status'] } : null,
-      followUpRules: followUp ? { sectionStatus: followUp['section_status'] } : null,
-      recommendationCount: (recs || []).length,
-      recommendationTitles: (recs || []).map((r: Record<string, unknown>) => r['title']),
+      // Handover rules — full content
+      handoverRules: handover ? {
+        handoverContactName: handover['handover_contact_name'] ?? null,
+        handoverMethod: handover['handover_method'],
+        handoverAvailability: handover['handover_availability'] ?? null,
+        emergencyContact: handover['emergency_contact'] ?? null,
+        triggers: handover['triggers'] ?? [],
+        sectionStatus: handover['section_status'],
+      } : null,
+      // Follow-up rules — full content
+      followUpRules: followUp ? {
+        enabled: followUp['enabled'],
+        goal: followUp['goal'] ?? null,
+        tone: followUp['tone'] ?? null,
+        cadenceHours: followUp['cadence_hours'],
+        stopConditions: followUp['stop_conditions'] ?? [],
+        doNotMessageRules: followUp['do_not_message_rules'] ?? [],
+        dormantReactivation: followUp['dormant_reactivation'],
+        sectionStatus: followUp['section_status'],
+      } : null,
+      // Recommendations — full content (titles, descriptions, config), sorted by title
+      recommendations: (recs || []).map((r: Record<string, unknown>) => ({
+        title: r['title'],
+        description: r['description'],
+        recommendationType: r['recommendation_type'],
+        riskLevel: r['risk_level'],
+        suggestedConfig: r['suggested_config'] ?? {},
+        status: r['status'],
+        source: r['source'],
+      })).sort((a, b) => String(a.title).localeCompare(String(b.title))),
     };
 
     const sourceSnapshotHash = createHash('sha256')
@@ -1165,11 +1232,12 @@ export class OnboardService {
         idempotent: true,
         fresh: true,
         sourceSnapshotHash: sourceSnapshotHash.slice(0, 8),
+        dryRunSchemaVersion: 'kb-dry-run-v1',
         targetSystem: 'KB',
         mode: 'DRY_RUN',
         status: latestRun['status'],
         payloadPreview: latestRun['response_payload'] ?? {},
-        nextAllowedAction: 'KB apply sync is future PR 10 and remains disabled. Apply requires matching snapshot hash.',
+        nextAllowedAction: 'KB apply sync is future PR 10 and remains disabled. Apply verifies snapshot hash matches current source.',
       };
     }
 
@@ -1278,10 +1346,20 @@ export class OnboardService {
       request_payload: {
         projectId,
         clientKey: client?.clientKey,
+        dryRunSchemaVersion: 'kb-dry-run-v1',
         sourceSnapshotHash,
+        sourceSnapshotFields: Object.keys(sourceSnapshot),
         generatedAt: now,
       },
-      response_payload: payloadPreview,
+      response_payload: {
+        ...payloadPreview,
+        _meta: {
+          dryRunSchemaVersion: 'kb-dry-run-v1',
+          sourceSnapshotHash: sourceSnapshotHash.slice(0, 8),
+          generatedFromCurrentSource: true,
+          cached: false,
+        },
+      },
       triggered_by: actorId,
       version: 1,
       duration_ms: null,
@@ -1310,6 +1388,7 @@ export class OnboardService {
       idempotent: cachedHash !== undefined && cachedHash !== sourceSnapshotHash ? false : undefined,
       fresh: cachedHash === undefined || cachedHash !== sourceSnapshotHash,
       sourceSnapshotHash: sourceSnapshotHash.slice(0, 8),
+      dryRunSchemaVersion: 'kb-dry-run-v1',
       previousRunStale: cachedHash !== undefined && cachedHash !== sourceSnapshotHash,
       targetSystem: 'KB',
       mode: 'DRY_RUN',

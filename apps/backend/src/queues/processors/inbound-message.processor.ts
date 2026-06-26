@@ -48,6 +48,7 @@ import { HumanEscalationHoldingReplyService } from '../../modules/human-escalati
 import { MediaTranscriptionQueueService } from '../media-transcription-queue.service';
 import { syncGhlConversationContext } from '../../lib/ghl-conversation-sync';
 import { MetricsService } from '../../lib/metrics.service';
+import { resolveContactIdIfPhone } from '../../lib/contact-resolve';
 
 export interface InboundMessageJobData {
   locationId: string;
@@ -1713,10 +1714,16 @@ export class InboundMessageProcessor extends WorkerHost {
       contactPhone: channelHints?.contactPhone,
       workflowFlatRaw: channelHints?.workflowFlatRaw,
     });
+
+    // Normalize phone-formatted contact IDs to GHL internal IDs before identity
+    // derivation so conversations are consistently matched by stable identifiers.
+    const resolved = await resolveContactIdIfPhone(this.supabase, tenantId, locationId, contactId);
+    const effectiveContactId = resolved.resolvedContactId;
+
     const identity = deriveConversationIdentity({
       tenantId,
       channel: norm.identityChannel,
-      externalContactId: contactId,
+      externalContactId: effectiveContactId,
       externalConversationId: ghlConversationId,
     });
 
@@ -1757,6 +1764,40 @@ export class InboundMessageProcessor extends WorkerHost {
     if (derivedExisting) {
       safeLog(true, derivedExisting.id, 'derived_conversation_key');
       return { id: derivedExisting.id, reused: true, derivedKeyHash: identity.derivedKeyHash };
+    }
+
+    // 2b) If we resolved a phone → GHL internal ID, also try the original phone-derived
+    // key. An existing conversation may have been created with the phone-derived key before
+    // this normalization was implemented. If found, upgrade it to use the resolved IDs.
+    if (resolved.wasResolved) {
+      const phoneDerivedKey = `aisbp:conv:${identity.channel}:${tenantId}:${resolved.originalContactId}`;
+      const { data: phoneExisting } = await this.supabase
+        .from('conversations')
+        .select('id, contact_id')
+        .eq('tenant_id', tenantId)
+        .eq('ghl_conversation_id', phoneDerivedKey)
+        .maybeSingle();
+      if (phoneExisting) {
+        // Upgrade the existing conversation: use resolved GHL ID for contact_id
+        // and the new derived key for ghl_conversation_id.
+        const { error: upErr } = await this.supabase
+          .from('conversations')
+          .update({
+            contact_id: effectiveContactId,
+            ghl_conversation_id: identity.derivedConversationKey,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', phoneExisting.id);
+        if (upErr) {
+          this.logger.warn(`contactResolveUpgradeFailed: ${formatPostgrestError(upErr)}`);
+        } else {
+          this.logger.log(
+            `contactResolveUpgraded: convId=${phoneExisting.id} ${resolved.originalContactId} → ${effectiveContactId}`,
+          );
+        }
+        safeLog(true, phoneExisting.id, 'phone_derived_key_upgraded');
+        return { id: phoneExisting.id, reused: true, derivedKeyHash: identity.derivedKeyHash };
+      }
     }
 
     // 3) Fallback: legacy rows for the same (tenant, contact, channel) — pick the most recent.
@@ -1812,12 +1853,15 @@ export class InboundMessageProcessor extends WorkerHost {
     const ghlIdToWrite = identity.externalConversationId ?? identity.derivedConversationKey;
     const metadata: Record<string, unknown> = {
       derivedConversationKey: identity.derivedConversationKey,
-      externalContactId: contactId,
+      externalContactId: effectiveContactId,
       channel: identity.channel,
       ghlChannelRaw: norm.raw,
       ghlOutboundChannel: norm.outboundChannel,
       locationId,
       createdFromTimestamp: timestamp,
+      ...(resolved.wasResolved
+        ? { originalContactId: resolved.originalContactId, contactResolvedAt: new Date().toISOString() }
+        : {}),
       ...(identity.externalConversationId
         ? { externalConversationId: identity.externalConversationId }
         : { derivedFromContact: true }),
@@ -1829,7 +1873,7 @@ export class InboundMessageProcessor extends WorkerHost {
         id: newId,
         tenant_id: tenantId,
         ghl_conversation_id: ghlIdToWrite,
-        contact_id: contactId,
+        contact_id: effectiveContactId,
         channel: norm.dbChannel,
         status: 'ACTIVE',
         last_message_at: now,

@@ -46,6 +46,7 @@ import { resolveInboundGhlWebhookTenant } from '../../modules/webhooks/ghl-inbou
 import { FollowUpEngineService } from '../../modules/follow-up-engine/follow-up-engine.service';
 import { HumanEscalationHoldingReplyService } from '../../modules/human-escalation/human-escalation-holding-reply.service';
 import { MediaTranscriptionQueueService } from '../media-transcription-queue.service';
+import { syncGhlConversationContext } from '../../lib/ghl-conversation-sync';
 
 export interface InboundMessageJobData {
   locationId: string;
@@ -1300,6 +1301,20 @@ export class InboundMessageProcessor extends WorkerHost {
     const agencyPolicy = await this.orchestrationService.loadAgencyPolicy(tenantId);
     const conversationRecord = await this.orchestrationService.loadConversation(conversationId);
 
+    // Pre-reply GHL context sync (feature-flagged, default OFF)
+    if (process.env['GHL_PRE_REPLY_CONTEXT_SYNC'] === 'true') {
+      try {
+        await syncGhlConversationContext({
+          supabase: this.supabase,
+          tenantId,
+          ghlLocationId: locationId,
+          conversationId,
+          contactId: ghlContactId,
+        });
+      } catch (e) {
+        this.logger.warn(`context_sync_failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
 
     const orchestrationInput = {
       tenantId,

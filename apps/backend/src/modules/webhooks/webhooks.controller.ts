@@ -21,7 +21,7 @@ import type { Request } from 'express';
 import { WebhooksService } from './webhooks.service';
 import { formatPostgrestError } from '../../lib/format-postgrest-error';
 import { WebhookVerificationService } from './webhook-verification.service';
-import type { GhlWebhookPayload } from './dto/ghl-webhook.payload';
+import type { GhlWebhookPayload, GhlOutboundThroughKbPayload } from './dto/ghl-webhook.payload';
 import {
   coerceGhlWebhookPayload,
   summarizeGhlWebhookBodyKeys,
@@ -131,5 +131,75 @@ export class WebhooksController {
       }
       throw new InternalServerErrorException('Webhook processing failed');
     }
+  }
+
+  /**
+   * Record outbound-through-KB messages (GHL workflow → KB context).
+   * Accepts GHL standard webhook fields — no custom body needed.
+   */
+  @Post('outbound')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Record GHL workflow outbound message in KB context' })
+  async recordOutbound(
+    @Body() body: Record<string, unknown>,
+    @Headers('x-aisbp-webhook-token') webhookToken: string,
+  ) {
+    if (process.env['AISBP_OUTBOUND_THROUGH_KB_ENABLED'] !== 'true') {
+      throw new BadRequestException('Outbound-through-KB is not enabled');
+    }
+
+    const authResult = await this.webhookVerificationService.verify({
+      rawBody: Buffer.from(JSON.stringify(body)),
+      hmacSignature: undefined,
+      staticToken: webhookToken,
+    });
+    if (!authResult) {
+      throw new UnauthorizedException('Invalid webhook token');
+    }
+
+    // Accept GHL standard fields: contact_id (preferred) or phone, location.id
+    const contactId = (typeof body['contact_id'] === 'string' ? body['contact_id'] : null)
+      ?? (typeof body['phone'] === 'string' ? body['phone'] : null)
+      ?? null;
+    const locationId = (body['location'] as Record<string,unknown> | null)?.['id'] as string | undefined
+      ?? body['ghlLocationId'] as string | undefined
+      ?? body['locationId'] as string | undefined;
+    // GHL workflow webhooks don't include the outbound message text — fall back to workflow name or generic msg
+    const messageBody = (typeof body['message'] === 'object'
+      ? ((body['message'] as Record<string,unknown>)?.['body'] as string
+        ?? (body['message'] as Record<string,unknown>)?.['message'] as string)
+      : null)
+      ?? (typeof body['body'] === 'string' ? body['body'] as string : null)
+      ?? (typeof body['messageContent'] === 'string' ? body['messageContent'] as string : null)
+      ?? (typeof body['msg'] === 'string' ? body['msg'] as string : null)
+      ?? ((body['workflow'] as Record<string,unknown> | null)?.['name'] as string)
+      ?? 'Outbound message sent via GHL workflow';
+
+    if (!contactId || !locationId) {
+      this.logger.error(`outboundThroughKb validation failed: contactId=${!!contactId} location=${!!locationId} keys=${JSON.stringify(Object.keys(body).slice(0,10))}`);
+      throw new BadRequestException(`Missing required fields: contact_id, location.id (got keys: ${Object.keys(body).join(', ')})`);
+    }
+
+    // Resolve tenant from location
+    const tenantId = await this.webhooksService.resolveTenantFromLocation(String(locationId));
+    if (!tenantId) {
+      throw new BadRequestException('No tenant found for this location');
+    }
+
+    // Find or create conversation using the GHL contact_id (matches inbound path)
+    const conversationId = await this.webhooksService.resolveConversationForContact(
+      tenantId, String(locationId), String(contactId),
+    );
+
+    await this.webhooksService.recordOutboundThroughKb({
+      tenantId,
+      ghlLocationId: String(locationId),
+      conversationId,
+      contactId: '',
+      messageContent: String(messageBody),
+      metadata: { source: 'ghl_workflow', rawKeys: Object.keys(body).filter(k => typeof body[k] !== 'object').join(',') },
+    });
+
+    return { success: true, tenantId, conversationId, messageContent: String(messageBody).slice(0, 100) };
   }
 }

@@ -46,3 +46,21 @@ export function contactDisplay(params: {
   if (contactId?.trim()) return shortId(contactId);
   return '—';
 }
+
+/**
+ * Conversation display: contact label · short conversation ID
+ * Example: +65****8634 · b6bac998
+ */
+export function conversationDisplay(params: {
+  contactName?: string | null;
+  contactPhone?: string | null;
+  contactId?: string | null;
+  conversationId?: string | null;
+}): string {
+  const contact = contactDisplay({ contactName: params.contactName, contactPhone: params.contactPhone, contactId: params.contactId });
+  const convId = shortId(params.conversationId);
+  if (contact === '—' && convId === '—') return '—';
+  if (contact === '—') return `Conv ${convId}`;
+  if (convId === '—') return contact;
+  return `${contact} · ${convId}`;
+}

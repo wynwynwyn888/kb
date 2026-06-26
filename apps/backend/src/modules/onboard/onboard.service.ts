@@ -1441,6 +1441,258 @@ export class OnboardService {
   }
 
   // ==========================================================================
+  // KB SYNC APPLY (PR 10)
+  // Apply approved dry-run payload to KB config behind strict gates.
+  // ==========================================================================
+
+  async kbApply(
+    projectId: string,
+    syncRunId: string,
+    actorId: string,
+    idempotencyKey: string,
+    confirmApply: boolean,
+    operatorNote?: string,
+  ): Promise<Record<string, unknown>> {
+    if (!confirmApply) {
+      throw new BadRequestException('confirmApply must be true');
+    }
+
+    // Feature flag gate
+    const flagEnabled = (process.env['ONBOARD_KB_SYNC_ENABLED'] ?? 'false').toLowerCase() === 'true';
+    if (!flagEnabled) {
+      throw new BadRequestException('ONBOARD_KB_SYNC_ENABLED is not enabled. KB apply sync is blocked.');
+    }
+
+    const project = await this.getProject(projectId);
+    if (!project) throw new NotFoundException('Project not found');
+
+    if (project.status !== 'APPROVED') {
+      throw new BadRequestException(`Project must be APPROVED for apply. Current status: ${project.status}`);
+    }
+
+    const supabase = getSupabaseService();
+
+    // Idempotency check
+    const { data: existingApply } = await supabase
+      .from('sync_runs')
+      .select('id, status')
+      .eq('project_id', projectId)
+      .eq('target_system', 'KB')
+      .eq('mode', 'APPLY')
+      .eq('idempotency_key', idempotencyKey)
+      .maybeSingle();
+
+    if (existingApply) {
+      return {
+        syncRunId: existingApply['id'],
+        idempotent: true,
+        status: existingApply['status'],
+        message: 'Apply already processed with this idempotency key.',
+      };
+    }
+
+    // Fetch the dry-run
+    const { data: dryRun } = await supabase
+      .from('sync_runs')
+      .select('*')
+      .eq('id', syncRunId)
+      .single();
+
+    if (!dryRun) throw new NotFoundException('syncRunId not found');
+
+    if (dryRun['project_id'] !== projectId) {
+      throw new BadRequestException('syncRun does not belong to this project');
+    }
+    if (dryRun['target_system'] !== 'KB') {
+      throw new BadRequestException('syncRun targetSystem must be KB');
+    }
+    if (dryRun['mode'] !== 'DRY_RUN') {
+      throw new BadRequestException('syncRun mode must be DRY_RUN');
+    }
+    if (dryRun['status'] !== 'DRY_RUN_PASSED') {
+      throw new BadRequestException(`syncRun status is ${dryRun['status']}, not DRY_RUN_PASSED`);
+    }
+
+    const dryRunReqPayload = dryRun['request_payload'] as Record<string, unknown> | null;
+    const schemaVersion = dryRunReqPayload?.['dryRunSchemaVersion'];
+    if (schemaVersion !== 'kb-dry-run-v1') {
+      throw new BadRequestException(`Unsupported dryRunSchemaVersion: ${String(schemaVersion)}. Expected kb-dry-run-v1. Run a new dry-run.`);
+    }
+
+    const dryRunSnapshotHash = dryRunReqPayload?.['sourceSnapshotHash'] as string | undefined;
+    if (!dryRunSnapshotHash) {
+      throw new BadRequestException('Dry-run does not have sourceSnapshotHash. Run a new dry-run.');
+    }
+
+    // Rebuild current source snapshot and compare
+    const currentHash = await this.buildCurrentSnapshotHash(projectId);
+    if (currentHash !== dryRunSnapshotHash) {
+      throw new BadRequestException(
+        `Source snapshot has changed since dry-run. Dry-run hash: ${String(dryRunSnapshotHash).slice(0, 8)}, current hash: ${currentHash.slice(0, 8)}. Run a new dry-run before applying.`,
+      );
+    }
+
+    // All gates passed — perform apply
+    const applyRunId = randomUUID();
+    const now = new Date().toISOString();
+
+    // KB write: update identity map (safe, non-mutating to KB tenant config)
+    // Future integration PR will handle actual KB tenant creation.
+    const { data: identityMap } = await supabase
+      .from('onboarding_identity_map')
+      .select('id')
+      .eq('project_id', projectId)
+      .maybeSingle();
+
+    if (identityMap) {
+      await supabase
+        .from('onboarding_identity_map')
+        .update({ updated_at: now })
+        .eq('id', identityMap['id']);
+    } else {
+      await supabase.from('onboarding_identity_map').insert({
+        id: randomUUID(),
+        project_id: projectId,
+        onboard_client_id: project.onboardClientId,
+        kb_tenant_id: null, // Future: populate when KB tenant is created
+      });
+    }
+
+    // Create APPLY sync_run
+    await supabase.from('sync_runs').insert({
+      id: applyRunId,
+      project_id: projectId,
+      target_system: 'KB',
+      mode: 'APPLY',
+      status: 'APPLIED',
+      idempotency_key: idempotencyKey,
+      request_payload: {
+        parentDryRunId: syncRunId,
+        dryRunSchemaVersion: schemaVersion,
+        sourceSnapshotHash: dryRunSnapshotHash,
+        confirmedBy: actorId,
+        operatorNote: operatorNote ?? null,
+      },
+      response_payload: {
+        appliedAt: now,
+        identityMapUpdated: true,
+        note: 'KB tenant creation deferred to future KB integration PR. Onboard identity map updated.',
+      },
+      triggered_by: actorId,
+      version: 1,
+      duration_ms: null,
+      completed_at: now,
+    });
+
+    // Update project status
+    await supabase
+      .from('onboarding_projects')
+      .update({ status: 'SYNCING' })
+      .eq('id', projectId);
+
+    // Audit
+    this.audit.log({
+      projectId,
+      actorId,
+      actorType: 'OPERATOR',
+      action: 'sync.kb.apply',
+      resourceType: 'sync_run',
+      resourceId: applyRunId,
+      changes: {
+        dryRunSyncRunId: syncRunId,
+        sourceSnapshotHash: dryRunSnapshotHash.slice(0, 8),
+        idempotencyKey: idempotencyKey.slice(0, 8),
+      },
+    });
+
+    return {
+      syncRunId: applyRunId,
+      status: 'APPLIED',
+      dryRunSyncRunId: syncRunId,
+      sourceSnapshotHash: dryRunSnapshotHash.slice(0, 8),
+      identityMapUpdated: true,
+      appliedAt: now,
+      appliedBy: actorId,
+      note: 'KB config apply accepted. Actual KB tenant creation/config mapping is deferred to future KB integration PR. Onboard identity map updated.',
+    };
+  }
+
+  private async buildCurrentSnapshotHash(projectId: string): Promise<string> {
+    const project = await this.getProject(projectId);
+    if (!project) throw new NotFoundException('Project not found');
+
+    const supabase = getSupabaseService();
+    const client = await this.getClient(project.onboardClientId);
+
+    const { data: bizProfile } = await supabase.from('business_profiles').select('*').eq('project_id', projectId).maybeSingle();
+    const { data: salesMap } = await supabase.from('sales_process_maps').select('*').eq('project_id', projectId).maybeSingle();
+    const { data: faqItems } = await supabase.from('faq_items').select('*').eq('project_id', projectId).eq('status', 'APPROVED');
+    const { data: promptCfg } = await supabase.from('prompt_configs').select('*').eq('project_id', projectId).maybeSingle();
+    const { data: handover } = await supabase.from('handover_rules').select('*').eq('project_id', projectId).maybeSingle();
+    const { data: followUp } = await supabase.from('follow_up_rules').select('*').eq('project_id', projectId).maybeSingle();
+    const { data: recs } = await supabase.from('automation_recommendations').select('*').eq('project_id', projectId).eq('status', 'SUGGESTED');
+
+    const sourceSnapshot = {
+      schemaVersion: 'kb-dry-run-v1',
+      projectId,
+      onboardClientId: project.onboardClientId,
+      clientKey: client?.clientKey ?? null,
+      displayName: client?.displayName ?? null,
+      clientStatus: client?.status ?? null,
+      projectStatus: project.status,
+      projectVersion: project.version,
+      businessProfile: bizProfile ? {
+        businessName: bizProfile['business_name'], description: bizProfile['description'] ?? null,
+        services: bizProfile['services'] ?? [], products: bizProfile['products'] ?? [],
+        pricingPolicy: bizProfile['pricing_policy'] ?? null, depositPolicy: bizProfile['deposit_policy'] ?? null,
+        openingHours: bizProfile['opening_hours'] ?? {}, targetCustomer: bizProfile['target_customer'] ?? null,
+        serviceArea: bizProfile['service_area'] ?? null, forbiddenTopics: bizProfile['forbidden_topics'] ?? [],
+        forbiddenClaims: bizProfile['forbidden_claims'] ?? [], sectionStatus: bizProfile['section_status'],
+      } : null,
+      salesProcess: salesMap ? {
+        leadSources: salesMap['lead_sources'] ?? [], conversationGoal: salesMap['conversation_goal'],
+        primaryCta: salesMap['primary_cta'] ?? null, bookingLink: salesMap['booking_link'] ?? null,
+        leadFieldsToCollect: salesMap['lead_fields_to_collect'] ?? [],
+        maxQuestionsBeforeBooking: salesMap['max_questions_before_booking'],
+        channelPreference: salesMap['channel_preference'], pipelineName: salesMap['pipeline_name'] ?? null,
+        pipelineStages: salesMap['pipeline_stages'] ?? [], conflictingWorkflows: salesMap['conflicting_workflows'] ?? [],
+        sectionStatus: salesMap['section_status'],
+      } : null,
+      faqItems: (faqItems || []).map((f: Record<string, unknown>) => ({
+        category: f['category'], question: f['question'], answer: f['answer'],
+        sortOrder: f['sort_order'], status: f['status'],
+      })).sort((a, b) => (Number(a.sortOrder) || 0) - (Number(b.sortOrder) || 0)),
+      promptConfig: promptCfg ? {
+        persona: promptCfg['persona'], toneOfVoice: promptCfg['tone_of_voice'],
+        conversationGoals: promptCfg['conversation_goals'] ?? [], businessNotes: promptCfg['business_notes'] ?? null,
+        language: promptCfg['language'] ?? null, useSinglish: promptCfg['use_singlish'],
+        maxReplyLength: promptCfg['max_reply_length'], exampleGoodReply: promptCfg['example_good_reply'] ?? null,
+        exampleBadReply: promptCfg['example_bad_reply'] ?? null, greetings: promptCfg['greetings'] ?? [],
+        signOffs: promptCfg['sign_offs'] ?? [], sectionStatus: promptCfg['section_status'],
+      } : null,
+      handoverRules: handover ? {
+        handoverContactName: handover['handover_contact_name'] ?? null,
+        handoverMethod: handover['handover_method'], handoverAvailability: handover['handover_availability'] ?? null,
+        emergencyContact: handover['emergency_contact'] ?? null, triggers: handover['triggers'] ?? [],
+        sectionStatus: handover['section_status'],
+      } : null,
+      followUpRules: followUp ? {
+        enabled: followUp['enabled'], goal: followUp['goal'] ?? null, tone: followUp['tone'] ?? null,
+        cadenceHours: followUp['cadence_hours'], stopConditions: followUp['stop_conditions'] ?? [],
+        doNotMessageRules: followUp['do_not_message_rules'] ?? [], dormantReactivation: followUp['dormant_reactivation'],
+        sectionStatus: followUp['section_status'],
+      } : null,
+      recommendations: (recs || []).map((r: Record<string, unknown>) => ({
+        title: r['title'], description: r['description'], recommendationType: r['recommendation_type'],
+        riskLevel: r['risk_level'], suggestedConfig: r['suggested_config'] ?? {}, status: r['status'],
+        source: r['source'],
+      })).sort((a, b) => String(a.title).localeCompare(String(b.title))),
+    };
+
+    return createHash('sha256').update(JSON.stringify(sourceSnapshot)).digest('hex');
+  }
+
+  // ==========================================================================
   // PRIVATE HELPERS
   // ==========================================================================
 

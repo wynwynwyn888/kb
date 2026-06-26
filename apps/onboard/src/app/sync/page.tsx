@@ -5,6 +5,7 @@ import { OnboardChrome } from '@/components/OnboardChrome';
 import { PlaceholderCard } from '@/components/PlaceholderCard';
 import { StatusPill } from '@/components/StatusPill';
 import { useAuth } from '@/contexts/AuthContext';
+import type { OnboardApi } from '@/lib/api/onboard';
 
 const asStr = (v: unknown, fallback = ''): string => (typeof v === 'string' ? v : fallback);
 const asArr = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
@@ -136,16 +137,28 @@ export default function SyncPreviewPage() {
             )}
           </PlaceholderCard>
 
-          <PlaceholderCard title="Apply Sync">
-            <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
-              <button type="button" disabled
-                style={{ padding: '0.55rem 1.25rem', borderRadius: 10, border: '1px solid var(--aisbp-border, #e2e8f0)', background: '#F1F5F9', color: '#94A3B8', fontWeight: 600, fontSize: '0.85rem', cursor: 'not-allowed' }}>
-                Future PR 10 — disabled
-              </button>
-              <span style={{ fontSize: '0.82rem', color: 'var(--aisbp-muted, #64748b)' }}>
-                KB apply sync is future PR 10 and remains disabled.
-              </span>
+          <PlaceholderCard title="Apply KB Sync">
+            <div style={{ marginBottom: '1rem', padding: '0.5rem 0.75rem', background: '#FEF3C7', borderRadius: 8, fontSize: '0.8rem', color: '#92400E' }}>
+              KB apply sync does not enable outbound sending. GHL sync is not active.
             </div>
+            {result?.['syncRunId'] && result?.['status'] === 'DRY_RUN_PASSED' ? (
+              <ApplyForm
+                projectId={projectId}
+                syncRunId={asStr(result?.['syncRunId'])}
+                api={api}
+                onApplied={(r) => setResult(r)}
+              />
+            ) : (
+              <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+                <button type="button" disabled
+                  style={{ padding: '0.55rem 1.25rem', borderRadius: 10, border: '1px solid var(--aisbp-border, #e2e8f0)', background: '#F1F5F9', color: '#94A3B8', fontWeight: 600, fontSize: '0.85rem', cursor: 'not-allowed' }}>
+                  Apply blocked
+                </button>
+                <span style={{ fontSize: '0.82rem', color: 'var(--aisbp-muted, #64748b)' }}>
+                  Run a successful dry-run first. Project must be approved and dry-run must pass.
+                </span>
+              </div>
+            )}
           </PlaceholderCard>
         </>
       )}
@@ -167,5 +180,67 @@ export default function SyncPreviewPage() {
         </PlaceholderCard>
       )}
     </OnboardChrome>
+  );
+}
+
+function ApplyForm({ projectId, syncRunId, api, onApplied }: {
+  projectId: string;
+  syncRunId: string;
+  api: OnboardApi | null;
+  onApplied: (r: Record<string, unknown>) => void;
+}) {
+  const [confirmed, setConfirmed] = useState(false);
+  const [idemKey, setIdemKey] = useState('');
+  const [note, setNote] = useState('');
+  const [applying, setApplying] = useState(false);
+  const [applyError, setApplyError] = useState<string | null>(null);
+
+  const handleApply = async () => {
+    if (!api || !confirmed || !idemKey.trim()) return;
+    setApplying(true); setApplyError(null);
+    try {
+      const res = await api.kbApply(projectId, syncRunId, idemKey.trim(), true, note || undefined);
+      onApplied(res);
+    } catch (err: unknown) {
+      setApplyError(err instanceof Error ? err.message : 'Apply failed');
+    } finally { setApplying(false); }
+  };
+
+  return (
+    <div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginBottom: '1rem' }}>
+        <div>
+          <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, marginBottom: '0.35rem', color: 'var(--aisbp-text, #0f172a)' }}>
+            Idempotency Key * (unique per apply)
+          </label>
+          <input type="text" value={idemKey} onChange={e => setIdemKey(e.target.value)}
+            placeholder="e.g. apply-2026-06-27-001"
+            style={{ width: '100%', padding: '0.45rem 0.65rem', borderRadius: 8, border: '1px solid var(--aisbp-border, #e2e8f0)', fontSize: '0.85rem', background: 'var(--aisbp-surface, #fff)', color: 'var(--aisbp-text, #0f172a)', boxSizing: 'border-box' }} />
+        </div>
+        <div>
+          <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, marginBottom: '0.35rem', color: 'var(--aisbp-text, #0f172a)' }}>
+            Operator Note (optional)
+          </label>
+          <input type="text" value={note} onChange={e => setNote(e.target.value)}
+            placeholder="Optional note for this apply"
+            style={{ width: '100%', padding: '0.45rem 0.65rem', borderRadius: 8, border: '1px solid var(--aisbp-border, #e2e8f0)', fontSize: '0.85rem', background: 'var(--aisbp-surface, #fff)', color: 'var(--aisbp-text, #0f172a)', boxSizing: 'border-box' }} />
+        </div>
+        <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', color: 'var(--aisbp-text, #0f172a)', cursor: 'pointer' }}>
+          <input type="checkbox" checked={confirmed} onChange={e => setConfirmed(e.target.checked)} />
+          <span>I confirm this will apply approved config to KB only. No GHL sync and no messages will be sent.</span>
+        </label>
+      </div>
+      {applyError && <div style={{ padding: '0.5rem 0.75rem', background: '#FEE2E2', borderRadius: 8, fontSize: '0.82rem', color: '#DC2626', marginBottom: '1rem' }}>{applyError}</div>}
+      <button type="button" onClick={handleApply}
+        disabled={!confirmed || !idemKey.trim() || applying}
+        style={{
+          padding: '0.55rem 1.5rem', borderRadius: 10, border: 'none',
+          background: '#16A34A', color: '#fff', fontWeight: 600, fontSize: '0.88rem',
+          cursor: !confirmed || !idemKey.trim() || applying ? 'not-allowed' : 'pointer',
+          opacity: !confirmed || !idemKey.trim() || applying ? 0.7 : 1,
+        }}>
+        {applying ? 'Applying...' : 'Apply KB Sync'}
+      </button>
+    </div>
   );
 }

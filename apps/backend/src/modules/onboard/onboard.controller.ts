@@ -23,6 +23,7 @@ import { RequestChangesDto } from './dto/request-changes.dto';
 import { RejectProjectDto } from './dto/reject-project.dto';
 import { ApproveProjectDto } from './dto/approve-project.dto';
 import { KbDryRunDto } from './dto/kb-dry-run.dto';
+import { KbApplyDto } from './dto/kb-apply.dto';
 import { VALID_SECTION_NAMES } from './utils/approval';
 
 @ApiTags('onboard')
@@ -219,5 +220,27 @@ export class OnboardController {
   @ApiOperation({ summary: 'Get sync run history for a project' })
   async getSyncRuns(@Param('onboardingProjectId') onboardingProjectId: string) {
     return this.onboardService.getSyncRuns(onboardingProjectId);
+  }
+
+  // ==========================================================================
+  // KB SYNC APPLY (PR 10)
+  // ==========================================================================
+
+  @Post('projects/:onboardingProjectId/sync/kb/apply')
+  @ApiOperation({ summary: 'Apply approved KB dry-run config. Requires feature flag, approval, and snapshot match.' })
+  async kbApply(
+    @Param('onboardingProjectId') onboardingProjectId: string,
+    @CurrentUser() user: SessionUser,
+    @Body() body: KbApplyDto,
+  ) {
+    if (!user?.id) throw new BadRequestException('Authentication required');
+    return this.onboardService.kbApply(
+      onboardingProjectId,
+      body.syncRunId,
+      user.id,
+      body.idempotencyKey,
+      body.confirmApply,
+      body.operatorNote,
+    );
   }
 }

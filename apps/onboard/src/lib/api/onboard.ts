@@ -150,6 +150,14 @@ export function createOnboardApi(token: string) {
 
     getSyncRuns: (projectId: string) =>
       apiRequest<Record<string, unknown>[]>(`/onboard/projects/${projectId}/sync-runs`, { token }),
+
+    // Apply Sync (PR 10)
+    kbApply: (projectId: string, syncRunId: string, idempotencyKey: string, confirmApply: boolean, operatorNote?: string) =>
+      apiRequest<Record<string, unknown>>(`/onboard/projects/${projectId}/sync/kb/apply`, {
+        token,
+        method: 'POST',
+        body: JSON.stringify({ syncRunId, idempotencyKey, confirmApply, operatorNote }),
+      }),
   };
 }
 

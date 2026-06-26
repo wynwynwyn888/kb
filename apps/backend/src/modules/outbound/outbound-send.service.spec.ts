@@ -826,4 +826,75 @@ describe('OutboundSendService', () => {
       expect(result).toBeNull();
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // resolveContactIdIfPhone — phone number to GHL contact ID resolution
+  // ---------------------------------------------------------------------------
+  describe('resolveContactIdIfPhone', () => {
+    let service: OutboundSendService;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    function resolve(ghlClient: any, locationId: string, contactId: string) {
+      return (service as any).resolveContactIdIfPhone(ghlClient, locationId, contactId);
+    }
+
+    beforeEach(() => {
+      jestGlobal.clearAllMocks();
+      service = new OutboundSendService();
+    });
+
+    it('returns null for normal GHL contact ID (no change)', async () => {
+      const ghlClient = { findContactByPhone: jestGlobal.fn() };
+      const result = await resolve(ghlClient, 'loc_1', 'kfmh8xHdo4KFVLO43BWI');
+      expect(result).toBeNull();
+      expect(ghlClient.findContactByPhone).not.toHaveBeenCalled();
+    });
+
+    it('resolves phone-format contact to GHL contact ID', async () => {
+      const ghlClient = {
+        findContactByPhone: jestGlobal.fn(async () => ({
+          success: true,
+          contact: { id: 'kfmh8xHdo4KFVLO43BWI', phone: '+6588658634', name: 'test bday' },
+        })),
+      };
+      const result = await resolve(ghlClient, 'loc_1', '+6588658634');
+      expect(result).toBe('kfmh8xHdo4KFVLO43BWI');
+    });
+
+    it('returns null when GHL API returns no match', async () => {
+      const ghlClient = {
+        findContactByPhone: jestGlobal.fn(async () => ({
+          success: true,
+          contact: undefined,
+        })),
+      };
+      const result = await resolve(ghlClient, 'loc_1', '+6599999999');
+      expect(result).toBeNull();
+    });
+
+    it('returns null when GHL API fails', async () => {
+      const ghlClient = {
+        findContactByPhone: jestGlobal.fn(async () => ({
+          success: false,
+          error: 'API error',
+        })),
+      };
+      const result = await resolve(ghlClient, 'loc_1', '+6588658634');
+      expect(result).toBeNull();
+    });
+
+    it('returns null when GHL API throws', async () => {
+      const ghlClient = {
+        findContactByPhone: jestGlobal.fn(async () => { throw new Error('Network error'); }),
+      };
+      const result = await resolve(ghlClient, 'loc_1', '+6588658634');
+      expect(result).toBeNull();
+    });
+
+    it('returns null for short numbers (not phone format)', async () => {
+      const ghlClient = { findContactByPhone: jestGlobal.fn() };
+      const result = await resolve(ghlClient, 'loc_1', '+12');
+      expect(result).toBeNull();
+      expect(ghlClient.findContactByPhone).not.toHaveBeenCalled();
+    });
+  });
 });

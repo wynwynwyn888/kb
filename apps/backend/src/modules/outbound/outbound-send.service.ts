@@ -391,7 +391,9 @@ export class OutboundSendService {
       bubble: ReplyBubbleDraft;
     },
   ): Promise<BubbleSendResult> {
-    const { locationId, contactId, bubble, ghlChannel } = params;
+    const { locationId, bubble, ghlChannel } = params;
+    const resolvedContactId = await this.resolveContactIdIfPhone(ghlClient, params.locationId, params.contactId);
+    const contactId = resolvedContactId ?? params.contactId;
 
     const tryChannels: OutboundChannel[] = [...ghlOutboundFallbackChannels(ghlChannel)];
     let lastError = 'Unknown send error';
@@ -456,6 +458,46 @@ export class OutboundSendService {
       success: false,
       error: lastError,
     };
+  }
+
+  /**
+   * Resolve a contact ID that looks like a phone number to the internal GHL contact ID.
+   * Returns null if the contactId is not phone-format or resolution fails.
+   */
+  private async resolveContactIdIfPhone(
+    ghlClient: ReturnType<typeof createGhlClient>,
+    locationId: string,
+    contactId: string,
+  ): Promise<string | null> {
+    if (!/^\+[0-9]{7,}$/.test(contactId.trim())) return null;
+
+    try {
+      const result = await ghlClient.findContactByPhone(locationId, contactId.trim());
+
+      if (!result.success) {
+        this.logger.warn(
+          `contactIdPhoneResolveFailed: contactId=${contactId.trim()} locationId=${locationId} error=${result.error ?? 'unknown'}`,
+        );
+        return null;
+      }
+
+      if (!result.contact?.id) {
+        this.logger.warn(
+          `contactIdPhoneResolveNoMatch: contactId=${contactId.trim()} locationId=${locationId} — no GHL contact found`,
+        );
+        return null;
+      }
+
+      this.logger.log(
+        `contactIdPhoneResolved: contactId=${contactId.trim()} → ghlContactId=${result.contact.id}`,
+      );
+      return result.contact.id;
+    } catch (e) {
+      this.logger.warn(
+        `contactIdPhoneResolveError: contactId=${contactId.trim()} error=${e instanceof Error ? e.message : String(e)}`,
+      );
+      return null;
+    }
   }
 
   private async persistConversationOutboundChannel(

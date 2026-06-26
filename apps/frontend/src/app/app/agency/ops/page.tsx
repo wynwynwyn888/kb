@@ -35,6 +35,7 @@ import {
   type OpsTenantReadiness,
   type OpsQueueHealth,
 } from '@/lib/api';
+import { tenantDisplay, shortId } from '@/lib/ops-display';
 
 const TABS = [
   'Health', 'Flags', 'Outbound', 'GHL Sync', 'Conversations',
@@ -289,16 +290,16 @@ export default function OpsDashboardPage() {
                   <tbody>
                     {outbound.map(r => (
                       <tr key={r.id} style={{ cursor: 'pointer' }} onClick={() => setDetailModal({ title: `Outbound ${r.id}`, rows: [
-                        { label:'ID',value:r.id },{ label:'Tenant',value:r.tenantId },{ label:'Conversation',value:r.conversationId },
+                        { label:'ID',value:r.id },{ label:'Tenant',value:tenantDisplay(r.tenantName,r.tenantId) },{ label:'Conversation',value:r.conversationId },
                         { label:'Reply',value:r.replyId },{ label:'Bubble',value:String(r.bubbleSequence) },
                         { label:'Provider Msg',value:r.providerMessageId||'—' },{ label:'Attempt',value:String(r.attempt) },
                         { label:'Error',value:r.lastErrorMessage||r.lastErrorCode||'—' },
                         { label:'Sent',value:r.sentAt?formatDateTime(r.sentAt):'—' },{ label:'Created',value:formatDateTime(r.createdAt) },
                       ]})}>
                         <td style={tdStyle}><StatusPill label={r.status} tone={statusTone(r.status)} /></td>
-                        <td style={{...tdStyle,fontFamily:'inherit',fontSize:'0.78rem'}}>{r.tenantId.slice(0,8)}</td>
-                        <td style={{...tdStyle,fontFamily:'inherit',fontSize:'0.78rem'}}>{r.conversationId.slice(0,8)}</td>
-                        <td style={{...tdStyle,fontFamily:'inherit',fontSize:'0.78rem'}}>{r.replyId.slice(0,8)}</td>
+                        <td style={{...tdStyle,fontFamily:'inherit',fontSize:'0.75rem',maxWidth:'160px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={tenantDisplay(r.tenantName, r.tenantId)}>{tenantDisplay(r.tenantName, r.tenantId)}</td>
+                        <td style={{...tdStyle,fontFamily:'inherit',fontSize:'0.78rem'}}>{shortId(r.conversationId)}</td>
+                        <td style={{...tdStyle,fontFamily:'inherit',fontSize:'0.78rem'}}>{shortId(r.replyId)}</td>
                         <td style={tdStyle}>{r.bubbleSequence}</td>
                         <td style={{...tdStyle,fontFamily:'inherit',fontSize:'0.78rem'}}>{r.providerMessageId||'—'}</td>
                         <td style={tdStyle}>{r.attempt}</td>
@@ -327,8 +328,8 @@ export default function OpsDashboardPage() {
                     return (
                       <tr key={i}>
                         <td style={tdStyle}><StatusPill label={s.eventType} tone={s.eventType.includes('failed')?'bad':s.eventType.includes('completed')?'ok':'neutral'} /></td>
-                        <td style={{...tdStyle,fontFamily:'inherit',fontSize:'0.78rem'}}>{s.tenantId.slice(0,8)}</td>
-                        <td style={{...tdStyle,fontFamily:'inherit',fontSize:'0.78rem'}}>{s.conversationId.slice(0,8)}</td>
+                        <td style={{...tdStyle,fontFamily:'inherit',fontSize:'0.78rem'}}>{tenantDisplay(s.tenantName, s.tenantId)}</td>
+                        <td style={{...tdStyle,fontFamily:'inherit',fontSize:'0.78rem'}}>{shortId(s.conversationId)}</td>
                         <td style={{...tdStyle,fontSize:'0.78rem'}}>{meta ? JSON.stringify(meta).slice(0,100) : '—'}</td>
                         <td style={{...tdStyle,fontSize:'0.78rem'}}>{formatDateTime(s.createdAt)}</td>
                       </tr>
@@ -351,8 +352,8 @@ export default function OpsDashboardPage() {
                   <tbody>
                     {conversations.map(c => (
                       <tr key={c.id}>
-                        <td style={{...tdStyle,fontFamily:'inherit',fontSize:'0.78rem'}}>{c.id.slice(0,8)}</td>
-                        <td style={{...tdStyle,fontFamily:'inherit',fontSize:'0.78rem'}}>{c.tenantId.slice(0,8)}</td>
+                        <td style={{...tdStyle,fontFamily:'inherit',fontSize:'0.78rem'}}>{shortId(c.id)}</td>
+                        <td style={{...tdStyle,fontFamily:'inherit',fontSize:'0.78rem'}}>{tenantDisplay(c.tenantName, c.tenantId)}</td>
                         <td style={{...tdStyle,fontFamily:'inherit',fontSize:'0.78rem'}}>{c.contactId}</td>
                         <td style={{...tdStyle,fontSize:'0.78rem'}}>{c.lastMessageAt?formatDateTime(c.lastMessageAt):'—'}</td>
                         <td style={tdStyle}>{c.staleSkipped>0?<StatusPill label={String(c.staleSkipped)} tone="warn"/>:'0'}</td>
@@ -411,7 +412,7 @@ export default function OpsDashboardPage() {
                         <td style={tdStyle}><StatusPill label={e.severity} tone={e.severity==='error'?'bad':'warn'} /></td>
                         <td style={{...tdStyle,fontSize:'0.78rem'}}>{e.eventSource}</td>
                         <td style={{...tdStyle,fontSize:'0.78rem'}}>{e.eventType}</td>
-                        <td style={{...tdStyle,fontFamily:'inherit',fontSize:'0.78rem'}}>{e.tenantId?.slice(0,8)||'—'}</td>
+                        <td style={{...tdStyle,fontFamily:'inherit',fontSize:'0.78rem'}}>{tenantDisplay(e.tenantName, e.tenantId)}</td>
                         <td style={{...tdStyle,fontFamily:'inherit',fontSize:'0.78rem'}}>{e.conversationId?.slice(0,8)||'—'}</td>
                         <td style={{...tdStyle,fontSize:'0.78rem',maxWidth:'200px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{e.metadata?JSON.stringify(e.metadata).slice(0,80):'—'}</td>
                         <td style={{...tdStyle,fontSize:'0.78rem'}}>{formatDateTime(e.createdAt)}</td>
@@ -439,7 +440,7 @@ export default function OpsDashboardPage() {
                         <td style={{...tdStyle,fontSize:'0.78rem'}}>{e.eventType}</td>
                         <td style={{...tdStyle,fontSize:'0.78rem'}}>{e.eventSource}</td>
                         <td style={tdStyle}><StatusPill label={e.severity} tone={e.severity==='error'?'bad':e.severity==='warn'?'warn':'ok'} /></td>
-                        <td style={{...tdStyle,fontFamily:'inherit',fontSize:'0.78rem'}}>{e.tenantId?.slice(0,8)||'—'}</td>
+                        <td style={{...tdStyle,fontFamily:'inherit',fontSize:'0.78rem'}}>{tenantDisplay(e.tenantName, e.tenantId)}</td>
                         <td style={{...tdStyle,fontFamily:'inherit',fontSize:'0.78rem'}}>{e.conversationId?.slice(0,8)||'—'}</td>
                         <td style={{...tdStyle,fontSize:'0.78rem'}}>{formatDateTime(e.createdAt)}</td>
                       </tr>

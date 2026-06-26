@@ -17,6 +17,8 @@ import { mapOnboardToKbPlan } from './kb-sync/onboard-kb-sync.mapper';
 import { TenantsService } from '../tenants/tenants.service';
 import { BotProfilesService } from '../prompts/bot-profiles.service';
 import { KbService } from '../kb/kb.service';
+import { BookingSettingsService } from '../booking-settings/booking-settings.service';
+import { HumanEscalationSettingsService } from '../human-escalation/human-escalation-settings.service';
 
 export interface OnboardClientSummary {
   id: string;
@@ -60,6 +62,8 @@ export class OnboardService {
     private readonly tenantsService: TenantsService,
     private readonly botProfilesService: BotProfilesService,
     private readonly kbService: KbService,
+    private readonly bookingSettingsService: BookingSettingsService,
+    private readonly humanEscalationService: HumanEscalationSettingsService,
   ) {}
 
   // ==========================================================================
@@ -1608,6 +1612,96 @@ export class OnboardService {
 
         throw new BadRequestException(reason);
       }
+    }
+
+    // ===== Booking + Handover Settings apply (PR 10G) =====
+    if (applyScope === 'BOOKING_HANDOVER_ONLY') {
+      if (!kbTenantId) {
+        throw new BadRequestException('No KB tenant found. Apply tenant identity first (PR 10D).');
+      }
+
+      let bookingSynced = false;
+      let handoverSynced = false;
+
+      // Booking settings
+      const { data: salesMap } = await supabase
+        .from('sales_process_maps')
+        .select('*')
+        .eq('project_id', projectId)
+        .maybeSingle();
+
+      try {
+        await this.bookingSettingsService.patchBookingSettings(kbTenantId, {
+          bookingMode: 'COLLECT_DETAILS_ONLY',
+          coreFieldsJson: { name: { enabled: true, required: true }, phone: { enabled: true, required: true } },
+          defaultGhlCalendarId: salesMap?.['booking_link'] ?? null,
+          serviceMenuOptions: null,
+          enabled: false,
+          internalBookingAlertEnabled: false,
+          maxBookingsPerSlot: 1,
+        });
+        bookingSynced = true;
+      } catch (err) {
+        // Booking failure is non-blocking — record but continue
+      }
+
+      // Handover settings
+      const { data: handover } = await supabase
+        .from('handover_rules')
+        .select('*')
+        .eq('project_id', projectId)
+        .maybeSingle();
+
+      if (handover && handover['section_status'] === 'APPROVED') {
+        try {
+          // Masked phone is display-only — never write into real phone field
+          const phone = handover['handover_contact_phone'];
+          await this.humanEscalationService.patchSettings(kbTenantId, {
+            enabled: false,
+            teamNotificationNumber: null,
+            optionalMessagePrefix: null,
+          });
+          handoverSynced = true;
+        } catch (err) {
+          // Handover failure is non-blocking
+        }
+      }
+
+      await supabase.from('sync_runs').insert({
+        id: applyRunId, project_id: projectId, target_system: 'KB', mode: 'APPLY',
+        status: 'APPLIED', idempotency_key: idempotencyKey,
+        request_payload: {
+          parentDryRunId: syncRunId, dryRunSchemaVersion: schemaVersion,
+          sourceSnapshotHash: dryRunSnapshotHash, confirmedBy: actorId,
+          appliedScope: 'BOOKING_HANDOVER_ONLY',
+        },
+        response_payload: {
+          appliedScope: 'BOOKING_HANDOVER_ONLY', kbTenantId,
+          bookingSettingsSynced: bookingSynced,
+          handoverSettingsSynced: handoverSynced,
+          bookingEnabled: false,
+          handoverEnabled: false,
+          botProfileActive: false, activationDeferred: true,
+          followUpSettingsSynced: false,
+          skipped: ['FOLLOW_UP_SETTINGS', 'GHL_SYNC', 'OUTBOUND_SENDING', 'BOT_ACTIVATION'],
+          noMessagesSent: true, noGhlSync: true, outboundEnabled: false,
+        },
+        triggered_by: actorId, version: 1, duration_ms: null, completed_at: now,
+      });
+
+      this.audit.log({ projectId, actorId, actorType: 'OPERATOR', action: 'sync.kb.apply_succeeded', resourceType: 'sync_run', resourceId: applyRunId, changes: { scope: 'BOOKING_HANDOVER_ONLY', kbTenantId: kbTenantId.slice(0, 8), bookingSynced, handoverSynced } });
+
+      return {
+        syncRunId: applyRunId, applied: true, appliedScope: 'BOOKING_HANDOVER_ONLY', status: 'APPLIED',
+        kbTenantId, bookingSettingsSynced: bookingSynced, handoverSettingsSynced: handoverSynced,
+        bookingEnabled: false, handoverEnabled: false,
+        botProfileActive: false, activationDeferred: true, followUpSettingsSynced: false,
+        skipped: ['FOLLOW_UP_SETTINGS', 'GHL_SYNC', 'OUTBOUND_SENDING', 'BOT_ACTIVATION'],
+        noMessagesSent: true, noGhlSync: true, outboundEnabled: false,
+        dryRunSyncRunId: syncRunId, sourceSnapshotHash: dryRunSnapshotHash.slice(0, 8),
+        appliedAt: now, appliedBy: actorId,
+        message: 'Booking and handover settings synced (both disabled). Follow-up, GHL, outbound sending, and bot activation are not synced.',
+      };
     }
 
     // ===== FAQ / Knowledge apply (PR 10F/10F-A) =====

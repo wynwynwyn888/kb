@@ -662,4 +662,168 @@ describe('OutboundSendService', () => {
       expect(insertMock).toBeDefined();
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // claimOutboundSend / reclaimOutboundSendOnRetry  (unit tests via private backdoor)
+  // ---------------------------------------------------------------------------
+  describe('claimOutboundSend', () => {
+    const claimParams = {
+      tenantId: 'tenant_1',
+      conversationId: 'conv_1',
+      ghlLocationId: 'loc_1',
+      replyId: 'reply_1',
+      bubbleSequence: 0,
+      content: 'hello',
+      sendBubbleJobId: 'job_1',
+    };
+
+    beforeEach(() => {
+      jestGlobal.clearAllMocks();
+      service = new OutboundSendService();
+    });
+
+    afterEach(() => {
+      delete process.env['AISBP_OUTBOUND_IDEMPOTENCY_ENABLED'];
+    });
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    function call(p: typeof claimParams) {
+      return (service as any).claimOutboundSend(p);
+    }
+
+    function mockOutboundSends(wrap: (b: {
+      insertResult: { data: unknown; error: { message: string; code?: string } | null };
+      selectResult: { data: unknown; error: unknown };
+      updateResult: { data: unknown; error: { message: string; code?: string } | null };
+    }) => void) {
+      const b = {
+        insertResult: { data: null, error: null } as { data: unknown; error: { message: string; code?: string } | null },
+        selectResult: { data: null, error: null } as { data: unknown; error: unknown },
+        updateResult: { data: null, error: null } as { data: unknown; error: { message: string; code?: string } | null },
+      };
+      wrap(b);
+      (mockSupabase.from as jest.Mock).mockImplementation((table: string) => {
+        if (table !== 'outbound_sends')
+          return { select: jestGlobal.fn(), insert: jestGlobal.fn(), update: jestGlobal.fn() };
+
+        return {
+          insert: jestGlobal.fn(async () => b.insertResult),
+          select: jestGlobal.fn(() => ({
+            eq: jestGlobal.fn(() => ({
+              eq: jestGlobal.fn(() => ({
+                eq: jestGlobal.fn(() => ({
+                  eq: jestGlobal.fn(() => ({
+                    maybeSingle: async () => b.selectResult,
+                  })),
+                })),
+              })),
+            })),
+          })),
+          update: jestGlobal.fn(() => ({
+            eq: jestGlobal.fn(() => ({
+              eq: jestGlobal.fn(() => ({
+                eq: jestGlobal.fn(() => ({
+                  eq: jestGlobal.fn(() => ({
+                    in: jestGlobal.fn(async () => b.updateResult),
+                  })),
+                })),
+              })),
+            })),
+          })),
+        };
+      });
+    }
+
+    it('returns null when flag is off', async () => {
+      mockOutboundSends(() => {});
+      const result = await call(claimParams);
+      expect(result).toBeNull();
+    });
+
+    it('first claim inserts a new pending row', async () => {
+      process.env['AISBP_OUTBOUND_IDEMPOTENCY_ENABLED'] = 'true';
+      mockOutboundSends(b => {});
+      const result = await call(claimParams);
+      expect(result).not.toBeNull();
+      expect(result!.status).toBe('pending');
+    });
+
+    it('duplicate pending returns null (skip)', async () => {
+      process.env['AISBP_OUTBOUND_IDEMPOTENCY_ENABLED'] = 'true';
+      mockOutboundSends(b => {
+        b.insertResult = { data: null, error: { message: 'duplicate key value violates unique constraint "uq_outbound_send"', code: '23505' } };
+        b.selectResult = { data: { id: 'row1', status: 'pending', attempt: 1 }, error: null };
+      });
+      const result = await call(claimParams);
+      expect(result).toBeNull();
+    });
+
+    it('duplicate sent returns null (skip)', async () => {
+      process.env['AISBP_OUTBOUND_IDEMPOTENCY_ENABLED'] = 'true';
+      mockOutboundSends(b => {
+        b.insertResult = { data: null, error: { message: 'duplicate key value violates unique constraint "uq_outbound_send"', code: '23505' } };
+        b.selectResult = { data: { id: 'row1', status: 'sent', attempt: 1 }, error: null };
+      });
+      const result = await call(claimParams);
+      expect(result).toBeNull();
+    });
+
+    it('duplicate failed_provider_rejected reclaims row', async () => {
+      process.env['AISBP_OUTBOUND_IDEMPOTENCY_ENABLED'] = 'true';
+      mockOutboundSends(b => {
+        b.insertResult = { data: null, error: { message: 'duplicate key value violates unique constraint "uq_outbound_send"', code: '23505' } };
+        b.selectResult = { data: { id: 'row1', status: 'failed_provider_rejected', attempt: 1 }, error: null };
+        b.updateResult = { data: null, error: null };
+      });
+      const result = await call(claimParams);
+      expect(result).not.toBeNull();
+      expect(result!.status).toBe('pending');
+      expect(result!.attempt).toBe(2);
+    });
+
+    it('duplicate dead_lettered reclaims row', async () => {
+      process.env['AISBP_OUTBOUND_IDEMPOTENCY_ENABLED'] = 'true';
+      mockOutboundSends(b => {
+        b.insertResult = { data: null, error: { message: 'duplicate key value violates unique constraint "uq_outbound_send"', code: '23505' } };
+        b.selectResult = { data: { id: 'row1', status: 'dead_lettered', attempt: 2 }, error: null };
+        b.updateResult = { data: null, error: null };
+      });
+      const result = await call(claimParams);
+      expect(result).not.toBeNull();
+      expect(result!.attempt).toBe(3);
+    });
+
+    it('duplicate unknown_provider_outcome reclaims row', async () => {
+      process.env['AISBP_OUTBOUND_IDEMPOTENCY_ENABLED'] = 'true';
+      mockOutboundSends(b => {
+        b.insertResult = { data: null, error: { message: 'duplicate key value violates unique constraint "uq_outbound_send"', code: '23505' } };
+        b.selectResult = { data: { id: 'row1', status: 'unknown_provider_outcome', attempt: 1 }, error: null };
+        b.updateResult = { data: null, error: null };
+      });
+      const result = await call(claimParams);
+      expect(result).not.toBeNull();
+    });
+
+    it('duplicate failed_before_provider reclaims row', async () => {
+      process.env['AISBP_OUTBOUND_IDEMPOTENCY_ENABLED'] = 'true';
+      mockOutboundSends(b => {
+        b.insertResult = { data: null, error: { message: 'duplicate key value violates unique constraint "uq_outbound_send"', code: '23505' } };
+        b.selectResult = { data: { id: 'row1', status: 'failed_before_provider', attempt: 1 }, error: null };
+        b.updateResult = { data: null, error: null };
+      });
+      const result = await call(claimParams);
+      expect(result).not.toBeNull();
+    });
+
+    it('concurrent retry: update fails returns null', async () => {
+      process.env['AISBP_OUTBOUND_IDEMPOTENCY_ENABLED'] = 'true';
+      mockOutboundSends(b => {
+        b.insertResult = { data: null, error: { message: 'duplicate key value violates unique constraint "uq_outbound_send"', code: '23505' } };
+        b.selectResult = { data: { id: 'row1', status: 'failed_provider_rejected', attempt: 1 }, error: null };
+        b.updateResult = { data: null, error: { message: 'no rows matched', code: 'PGRST000' } };
+      });
+      const result = await call(claimParams);
+      expect(result).toBeNull();
+    });
+  });
 });

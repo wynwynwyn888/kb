@@ -832,17 +832,15 @@ export class OutboundSendService {
       if (insErr) {
         const msg = formatPostgrestError(insErr);
         if (msg.includes('unique') || msg.includes('23505') || msg.includes('conflict')) {
-          const { data: existing } = await this.supabase
-            .from('outbound_sends')
-            .select('status')
-            .eq('tenant_id', params.tenantId)
-            .eq('conversation_id', params.conversationId)
-            .eq('reply_id', params.replyId)
-            .eq('bubble_sequence', params.bubbleSequence)
-            .maybeSingle();
-          const status = existing?.status ?? 'duplicate_prevented';
+          const reclaimed = await this.reclaimOutboundSendOnRetry(params);
+          if (reclaimed) {
+            this.logger.log(
+              `outboundIdempotencyRetry: tenantId=${params.tenantId} conversationId=${params.conversationId} replyId=${params.replyId} bubble=${params.bubbleSequence} attempt=${reclaimed.attempt}`,
+            );
+            return reclaimed;
+          }
           this.logger.log(
-            `outboundIdempotencyDuplicate: tenantId=${params.tenantId} conversationId=${params.conversationId} replyId=${params.replyId} bubble=${params.bubbleSequence} status=${status}`,
+            `outboundIdempotencyDuplicate: tenantId=${params.tenantId} conversationId=${params.conversationId} replyId=${params.replyId} bubble=${params.bubbleSequence}`,
           );
           return null;
         }
@@ -854,6 +852,69 @@ export class OutboundSendService {
       this.logger.warn(`claimOutboundSend catch: ${e instanceof Error ? e.message : String(e)}`);
       return null;
     }
+  }
+
+  /**
+   * Attempt to reclaim an existing failed outbound_sends row for retry.
+   * Only rows with terminal failure statuses are eligible for reclamation.
+   * The update is conditional on the row still having the eligible status to
+   * prevent concurrent reclaims.
+   */
+  private async reclaimOutboundSendOnRetry(params: {
+    tenantId: string;
+    conversationId: string;
+    replyId: string;
+    bubbleSequence: number;
+    sendBubbleJobId: string;
+  }): Promise<{ id: string; status: string; attempt: number } | null> {
+    const eligibleStatuses = [
+      'failed_provider_rejected',
+      'failed_before_provider',
+      'dead_lettered',
+      'unknown_provider_outcome',
+    ];
+
+    const { data: existing } = await this.supabase
+      .from('outbound_sends')
+      .select('id, status, attempt')
+      .eq('tenant_id', params.tenantId)
+      .eq('conversation_id', params.conversationId)
+      .eq('reply_id', params.replyId)
+      .eq('bubble_sequence', params.bubbleSequence)
+      .maybeSingle();
+
+    if (!existing) return null;
+
+    const existingRow = existing as { id: string; status: string; attempt: number };
+    if (!eligibleStatuses.includes(existingRow.status)) return null;
+
+    const newAttempt = existingRow.attempt + 1;
+
+    const { error: upErr } = await this.supabase
+      .from('outbound_sends')
+      .update({
+        status: 'pending',
+        attempt: newAttempt,
+        last_error_code: null,
+        last_error_message: null,
+        sent_at: null,
+        updated_at: new Date().toISOString(),
+        job_id: params.sendBubbleJobId,
+      })
+      .eq('tenant_id', params.tenantId)
+      .eq('conversation_id', params.conversationId)
+      .eq('reply_id', params.replyId)
+      .eq('bubble_sequence', params.bubbleSequence)
+      .in('status', eligibleStatuses);
+
+    if (upErr) {
+      this.logger.warn(
+        `reclaimOutboundSendOnRetry update error: ${formatPostgrestError(upErr)}`,
+      );
+      return null;
+    }
+
+    return { id: existingRow.id, status: 'pending', attempt: newAttempt };
   }
 
   private async updateOutboundSendResult(params: {

@@ -1630,11 +1630,12 @@ export class OnboardService {
 
       let followUpPlanStored = false;
       let stepsStoredCount = 0;
+      let sourceRulesCount = 0;
 
       try {
-        // Build disabled follow-up steps from Onboard data
         const steps: Array<Record<string, unknown>> = [];
         if (followUp?.['goal'] || followUp?.['cadence_hours']) {
+          sourceRulesCount = 1;
           steps.push({
             stepNumber: 1,
             delayAmount: followUp['cadence_hours'] ?? 24,
@@ -1680,24 +1681,30 @@ export class OnboardService {
         response_payload: {
           appliedScope: 'FOLLOW_UP_SETTINGS_ONLY', kbTenantId,
           followUpSettingsSynced: true, followUpPlanStored,
+          followUpPlanFullyPreserved: sourceRulesCount === stepsStoredCount,
+          sourceRulesCount, stepsStoredCount,
           followUpEnabled: false, followUpExecutionEnabled: false,
-          stepsStoredCount, noQueueJobsCreated: true, noMessagesSent: true,
+          noQueueJobsCreated: true, noMessagesSent: true,
           noGhlSync: true, outboundEnabled: false,
           botProfileActive: false, activationDeferred: true,
+          limitation: sourceRulesCount > stepsStoredCount ? 'MULTI_STEP_FOLLOW_UP_SUMMARIZED' : null,
           skipped: ['GHL_SYNC', 'OUTBOUND_SENDING', 'BOT_ACTIVATION'],
         },
         triggered_by: actorId, version: 1, duration_ms: null, completed_at: now,
       });
 
-      this.audit.log({ projectId, actorId, actorType: 'OPERATOR', action: 'sync.kb.apply_succeeded', resourceType: 'sync_run', resourceId: applyRunId, changes: { scope: 'FOLLOW_UP_SETTINGS_ONLY', kbTenantId: kbTenantId.slice(0, 8), followUpPlanStored, stepsStoredCount } });
+      this.audit.log({ projectId, actorId, actorType: 'OPERATOR', action: 'sync.kb.apply_succeeded', resourceType: 'sync_run', resourceId: applyRunId, changes: { scope: 'FOLLOW_UP_SETTINGS_ONLY', kbTenantId: kbTenantId.slice(0, 8), followUpPlanStored, stepsStoredCount, sourceRulesCount } });
 
       return {
         syncRunId: applyRunId, applied: true, appliedScope: 'FOLLOW_UP_SETTINGS_ONLY', status: 'APPLIED',
         kbTenantId, followUpSettingsSynced: true, followUpPlanStored,
+        followUpPlanFullyPreserved: sourceRulesCount === stepsStoredCount,
+        sourceRulesCount, stepsStoredCount,
         followUpEnabled: false, followUpExecutionEnabled: false,
-        stepsStoredCount, noQueueJobsCreated: true, noMessagesSent: true,
+        noQueueJobsCreated: true, noMessagesSent: true,
         noGhlSync: true, outboundEnabled: false,
         botProfileActive: false, activationDeferred: true,
+        limitation: sourceRulesCount > stepsStoredCount ? 'MULTI_STEP_FOLLOW_UP_SUMMARIZED' : null,
         skipped: ['GHL_SYNC', 'OUTBOUND_SENDING', 'BOT_ACTIVATION'],
         dryRunSyncRunId: syncRunId, sourceSnapshotHash: dryRunSnapshotHash.slice(0, 8),
         appliedAt: now, appliedBy: actorId,

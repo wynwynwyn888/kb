@@ -139,7 +139,8 @@ export default function SyncPreviewPage() {
 
           <PlaceholderCard title="Apply KB Bot Profile + Prompt Config Only">
             <div style={{ marginBottom: '1rem', padding: '0.5rem 0.75rem', background: '#FEF3C7', borderRadius: 8, fontSize: '0.8rem', color: '#92400E' }}>
-              Profile will be saved as inactive/draft. This does not activate the bot. FAQ, booking, handover, follow-up, GHL sync, and outbound sending are not synced. Bot activation is deferred to a future controlled go-live PR.
+              Profile will be saved as inactive/draft. This does not activate the bot. FAQ, booking, handover, follow-up, GHL sync, and outbound sending are not synced. Bot activation is deferred to a future controlled go-live PR.<br/>
+              <strong>Follow-up settings: plan preserved as disabled steps. No messages will be sent. No queue jobs created. No GHL sync.</strong>
             </div>
             {result?.['syncRunId'] && result?.['status'] === 'DRY_RUN_PASSED' ? (
               <ApplyForm

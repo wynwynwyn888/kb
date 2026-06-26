@@ -15,6 +15,7 @@ import {
 } from './utils/approval';
 import { mapOnboardToKbPlan } from './kb-sync/onboard-kb-sync.mapper';
 import { TenantsService } from '../tenants/tenants.service';
+import { BotProfilesService } from '../prompts/bot-profiles.service';
 
 export interface OnboardClientSummary {
   id: string;
@@ -56,6 +57,7 @@ export class OnboardService {
   constructor(
     private readonly audit: OnboardAuditService,
     private readonly tenantsService: TenantsService,
+    private readonly botProfilesService: BotProfilesService,
   ) {}
 
   // ==========================================================================
@@ -1457,6 +1459,7 @@ export class OnboardService {
     agencyId: string | undefined,
     idempotencyKey: string,
     confirmApply: boolean,
+    applyScope?: string,
     operatorNote?: string,
   ): Promise<Record<string, unknown>> {
     if (!confirmApply) {
@@ -1605,7 +1608,79 @@ export class OnboardService {
       }
     }
 
-    // Record APPLY sync_run
+    // ===== Bot Profile + Prompt Config apply (PR 10E) =====
+    if (applyScope === 'BOT_PROFILE_PROMPT_ONLY') {
+      if (!kbTenantId) {
+        throw new BadRequestException('No KB tenant found. Apply tenant identity first (PR 10D).');
+      }
+
+      const { data: promptCfg } = await supabase
+        .from('prompt_configs')
+        .select('*')
+        .eq('project_id', projectId)
+        .maybeSingle();
+
+      if (!promptCfg) {
+        throw new BadRequestException('No approved prompt config found. Approve the prompt config section first.');
+      }
+
+      let botProfileCreated = false;
+      try {
+        await this.botProfilesService.createBotProfile(actorId, kbTenantId, {
+          name: 'Onboard Config',
+          persona: promptCfg['persona'] ?? '',
+          conversationGoals: Array.isArray(promptCfg['conversation_goals'])
+            ? (promptCfg['conversation_goals'] as string[]).join('\n')
+            : (promptCfg['conversation_goals'] ?? ''),
+          businessNotes: promptCfg['business_notes'] ?? '',
+          toneRules: promptCfg['tone_of_voice'] ?? '',
+          setActive: true,
+        });
+        botProfileCreated = true;
+      } catch (err) {
+        const reason = `BOT_PROFILE_CREATE_FAILED: ${err instanceof Error ? err.message : String(err)}`;
+        await supabase.from('sync_runs').insert({
+          id: applyRunId, project_id: projectId, target_system: 'KB', mode: 'APPLY',
+          status: 'APPLY_FAILED', idempotency_key: idempotencyKey,
+          request_payload: { parentDryRunId: syncRunId, appliedScope: 'BOT_PROFILE_PROMPT_ONLY' },
+          response_payload: { reason, botProfileCreated: false },
+          error_message: reason, triggered_by: actorId, version: 1, completed_at: now,
+        });
+        this.audit.log({ projectId, actorId, actorType: 'OPERATOR', action: 'sync.kb.apply_failed', resourceType: 'sync_run', resourceId: applyRunId, changes: { reason } });
+        throw new BadRequestException(reason);
+      }
+
+      await supabase.from('sync_runs').insert({
+        id: applyRunId, project_id: projectId, target_system: 'KB', mode: 'APPLY',
+        status: 'APPLIED', idempotency_key: idempotencyKey,
+        request_payload: {
+          parentDryRunId: syncRunId, dryRunSchemaVersion: schemaVersion,
+          sourceSnapshotHash: dryRunSnapshotHash, confirmedBy: actorId,
+          appliedScope: 'BOT_PROFILE_PROMPT_ONLY',
+        },
+        response_payload: {
+          appliedScope: 'BOT_PROFILE_PROMPT_ONLY', kbTenantId,
+          botProfileCreated, promptConfigSynced: true,
+          skipped: ['FAQ_KNOWLEDGE', 'BOOKING_SETTINGS', 'HANDOVER_SETTINGS', 'FOLLOW_UP_SETTINGS', 'GHL_SYNC', 'OUTBOUND_SENDING'],
+          noMessagesSent: true, noGhlSync: true, outboundEnabled: false,
+        },
+        triggered_by: actorId, version: 1, duration_ms: null, completed_at: now,
+      });
+
+      this.audit.log({ projectId, actorId, actorType: 'OPERATOR', action: 'sync.kb.apply_succeeded', resourceType: 'sync_run', resourceId: applyRunId, changes: { scope: 'BOT_PROFILE_PROMPT_ONLY', kbTenantId: kbTenantId.slice(0, 8) } });
+
+      return {
+        syncRunId: applyRunId, applied: true, appliedScope: 'BOT_PROFILE_PROMPT_ONLY', status: 'APPLIED',
+        kbTenantId, botProfileCreated, promptConfigSynced: true,
+        skipped: ['FAQ_KNOWLEDGE', 'BOOKING_SETTINGS', 'HANDOVER_SETTINGS', 'FOLLOW_UP_SETTINGS', 'GHL_SYNC', 'OUTBOUND_SENDING'],
+        noMessagesSent: true, noGhlSync: true, outboundEnabled: false,
+        dryRunSyncRunId: syncRunId, sourceSnapshotHash: dryRunSnapshotHash.slice(0, 8),
+        appliedAt: now, appliedBy: actorId,
+        message: 'Bot profile and prompt config synced. FAQ, follow-up, handover, booking, GHL, and outbound are not synced yet.',
+      };
+    }
+
+    // ===== Tenant identity only (default) =====
     await supabase.from('sync_runs').insert({
       id: applyRunId, project_id: projectId, target_system: 'KB', mode: 'APPLY',
       status: 'APPLIED', idempotency_key: idempotencyKey,
@@ -1628,8 +1703,6 @@ export class OnboardService {
       },
       triggered_by: actorId, version: 1, duration_ms: null, completed_at: now,
     });
-
-    // Do NOT update project status — only tenant identity synced, not full config.
 
     this.audit.log({
       projectId, actorId, actorType: 'OPERATOR', action: 'sync.kb.apply_succeeded',

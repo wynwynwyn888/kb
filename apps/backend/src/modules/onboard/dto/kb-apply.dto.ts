@@ -1,4 +1,4 @@
-import { IsBoolean, IsNotEmpty, IsOptional, IsString, IsUUID } from 'class-validator';
+import { IsBoolean, IsIn, IsNotEmpty, IsOptional, IsString, IsUUID } from 'class-validator';
 
 export class KbApplyDto {
   @IsString()
@@ -12,6 +12,11 @@ export class KbApplyDto {
   @IsString()
   @IsNotEmpty()
   idempotencyKey!: string;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['BOT_PROFILE_PROMPT_ONLY'])
+  applyScope?: string;
 
   @IsOptional()
   @IsString()

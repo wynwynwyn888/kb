@@ -247,6 +247,7 @@ export class OnboardController {
       user.agencyId,
       body.idempotencyKey,
       body.confirmApply,
+      body.applyScope,
       body.operatorNote,
     );
   }

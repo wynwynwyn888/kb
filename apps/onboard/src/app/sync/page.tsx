@@ -191,6 +191,7 @@ function ApplyForm({ projectId, syncRunId, api, onChecked }: {
 }) {
   const [confirmed, setConfirmed] = useState(false);
   const [idemKey, setIdemKey] = useState('');
+  const [scope, setScope] = useState('');
   const [note, setNote] = useState('');
   const [checking, setChecking] = useState(false);
   const [checkError, setCheckError] = useState<string | null>(null);
@@ -199,31 +200,41 @@ function ApplyForm({ projectId, syncRunId, api, onChecked }: {
     if (!api || !confirmed || !idemKey.trim()) return;
     setChecking(true); setCheckError(null);
     try {
-      const res = await api.kbApply(projectId, syncRunId, idemKey.trim(), true, note || undefined);
+      const res = await api.kbApply(projectId, syncRunId, idemKey.trim(), true, scope || undefined, note || undefined);
       onChecked(res);
-      // If tenant-only apply succeeded, show clear message
-      if (res?.['applied'] === true) {
-        setCheckError(null);
-      }
     } catch (err: unknown) {
       setCheckError(err instanceof Error ? err.message : 'Apply failed');
     } finally { setChecking(false); }
   };
+
+  const scopeLabel = scope === 'BOT_PROFILE_PROMPT_ONLY'
+    ? 'Bot Profile + Prompt Config'
+    : 'Tenant + Identity Only';
 
   return (
     <div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginBottom: '1rem' }}>
         <div>
           <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, marginBottom: '0.35rem', color: 'var(--aisbp-text, #0f172a)' }}>
-            Idempotency Key * (unique per check)
+            Apply Scope
+          </label>
+          <select value={scope} onChange={e => setScope(e.target.value)}
+            style={{ width: '100%', padding: '0.45rem 0.65rem', borderRadius: 8, border: '1px solid var(--aisbp-border, #e2e8f0)', fontSize: '0.85rem', background: 'var(--aisbp-surface, #fff)', color: 'var(--aisbp-text, #0f172a)', boxSizing: 'border-box' }}>
+            <option value="">Tenant + Identity Only (default)</option>
+            <option value="BOT_PROFILE_PROMPT_ONLY">Bot Profile + Prompt Config</option>
+          </select>
+        </div>
+        <div>
+          <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, marginBottom: '0.35rem', color: 'var(--aisbp-text, #0f172a)' }}>
+            Idempotency Key * (unique per apply)
           </label>
           <input type="text" value={idemKey} onChange={e => setIdemKey(e.target.value)}
-            placeholder="e.g. gate-check-001"
+            placeholder="e.g. apply-bot-profile-001"
             style={{ width: '100%', padding: '0.45rem 0.65rem', borderRadius: 8, border: '1px solid var(--aisbp-border, #e2e8f0)', fontSize: '0.85rem', background: 'var(--aisbp-surface, #fff)', color: 'var(--aisbp-text, #0f172a)', boxSizing: 'border-box' }} />
         </div>
         <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', color: 'var(--aisbp-text, #0f172a)', cursor: 'pointer' }}>
           <input type="checkbox" checked={confirmed} onChange={e => setConfirmed(e.target.checked)} />
-          <span>I confirm I am applying KB tenant identity only. No bot config, automation, or messages will be sent.</span>
+          <span>I confirm I am applying {scopeLabel.toLowerCase()} only. No outbound messages will be sent.</span>
         </label>
       </div>
       {checkError && <div style={{ padding: '0.5rem 0.75rem', background: '#FEE2E2', borderRadius: 8, fontSize: '0.82rem', color: '#DC2626', marginBottom: '1rem' }}>{checkError}</div>}
@@ -235,7 +246,7 @@ function ApplyForm({ projectId, syncRunId, api, onChecked }: {
           cursor: !confirmed || !idemKey.trim() || checking ? 'not-allowed' : 'pointer',
           opacity: !confirmed || !idemKey.trim() || checking ? 0.7 : 1,
         }}>
-        {checking ? 'Applying...' : 'Apply KB Tenant + Identity'}
+        {checking ? 'Applying...' : `Apply ${scopeLabel}`}
       </button>
     </div>
   );

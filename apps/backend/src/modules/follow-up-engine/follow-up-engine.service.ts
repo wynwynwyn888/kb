@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import type { Queue } from 'bullmq';
 import { randomUUID } from 'crypto';
@@ -24,7 +24,7 @@ import type { MemoryEntry } from '../orchestration/dto/memory-entry';
 import type { RetrievalChunk } from '../kb/dto/retrieval.dto';
 import type { ReplyDecision } from '../reply-planning/dto';
 
-type FollowUpJobStatus = 'PENDING' | 'SENT' | 'SKIPPED' | 'FAILED';
+type FollowUpJobStatus = 'PENDING' | 'SENT' | 'SKIPPED' | 'FAILED' | 'EXPIRED';
 
 export type FollowUpProcessorJob =
   | {
@@ -99,7 +99,7 @@ function localWallClockParts(timeZone: string, at: Date): { y: number; m: number
 }
 
 @Injectable()
-export class FollowUpEngineService {
+export class FollowUpEngineService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(FollowUpEngineService.name);
   private readonly supabase = getSupabaseService();
 
@@ -804,6 +804,158 @@ export class FollowUpEngineService {
       .filter((m) => m.content.length > 0);
     // Keep last 12 turns max.
     return mapped.slice(-12);
+  }
+
+  // ── Stale Job Cleanup ────────────────────────────────────────────────────
+
+  private cleanupTimer: ReturnType<typeof setInterval> | null = null;
+  private readonly CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000; // daily
+
+  onModuleInit(): void {
+    if (process.env['BYPASS_FOLLOW_UP_CLEANUP_CRON'] === 'true') {
+      this.logger.log('Stale follow-up cleanup cron bypassed (env flag)');
+      return;
+    }
+    this.cleanupTimer = setInterval(() => {
+      void this.cleanupStaleFollowUpJobs().catch((e) => {
+        this.logger.warn(`followUpCleanupCronRejected: ${e instanceof Error ? e.message : String(e)}`);
+      });
+    }, this.CLEANUP_INTERVAL_MS);
+    // Also run once shortly after startup (defer 60s so DB/Redis are ready).
+    setTimeout(() => {
+      void this.cleanupStaleFollowUpJobs().catch((e) => {
+        this.logger.warn(`followUpCleanupStartupRejected: ${e instanceof Error ? e.message : String(e)}`);
+      });
+    }, 60_000);
+  }
+
+  onModuleDestroy(): void {
+    if (this.cleanupTimer) {
+      clearInterval(this.cleanupTimer);
+      this.cleanupTimer = null;
+    }
+  }
+
+  /**
+   * Clean up stale follow-up job rows that are orphaned or definitively resolved.
+   *
+   * Conservatively updates status to 'EXPIRED' rather than deleting, so audit trail
+   * is preserved. PENDING rows are only touched when their due_at is well in the past
+   * AND no corresponding BullMQ job exists (prevents accidentally killing valid delayed jobs).
+   *
+   * Thresholds (conservative):
+   *   PENDING  — older than 7 days since due_at, no BullMQ job
+   *   FAILED   — older than 7 days since created_at
+   *   SKIPPED  — older than 30 days since created_at
+   */
+  async cleanupStaleFollowUpJobs(): Promise<{
+    expired: number;
+    skippedPending: number;
+    skippedBullExists: number;
+  }> {
+    const now = Date.now();
+    const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+    const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
+    let expired = 0;
+    let skippedPending = 0;
+    let skippedBullExists = 0;
+
+    // 1) Expired FAILED rows (older than 7 days)
+    try {
+      const failedCutoff = new Date(now - sevenDaysMs).toISOString();
+      const { data: failedRows, error: fErr } = await this.supabase
+        .from('conversation_follow_up_jobs')
+        .select('id')
+        .eq('status', 'FAILED')
+        .lt('created_at', failedCutoff)
+        .limit(500);
+      if (!fErr && failedRows && failedRows.length > 0) {
+        const ids = (failedRows as Array<{ id: string }>).map(r => r.id);
+        const { error: upErr } = await this.supabase
+          .from('conversation_follow_up_jobs')
+          .update({ status: 'EXPIRED', updated_at: new Date().toISOString() })
+          .in('id', ids);
+        if (upErr) {
+          this.logger.warn(`followUpCleanupFailedStatusUpdate: ${String(upErr)}`);
+        } else {
+          expired += ids.length;
+        }
+      }
+    } catch (e) {
+      this.logger.warn(`followUpCleanupFailedQuery: ${e instanceof Error ? e.message : String(e)}`);
+    }
+
+    // 2) Expired SKIPPED rows (older than 30 days)
+    try {
+      const skippedCutoff = new Date(now - thirtyDaysMs).toISOString();
+      const { data: skippedRows, error: sErr } = await this.supabase
+        .from('conversation_follow_up_jobs')
+        .select('id')
+        .eq('status', 'SKIPPED')
+        .lt('created_at', skippedCutoff)
+        .limit(500);
+      if (!sErr && skippedRows && skippedRows.length > 0) {
+        const ids = (skippedRows as Array<{ id: string }>).map(r => r.id);
+        const { error: upErr } = await this.supabase
+          .from('conversation_follow_up_jobs')
+          .update({ status: 'EXPIRED', updated_at: new Date().toISOString() })
+          .in('id', ids);
+        if (upErr) {
+          this.logger.warn(`followUpCleanupSkippedStatusUpdate: ${String(upErr)}`);
+        } else {
+          expired += ids.length;
+        }
+      }
+    } catch (e) {
+      this.logger.warn(`followUpCleanupSkippedQuery: ${e instanceof Error ? e.message : String(e)}`);
+    }
+
+    // 3) Orphaned PENDING rows (due_at > 7 days ago, no BullMQ job)
+    try {
+      const pendingCutoff = new Date(now - sevenDaysMs).toISOString();
+      const { data: pendingRows, error: pErr } = await this.supabase
+        .from('conversation_follow_up_jobs')
+        .select('id')
+        .eq('status', 'PENDING')
+        .lt('due_at', pendingCutoff)
+        .limit(500);
+      if (!pErr && pendingRows && pendingRows.length > 0) {
+        for (const row of pendingRows as Array<{ id: string }>) {
+          try {
+            const bullJobId = toBullSafeFollowUpJobId(row.id);
+            const bullJob = await this.followUpQueue.getJob(bullJobId);
+            if (bullJob) {
+              skippedBullExists++;
+              continue;
+            }
+            // Job doesn't exist in Redis — orphaned. Mark as EXPIRED.
+            const { error: upErr } = await this.supabase
+              .from('conversation_follow_up_jobs')
+              .update({ status: 'EXPIRED', updated_at: new Date().toISOString() })
+              .eq('id', row.id);
+            if (upErr) {
+              this.logger.warn(`followUpCleanupPendingUpdate: ${String(upErr)}`);
+            } else {
+              expired++;
+              skippedPending++;
+            }
+          } catch (e) {
+            // Individual row failure doesn't stop the batch
+            this.logger.warn(`followUpCleanupPendingRow: ${e instanceof Error ? e.message : String(e)}`);
+          }
+        }
+      }
+    } catch (e) {
+      this.logger.warn(`followUpCleanupPendingQuery: ${e instanceof Error ? e.message : String(e)}`);
+    }
+
+    const total = expired + skippedBullExists;
+    if (total > 0) {
+      this.logger.log(
+        `followUpCleanupComplete: expired=${expired} skippedBullExists=${skippedBullExists} totalProcessed=${total}`,
+      );
+    }
+    return { expired, skippedPending, skippedBullExists };
   }
 }
 

@@ -137,9 +137,9 @@ export default function SyncPreviewPage() {
             )}
           </PlaceholderCard>
 
-          <PlaceholderCard title="KB Apply Readiness Check">
+          <PlaceholderCard title="Apply KB Tenant + Identity Only">
             <div style={{ marginBottom: '1rem', padding: '0.5rem 0.75rem', background: '#FEF3C7', borderRadius: 8, fontSize: '0.8rem', color: '#92400E' }}>
-              KB write adapter is not implemented yet. This checks whether the approved dry-run is eligible for future KB apply. No KB config is written.
+              This creates/updates the KB tenant shell only. Bot profile, prompt config, FAQ, booking, handover, follow-up, GHL sync, and outbound sending are not synced in this step. AISBP_OUTBOUND_THROUGH_KB_ENABLED remains false.
             </div>
             {result?.['syncRunId'] && result?.['status'] === 'DRY_RUN_PASSED' ? (
               <ApplyForm
@@ -201,8 +201,12 @@ function ApplyForm({ projectId, syncRunId, api, onChecked }: {
     try {
       const res = await api.kbApply(projectId, syncRunId, idemKey.trim(), true, note || undefined);
       onChecked(res);
+      // If tenant-only apply succeeded, show clear message
+      if (res?.['applied'] === true) {
+        setCheckError(null);
+      }
     } catch (err: unknown) {
-      setCheckError(err instanceof Error ? err.message : 'Gate check failed');
+      setCheckError(err instanceof Error ? err.message : 'Apply failed');
     } finally { setChecking(false); }
   };
 
@@ -219,7 +223,7 @@ function ApplyForm({ projectId, syncRunId, api, onChecked }: {
         </div>
         <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', color: 'var(--aisbp-text, #0f172a)', cursor: 'pointer' }}>
           <input type="checkbox" checked={confirmed} onChange={e => setConfirmed(e.target.checked)} />
-          <span>I confirm I am checking apply readiness only. No KB config or messages will be sent.</span>
+          <span>I confirm I am applying KB tenant identity only. No bot config, automation, or messages will be sent.</span>
         </label>
       </div>
       {checkError && <div style={{ padding: '0.5rem 0.75rem', background: '#FEE2E2', borderRadius: 8, fontSize: '0.82rem', color: '#DC2626', marginBottom: '1rem' }}>{checkError}</div>}
@@ -231,7 +235,7 @@ function ApplyForm({ projectId, syncRunId, api, onChecked }: {
           cursor: !confirmed || !idemKey.trim() || checking ? 'not-allowed' : 'pointer',
           opacity: !confirmed || !idemKey.trim() || checking ? 0.7 : 1,
         }}>
-        {checking ? 'Checking...' : 'Validate KB Apply Readiness'}
+        {checking ? 'Applying...' : 'Apply KB Tenant + Identity'}
       </button>
     </div>
   );

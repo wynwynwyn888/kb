@@ -1549,56 +1549,60 @@ export class OnboardService {
 
     const tenantName = client?.displayName ?? project.displayLabel ?? 'Unnamed Onboard Client';
 
-    let kbTenantId: string | null = null;
+    // Check identity map — if kbTenantId already exists, skip creation
+    const { data: existingIdMap } = await supabase
+      .from('onboarding_identity_map')
+      .select('kb_tenant_id, id')
+      .eq('project_id', projectId)
+      .maybeSingle();
+
+    let kbTenantId: string | null = existingIdMap?.['kb_tenant_id'] ?? null;
     let tenantCreated = false;
 
-    try {
-      // Create KB tenant via existing TenantsService
-      const tenant = await this.tenantsService.createTenant(agencyId, actorId, {
-        name: tenantName,
-        ghlLocationId: null, // Deferred to GHL integration
-        clientContactName: client?.contactName ?? null,
-        clientContactPhone: client?.contactPhoneMasked ?? null,
-        clientContactEmail: client?.contactEmail ?? null,
-      });
-
-      kbTenantId = tenant.id;
-      tenantCreated = true;
-
-      // Update onboarding_identity_map
-      const { data: idMap } = await supabase
-        .from('onboarding_identity_map')
-        .select('id')
-        .eq('project_id', projectId)
-        .maybeSingle();
-
-      if (idMap) {
-        await supabase.from('onboarding_identity_map').update({ kb_tenant_id: kbTenantId }).eq('id', idMap['id']);
-      } else {
-        await supabase.from('onboarding_identity_map').insert({
-          id: randomUUID(),
-          project_id: projectId,
-          onboard_client_id: project.onboardClientId,
-          kb_tenant_id: kbTenantId,
+    if (!kbTenantId) {
+      try {
+        // Masked phone is display-only — do NOT write into real contact phone fields.
+        // Pass null so real phone fields are stored empty.
+        const tenant = await this.tenantsService.createTenant(agencyId, actorId, {
+          name: tenantName,
+          ghlLocationId: null,
+          clientContactName: client?.contactName ?? null,
+          clientContactPhone: null,
+          clientContactEmail: client?.contactEmail ?? null,
         });
+
+        kbTenantId = tenant.id;
+        tenantCreated = true;
+
+        // Update onboarding_identity_map
+        if (existingIdMap) {
+          await supabase.from('onboarding_identity_map').update({ kb_tenant_id: kbTenantId }).eq('id', existingIdMap['id']);
+        } else {
+          await supabase.from('onboarding_identity_map').insert({
+            id: randomUUID(),
+            project_id: projectId,
+            onboard_client_id: project.onboardClientId,
+            kb_tenant_id: kbTenantId,
+          });
+        }
+      } catch (err) {
+        const reason = `TENANT_CREATE_FAILED: ${err instanceof Error ? err.message : String(err)}`;
+        await supabase.from('sync_runs').insert({
+          id: applyRunId, project_id: projectId, target_system: 'KB', mode: 'APPLY',
+          status: 'APPLY_FAILED', idempotency_key: idempotencyKey,
+          request_payload: { parentDryRunId: syncRunId, dryRunSchemaVersion: schemaVersion, sourceSnapshotHash: dryRunSnapshotHash, confirmedBy: actorId },
+          response_payload: { reason, tenantCreated: false },
+          error_message: reason, triggered_by: actorId, version: 1, completed_at: now,
+        });
+
+        this.audit.log({
+          projectId, actorId, actorType: 'OPERATOR', action: 'sync.kb.apply_failed',
+          resourceType: 'sync_run', resourceId: applyRunId,
+          changes: { reason, dryRunSyncRunId: syncRunId, sourceSnapshotHash: dryRunSnapshotHash.slice(0, 8) },
+        });
+
+        throw new BadRequestException(reason);
       }
-    } catch (err) {
-      const reason = `TENANT_CREATE_FAILED: ${err instanceof Error ? err.message : String(err)}`;
-      await supabase.from('sync_runs').insert({
-        id: applyRunId, project_id: projectId, target_system: 'KB', mode: 'APPLY',
-        status: 'APPLY_FAILED', idempotency_key: idempotencyKey,
-        request_payload: { parentDryRunId: syncRunId, dryRunSchemaVersion: schemaVersion, sourceSnapshotHash: dryRunSnapshotHash, confirmedBy: actorId },
-        response_payload: { reason, tenantCreated: false },
-        error_message: reason, triggered_by: actorId, version: 1, completed_at: now,
-      });
-
-      this.audit.log({
-        projectId, actorId, actorType: 'OPERATOR', action: 'sync.kb.apply_failed',
-        resourceType: 'sync_run', resourceId: applyRunId,
-        changes: { reason, dryRunSyncRunId: syncRunId, sourceSnapshotHash: dryRunSnapshotHash.slice(0, 8) },
-      });
-
-      throw new BadRequestException(reason);
     }
 
     // Record APPLY sync_run
@@ -1614,11 +1618,13 @@ export class OnboardService {
         appliedScope: 'TENANT_IDENTITY_ONLY',
         kbTenantId,
         tenantCreated,
+        tenantReused: !tenantCreated,
         identityMapUpdated: true,
-        skipped: ['BOT_PROFILE', 'PROMPT_CONFIG', 'FAQ', 'KNOWLEDGE', 'BOOKING', 'HANDOVER', 'FOLLOW_UP', 'GHL'],
+        skipped: ['BOT_PROFILE', 'PROMPT_CONFIG', 'FAQ_KNOWLEDGE', 'BOOKING_SETTINGS', 'HANDOVER_SETTINGS', 'FOLLOW_UP_SETTINGS', 'GHL_SYNC', 'OUTBOUND_SENDING'],
         noMessagesSent: true,
         noGhlSync: true,
         outboundEnabled: false,
+        botConfigSynced: false,
       },
       triggered_by: actorId, version: 1, duration_ms: null, completed_at: now,
     });
@@ -1630,7 +1636,7 @@ export class OnboardService {
       resourceType: 'sync_run', resourceId: applyRunId,
       changes: {
         scope: 'TENANT_IDENTITY_ONLY', kbTenantId: kbTenantId?.slice(0, 8),
-        sourceSnapshotHash: dryRunSnapshotHash.slice(0, 8), idempotencyKey: idempotencyKey.slice(0, 8),
+        tenantCreated, sourceSnapshotHash: dryRunSnapshotHash.slice(0, 8), idempotencyKey: idempotencyKey.slice(0, 8),
       },
     });
 
@@ -1640,11 +1646,14 @@ export class OnboardService {
       appliedScope: 'TENANT_IDENTITY_ONLY',
       status: 'APPLIED',
       kbTenantId,
+      tenantCreated,
+      tenantReused: !tenantCreated,
       identityMapUpdated: true,
-      skipped: ['BOT_PROFILE', 'PROMPT_CONFIG', 'FAQ', 'KNOWLEDGE', 'BOOKING', 'HANDOVER', 'FOLLOW_UP', 'GHL'],
+      skipped: ['BOT_PROFILE', 'PROMPT_CONFIG', 'FAQ_KNOWLEDGE', 'BOOKING_SETTINGS', 'HANDOVER_SETTINGS', 'FOLLOW_UP_SETTINGS', 'GHL_SYNC', 'OUTBOUND_SENDING'],
       noMessagesSent: true,
       noGhlSync: true,
       outboundEnabled: false,
+      botConfigSynced: false,
       dryRunSyncRunId: syncRunId,
       sourceSnapshotHash: dryRunSnapshotHash.slice(0, 8),
       appliedAt: now,

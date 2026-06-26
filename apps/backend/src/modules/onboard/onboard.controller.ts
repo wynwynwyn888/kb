@@ -244,6 +244,7 @@ export class OnboardController {
       onboardingProjectId,
       body.syncRunId,
       user.id,
+      user.agencyId,
       body.idempotencyKey,
       body.confirmApply,
       body.operatorNote,

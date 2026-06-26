@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { OnboardController } from './onboard.controller';
 import { OnboardService } from './onboard.service';
 import { OnboardAuditService } from './utils/audit';
@@ -6,9 +6,10 @@ import { OnboardOperatorGuard } from './guards/onboard-operator.guard';
 import { AgentController } from './agent/agent.controller';
 import { AgentTokenGuard } from './agent/agent-token.guard';
 import { AuthModule } from '../auth/auth.module';
+import { TenantsModule } from '../tenants/tenants.module';
 
 @Module({
-  imports: [AuthModule],
+  imports: [AuthModule, forwardRef(() => TenantsModule)],
   controllers: [OnboardController, AgentController],
   providers: [OnboardService, OnboardAuditService, OnboardOperatorGuard, AgentTokenGuard],
   exports: [OnboardService],

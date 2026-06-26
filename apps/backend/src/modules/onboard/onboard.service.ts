@@ -14,6 +14,7 @@ import {
   type SectionName,
 } from './utils/approval';
 import { mapOnboardToKbPlan } from './kb-sync/onboard-kb-sync.mapper';
+import { TenantsService } from '../tenants/tenants.service';
 
 export interface OnboardClientSummary {
   id: string;
@@ -52,7 +53,10 @@ export interface OnboardProjectSummary {
 
 @Injectable()
 export class OnboardService {
-  constructor(private readonly audit: OnboardAuditService) {}
+  constructor(
+    private readonly audit: OnboardAuditService,
+    private readonly tenantsService: TenantsService,
+  ) {}
 
   // ==========================================================================
   // CLIENTS
@@ -1450,6 +1454,7 @@ export class OnboardService {
     projectId: string,
     syncRunId: string,
     actorId: string,
+    agencyId: string | undefined,
     idempotencyKey: string,
     confirmApply: boolean,
     operatorNote?: string,
@@ -1533,69 +1538,118 @@ export class OnboardService {
       );
     }
 
-    // All gates passed — but KB target config write adapter is not implemented yet.
-    // Record the gate check as blocked/not-implemented until real KB integration exists.
+    // All gates passed — execute tenant-only KB apply (PR 10D)
     const applyRunId = randomUUID();
     const now = new Date().toISOString();
-    const reason = 'KB_TARGET_MAPPING_NOT_IMPLEMENTED';
+    const client = await this.getClient(project.onboardClientId);
 
+    if (!agencyId) {
+      throw new BadRequestException('Operator agency is required for KB tenant creation. No agency found on session.');
+    }
+
+    const tenantName = client?.displayName ?? project.displayLabel ?? 'Unnamed Onboard Client';
+
+    let kbTenantId: string | null = null;
+    let tenantCreated = false;
+
+    try {
+      // Create KB tenant via existing TenantsService
+      const tenant = await this.tenantsService.createTenant(agencyId, actorId, {
+        name: tenantName,
+        ghlLocationId: null, // Deferred to GHL integration
+        clientContactName: client?.contactName ?? null,
+        clientContactPhone: client?.contactPhoneMasked ?? null,
+        clientContactEmail: client?.contactEmail ?? null,
+      });
+
+      kbTenantId = tenant.id;
+      tenantCreated = true;
+
+      // Update onboarding_identity_map
+      const { data: idMap } = await supabase
+        .from('onboarding_identity_map')
+        .select('id')
+        .eq('project_id', projectId)
+        .maybeSingle();
+
+      if (idMap) {
+        await supabase.from('onboarding_identity_map').update({ kb_tenant_id: kbTenantId }).eq('id', idMap['id']);
+      } else {
+        await supabase.from('onboarding_identity_map').insert({
+          id: randomUUID(),
+          project_id: projectId,
+          onboard_client_id: project.onboardClientId,
+          kb_tenant_id: kbTenantId,
+        });
+      }
+    } catch (err) {
+      const reason = `TENANT_CREATE_FAILED: ${err instanceof Error ? err.message : String(err)}`;
+      await supabase.from('sync_runs').insert({
+        id: applyRunId, project_id: projectId, target_system: 'KB', mode: 'APPLY',
+        status: 'APPLY_FAILED', idempotency_key: idempotencyKey,
+        request_payload: { parentDryRunId: syncRunId, dryRunSchemaVersion: schemaVersion, sourceSnapshotHash: dryRunSnapshotHash, confirmedBy: actorId },
+        response_payload: { reason, tenantCreated: false },
+        error_message: reason, triggered_by: actorId, version: 1, completed_at: now,
+      });
+
+      this.audit.log({
+        projectId, actorId, actorType: 'OPERATOR', action: 'sync.kb.apply_failed',
+        resourceType: 'sync_run', resourceId: applyRunId,
+        changes: { reason, dryRunSyncRunId: syncRunId, sourceSnapshotHash: dryRunSnapshotHash.slice(0, 8) },
+      });
+
+      throw new BadRequestException(reason);
+    }
+
+    // Record APPLY sync_run
     await supabase.from('sync_runs').insert({
-      id: applyRunId,
-      project_id: projectId,
-      target_system: 'KB',
-      mode: 'APPLY',
-      status: 'APPLY_FAILED',
-      idempotency_key: idempotencyKey,
+      id: applyRunId, project_id: projectId, target_system: 'KB', mode: 'APPLY',
+      status: 'APPLIED', idempotency_key: idempotencyKey,
       request_payload: {
-        parentDryRunId: syncRunId,
-        dryRunSchemaVersion: schemaVersion,
-        sourceSnapshotHash: dryRunSnapshotHash,
-        confirmedBy: actorId,
-        operatorNote: operatorNote ?? null,
+        parentDryRunId: syncRunId, dryRunSchemaVersion: schemaVersion,
+        sourceSnapshotHash: dryRunSnapshotHash, confirmedBy: actorId,
+        appliedScope: 'TENANT_IDENTITY_ONLY',
       },
       response_payload: {
-        reason,
-        message: 'KB apply gate passed, but KB tenant/config write adapter is not implemented yet. No KB config was written.',
-        gateCheckPassed: true,
-        kbWriteImplemented: false,
+        appliedScope: 'TENANT_IDENTITY_ONLY',
+        kbTenantId,
+        tenantCreated,
+        identityMapUpdated: true,
+        skipped: ['BOT_PROFILE', 'PROMPT_CONFIG', 'FAQ', 'KNOWLEDGE', 'BOOKING', 'HANDOVER', 'FOLLOW_UP', 'GHL'],
+        noMessagesSent: true,
+        noGhlSync: true,
+        outboundEnabled: false,
       },
-      error_message: reason,
-      triggered_by: actorId,
-      version: 1,
-      duration_ms: null,
-      completed_at: now,
+      triggered_by: actorId, version: 1, duration_ms: null, completed_at: now,
     });
 
-    // Do NOT update project status — no real KB write occurred.
+    // Do NOT update project status — only tenant identity synced, not full config.
 
     this.audit.log({
-      projectId,
-      actorId,
-      actorType: 'OPERATOR',
-      action: 'sync.kb.apply_blocked',
-      resourceType: 'sync_run',
-      resourceId: applyRunId,
+      projectId, actorId, actorType: 'OPERATOR', action: 'sync.kb.apply_succeeded',
+      resourceType: 'sync_run', resourceId: applyRunId,
       changes: {
-        reason,
-        dryRunSyncRunId: syncRunId,
-        sourceSnapshotHash: dryRunSnapshotHash.slice(0, 8),
-        idempotencyKey: idempotencyKey.slice(0, 8),
-        gateCheckPassed: true,
+        scope: 'TENANT_IDENTITY_ONLY', kbTenantId: kbTenantId?.slice(0, 8),
+        sourceSnapshotHash: dryRunSnapshotHash.slice(0, 8), idempotencyKey: idempotencyKey.slice(0, 8),
       },
     });
 
     return {
       syncRunId: applyRunId,
-      applied: false,
-      status: 'BLOCKED',
-      reason,
-      message: 'KB apply gate passed, but KB tenant/config write adapter is not implemented yet. No KB config was written.',
+      applied: true,
+      appliedScope: 'TENANT_IDENTITY_ONLY',
+      status: 'APPLIED',
+      kbTenantId,
+      identityMapUpdated: true,
+      skipped: ['BOT_PROFILE', 'PROMPT_CONFIG', 'FAQ', 'KNOWLEDGE', 'BOOKING', 'HANDOVER', 'FOLLOW_UP', 'GHL'],
+      noMessagesSent: true,
+      noGhlSync: true,
+      outboundEnabled: false,
       dryRunSyncRunId: syncRunId,
       sourceSnapshotHash: dryRunSnapshotHash.slice(0, 8),
-      gateCheckPassed: true,
-      kbWriteImplemented: false,
-      checkedAt: now,
-      checkedBy: actorId,
+      appliedAt: now,
+      appliedBy: actorId,
+      message: 'Tenant identity sync completed. Bot brain/config is not synced yet.',
     };
   }
 

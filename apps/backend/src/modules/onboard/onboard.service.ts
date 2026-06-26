@@ -1532,39 +1532,18 @@ export class OnboardService {
       );
     }
 
-    // All gates passed — perform apply
+    // All gates passed — but KB target config write adapter is not implemented yet.
+    // Record the gate check as blocked/not-implemented until real KB integration exists.
     const applyRunId = randomUUID();
     const now = new Date().toISOString();
+    const reason = 'KB_TARGET_MAPPING_NOT_IMPLEMENTED';
 
-    // KB write: update identity map (safe, non-mutating to KB tenant config)
-    // Future integration PR will handle actual KB tenant creation.
-    const { data: identityMap } = await supabase
-      .from('onboarding_identity_map')
-      .select('id')
-      .eq('project_id', projectId)
-      .maybeSingle();
-
-    if (identityMap) {
-      await supabase
-        .from('onboarding_identity_map')
-        .update({ updated_at: now })
-        .eq('id', identityMap['id']);
-    } else {
-      await supabase.from('onboarding_identity_map').insert({
-        id: randomUUID(),
-        project_id: projectId,
-        onboard_client_id: project.onboardClientId,
-        kb_tenant_id: null, // Future: populate when KB tenant is created
-      });
-    }
-
-    // Create APPLY sync_run
     await supabase.from('sync_runs').insert({
       id: applyRunId,
       project_id: projectId,
       target_system: 'KB',
       mode: 'APPLY',
-      status: 'APPLIED',
+      status: 'APPLY_FAILED',
       idempotency_key: idempotencyKey,
       request_payload: {
         parentDryRunId: syncRunId,
@@ -1574,46 +1553,48 @@ export class OnboardService {
         operatorNote: operatorNote ?? null,
       },
       response_payload: {
-        appliedAt: now,
-        identityMapUpdated: true,
-        note: 'KB tenant creation deferred to future KB integration PR. Onboard identity map updated.',
+        reason,
+        message: 'KB apply gate passed, but KB tenant/config write adapter is not implemented yet. No KB config was written.',
+        gateCheckPassed: true,
+        kbWriteImplemented: false,
       },
+      error_message: reason,
       triggered_by: actorId,
       version: 1,
       duration_ms: null,
       completed_at: now,
     });
 
-    // Update project status
-    await supabase
-      .from('onboarding_projects')
-      .update({ status: 'SYNCING' })
-      .eq('id', projectId);
+    // Do NOT update project status — no real KB write occurred.
 
-    // Audit
     this.audit.log({
       projectId,
       actorId,
       actorType: 'OPERATOR',
-      action: 'sync.kb.apply',
+      action: 'sync.kb.apply_blocked',
       resourceType: 'sync_run',
       resourceId: applyRunId,
       changes: {
+        reason,
         dryRunSyncRunId: syncRunId,
         sourceSnapshotHash: dryRunSnapshotHash.slice(0, 8),
         idempotencyKey: idempotencyKey.slice(0, 8),
+        gateCheckPassed: true,
       },
     });
 
     return {
       syncRunId: applyRunId,
-      status: 'APPLIED',
+      applied: false,
+      status: 'BLOCKED',
+      reason,
+      message: 'KB apply gate passed, but KB tenant/config write adapter is not implemented yet. No KB config was written.',
       dryRunSyncRunId: syncRunId,
       sourceSnapshotHash: dryRunSnapshotHash.slice(0, 8),
-      identityMapUpdated: true,
-      appliedAt: now,
-      appliedBy: actorId,
-      note: 'KB config apply accepted. Actual KB tenant creation/config mapping is deferred to future KB integration PR. Onboard identity map updated.',
+      gateCheckPassed: true,
+      kbWriteImplemented: false,
+      checkedAt: now,
+      checkedBy: actorId,
     };
   }
 

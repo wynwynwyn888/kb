@@ -137,16 +137,16 @@ export default function SyncPreviewPage() {
             )}
           </PlaceholderCard>
 
-          <PlaceholderCard title="Apply KB Sync">
+          <PlaceholderCard title="KB Apply Readiness Check">
             <div style={{ marginBottom: '1rem', padding: '0.5rem 0.75rem', background: '#FEF3C7', borderRadius: 8, fontSize: '0.8rem', color: '#92400E' }}>
-              KB apply sync does not enable outbound sending. GHL sync is not active.
+              KB write adapter is not implemented yet. This checks whether the approved dry-run is eligible for future KB apply. No KB config is written.
             </div>
             {result?.['syncRunId'] && result?.['status'] === 'DRY_RUN_PASSED' ? (
               <ApplyForm
                 projectId={projectId}
                 syncRunId={asStr(result?.['syncRunId'])}
                 api={api}
-                onApplied={(r) => setResult(r)}
+                onChecked={(r) => setResult(r)}
               />
             ) : (
               <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
@@ -183,27 +183,27 @@ export default function SyncPreviewPage() {
   );
 }
 
-function ApplyForm({ projectId, syncRunId, api, onApplied }: {
+function ApplyForm({ projectId, syncRunId, api, onChecked }: {
   projectId: string;
   syncRunId: string;
   api: OnboardApi | null;
-  onApplied: (r: Record<string, unknown>) => void;
+  onChecked: (r: Record<string, unknown>) => void;
 }) {
   const [confirmed, setConfirmed] = useState(false);
   const [idemKey, setIdemKey] = useState('');
   const [note, setNote] = useState('');
-  const [applying, setApplying] = useState(false);
-  const [applyError, setApplyError] = useState<string | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [checkError, setCheckError] = useState<string | null>(null);
 
-  const handleApply = async () => {
+  const handleCheck = async () => {
     if (!api || !confirmed || !idemKey.trim()) return;
-    setApplying(true); setApplyError(null);
+    setChecking(true); setCheckError(null);
     try {
       const res = await api.kbApply(projectId, syncRunId, idemKey.trim(), true, note || undefined);
-      onApplied(res);
+      onChecked(res);
     } catch (err: unknown) {
-      setApplyError(err instanceof Error ? err.message : 'Apply failed');
-    } finally { setApplying(false); }
+      setCheckError(err instanceof Error ? err.message : 'Gate check failed');
+    } finally { setChecking(false); }
   };
 
   return (
@@ -211,35 +211,27 @@ function ApplyForm({ projectId, syncRunId, api, onApplied }: {
       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginBottom: '1rem' }}>
         <div>
           <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, marginBottom: '0.35rem', color: 'var(--aisbp-text, #0f172a)' }}>
-            Idempotency Key * (unique per apply)
+            Idempotency Key * (unique per check)
           </label>
           <input type="text" value={idemKey} onChange={e => setIdemKey(e.target.value)}
-            placeholder="e.g. apply-2026-06-27-001"
-            style={{ width: '100%', padding: '0.45rem 0.65rem', borderRadius: 8, border: '1px solid var(--aisbp-border, #e2e8f0)', fontSize: '0.85rem', background: 'var(--aisbp-surface, #fff)', color: 'var(--aisbp-text, #0f172a)', boxSizing: 'border-box' }} />
-        </div>
-        <div>
-          <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, marginBottom: '0.35rem', color: 'var(--aisbp-text, #0f172a)' }}>
-            Operator Note (optional)
-          </label>
-          <input type="text" value={note} onChange={e => setNote(e.target.value)}
-            placeholder="Optional note for this apply"
+            placeholder="e.g. gate-check-001"
             style={{ width: '100%', padding: '0.45rem 0.65rem', borderRadius: 8, border: '1px solid var(--aisbp-border, #e2e8f0)', fontSize: '0.85rem', background: 'var(--aisbp-surface, #fff)', color: 'var(--aisbp-text, #0f172a)', boxSizing: 'border-box' }} />
         </div>
         <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', color: 'var(--aisbp-text, #0f172a)', cursor: 'pointer' }}>
           <input type="checkbox" checked={confirmed} onChange={e => setConfirmed(e.target.checked)} />
-          <span>I confirm this will apply approved config to KB only. No GHL sync and no messages will be sent.</span>
+          <span>I confirm I am checking apply readiness only. No KB config or messages will be sent.</span>
         </label>
       </div>
-      {applyError && <div style={{ padding: '0.5rem 0.75rem', background: '#FEE2E2', borderRadius: 8, fontSize: '0.82rem', color: '#DC2626', marginBottom: '1rem' }}>{applyError}</div>}
-      <button type="button" onClick={handleApply}
-        disabled={!confirmed || !idemKey.trim() || applying}
+      {checkError && <div style={{ padding: '0.5rem 0.75rem', background: '#FEE2E2', borderRadius: 8, fontSize: '0.82rem', color: '#DC2626', marginBottom: '1rem' }}>{checkError}</div>}
+      <button type="button" onClick={handleCheck}
+        disabled={!confirmed || !idemKey.trim() || checking}
         style={{
           padding: '0.55rem 1.5rem', borderRadius: 10, border: 'none',
-          background: '#16A34A', color: '#fff', fontWeight: 600, fontSize: '0.88rem',
-          cursor: !confirmed || !idemKey.trim() || applying ? 'not-allowed' : 'pointer',
-          opacity: !confirmed || !idemKey.trim() || applying ? 0.7 : 1,
+          background: '#2563EB', color: '#fff', fontWeight: 600, fontSize: '0.88rem',
+          cursor: !confirmed || !idemKey.trim() || checking ? 'not-allowed' : 'pointer',
+          opacity: !confirmed || !idemKey.trim() || checking ? 0.7 : 1,
         }}>
-        {applying ? 'Applying...' : 'Apply KB Sync'}
+        {checking ? 'Checking...' : 'Validate KB Apply Readiness'}
       </button>
     </div>
   );

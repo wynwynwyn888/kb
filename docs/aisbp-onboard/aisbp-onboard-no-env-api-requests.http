@@ -1,0 +1,309 @@
+### AISBP-Onboard No-Env API Collection
+### DO NOT run against production. No live WhatsApp/GHL tests.
+### All placeholders. Fill <ONBOARD_API_BASE_URL>, <OPERATOR_JWT>, <ONBOARD_AGENT_API_TOKEN>, <PROJECT_ID>, <CLIENT_ID>, <SESSION_ID>, <SYNC_RUN_ID> after env setup.
+
+### ========================================
+### AGENT ENDPOINTS
+### ========================================
+
+### Create agent session
+POST {{ONBOARD_API_BASE_URL}}/onboard/agent/sessions
+Authorization: Bearer {{ONBOARD_AGENT_API_TOKEN}}
+Content-Type: application/json
+
+{
+  "projectId": "{{PROJECT_ID}}",
+  "agentType": "whatsapp_ai"
+}
+
+### Get agent session
+GET {{ONBOARD_API_BASE_URL}}/onboard/agent/sessions/{{SESSION_ID}}
+Authorization: Bearer {{ONBOARD_AGENT_API_TOKEN}}
+
+### Submit agent answers
+POST {{ONBOARD_API_BASE_URL}}/onboard/agent/sessions/{{SESSION_ID}}/answers
+Authorization: Bearer {{ONBOARD_AGENT_API_TOKEN}}
+Content-Type: application/json
+
+{
+  "answers": [
+    {
+      "section": "business_profile",
+      "questionKey": "business_name",
+      "questionLabel": "What is your business name?",
+      "answerValue": "Pilot Test Business",
+      "confidence": 0.98,
+      "source": "client_direct"
+    },
+    {
+      "section": "prompt",
+      "questionKey": "persona",
+      "questionLabel": "How should the bot sound?",
+      "answerValue": "Friendly and professional.",
+      "confidence": 0.92,
+      "source": "client_direct"
+    },
+    {
+      "section": "faq",
+      "questionKey": "faq_pricing",
+      "questionLabel": "What are your prices?",
+      "answerValue": "Our services range from $10 to $50.",
+      "confidence": 0.90,
+      "source": "client_direct"
+    }
+  ]
+}
+
+### Submit agent analysis
+POST {{ONBOARD_API_BASE_URL}}/onboard/agent/projects/{{PROJECT_ID}}/analysis
+Authorization: Bearer {{ONBOARD_AGENT_API_TOKEN}}
+Content-Type: application/json
+
+{
+  "summary": "Test business with simple lead flow.",
+  "leadSources": ["website", "whatsapp"],
+  "confidence": 0.85,
+  "recommendations": [
+    {
+      "title": "Auto-reply to new WhatsApp leads",
+      "description": "Instantly respond with qualifying questions.",
+      "type": "FOLLOW_UP",
+      "riskLevel": "LOW",
+      "businessValue": "Reduce response time."
+    }
+  ]
+}
+
+### Get missing fields
+GET {{ONBOARD_API_BASE_URL}}/onboard/agent/projects/{{PROJECT_ID}}/missing-fields
+Authorization: Bearer {{ONBOARD_AGENT_API_TOKEN}}
+
+### Request Wyn review
+POST {{ONBOARD_API_BASE_URL}}/onboard/agent/projects/{{PROJECT_ID}}/request-review
+Authorization: Bearer {{ONBOARD_AGENT_API_TOKEN}}
+Content-Type: application/json
+
+{}
+
+### Get project status (agent)
+GET {{ONBOARD_API_BASE_URL}}/onboard/agent/projects/{{PROJECT_ID}}/status
+Authorization: Bearer {{ONBOARD_AGENT_API_TOKEN}}
+
+### ========================================
+### OPERATOR CRUD
+### ========================================
+
+### Create client
+POST {{ONBOARD_API_BASE_URL}}/onboard/clients
+Authorization: Bearer {{OPERATOR_JWT}}
+Content-Type: application/json
+
+{
+  "clientKey": "pilot-test",
+  "displayName": "Pilot Test Business",
+  "contactName": "Test Owner",
+  "contactPhone": "+6500001111",
+  "contactEmail": "test@example.com",
+  "industry": "Testing",
+  "timezone": "Asia/Singapore"
+}
+
+### List clients
+GET {{ONBOARD_API_BASE_URL}}/onboard/clients
+Authorization: Bearer {{OPERATOR_JWT}}
+
+### Get client
+GET {{ONBOARD_API_BASE_URL}}/onboard/clients/{{CLIENT_ID}}
+Authorization: Bearer {{OPERATOR_JWT}}
+
+### Update client
+PATCH {{ONBOARD_API_BASE_URL}}/onboard/clients/{{CLIENT_ID}}
+Authorization: Bearer {{OPERATOR_JWT}}
+Content-Type: application/json
+
+{
+  "displayName": "Updated Test Business"
+}
+
+### Create project
+POST {{ONBOARD_API_BASE_URL}}/onboard/projects
+Authorization: Bearer {{OPERATOR_JWT}}
+Content-Type: application/json
+
+{
+  "onboardClientId": "{{CLIENT_ID}}"
+}
+
+### List projects
+GET {{ONBOARD_API_BASE_URL}}/onboard/projects
+Authorization: Bearer {{OPERATOR_JWT}}
+
+### Get project
+GET {{ONBOARD_API_BASE_URL}}/onboard/projects/{{PROJECT_ID}}
+Authorization: Bearer {{OPERATOR_JWT}}
+
+### ========================================
+### APPROVAL
+### ========================================
+
+### Approve section
+POST {{ONBOARD_API_BASE_URL}}/onboard/projects/{{PROJECT_ID}}/sections/business_profile/approve
+Authorization: Bearer {{OPERATOR_JWT}}
+Content-Type: application/json
+
+{ "comment": "Looks good." }
+
+### Request changes
+POST {{ONBOARD_API_BASE_URL}}/onboard/projects/{{PROJECT_ID}}/request-changes
+Authorization: Bearer {{OPERATOR_JWT}}
+Content-Type: application/json
+
+{
+  "comment": "Please update pricing information.",
+  "rejectedSections": ["faq"]
+}
+
+### Reject project
+POST {{ONBOARD_API_BASE_URL}}/onboard/projects/{{PROJECT_ID}}/reject
+Authorization: Bearer {{OPERATOR_JWT}}
+Content-Type: application/json
+
+{ "comment": "Needs major revisions." }
+
+### Final approve project
+POST {{ONBOARD_API_BASE_URL}}/onboard/projects/{{PROJECT_ID}}/approve
+Authorization: Bearer {{OPERATOR_JWT}}
+Content-Type: application/json
+
+{ "comment": "Ready for sync." }
+
+### ========================================
+### KB SYNC
+### ========================================
+
+### KB dry-run
+POST {{ONBOARD_API_BASE_URL}}/onboard/projects/{{PROJECT_ID}}/sync/kb/dry-run
+Authorization: Bearer {{OPERATOR_JWT}}
+Content-Type: application/json
+
+{}
+
+### KB apply — tenant identity
+# Requires ONBOARD_KB_SYNC_ENABLED=true
+POST {{ONBOARD_API_BASE_URL}}/onboard/projects/{{PROJECT_ID}}/sync/kb/apply
+Authorization: Bearer {{OPERATOR_JWT}}
+Content-Type: application/json
+
+{
+  "syncRunId": "{{SYNC_RUN_ID}}",
+  "confirmApply": true,
+  "idempotencyKey": "pilot-apply-001",
+  "applyScope": "TENANT_IDENTITY_ONLY"
+}
+
+### KB apply — bot profile
+POST {{ONBOARD_API_BASE_URL}}/onboard/projects/{{PROJECT_ID}}/sync/kb/apply
+Authorization: Bearer {{OPERATOR_JWT}}
+Content-Type: application/json
+
+{
+  "syncRunId": "{{SYNC_RUN_ID}}",
+  "confirmApply": true,
+  "idempotencyKey": "pilot-apply-002",
+  "applyScope": "BOT_PROFILE_PROMPT_ONLY"
+}
+
+### KB apply — FAQ knowledge
+POST {{ONBOARD_API_BASE_URL}}/onboard/projects/{{PROJECT_ID}}/sync/kb/apply
+Authorization: Bearer {{OPERATOR_JWT}}
+Content-Type: application/json
+
+{
+  "syncRunId": "{{SYNC_RUN_ID}}",
+  "confirmApply": true,
+  "idempotencyKey": "pilot-apply-003",
+  "applyScope": "FAQ_KNOWLEDGE_ONLY"
+}
+
+### KB apply — booking/handover
+POST {{ONBOARD_API_BASE_URL}}/onboard/projects/{{PROJECT_ID}}/sync/kb/apply
+Authorization: Bearer {{OPERATOR_JWT}}
+Content-Type: application/json
+
+{
+  "syncRunId": "{{SYNC_RUN_ID}}",
+  "confirmApply": true,
+  "idempotencyKey": "pilot-apply-004",
+  "applyScope": "BOOKING_HANDOVER_ONLY"
+}
+
+### KB apply — follow-up
+POST {{ONBOARD_API_BASE_URL}}/onboard/projects/{{PROJECT_ID}}/sync/kb/apply
+Authorization: Bearer {{OPERATOR_JWT}}
+Content-Type: application/json
+
+{
+  "syncRunId": "{{SYNC_RUN_ID}}",
+  "confirmApply": true,
+  "idempotencyKey": "pilot-apply-005",
+  "applyScope": "FOLLOW_UP_SETTINGS_ONLY"
+}
+
+### Get sync runs
+GET {{ONBOARD_API_BASE_URL}}/onboard/projects/{{PROJECT_ID}}/sync-runs
+Authorization: Bearer {{OPERATOR_JWT}}
+
+### Get KB plan preview
+GET {{ONBOARD_API_BASE_URL}}/onboard/projects/{{PROJECT_ID}}/sync/kb/plan-preview
+Authorization: Bearer {{OPERATOR_JWT}}
+
+### ========================================
+### GHL
+### ========================================
+
+### GHL validate
+POST {{ONBOARD_API_BASE_URL}}/onboard/projects/{{PROJECT_ID}}/sync/ghl/validate
+Authorization: Bearer {{OPERATOR_JWT}}
+Content-Type: application/json
+
+{}
+
+### GHL dry-run
+POST {{ONBOARD_API_BASE_URL}}/onboard/projects/{{PROJECT_ID}}/sync/ghl/dry-run
+Authorization: Bearer {{OPERATOR_JWT}}
+Content-Type: application/json
+
+{}
+
+### ========================================
+### NOTIFICATIONS
+### ========================================
+
+### Get review alerts
+GET {{ONBOARD_API_BASE_URL}}/onboard/notifications/review-alerts
+Authorization: Bearer {{OPERATOR_JWT}}
+
+### ========================================
+### AGENT CANNOT (should return 401/403)
+### ========================================
+
+### Agent tries approve → BLOCKED
+POST {{ONBOARD_API_BASE_URL}}/onboard/projects/{{PROJECT_ID}}/sections/business_profile/approve
+Authorization: Bearer {{ONBOARD_AGENT_API_TOKEN}}
+Content-Type: application/json
+
+{ "comment": "Should fail." }
+
+### Agent tries KB dry-run → BLOCKED
+POST {{ONBOARD_API_BASE_URL}}/onboard/projects/{{PROJECT_ID}}/sync/kb/dry-run
+Authorization: Bearer {{ONBOARD_AGENT_API_TOKEN}}
+Content-Type: application/json
+
+{}
+
+### Agent tries KB apply → BLOCKED
+POST {{ONBOARD_API_BASE_URL}}/onboard/projects/{{PROJECT_ID}}/sync/kb/apply
+Authorization: Bearer {{ONBOARD_AGENT_API_TOKEN}}
+Content-Type: application/json
+
+{ "syncRunId": "{{SYNC_RUN_ID}}", "confirmApply": true, "idempotencyKey": "x" }

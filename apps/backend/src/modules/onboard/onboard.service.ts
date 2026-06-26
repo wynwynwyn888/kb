@@ -582,6 +582,280 @@ export class OnboardService {
   }
 
   // ==========================================================================
+  // AGENT INTAKE (PR 7)
+  // Agent can ONLY draft. Cannot approve, cannot sync, cannot mutate production.
+  // ==========================================================================
+
+  async agentCreateSession(
+    projectId: string,
+    agentType: string,
+    agentId: string,
+  ): Promise<Record<string, unknown>> {
+    const project = await this.getProject(projectId);
+    if (!project) throw new NotFoundException('Project not found');
+
+    const supabase = getSupabaseService();
+
+    // Check for existing active session
+    const { data: existing } = await supabase
+      .from('agent_interview_sessions')
+      .select('*')
+      .eq('project_id', projectId)
+      .eq('status', 'ACTIVE')
+      .maybeSingle();
+
+    if (existing) {
+      return {
+        sessionId: existing['id'],
+        projectId,
+        status: existing['status'],
+        currentStep: existing['current_step'] ?? null,
+        totalSteps: existing['total_steps'] ?? null,
+        completedSteps: existing['total_steps'] ? Math.round((existing['total_steps'] - (existing['total_steps'] - 0)) * 0) : 0,
+      };
+    }
+
+    const id = randomUUID();
+    const { error } = await supabase.from('agent_interview_sessions').insert({
+      id,
+      project_id: projectId,
+      agent_type: agentType,
+      status: 'ACTIVE',
+      total_steps: 12,
+      expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+    });
+
+    if (error) throw new BadRequestException(`Failed to create session: ${error.message}`);
+
+    this.audit.log({
+      projectId,
+      actorId: agentId,
+      actorType: 'AGENT',
+      action: 'session.create',
+      resourceType: 'agent_interview_session',
+      resourceId: id,
+      changes: { agentType },
+    });
+
+    return {
+      sessionId: id,
+      projectId,
+      status: 'ACTIVE',
+      currentStep: 'business_name',
+      totalSteps: 12,
+    };
+  }
+
+  async agentGetSession(sessionId: string): Promise<Record<string, unknown> | null> {
+    const supabase = getSupabaseService();
+    const { data, error } = await supabase
+      .from('agent_interview_sessions')
+      .select('*')
+      .eq('id', sessionId)
+      .single();
+
+    if (error || !data) return null;
+
+    // Count completed answers
+    const { count } = await supabase
+      .from('agent_interview_answers')
+      .select('*', { count: 'exact', head: true })
+      .eq('session_id', sessionId);
+
+    return {
+      sessionId: data['id'],
+      projectId: data['project_id'],
+      status: data['status'],
+      currentStep: data['current_step'] ?? null,
+      totalSteps: data['total_steps'] ?? 12,
+      completedSteps: count ?? 0,
+      expiresAt: data['expires_at'] ?? null,
+    };
+  }
+
+  async agentSubmitAnswers(
+    sessionId: string,
+    answers: Array<{
+      section: string;
+      questionKey: string;
+      questionLabel?: string;
+      answerValue: unknown;
+      confidence?: number;
+      source?: string;
+    }>,
+    agentId: string,
+    idempotencyKey?: string,
+  ): Promise<{ accepted: number; rejected: number; answers: { id: string; section: string; questionKey: string; status: string }[] }> {
+    const supabase = getSupabaseService();
+
+    // Validate session exists
+    const { data: session, error: sessionError } = await supabase
+      .from('agent_interview_sessions')
+      .select('*')
+      .eq('id', sessionId)
+      .single();
+
+    if (sessionError || !session) throw new NotFoundException('Session not found');
+    if (session['status'] !== 'ACTIVE') throw new BadRequestException(`Session is ${session['status']}`);
+
+    const projectId = session['project_id'];
+    const results: { id: string; section: string; questionKey: string; status: string }[] = [];
+    let accepted = 0;
+    let rejected = 0;
+
+    for (const answer of answers) {
+      const id = randomUUID();
+
+      // Check idempotency: same project + section + questionKey = update existing
+      const { data: existing } = await supabase
+        .from('agent_interview_answers')
+        .select('id')
+        .eq('project_id', projectId)
+        .eq('section', answer.section)
+        .eq('question_key', answer.questionKey)
+        .maybeSingle();
+
+      if (existing) {
+        // Update existing answer
+        const { error: updateError } = await supabase
+          .from('agent_interview_answers')
+          .update({
+            answer_value: answer.answerValue,
+            confidence: answer.confidence ?? null,
+            source: answer.source ?? 'AGENT',
+            question_label: answer.questionLabel ?? null,
+          })
+          .eq('id', existing['id']);
+
+        if (updateError) {
+          rejected++;
+          continue;
+        }
+        results.push({ id: existing['id'], section: answer.section, questionKey: answer.questionKey, status: 'updated' });
+        accepted++;
+      } else {
+        // Insert new answer
+        const { error: insertError } = await supabase
+          .from('agent_interview_answers')
+          .insert({
+            id,
+            session_id: sessionId,
+            project_id: projectId,
+            section: answer.section,
+            question_key: answer.questionKey,
+            question_label: answer.questionLabel ?? null,
+            answer_value: answer.answerValue,
+            confidence: answer.confidence ?? null,
+            source: answer.source ?? 'AGENT',
+            idempotency_key: idempotencyKey ?? null,
+          });
+
+        if (insertError) {
+          if (insertError.code === '23505') {
+            // Duplicate key — try upsert-style skip
+            rejected++;
+            continue;
+          }
+          rejected++;
+          continue;
+        }
+        results.push({ id, section: answer.section, questionKey: answer.questionKey, status: 'stored' });
+        accepted++;
+      }
+
+      // Update session current_step
+      await supabase
+        .from('agent_interview_sessions')
+        .update({ current_step: answer.section + '_' + answer.questionKey })
+        .eq('id', sessionId);
+    }
+
+    this.audit.log({
+      projectId,
+      actorId: agentId,
+      actorType: 'AGENT',
+      action: 'answer.submit',
+      resourceType: 'agent_interview_answer',
+      resourceId: sessionId,
+      changes: { accepted, rejected, sections: answers.map(a => a.section) },
+    });
+
+    return { accepted, rejected, answers: results };
+  }
+
+  async agentGetMissingFields(
+    projectId: string,
+  ): Promise<{ projectId: string; completeness: number; sections: { name: string; status: string; fieldsCompleted: number; fieldsTotal: number }[] }> {
+    const ALL_SECTIONS = ['business_profile', 'sales_process', 'faq', 'prompt', 'handover', 'follow_up'];
+    const supabase = getSupabaseService();
+
+    const sections = [];
+    let totalFields = 0;
+    let completedFields = 0;
+
+    for (const sectionName of ALL_SECTIONS) {
+      // Count answers for this section
+      const { count } = await supabase
+        .from('agent_interview_answers')
+        .select('*', { count: 'exact', head: true })
+        .eq('project_id', projectId)
+        .eq('section', sectionName);
+
+      const fieldsCompleted = count ?? 0;
+      const estimatedTotal = sectionName === 'faq' ? 15 : sectionName === 'business_profile' ? 12 : sectionName === 'prompt' ? 10 : 5;
+      const status = fieldsCompleted === 0 ? 'EMPTY' : fieldsCompleted >= estimatedTotal ? 'COMPLETE' : 'PARTIAL';
+
+      sections.push({ name: sectionName, status, fieldsCompleted, fieldsTotal: estimatedTotal });
+      totalFields += estimatedTotal;
+      completedFields += fieldsCompleted;
+    }
+
+    const completeness = totalFields > 0 ? Math.round((completedFields / totalFields) * 100) / 100 : 0;
+
+    return { projectId, completeness, sections };
+  }
+
+  async agentRequestReview(
+    projectId: string,
+    agentId: string,
+  ): Promise<{ projectId: string; status: string; submittedAt: string }> {
+    const project = await this.getProject(projectId);
+    if (!project) throw new NotFoundException('Project not found');
+
+    const prevStatus = project.status;
+    const allowed = ['DRAFT', 'CHANGES_REQUESTED'];
+    if (!allowed.includes(prevStatus)) {
+      throw new BadRequestException(`Cannot request review for project with status "${prevStatus}". Project is already in review or approved.`);
+    }
+
+    const supabase = getSupabaseService();
+    const now = new Date().toISOString();
+
+    const { error } = await supabase
+      .from('onboarding_projects')
+      .update({
+        status: 'SUBMITTED',
+        submitted_at: now,
+        version: project.version + 1,
+      })
+      .eq('id', projectId);
+
+    if (error) throw new BadRequestException(`Failed to submit for review: ${error.message}`);
+
+    this.audit.log({
+      projectId,
+      actorId: agentId,
+      actorType: 'AGENT',
+      action: 'project.request_review',
+      resourceType: 'onboarding_project',
+      resourceId: projectId,
+      changes: { previousStatus: prevStatus, newStatus: 'SUBMITTED' },
+    });
+
+    return { projectId, status: 'SUBMITTED', submittedAt: now };
+  }
+
+  // ==========================================================================
   // PRIVATE HELPERS
   // ==========================================================================
 

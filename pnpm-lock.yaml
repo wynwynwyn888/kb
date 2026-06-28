@@ -202,46 +202,6 @@ importers:
         specifier: ^2.1.0
         version: 2.1.9(@types/node@20.19.39)(terser@5.46.1)
 
-  apps/onboard:
-    dependencies:
-      '@aisbp/tsconfig':
-        specifier: workspace:*
-        version: link:../../packages/tsconfig
-      '@supabase/supabase-js':
-        specifier: ^2.43.0
-        version: 2.103.3
-      next:
-        specifier: ^14.2.0
-        version: 14.2.35(@playwright/test@1.59.1)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
-      react:
-        specifier: ^18.3.0
-        version: 18.3.1
-      react-dom:
-        specifier: ^18.3.0
-        version: 18.3.1(react@18.3.1)
-    devDependencies:
-      '@types/node':
-        specifier: ^20.11.0
-        version: 20.19.39
-      '@types/react':
-        specifier: ^18.3.0
-        version: 18.3.28
-      '@types/react-dom':
-        specifier: ^18.3.0
-        version: 18.3.7(@types/react@18.3.28)
-      eslint:
-        specifier: ^8.57.0
-        version: 8.57.1
-      eslint-config-next:
-        specifier: ^14.2.0
-        version: 14.2.35(eslint@8.57.1)(typescript@5.9.3)
-      typescript:
-        specifier: ^5.4.0
-        version: 5.9.3
-      vitest:
-        specifier: ^2.1.0
-        version: 2.1.9(@types/node@20.19.39)(terser@5.46.1)
-
   packages/ai-provider-openai:
     dependencies:
       '@aisbp/ai-router':

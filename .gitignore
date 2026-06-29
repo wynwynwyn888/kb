@@ -12,6 +12,8 @@ out/
 .env.local
 .env.*.local
 .env.production
+.env.staging
+docker-compose.staging.override.yml
 infra/vps/.github-secrets.local.env
 infra/vps/.deploy.local.env
 .ssh-tmp/

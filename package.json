@@ -11,6 +11,10 @@
     "dev:api": "pnpm --filter @aisbp/backend dev",
     "dev:redis": "node scripts/redis-docker.mjs",
     "dev:redis:down": "node scripts/redis-docker.mjs down",
+    "staging:config": "docker compose --env-file .env.staging -f docker-compose.staging.yml config",
+    "staging:up": "docker compose --env-file .env.staging -f docker-compose.staging.yml up -d",
+    "staging:down": "docker compose -f docker-compose.staging.yml down",
+    "staging:smoke": "bash scripts/smoke-staging.sh",
     "lint": "turbo lint",
     "test": "turbo test",
     "typecheck": "turbo typecheck"

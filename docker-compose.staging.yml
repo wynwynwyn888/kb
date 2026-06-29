@@ -1,0 +1,98 @@
+# Local staging stack for KB (aisbp) — Phase 1 scaffolding.
+#
+# PURPOSE
+#   Run an isolated LOCAL staging stack so future major changes can be tested
+#   against a separate staging Supabase project BEFORE production. This file is
+#   scaffolding only: it is intentionally NOT wired to any production resource.
+#
+# FAIL-CLOSED DESIGN (read before use)
+#   * Unique project name `aisbp-staging` isolates networks/volumes/containers
+#     from dev (`aisbp-dev`) and from any production stack.
+#   * Services load env from `.env.staging` via `env_file`. That file is git-
+#     ignored and is NOT committed. If `.env.staging` is missing, Docker Compose
+#     fails to start — it cannot silently fall back to production.
+#   * This file NEVER references `.env`, `.env.local`, or `.env.production`.
+#   * `DATABASE_URL` is NOT taken from the parent shell `${DATABASE_URL}`. It is
+#     derived from `${STAGING_DATABASE_URL}` and, when that is unset, defaults to
+#     an intentionally INVALID local DSN so a misconfigured run cannot reach a
+#     real (let alone production) database. Point this at a STAGING Supabase
+#     project only — never production. See `docs/staging-setup-guide.md`.
+#   * `NODE_ENV` and `QUEUE_PREFIX` are pinned to `staging` so queues and runtime
+#     behavior stay isolated from production (`aisbp`).
+#
+# NOT IMPLEMENTED IN PHASE 1
+#   * Application container images (no Dockerfiles yet). `docker compose up` is
+#     intentionally out of scope for Phase 1 — see the setup guide. Validate the
+#     file with `docker compose -f docker-compose.staging.yml config` instead.
+#   * Phase 2 (remote VPS/DNS staging) is not implemented.
+
+name: aisbp-staging
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: aisbp-staging-redis
+    restart: unless-stopped
+    command: ['redis-server', '--appendonly', 'yes']
+    ports:
+      # Non-default host port so local dev Redis (6379) is never disturbed.
+      - '6380:6379'
+    volumes:
+      - aisbp_staging_redis_data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  backend:
+    # No Dockerfile is committed yet (Phase 1 = scaffolding). The build context
+    # is declared so the stack is ready to wire up in a later phase; `up` is not
+    # part of Phase 1.
+    build:
+      context: ./apps/backend
+    container_name: aisbp-staging-backend
+    restart: unless-stopped
+    env_file:
+      - .env.staging
+    environment:
+      # Enforced staging isolation (override anything in .env.staging).
+      NODE_ENV: staging
+      QUEUE_PREFIX: staging
+      PORT: '3003'
+      NEST_PORT: '3003'
+      API_PREFIX: api/v1
+      REDIS_HOST: redis
+      REDIS_PORT: '6379'
+      # Fail-closed: never pull DATABASE_URL from the parent shell. Use the
+      # staging-only variable; if unset, fall back to an INVALID local DSN that
+      # cannot reach any real or production database.
+      DATABASE_URL: '${STAGING_DATABASE_URL:-postgresql://FAIL_CLOSED__SET_STAGING_DATABASE_URL:FAIL_CLOSED@127.0.0.1:5499/UNCONFIGURED_STAGING_DB}'
+    ports:
+      # Non-production host port for the backend API.
+      - '3003:3003'
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./apps/frontend
+    container_name: aisbp-staging-frontend
+    restart: unless-stopped
+    env_file:
+      - .env.staging
+    environment:
+      NODE_ENV: staging
+      PORT: '3002'
+      FRONTEND_PORT: '3002'
+      NEXT_PUBLIC_APP_URL: 'http://localhost:3002'
+      BACKEND_URL: 'http://backend:3003'
+    ports:
+      # Non-production host port for the frontend.
+      - '3002:3002'
+    depends_on:
+      - backend
+
+volumes:
+  aisbp_staging_redis_data:

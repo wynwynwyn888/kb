@@ -22,7 +22,7 @@ const tabStyle = (active: boolean): CSSProperties => ({
 
 const TABS: { suffix: string; label: string }[] = [
   { suffix: '/automation/tagging', label: 'Tagging' },
-  { suffix: '/automation/booking', label: 'Booking' },
+
   { suffix: '/automation/follow-up', label: 'Follow-up' },
   { suffix: '/automation/escalation', label: 'Human Escalation' },
 ];

@@ -145,11 +145,7 @@ export function buildTenantSidebarNav(
           match: p => p === `${automationBase}/tagging` || p === `${automationBase}/tags`,
         },
         {
-          href: `${automationBase}/booking`,
-          label: 'Booking',
-          match: p => p === `${automationBase}/booking`,
-        },
-        {
+
           href: `${automationBase}/follow-up`,
           label: 'Follow-up',
           match: p => p === `${automationBase}/follow-up`,

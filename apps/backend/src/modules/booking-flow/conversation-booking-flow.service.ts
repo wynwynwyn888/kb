@@ -428,22 +428,12 @@ export class ConversationBookingFlowService {
     if (!eligible) {
       if (interest) {
         this.logger.log(
-          `bookingFlowStarted ${JSON.stringify({
-            channel: params.channel,
+          `bookingFlowSkipped ${JSON.stringify({
+            reason: 'not_eligible_booking_interest',
             tenantId: params.tenantId,
             conversationId: params.conversationId,
-            eligible: false,
           })}`,
         );
-        return {
-          handled: true,
-          persistMetadata: prevMeta,
-          replyPlan: plan(
-            "Thanks for wanting to book with us. Live calendar booking isn't switched on for this conversation yet, so I've noted your interest — the team will follow up to help you secure a time.",
-            'booking_not_enabled',
-          ),
-          routing: stubRouting(),
-        };
       }
       return { handled: false };
     }

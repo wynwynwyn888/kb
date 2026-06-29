@@ -57,8 +57,8 @@ jobs:
             echo "=== BUILD AND DEPLOY BACKEND ==="
             docker compose -f docker-compose.hostinger.yml --env-file .env.production up -d --build backend
 
-            echo "=== RESTART FRONTEND ==="
-            docker compose -f docker-compose.hostinger.yml --env-file .env.production restart frontend
+            echo "=== BUILD AND DEPLOY FRONTEND ==="
+            docker compose -f docker-compose.hostinger.yml --env-file .env.production up -d --build frontend
 
             echo "=== HEALTH CHECK ==="
             docker ps --filter name=aisbp --format 'table {{.Names}}\t{{.Status}}'

@@ -246,7 +246,8 @@ async function fetchGhlMessages(
   baseUrl: string, hdrs: Record<string, string>, nativeId: string,
 ): Promise<Array<{ id: string; body: string; direction: string; source: string; dateAdded: string; status: string }> | null> {
   try {
-    const url = `${baseUrl}/conversations/${encodeURIComponent(nativeId)}/messages?limit=20`;
+    const syncLimit = parseInt(process.env['GHL_SYNC_MESSAGE_LIMIT'] ?? '50', 10) || 50;
+    const url = `${baseUrl}/conversations/${encodeURIComponent(nativeId)}/messages?limit=${syncLimit}`;
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), 5000);
     const res = await fetch(url, { headers: hdrs, signal: ac.signal });

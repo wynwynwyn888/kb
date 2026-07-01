@@ -302,7 +302,7 @@ describe('ConversationBookingFlowService', () => {
     expect(r.handled).toBe(false);
   });
 
-  it('when booking disabled but user shows interest, returns team handoff', async () => {
+  it('when booking disabled but user shows interest, skips with handled false', async () => {
     const booking = {
       getBookingSettings: jest.fn(async () => ({ ...baseSettings, enabled: false })),
     } as unknown as BookingSettingsService;
@@ -316,10 +316,7 @@ describe('ConversationBookingFlowService', () => {
       latestInboundText: 'I want to book an appointment tomorrow',
       metadata: {},
     });
-    expect(r.handled).toBe(true);
-    if (r.handled) {
-      expect(r.replyPlan.bubbles[0]!.text).toMatch(/isn't switched on/i);
-    }
+    expect(r.handled).toBe(false);
   });
 
   it('collects missing required fields before slots', async () => {

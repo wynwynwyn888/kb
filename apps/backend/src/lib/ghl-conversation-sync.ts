@@ -4,8 +4,8 @@
 
 import { Logger } from '@nestjs/common';
 import { type SupabaseClient } from '@supabase/supabase-js';
-import { randomUUID } from 'crypto';
 import { decrypt } from './encryption';
+import { ingestInboundMessage } from './inbound-message-ingest';
 
 const logger = new Logger('GhlConversationSync');
 
@@ -14,6 +14,11 @@ interface SyncResult {
   deduped: number;
   appSkipped: number;
   latencyMs: number;
+  insertedContactInboundIds: string[];
+  insertedAppOutboundIds: string[];
+  dedupedIds: string[];
+  upgradedMetadataIds: string[];
+  latestRecoveredContactInboundAt: string | null;
 }
 
 export async function syncGhlConversationContext(params: {
@@ -26,7 +31,12 @@ export async function syncGhlConversationContext(params: {
 }): Promise<SyncResult> {
   const { supabase, tenantId, ghlLocationId, conversationId, contactId } = params;
   const t0 = Date.now();
-  const result: SyncResult = { synced: 0, deduped: 0, appSkipped: 0, latencyMs: 0 };
+  const result: SyncResult = {
+    synced: 0, deduped: 0, appSkipped: 0, latencyMs: 0,
+    insertedContactInboundIds: [], insertedAppOutboundIds: [],
+    dedupedIds: [], upgradedMetadataIds: [],
+    latestRecoveredContactInboundAt: null,
+  };
 
   if (!contactId) {
     logger.log(`context_sync_skipped: no contactId conversationId=${conversationId}`);
@@ -134,27 +144,47 @@ export async function syncGhlConversationContext(params: {
       sender = 'SYSTEM'; // unknown source, conservative
     }
 
-    const { error: insErr } = await supabase.from('messages').insert({
-      id: randomUUID(),
-      conversation_id: conversationId,
-      direction,
+    // Use shared ingest with 3-tier dedupe
+    const ingestResult = await ingestInboundMessage({
+      supabase,
+      conversationId,
+      tenantId,
+      direction: direction as 'INBOUND' | 'OUTBOUND',
       sender,
       content: msg.body || '',
       contentType: 'TEXT',
-      metadata: {
-        ghlMessageId: msg.id,
+      ghlMessageId: msg.id || null,
+      ghlTimestamp: msg.dateAdded || null,
+      ingestSource: 'ghl-sync',
+      sourceMetadata: {
         ghlSource: msg.source,
         ghlStatus: msg.status,
         syncedAt: new Date().toISOString(),
       },
-      created_at: msg.dateAdded || new Date().toISOString(),
     });
 
-    if (insErr) {
-      logger.warn(`messages_insert_error: ghlMessageId=${msg.id} err=${String(insErr)}`);
-    } else {
+    if (ingestResult.inserted) {
       result.synced++;
+      if (direction === 'INBOUND' && sender === 'CONTACT') {
+        result.insertedContactInboundIds.push(ingestResult.messageId);
+        const ts = msg.dateAdded || new Date().toISOString();
+        if (!result.latestRecoveredContactInboundAt || ts > result.latestRecoveredContactInboundAt) {
+          result.latestRecoveredContactInboundAt = ts;
+        }
+      }
       params.onMessageImported?.({ direction, sender, source: msg.source });
+    } else if (ingestResult.duplicate) {
+      result.deduped++;
+      result.dedupedIds.push(ingestResult.messageId);
+    }
+    if (ingestResult.upgraded) {
+      result.upgradedMetadataIds.push(ingestResult.messageId);
+    }
+    if (ingestResult.fingerprintConflict) {
+      logger.warn(
+        `fingerprintConflict: conversationId=${conversationId} ghlMessageId=${msg.id} ` +
+        `existingMsgId=${ingestResult.messageId}`,
+      );
     }
   }
 

@@ -12,12 +12,12 @@ describe('tenant sidebar nav', () => {
     expect(preview?.href).toBe(`/app/tenant/${tid}/assistant/preview`);
   });
 
-  it('shows Automation as top-level group with Tagging/Booking/Follow-up/Human Escalation', () => {
+  it('shows Automation as top-level group with Tagging/Follow-up/Human Escalation', () => {
     const tid = 't_nav';
     const nodes = buildTenantSidebarNav(tid, { showAdvanced: true, showLogs: true });
     const automation = nodes.find(n => n.kind === 'group' && n.label === 'Automation');
     if (!automation || automation.kind !== 'group') throw new Error('Automation group missing');
-    expect(automation.children.map(c => c.label)).toEqual(['Tagging', 'Booking', 'Follow-up', 'Human Escalation']);
+    expect(automation.children.map(c => c.label)).toEqual(['Tagging', 'Follow-up', 'Human Escalation']);
     expect(automation.children[0]?.href).toBe(`/app/tenant/${tid}/automation/tagging`);
   });
 

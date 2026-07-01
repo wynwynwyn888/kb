@@ -116,7 +116,7 @@ export async function ingestInboundMessage(
     return { inserted: false, duplicate: true, upgraded: false, messageId: fpMatch.id as string };
   }
 
-  // Insert new message
+  // Insert new message — with DB-level conflict handling
   const newId = randomUUID();
   const metadata = buildMessageMetadata(params, fingerprint);
 
@@ -129,10 +129,36 @@ export async function ingestInboundMessage(
     contentType: params.contentType,
     metadata,
     created_at: params.ghlTimestamp?.trim() || new Date().toISOString(),
-  });
+  }).select('id').single();
 
   if (insErr) {
-    throw new Error(`ingestInboundMessage insert failed: ${JSON.stringify(insErr)}`);
+    const msg = String(insErr?.message ?? insErr ?? '');
+    // Unique constraint conflict — another process inserted the same message first
+    if (/23505|duplicate key|unique constraint/i.test(msg)) {
+      // Re-query: find the row that was inserted by the other process
+      if (ghlMsgId) {
+        const { data: existing } = await supabase
+          .from('messages')
+          .select('id')
+          .eq('conversation_id', conversationId)
+          .filter('metadata->>ghlMessageId', 'eq', ghlMsgId)
+          .maybeSingle();
+        if (existing) {
+          return { inserted: false, duplicate: true, upgraded: false, messageId: existing.id as string };
+        }
+      }
+      // Fallback: query by fingerprint
+      const { data: fpExisting } = await supabase
+        .from('messages')
+        .select('id')
+        .eq('conversation_id', conversationId)
+        .filter('metadata->>contentFingerprint', 'eq', fingerprint)
+        .maybeSingle();
+      if (fpExisting) {
+        return { inserted: false, duplicate: true, upgraded: false, messageId: fpExisting.id as string };
+      }
+    }
+    throw new Error(`ingestInboundMessage insert failed: ${msg}`);
   }
 
   return { inserted: true, duplicate: false, upgraded: false, messageId: newId };

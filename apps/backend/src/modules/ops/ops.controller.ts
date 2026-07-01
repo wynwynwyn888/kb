@@ -69,14 +69,19 @@ export class OpsController {
   }
 
   @Get('ghl-sync')
-  @ApiOperation({ summary: 'GHL pre-reply context sync events' })
+  @ApiOperation({ summary: 'GHL pre-reply context sync events — paginated' })
   async getGhlSync(
     @Req() req: Request,
     @Query('conversationId') conversationId?: string,
-    @Query('limit') limit?: number,
+    @Query('page') page?: number,
+    @Query('pageSize') pageSize?: number,
   ) {
     this.assertAgency(req);
-    return this.opsService.getGhlSync(conversationId, Math.min(100, Math.max(1, limit ?? 20)));
+    return this.opsService.getGhlSync({
+      conversationId,
+      page: Math.max(1, page ?? 1),
+      pageSize: Math.min(250, Math.max(1, pageSize ?? 20)),
+    });
   }
 
   @Get('errors')

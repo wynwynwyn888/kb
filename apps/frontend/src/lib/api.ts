@@ -2352,13 +2352,14 @@ export async function getOpsConversations(
 
 export async function getOpsGhlSync(
   token: string,
-  params?: { conversationId?: string; limit?: number },
-): Promise<OpsGhlSync[]> {
+  params?: { conversationId?: string; page?: number; pageSize?: number },
+): Promise<OpsPaginated<OpsGhlSync>> {
   const qs = new URLSearchParams();
   if (params?.conversationId) qs.set('conversationId', params.conversationId);
-  if (params?.limit) qs.set('limit', String(params.limit));
+  if (params?.page) qs.set('page', String(params.page));
+  if (params?.pageSize) qs.set('pageSize', String(params.pageSize));
   const query = qs.toString();
-  return apiRequest<OpsGhlSync[]>(`/ops/ghl-sync${query ? '?' + query : ''}`, { token });
+  return apiRequest<OpsPaginated<OpsGhlSync>>(`/ops/ghl-sync${query ? '?' + query : ''}`, { token });
 }
 
 export async function getOpsErrors(

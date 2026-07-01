@@ -19,7 +19,7 @@ describe('OpsController', () => {
       getFlags: jest.fn().mockReturnValue([{ key: 'AISBP_FOO', value: 'true' }]),
       getOutboundSends: jest.fn().mockResolvedValue({ data: [], total: 0, page: 1, pageSize: 20 }),
       getConversations: jest.fn().mockResolvedValue({ data: [], total: 0, page: 1, pageSize: 20 }),
-      getGhlSync: jest.fn().mockResolvedValue([]),
+      getGhlSync: jest.fn().mockResolvedValue({ data: [], total: 0, page: 1, pageSize: 20 }),
       getErrors: jest.fn().mockResolvedValue({ data: [], total: 0, page: 1, pageSize: 20 }),
       getAuditEvents: jest.fn().mockResolvedValue({ data: [], total: 0, page: 1, pageSize: 20 }),
       getTenants: jest.fn().mockResolvedValue([]),
@@ -83,6 +83,19 @@ describe('OpsController', () => {
     it('returns paginated errors', async () => {
       const result = await controller.getErrors(mockReq('OWNER'));
       expect(result.total).toBe(0);
+    });
+  });
+
+  describe('ghl-sync', () => {
+    it('paginates with defaults', async () => {
+      const result = await controller.getGhlSync(mockReq('OWNER'));
+      expect(result.page).toBe(1);
+      expect(result.pageSize).toBe(20);
+    });
+
+    it('clamps pageSize to max 250', async () => {
+      await controller.getGhlSync(mockReq('OWNER'), undefined, 1, 999);
+      expect(service.getGhlSync).toHaveBeenCalledWith(expect.objectContaining({ pageSize: 250 }));
     });
   });
 

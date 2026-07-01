@@ -41,7 +41,7 @@ jobs:
             echo "=== PULLING LATEST MAIN ==="
             git fetch origin main
             git checkout main
-            git pull --ff-only origin main
+            git reset --hard origin/main
 
             echo "=== VERIFY COMMIT ==="
             VPS_COMMIT=$(git rev-parse HEAD)

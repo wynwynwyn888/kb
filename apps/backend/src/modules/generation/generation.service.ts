@@ -504,6 +504,16 @@ export class GenerationService {
       messages.push(this.buildKbContextSystemMessage(params));
     }
 
+    if (params.kbContext.length === 0 && params.incomingMessage?.trim()) {
+      messages.push({
+        role: 'system',
+        content:
+          'No knowledge-base data is available for this query. Be honest about what you do and do not know. ' +
+          'Do not invent prices, menus, availability, policies, or booking details. ' +
+          'If the answer requires business-specific information you do not have, say so clearly and ask what else you can help with.',
+      });
+    }
+
     const pc = params.policyContext;
     if (pc) {
       const multi = (pc.combinedInboundMessageCount ?? 0) > 1;

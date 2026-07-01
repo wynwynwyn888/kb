@@ -25,6 +25,9 @@ export const QUEUES = {
 
   // Follow-up automation (delayed jobs, due checks, sends)
   FOLLOW_UP: 'follow-up',
+
+  // Post-outbound GHL recovery sync (checks for missed webhook messages)
+  POST_OUTBOUND_SYNC: 'post-outbound-sync',
 } as const;
 
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];
@@ -100,6 +103,14 @@ export const queueConfig: Record<QueueName, {
       backoff: { type: 'fixed', delay: 0 },
       removeOnComplete: true,
       removeOnFail: false, // keep failures for debugging follow-up decisions
+    },
+  },
+  [QUEUES.POST_OUTBOUND_SYNC]: {
+    defaultJobOptions: {
+      attempts: 1,
+      backoff: { type: 'fixed', delay: 0 },
+      removeOnComplete: true,
+      removeOnFail: true,
     },
   },
 };

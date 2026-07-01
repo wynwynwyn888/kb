@@ -61,7 +61,7 @@ export class PostOutboundSyncProcessor extends WorkerHost {
     }
 
     this.logger.debug(
-      `Post-outbound sync window ${windowIndex}: conversationId=${conversationId} replyId=${replyId.slice(0,8)}`,
+      `Post-outbound sync window ${windowIndex}: conversationId=${conversationId} replyId=${(replyId ?? '').slice(0,8)}`,
     );
 
     try {

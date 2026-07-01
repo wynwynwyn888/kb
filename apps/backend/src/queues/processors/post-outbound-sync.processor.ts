@@ -22,6 +22,15 @@ import type { OrchestrateDebouncedJobData } from '../processors/inbound-message.
 
 const RECOVERY_HORIZON_MS = 5 * 60 * 1000; // 5 minutes
 
+function isRecoveryEnabledForTenant(tenantId: string): boolean {
+  const allowlist = (process.env['GHL_POST_OUTBOUND_RECOVERY_SYNC_TENANTS'] ?? '').trim();
+  if (!allowlist) {
+    return process.env['GHL_POST_OUTBOUND_RECOVERY_SYNC_ALL'] === 'true';
+  }
+  return allowlist.split(',').map(s => s.trim()).filter(Boolean).includes(tenantId);
+}
+
+
 interface PostOutboundSyncJobData {
   tenantId: string;
   conversationId: string;
@@ -47,7 +56,7 @@ export class PostOutboundSyncProcessor extends WorkerHost {
   async process(job: Job<PostOutboundSyncJobData>): Promise<void> {
     const { tenantId, conversationId, ghlLocationId, contactId, replyId, windowIndex, outboundCompletedAt } = job.data;
 
-    if (process.env['GHL_POST_OUTBOUND_RECOVERY_SYNC'] !== 'true') {
+    if (!isRecoveryEnabledForTenant(tenantId)) {
       return;
     }
 

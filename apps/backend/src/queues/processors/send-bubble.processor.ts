@@ -333,22 +333,28 @@ export class SendBubbleProcessor extends WorkerHost {
     }
 
     // Step 5b: Post-outbound GHL recovery sync windows
-    // Only when the feature flag is enabled and at least one bubble succeeded.
-    if (summary.succeeded > 0 && process.env['GHL_POST_OUTBOUND_RECOVERY_SYNC'] === 'true') {
+    // Feature flag + tenant allowlist gating
+    if (summary.succeeded > 0) {
       try {
-        const recoveryWindows = [15_000, 45_000, 120_000, 300_000]; // 15s, 45s, 2m, 5m
-        const outboundCompletedAt = new Date().toISOString();
-        for (let i = 0; i < recoveryWindows.length; i++) {
-          await this.postOutboundSyncQueue.add('check', {
-            tenantId, conversationId, ghlLocationId: ghlLocationId, contactId,
-            replyId, windowIndex: i, outboundCompletedAt,
-          }, {
-            delay: recoveryWindows[i],
-            jobId: `posync:${tenantId}:${conversationId}:${replyId}:${i}`,
-            removeOnComplete: true,
-            attempts: 1,
-            backoff: { type: 'fixed', delay: 0 },
-          });
+        const allowlist = (process.env['GHL_POST_OUTBOUND_RECOVERY_SYNC_TENANTS'] ?? '').trim();
+        const allowed = allowlist
+          ? allowlist.split(',').map(s => s.trim()).filter(Boolean).includes(tenantId)
+          : process.env['GHL_POST_OUTBOUND_RECOVERY_SYNC_ALL'] === 'true';
+        if (allowed) {
+          const recoveryWindows = [15_000, 45_000, 120_000, 300_000];
+          const outboundCompletedAt = new Date().toISOString();
+          for (let i = 0; i < recoveryWindows.length; i++) {
+            await this.postOutboundSyncQueue.add('check', {
+              tenantId, conversationId, ghlLocationId, contactId,
+              replyId, windowIndex: i, outboundCompletedAt,
+            }, {
+              delay: recoveryWindows[i],
+              jobId: `posync:${tenantId}:${conversationId}:${replyId}:${i}`,
+              removeOnComplete: true,
+              attempts: 1,
+              backoff: { type: 'fixed', delay: 0 },
+            });
+          }
         }
       } catch (e) {
         this.logger.warn(

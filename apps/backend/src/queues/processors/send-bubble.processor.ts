@@ -349,7 +349,7 @@ export class SendBubbleProcessor extends WorkerHost {
               replyId, windowIndex: i, outboundCompletedAt,
             }, {
               delay: recoveryWindows[i],
-              jobId: `posync:${tenantId}:${conversationId}:${replyId}:${i}`,
+              jobId: `posync_${tenantId}_${conversationId}_${replyId}_${i}`,
               removeOnComplete: true,
               attempts: 1,
               backoff: { type: 'fixed', delay: 0 },

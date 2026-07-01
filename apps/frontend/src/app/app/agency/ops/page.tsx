@@ -106,6 +106,9 @@ export default function OpsDashboardPage() {
   const [convPage, setConvPage] = useState(1);
   const [convTotal, setConvTotal] = useState(0);
   const [ghlSync, setGhlSync] = useState<OpsGhlSync[]>([]);
+  const [ghlSyncPage, setGhlSyncPage] = useState(1);
+  const [ghlSyncTotal, setGhlSyncTotal] = useState(0);
+  const [ghlSyncPageSize, setGhlSyncPageSize] = useState(20);
   const [errors, setErrors] = useState<OpsErrorEvent[]>([]);
   const [errorsTotal, setErrorsTotal] = useState(0);
   const [errorsPage, setErrorsPage] = useState(1);
@@ -162,8 +165,11 @@ export default function OpsDashboardPage() {
 
   const fetchGhlSync = useCallback(async () => {
     if (!token) return;
-    try { setGhlSync(await getOpsGhlSync(token, { limit: 20 })); } catch { /* not fatal */ }
-  }, [token]);
+    try {
+      const r = await getOpsGhlSync(token, { page: ghlSyncPage, pageSize: ghlSyncPageSize });
+      setGhlSync(r.data); setGhlSyncTotal(r.total);
+    } catch { /* not fatal */ }
+  }, [token, ghlSyncPage, ghlSyncPageSize]);
 
   const fetchErrors = useCallback(async () => {
     if (!token) return;
@@ -318,26 +324,38 @@ export default function OpsDashboardPage() {
 
       {tab === 'GHL Sync' && (
         <SectionCard title="GHL Pre-Reply Context Sync" subtitle="Recent sync events from metrics_events.">
+          <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
+            <select style={{ ...mvpSelectStyle, width: '100px', marginTop: 0 }} value={ghlSyncPageSize} onChange={e => { setGhlSyncPageSize(Number(e.target.value)); setGhlSyncPage(1); }}>
+              <option value={20}>20</option>
+              <option value={50}>50</option>
+              <option value={100}>100</option>
+              <option value={250}>250</option>
+            </select>
+            <span style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted)' }}>per page</span>
+          </div>
           {ghlSync.length === 0 ? <EmptyState title="No sync events" compact /> : (
-            <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.84rem' }}>
-                <thead><tr>{['Event','Tenant','Conversation','Details','Time'].map(h => <th key={h} style={thStyle}>{h}</th>)}</tr></thead>
-                <tbody>
-                  {ghlSync.map((s, i) => {
-                    const meta = s.metadata as Record<string,unknown>|null;
-                    return (
-                      <tr key={i}>
-                        <td style={tdStyle}><StatusPill label={s.eventType} tone={s.eventType.includes('failed')?'bad':s.eventType.includes('completed')?'ok':'neutral'} /></td>
-                        <td style={{...tdStyle,fontFamily:'inherit',fontSize:'0.78rem'}}>{tenantDisplay(s.tenantName, s.tenantId)}</td>
-                        <td style={{...tdStyle,fontFamily:'inherit',fontSize:'0.78rem'}}>{conversationDisplay({conversationId:s.conversationId})}</td>
-                        <td style={{...tdStyle,fontSize:'0.78rem'}}>{meta ? JSON.stringify(meta).slice(0,100) : '—'}</td>
-                        <td style={{...tdStyle,fontSize:'0.78rem'}}>{formatDateTime(s.createdAt)}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+            <>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.84rem', minWidth: '600px' }}>
+                  <thead><tr>{['Event','Tenant','Conversation','Details','Time'].map(h => <th key={h} style={thStyle}>{h}</th>)}</tr></thead>
+                  <tbody>
+                    {ghlSync.map((s, i) => {
+                      const meta = s.metadata as Record<string,unknown>|null;
+                      return (
+                        <tr key={i}>
+                          <td style={tdStyle}><StatusPill label={s.eventType} tone={s.eventType.includes('failed') ? 'bad' : s.eventType.includes('started') ? 'warn' : 'ok'} /></td>
+                          <td style={{...tdStyle,fontFamily:'inherit',fontSize:'0.78rem',maxWidth:'160px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{tenantDisplay(s.tenantName, s.tenantId)}</td>
+                          <td style={{...tdStyle,fontFamily:'inherit',fontSize:'0.78rem'}}>{conversationDisplay({conversationId:s.conversationId})}</td>
+                          <td style={{...tdStyle,fontFamily:'inherit',fontSize:'0.78rem',maxWidth:'220px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{meta ? JSON.stringify(meta).slice(0,100) : '—'}</td>
+                          <td style={{...tdStyle,fontSize:'0.78rem'}}>{formatDateTime(s.createdAt)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              {renderPaginator(ghlSyncPage, ghlSyncTotal, setGhlSyncPage)}
+            </>
           )}
         </SectionCard>
       )}

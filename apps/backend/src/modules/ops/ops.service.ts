@@ -261,34 +261,47 @@ export class OpsService {
     return { data: rows, total: count ?? 0, page, pageSize };
   }
 
-  async getGhlSync(conversationId?: string | null, limit = 20): Promise<GhlSyncRow[]> {
+  async getGhlSync(params: {
+    conversationId?: string | null;
+    page: number;
+    pageSize: number;
+  }): Promise<PaginatedResponse<GhlSyncRow>> {
+    const { conversationId, page, pageSize } = params;
+    const from = (page - 1) * pageSize;
+    const to = from + pageSize - 1;
+
     let query = this.supabase
       .from('metrics_events')
-      .select('conversation_id, tenant_id, event_type, metadata, created_at')
+      .select('conversation_id, tenant_id, event_type, metadata, created_at', { count: 'exact' })
       .in('event_type', ['ghl_sync_started', 'ghl_sync_completed', 'ghl_sync_failed', 'ghl_message_imported'])
       .order('created_at', { ascending: false })
-      .limit(limit);
+      .range(from, to);
 
     if (conversationId) query = query.eq('conversation_id', conversationId);
 
-    const { data, error } = await query;
+    const { data, error, count } = await query;
     if (error) {
       this.logger.warn(`getGhlSync error: ${String(error)}`);
-      return [];
+      return { data: [], total: 0, page, pageSize };
     }
 
     const tenantNames = await this.loadTenantNames();
-    return ((data ?? []) as Record<string, unknown>[]).map(r => {
-      const tid = r['tenant_id'] ? String(r['tenant_id']) : '';
-      return {
-        conversationId: r['conversation_id'] ? String(r['conversation_id']) : '',
-        tenantId: tid,
-        tenantName: tenantNames.get(tid) ?? null,
-        eventType: String(r['event_type'] ?? ''),
-        metadata: (r['metadata'] as Record<string, unknown>) ?? null,
-        createdAt: String(r['created_at'] ?? ''),
-      };
-    });
+    return {
+      data: ((data ?? []) as Record<string, unknown>[]).map(r => {
+        const tid = r['tenant_id'] ? String(r['tenant_id']) : '';
+        return {
+          conversationId: r['conversation_id'] ? String(r['conversation_id']) : '',
+          tenantId: tid,
+          tenantName: tenantNames.get(tid) ?? null,
+          eventType: String(r['event_type'] ?? ''),
+          metadata: (r['metadata'] as Record<string, unknown>) ?? null,
+          createdAt: String(r['created_at'] ?? ''),
+        };
+      }),
+      total: count ?? 0,
+      page,
+      pageSize,
+    };
   }
 
   async getErrors(params: {

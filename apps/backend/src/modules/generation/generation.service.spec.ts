@@ -716,30 +716,311 @@ describe('GenerationService', () => {
   });
 
   // ===========================================================================
-  // Routing Recommended Model (informational only)
+  // Business Scenario: Pricing Question
   // ===========================================================================
 
-  describe('routing recommended model', () => {
-    it('forwards routingRecommendedModel in the result', async () => {
-      setupSupabaseStubs({
-        agencyId: 'a1',
-        activeProvider: 'OPENAI',
-        providerRow: { provider: 'OPENAI', api_key: 'sk-valid' },
-      });
-      const result = await service.generateDraft(
-        makeParams({ routingRecommendedModel: 'gpt-4o' }),
+  describe('pricing question with KB context', () => {
+    it('includes KB context when user asks about pricing', () => {
+      const messages = (service as never)['buildMessages'](
+        makeParams({
+          incomingMessage: 'How much does a haircut cost?',
+          kbContext: [
+            { chunkId: 'c1', documentId: 'd1', content: 'Haircut: $40. Balayage: $200.', title: 'Pricing', source: 'kb', relevanceScore: 0.95 },
+          ],
+        }),
       );
-      expect(result.routingRecommendedModel).toBe('gpt-4o');
+      const hasKbBlock = messages.some(
+        (m: { role: string; content: string }) =>
+          m.role === 'system' && typeof m.content === 'string' && m.content.includes('Source excerpts'),
+      );
+      expect(hasKbBlock).toBe(true);
+      const kbMsg = messages.find(
+        (m: { role: string; content: string }) =>
+          m.role === 'system' && typeof m.content === 'string' && m.content.includes('Source excerpts'),
+      );
+      expect((kbMsg!.content as string)).toContain('Haircut: $40');
+      expect((kbMsg!.content as string)).toContain('Do not invent prices');
     });
 
-    it('passes undefined routingRecommendedModel when not set', async () => {
+    it('grounds pricing response in KB content with anti-hallucination rule', () => {
+      const msg = (service as never)['buildKbContextSystemMessage'](
+        makeParams({
+          kbContext: [
+            { chunkId: 'c1', documentId: 'd1', content: 'Service costs', title: 'Prices', source: 'kb', relevanceScore: 0.9 },
+          ],
+          policyContext: { latestIntent: 'PRICE' as never, resolvedSelection: null, conversationStateSummary: 'idle' },
+        }),
+      );
+      expect(msg.content as string).toContain('Do not invent prices');
+      expect(msg.content as string).toContain('Keep the reply to one or two short paragraphs');
+    });
+  });
+
+  // ===========================================================================
+  // Business Scenario: Booking Question
+  // ===========================================================================
+
+  describe('booking question with policy context', () => {
+    it('injects booking rule when booking intent is detected', () => {
+      const messages = (service as never)['buildMessages'](
+        makeParams({
+          incomingMessage: 'I want to book an appointment',
+          policyContext: {
+            latestIntent: 'BOOKING' as never,
+            resolvedSelection: null,
+            conversationStateSummary: 'booking_in_progress',
+          },
+        }),
+      );
+      const hasBookingRule = messages.some(
+        (m: { role: string; content: string }) =>
+          m.role === 'system' && typeof m.content === 'string' && m.content.includes('Booking rule'),
+      );
+      expect(hasBookingRule).toBe(true);
+    });
+
+    it('booking policy prevents hallucinated time slots', () => {
+      const messages = (service as never)['buildMessages'](
+        makeParams({
+          incomingMessage: 'Can I come in tomorrow at 3pm?',
+          policyContext: {
+            latestIntent: 'BOOKING' as never,
+            resolvedSelection: null,
+            conversationStateSummary: 'asking_slot',
+          },
+        }),
+      );
+      const bookingMsg = messages.find(
+        (m: { role: string; content: string }) =>
+          m.role === 'system' && typeof m.content === 'string' && m.content.includes('Booking rule'),
+      );
+      expect((bookingMsg!.content as string)).toMatch(/Never invent reservation time slots|no booking system data/);
+    });
+  });
+
+  // ===========================================================================
+  // Business Scenario: Complaint / Escalation
+  // ===========================================================================
+
+  describe('complaint intent preserves safe tone', () => {
+    it('injects complaint rule with empathetic and safe language', () => {
+      const messages = (service as never)['buildMessages'](
+        makeParams({
+          incomingMessage: 'I am really unhappy with the service',
+          policyContext: {
+            latestIntent: 'COMPLAINT' as never,
+            resolvedSelection: null,
+            conversationStateSummary: 'complaint_received',
+          },
+        }),
+      );
+      const hasComplaintRule = messages.some(
+        (m: { role: string; content: string }) =>
+          m.role === 'system' && typeof m.content === 'string' && m.content.includes('Complaint rule'),
+      );
+      expect(hasComplaintRule).toBe(true);
+    });
+
+    it('complaint policy prohibits internal complaint procedures in customer text', () => {
+      const messages = (service as never)['buildMessages'](
+        makeParams({
+          incomingMessage: 'This service was horrible',
+          policyContext: {
+            latestIntent: 'COMPLAINT' as never,
+            resolvedSelection: null,
+            conversationStateSummary: 'complaint_received',
+          },
+        }),
+      );
+      const complaintMsg = messages.find(
+        (m: { role: string; content: string }) =>
+          m.role === 'system' && typeof m.content === 'string' && m.content.includes('Complaint rule'),
+      );
+      expect((complaintMsg!.content as string)).toContain('Be empathetic');
+      expect((complaintMsg!.content as string)).toContain('Never paste');
+    });
+  });
+
+  // ===========================================================================
+  // Business Scenario: Empty KB Context
+  // ===========================================================================
+
+  describe('empty KB context - no hallucination', () => {
+    it('does not inject KB context system message when kbContext is empty', () => {
+      const messages = (service as never)['buildMessages'](
+        makeParams({
+          incomingMessage: 'Do you offer gel nails?',
+          kbContext: [],
+        }),
+      );
+      const hasKbBlock = messages.some(
+        (m: { role: string; content: string }) =>
+          m.role === 'system' && typeof m.content === 'string' && m.content.includes('Source excerpts'),
+      );
+      expect(hasKbBlock).toBe(false);
+    });
+
+    it('policy context alone does not carry hallucinated KB content', () => {
+      const messages = (service as never)['buildMessages'](
+        makeParams({
+          incomingMessage: 'Tell me about your services',
+          kbContext: [],
+          policyContext: {
+            latestIntent: 'MENU' as never,
+            resolvedSelection: null,
+            conversationStateSummary: 'idle',
+          },
+        }),
+      );
+      const msgContents = messages
+        .filter(m => typeof m.content === 'string')
+        .map(m => m.content as string);
+      expect(msgContents.some(c => c.includes('Source excerpts'))).toBe(false);
+    });
+
+    it('buildKbContextSystemMessage still includes anti-invention rule even with empty KB', () => {
+      const msg = (service as never)['buildKbContextSystemMessage'](
+        makeParams({
+          kbContext: [],
+          policyContext: { latestIntent: 'UNKNOWN' as never, resolvedSelection: null, conversationStateSummary: 'idle' },
+        }),
+      );
+      expect(msg.content as string).toContain('Do not invent');
+    });
+
+    it('injects honesty rule when KB context is empty and incoming message is non-empty', () => {
+      const messages = (service as never)['buildMessages'](
+        makeParams({
+          incomingMessage: 'Do you offer gel nails?',
+          kbContext: [],
+        }),
+      );
+      const hasHonestyRule = messages.some(
+        (m: { role: string; content: string }) =>
+          m.role === 'system' && typeof m.content === 'string' &&
+          m.content.includes('No knowledge-base data is available'),
+      );
+      expect(hasHonestyRule).toBe(true);
+    });
+
+    it('honesty rule is not injected when KB context is present', () => {
+      const messages = (service as never)['buildMessages'](
+        makeParams({
+          incomingMessage: 'What services do you offer?',
+          kbContext: [
+            { chunkId: 'c1', documentId: 'd1', content: 'We offer haircuts and colouring.', title: 'Services', source: 'kb', relevanceScore: 0.9 },
+          ],
+        }),
+      );
+      const hasHonestyRule = messages.some(
+        (m: { role: string; content: string }) =>
+          m.role === 'system' && typeof m.content === 'string' &&
+          m.content.includes('No knowledge-base data is available'),
+      );
+      expect(hasHonestyRule).toBe(false);
+    });
+  });
+
+  // ===========================================================================
+  // Business Scenario: Customer-Facing Sanitization
+  // ===========================================================================
+
+  describe('customer-facing sanitization strips internal content', () => {
+    it('sanitizeCustomerFacing strips <think> blocks from model output', async () => {
       setupSupabaseStubs({
         agencyId: 'a1',
         activeProvider: 'OPENAI',
         providerRow: { provider: 'OPENAI', api_key: 'sk-valid' },
       });
+      mockOpenAiGenerate.mockResolvedValue({
+        content: '<think>I should check hours</think>\nWe are open 9am-5pm.',
+        usage: { totalTokens: 30 },
+        model: 'gpt-4o-mini',
+      });
       const result = await service.generateDraft(makeParams());
-      expect(result.routingRecommendedModel).toBeUndefined();
+      expect(result.content).not.toContain('think');
+      expect(result.content).not.toContain('I should check hours');
+      expect(result.content).toContain('We are open 9am-5pm');
+    });
+
+    it('sanitizeCustomerFacing strips customer-facing meta lines', async () => {
+      setupSupabaseStubs({
+        agencyId: 'a1',
+        activeProvider: 'OPENAI',
+        providerRow: { provider: 'OPENAI', api_key: 'sk-valid' },
+      });
+      mockOpenAiGenerate.mockResolvedValue({
+        content: 'Source: internal-doc-123\nWe offer balayage starting at $150.',
+        usage: { totalTokens: 25 },
+        model: 'gpt-4o-mini',
+      });
+      const result = await service.generateDraft(makeParams());
+      expect(result.content).not.toContain('Source:');
+      expect(result.content).toContain('balayage');
+    });
+
+    it('returns null when all content is stripped as internal', async () => {
+      setupSupabaseStubs({
+        agencyId: 'a1',
+        activeProvider: 'OPENAI',
+        providerRow: { provider: 'OPENAI', api_key: 'sk-valid' },
+      });
+      mockOpenAiGenerate.mockResolvedValue({
+        content: '<think>internal reasoning only</think>',
+        usage: { totalTokens: 5 },
+        model: 'gpt-4o-mini',
+      });
+      const result = await service.generateDraft(makeParams());
+      expect(result.content).toBeNull();
+    });
+  });
+
+  // ===========================================================================
+  // Business Scenario: WhatsApp-Friendly Concise Replies
+  // ===========================================================================
+
+  describe('WhatsApp-friendly concise tone', () => {
+    it('non-MENU KB context message includes concise paragraph rule', () => {
+      const msg = (service as never)['buildKbContextSystemMessage'](
+        makeParams({
+          kbContext: [
+            { chunkId: 'c1', documentId: 'd1', content: 'Hours: Mon-Fri 9-5', title: 'Hours', source: 'kb', relevanceScore: 0.9 },
+          ],
+          policyContext: { latestIntent: 'BUSINESS_HOURS' as never, resolvedSelection: null, conversationStateSummary: 'idle' },
+        }),
+      );
+      expect(msg.content as string).toContain('one or two short paragraphs');
+    });
+
+    it('KB excerpts are labeled as source material only, not a script', () => {
+      const msg = (service as never)['buildKbContextSystemMessage'](
+        makeParams({
+          kbContext: [
+            { chunkId: 'c1', documentId: 'd1', content: 'About us', title: 'Intro', source: 'kb', relevanceScore: 0.5 },
+          ],
+          policyContext: { latestIntent: 'UNKNOWN' as never, resolvedSelection: null, conversationStateSummary: 'idle' },
+        }),
+      );
+      expect(msg.content as string).toContain('source material only');
+      expect(msg.content as string).toContain('not a script to paste');
+    });
+
+    it('multi-line turn includes ordered priority and only-facts rule', () => {
+      const msg = (service as never)['buildKbContextSystemMessage'](
+        makeParams({
+          kbContext: [
+            { chunkId: 'c1', documentId: 'd1', content: 'Info', title: '', source: 'kb', relevanceScore: 0.9 },
+          ],
+          policyContext: {
+            latestIntent: 'UNKNOWN' as never,
+            resolvedSelection: null,
+            conversationStateSummary: 'idle',
+            combinedInboundMessageCount: 2,
+          },
+        }),
+      );
+      expect(msg.content as string).toContain('sent multiple short messages');
+      expect(msg.content as string).toContain('Answer each distinct question');
     });
   });
 });

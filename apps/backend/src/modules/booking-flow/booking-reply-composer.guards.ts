@@ -1,7 +1,5 @@
 import type { BookingReplyComposerNextStep } from './booking-reply-composer.types';
 import { containsDisallowedSingaporeReplyLanguage } from '../../lib/reply-language-guard';
-import { containsAiOrModelDisclosure } from '../../lib/brand-assistant-identity';
-
 const CONFIRM_PATTERNS =
   /\b(appointment\s+is\s+confirmed|done\s*[—–-]\s*your\s+appointment|you\s*['']?re\s+all\s+set|booking\s+is\s+confirmed)\b/i;
 
@@ -15,10 +13,6 @@ export function bookingReplyComposerOutputPassesGuardrails(
   if (!r || r.length > 2200) return false;
 
   if (containsDisallowedSingaporeReplyLanguage(r)) {
-    return false;
-  }
-
-  if (containsAiOrModelDisclosure(r)) {
     return false;
   }
 

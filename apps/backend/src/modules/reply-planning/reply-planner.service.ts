@@ -30,7 +30,7 @@ import { applyBusinessHoursGroundingGuard } from '../../lib/business-hours-groun
 import { applyMenuKbGroundingGuard } from '../../lib/menu-kb-grounding-guard';
 import { sanitizeOutboundInternalKbLeak } from '../../lib/outbound-internal-kb-sanitizer';
 import { containsDisallowedSingaporeReplyLanguage } from '../../lib/reply-language-guard';
-import { applyBrandAssistantIdentityGuard } from '../../lib/brand-assistant-identity';
+
 import { applyOutboundPolicyGuard } from '../../lib/outbound-policy-guard';
 import { detectMenuIntentInMessage } from '../../lib/kb-relevance';
 import { rewriteUnsupportedBusinessClaimsWhenNoKb } from '../../lib/outbound-safety-governor';
@@ -479,17 +479,7 @@ export class ReplyPlannerService {
     });
     const generation_ms = Date.now() - generationStarted;
 
-    const trimmed = stripModelThinking(liveDraft.content ?? '').trim();
-    const identityGuarded = applyBrandAssistantIdentityGuard({
-      text: trimmed,
-      businessName: businessDisplayName,
-    });
-    if (identityGuarded.rewritten) {
-      this.logger.warn(
-        `brandIdentityGuardRewrite ${JSON.stringify({ tenantId, sample: trimmed.slice(0, 120) })}`,
-      );
-    }
-    const outboundText = identityGuarded.text.trim();
+    const outboundText = stripModelThinking(liveDraft.content ?? '').trim();
     if (outboundText.length > 0 && !containsDisallowedSingaporeReplyLanguage(outboundText)) {
       const gma = liveDraft.generationModelActuallyUsed ?? liveDraft.generationModel;
       this.logger.log(
@@ -516,11 +506,11 @@ export class ReplyPlannerService {
           sample: outboundText.slice(0, 120),
         })}`,
       );
-    } else if (trimmed.length > 0 && containsDisallowedSingaporeReplyLanguage(trimmed)) {
+    } else if (outboundText.length > 0 && containsDisallowedSingaporeReplyLanguage(outboundText)) {
       this.logger.warn(
         `disallowedReplyLanguage ${JSON.stringify({
           tenantId,
-          sample: trimmed.slice(0, 120),
+          sample: outboundText.slice(0, 120),
         })}`,
       );
     }
@@ -531,7 +521,7 @@ export class ReplyPlannerService {
 
     const fallbackReason =
       liveDraft.skipReason ??
-      (liveDraft.content !== null && trimmed.length === 0 ? 'generation_failed' : undefined);
+      (liveDraft.content !== null && outboundText.length === 0 ? 'generation_failed' : undefined);
 
     const text = this.buildPlaceholderDraft(routing, kbChunks, memory);
     return {

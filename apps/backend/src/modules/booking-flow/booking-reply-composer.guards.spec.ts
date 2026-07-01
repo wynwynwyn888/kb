@@ -67,15 +67,4 @@ describe('bookingReplyComposerOutputPassesGuardrails', () => {
     expect(bookingReplyComposerOutputPassesGuardrails(nextStep, safe, pt)).toBe(false);
   });
 
-  it('rejects AI or model identity disclosure', () => {
-    const safe = 'May I have your preferred time?';
-    const nextStep = { type: 'ask_time' as const, fieldId: 'preferred_time', safeBaseMessage: safe };
-    expect(
-      bookingReplyComposerOutputPassesGuardrails(
-        nextStep,
-        safe,
-        'As an AI language model, I can help you pick a time.',
-      ),
-    ).toBe(false);
-  });
 });

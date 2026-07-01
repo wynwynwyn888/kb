@@ -897,4 +897,162 @@ describe('OutboundSendService', () => {
       expect(ghlClient.findContactByPhone).not.toHaveBeenCalled();
     });
   });
+
+  describe('checkPriorBubble', () => {
+    let service: OutboundSendService;
+
+    beforeEach(() => {
+      service = new OutboundSendService(
+        { get: jestGlobal.fn() } as never,
+        { resolve: jestGlobal.fn() } as never,
+        { getSender: jestGlobal.fn() } as never,
+        { appCache: null } as never,
+      );
+    });
+
+    it('returns proceed for bubble 0 regardless of DB state', async () => {
+      const result = await service.checkPriorBubble('t1', 'c1', 'r1', 0);
+      expect(result).toBe('proceed');
+    });
+
+    it('returns proceed when predecessor exists with sent status', async () => {
+      mockSupabase.from.mockReturnValue({
+        select: () => ({
+          eq: () => ({
+            eq: () => ({
+              eq: () => ({
+                eq: () => ({
+                  maybeSingle: jestGlobal.fn(async () => ({
+                    data: { status: 'sent' }, error: null,
+                  })),
+                }),
+              }),
+            }),
+          }),
+        }),
+      } as never);
+      const result = await service.checkPriorBubble('t1', 'c1', 'r1', 1);
+      expect(result).toBe('proceed');
+    });
+
+    it('returns wait when predecessor is pending', async () => {
+      mockSupabase.from.mockReturnValue({
+        select: () => ({
+          eq: () => ({
+            eq: () => ({
+              eq: () => ({
+                eq: () => ({
+                  maybeSingle: jestGlobal.fn(async () => ({
+                    data: { status: 'pending' }, error: null,
+                  })),
+                }),
+              }),
+            }),
+          }),
+        }),
+      } as never);
+      const result = await service.checkPriorBubble('t1', 'c1', 'r1', 1);
+      expect(result).toBe('wait');
+    });
+
+    it('returns wait when predecessor is processing', async () => {
+      mockSupabase.from.mockReturnValue({
+        select: () => ({
+          eq: () => ({
+            eq: () => ({
+              eq: () => ({
+                eq: () => ({
+                  maybeSingle: jestGlobal.fn(async () => ({
+                    data: { status: 'processing' }, error: null,
+                  })),
+                }),
+              }),
+            }),
+          }),
+        }),
+      } as never);
+      const result = await service.checkPriorBubble('t1', 'c1', 'r1', 1);
+      expect(result).toBe('wait');
+    });
+
+    it('returns proceed when predecessor not yet created (same-reply batch)', async () => {
+      mockSupabase.from.mockReturnValue({
+        select: () => ({
+          eq: () => ({
+            eq: () => ({
+              eq: () => ({
+                eq: () => ({
+                  maybeSingle: jestGlobal.fn(async () => ({
+                    data: null, error: null,
+                  })),
+                }),
+              }),
+            }),
+          }),
+        }),
+      } as never);
+      const result = await service.checkPriorBubble('t1', 'c1', 'r1', 1);
+      expect(result).toBe('proceed');
+    });
+
+    it('returns cancel when predecessor is in a terminal non-sent state', async () => {
+      mockSupabase.from.mockReturnValue({
+        select: () => ({
+          eq: () => ({
+            eq: () => ({
+              eq: () => ({
+                eq: () => ({
+                  maybeSingle: jestGlobal.fn(async () => ({
+                    data: { status: 'stale_cancelled' }, error: null,
+                  })),
+                }),
+              }),
+            }),
+          }),
+        }),
+      } as never);
+      const result = await service.checkPriorBubble('t1', 'c1', 'r1', 1);
+      expect(result).toBe('cancel');
+    });
+
+    it('returns proceed for bubble 2 when predecessor bubble 1 not yet created', async () => {
+      mockSupabase.from.mockReturnValue({
+        select: () => ({
+          eq: () => ({
+            eq: () => ({
+              eq: () => ({
+                eq: () => ({
+                  maybeSingle: jestGlobal.fn(async () => ({
+                    data: null, error: null,
+                  })),
+                }),
+              }),
+            }),
+          }),
+        }),
+      } as never);
+      const result = await service.checkPriorBubble('t1', 'c1', 'r1', 2);
+      expect(result).toBe('proceed');
+    });
+
+    it('returns wait on DB error (retry-safe — do not silently proceed)', async () => {
+      mockSupabase.from.mockReturnValue({
+        select: () => ({
+          eq: () => ({
+            eq: () => ({
+              eq: () => ({
+                eq: () => ({
+                  maybeSingle: jestGlobal.fn(async () => ({
+                    data: null, error: { message: 'DB connection lost' },
+                  })),
+                }),
+              }),
+            }),
+          }),
+        }),
+      } as never);
+      const result = await service.checkPriorBubble('t1', 'c1', 'r1', 1);
+      expect(result).toBe('wait');
+    });
+  });
 });

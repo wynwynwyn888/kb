@@ -2,7 +2,7 @@
 // Implements AiProviderAdapter using the Chat Completions API.
 
 import axios from 'axios';
-import type { AxiosInstance } from 'axios';
+import type { AxiosInstance, AxiosError } from 'axios';
 import type {
   AiProviderAdapter,
   ProviderConfig,
@@ -12,6 +12,59 @@ import type {
 import { AiProvider } from '@aisbp/types';
 
 const OPENAI_BASE_URL = 'https://api.openai.com/v1';
+
+const MAX_RETRIES = 3;
+const RETRY_BASE_MS = 500;
+
+function isRetryableError(err: AxiosError): boolean {
+  if (!err.response) {
+    const code = (err as AxiosError & { code?: string }).code;
+    return code === 'ETIMEDOUT' || code === 'ECONNRESET' || code === 'ECONNREFUSED' || code === 'ECONNABORTED';
+  }
+  const status = err.response.status;
+  return status === 429 || (status >= 500 && status <= 504);
+}
+
+function isNonRetryableError(err: AxiosError): boolean {
+  if (!err.response) return false;
+  const status = err.response.status;
+  return status === 400 || status === 401 || status === 403;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function backoffMs(attempt: number): number {
+  const base = RETRY_BASE_MS * Math.pow(2, attempt);
+  const jitter = Math.random() * (base * 0.3);
+  return Math.floor(base + jitter);
+}
+
+async function retryWithBackoff<T>(
+  fn: () => Promise<T>,
+  label: string,
+): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      return await fn();
+    } catch (err: unknown) {
+      lastError = err;
+      if (attempt >= MAX_RETRIES) break;
+      if (isNonRetryableError(err as AxiosError)) break;
+      if (!isRetryableError(err as AxiosError)) break;
+      const delay = backoffMs(attempt);
+      const status =
+        (err as AxiosError).response?.status ?? 'network';
+      console.warn(
+        `OpenAI ${label} attempt ${attempt + 1}/${MAX_RETRIES + 1} failed (${status}); retrying in ${delay}ms`,
+      );
+      await sleep(delay);
+    }
+  }
+  throw lastError;
+}
 
 export class OpenAiProviderAdapter implements AiProviderAdapter {
   readonly provider: AiProvider = AiProvider.OpenAI;
@@ -45,12 +98,16 @@ export class OpenAiProviderAdapter implements AiProviderAdapter {
 
     const { model, messages, temperature, maxTokens } = options;
 
-    const response = await this.client.post<OpenAIChatResponse>('/chat/completions', {
-      model,
-      messages: messages.map(m => ({ role: m.role, content: m.content })),
-      temperature: temperature ?? this.config.temperature ?? 0.7,
-      max_tokens: maxTokens ?? this.config.maxTokens ?? 500,
-    });
+    const response = await retryWithBackoff(
+      () =>
+        this.client!.post<OpenAIChatResponse>('/chat/completions', {
+          model,
+          messages: messages.map(m => ({ role: m.role, content: m.content })),
+          temperature: temperature ?? this.config!.temperature ?? 0.7,
+          max_tokens: maxTokens ?? this.config!.maxTokens ?? 500,
+        }),
+      'chat/completions',
+    );
 
     const choice = response.data.choices[0];
     const usage = response.data.usage;
@@ -69,15 +126,11 @@ export class OpenAiProviderAdapter implements AiProviderAdapter {
   }
 
   async getTokenCount(text: string): Promise<number> {
-    // Approximate: ~4 chars per token for English text
     return Math.ceil(text.length / 4);
   }
 }
 
-// ---------------------------------------------------------------------------
 // Internal types
-// ---------------------------------------------------------------------------
-
 interface OpenAIChatResponse {
   id: string;
   model: string;

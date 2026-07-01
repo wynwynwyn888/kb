@@ -1056,7 +1056,14 @@ export class OutboundSendService {
         .eq('reply_id', replyId)
         .eq('bubble_sequence', bubbleSequence - 1)
         .maybeSingle();
-      if (error || !data) return 'wait'; // predecessor not yet created
+      if (error) return 'wait'; // Real DB error — let the send-bubble job retry
+      // Predecessor row does not exist in outbound_sends yet.
+      // For same-reply multi-bubble batches this is expected: bubble 0 will be
+      // created by the same sendReply() call. The conversation ordering lock
+      // already guards cross-reply interleaving.
+      // Returning 'proceed' fixes the bug where 2‑bubble replies were cancelled
+      // by their own not-yet-inserted predecessor.
+      if (!data) return 'proceed';
       const status = data.status as string;
       if (status === 'sent') return 'proceed';
       if (['pending', 'processing', 'failed_before_provider', 'failed_provider_rejected'].includes(status)) return 'wait';

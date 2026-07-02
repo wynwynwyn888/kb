@@ -312,6 +312,7 @@ type FormBaseline = {
   bookingBehaviorNotes: string;
   escalationBehaviorNotes: string;
   knowledgeScopeNotes: string;
+  criticalFacts: string;
   knowledgeAccessMode: string;
   selectedVaultIds: string[];
   tempPreset: TempPreset;
@@ -335,6 +336,7 @@ function rowToBaseline(row: TenantBotProfileRow): FormBaseline {
     bookingBehaviorNotes: row.bookingBehaviorNotes ?? '',
     escalationBehaviorNotes: row.escalationBehaviorNotes ?? '',
     knowledgeScopeNotes: row.knowledgeScopeNotes ?? '',
+    criticalFacts: row.criticalFacts ?? '',
     knowledgeAccessMode: access,
     selectedVaultIds: sortVaultIds(row.selectedVaultIds ?? []),
     tempPreset: numToPreset(row.temperature != null ? Number(row.temperature) : 0.7),
@@ -384,6 +386,7 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
   const [bookingBehaviorNotes, setBookingBehaviorNotes] = useState('');
   const [escalationBehaviorNotes, setEscalationBehaviorNotes] = useState('');
   const [knowledgeScopeNotes, setKnowledgeScopeNotes] = useState('');
+  const [criticalFacts, setCriticalFacts] = useState('');
   const [knowledgeAccessMode, setKnowledgeAccessMode] = useState(KNOWLEDGE_ACCESS_ALL_VAULTS);
   const [selectedVaultIds, setSelectedVaultIds] = useState<string[]>([]);
   const [kbVaults, setKbVaults] = useState<KbVaultRow[]>([]);
@@ -422,6 +425,7 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
       bookingBehaviorNotes,
       escalationBehaviorNotes,
       knowledgeScopeNotes,
+      criticalFacts,
       knowledgeAccessMode,
       selectedVaultIds,
       tempPreset,
@@ -1122,6 +1126,15 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                         autoComplete="off"
                       />
                       <p style={{ ...mvpFieldHint, marginBottom: 0 }}>Shown in the profile list only.</p>
+                    </div>
+                  </div>
+
+                  <div style={sectionCard}>
+                    <h3 style={sectionTitleStyle}>Critical Facts</h3>
+                    <p style={{ ...mvpFieldHint, margin: '-0.25rem 0 0.5rem' }}>Important tenant-specific facts that must be preserved in the AI prompt, such as pricing, guarantees, CTA, positioning, key rules, and non-negotiable sales instructions. Max 1,500 characters.</p>
+                    <textarea style={textareaStyle} value={criticalFacts} onChange={e => { const v = e.target.value; if (v.length <= 1500) setCriticalFacts(v); }} aria-label="Critical Facts" />
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginTop: 8 }}>
+                      <span style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted)' }}>{criticalFacts.length} / 1500 characters</span>
                     </div>
                   </div>
 

@@ -1479,7 +1479,7 @@ export interface TenantBotProfileRow {
   bookingBehaviorNotes: string;
   escalationBehaviorNotes: string;
   knowledgeScopeNotes: string;
-  /** all_workspace_knowledge | selected_collections (legacy; kept in sync with vault access) */
+  criticalFacts: string;
   knowledgeScopeMode: string;
   /** all_vaults | selected_vaults */
   knowledgeAccessMode: string;
@@ -1574,7 +1574,8 @@ export async function updateTenantBotProfile(
     toneRules: string;
     bookingBehaviorNotes: string;
     escalationBehaviorNotes: string;
-    knowledgeScopeNotes: string;
+  knowledgeScopeNotes: string;
+  criticalFacts: string;
     knowledgeScopeMode: string;
     knowledgeAccessMode?: string;
     selectedVaultIds?: string[];

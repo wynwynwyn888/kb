@@ -51,6 +51,7 @@ export class SendBubbleProcessor extends WorkerHost {
     private readonly humanEscalationHolding: HumanEscalationHoldingReplyService,
     @InjectQueue(QUEUES.INBOUND_MESSAGE_PROCESSOR) private readonly inboundQueue: Queue,
     @InjectQueue(QUEUES.POST_OUTBOUND_SYNC) private readonly postOutboundSyncQueue: Queue,
+    @InjectQueue(QUEUES.ACTIVE_RECOVERY_WATCHDOG) private readonly watchdogQueue: Queue,
     @Optional() private readonly appCache?: AppCacheService,
     @Optional() private readonly metrics?: MetricsService,
   ) {
@@ -332,7 +333,28 @@ export class SendBubbleProcessor extends WorkerHost {
       }
     }
 
-    // Step 5b: Post-outbound GHL recovery sync windows
+    // Step 5c: Active recovery watchdog (30-min self-rescheduling poll)
+    if (summary.succeeded > 0 && process.env['GHL_ACTIVE_RECOVERY_WATCHDOG_ENABLED'] === 'true') {
+      try {
+        const now = new Date().toISOString();
+        const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+        const jobId = `wdog_${tenantId}_${conversationId}`;
+        // Remove any existing watchdog for this conversation (stale/older)
+        await this.watchdogQueue.remove(jobId).catch(() => {});
+        await this.watchdogQueue.add('check', {
+          tenantId, conversationId, ghlLocationId, contactId,
+          latestOutboundAt: now, startedAt: now, expiresAt,
+        }, {
+          delay: 15_000,
+          jobId,
+          removeOnComplete: true,
+          attempts: 1,
+          backoff: { type: 'fixed', delay: 0 },
+        });
+      } catch (e) {
+        this.logger.warn(`activeWatchdogScheduleFailed: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
     // Feature flag + tenant allowlist gating
     if (summary.succeeded > 0) {
       try {

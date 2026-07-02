@@ -12,6 +12,7 @@ import { HandoverNotifyProcessor } from './processors/handover-notify.processor'
 import { QuotaThresholdAlertProcessor } from './processors/quota-threshold-alert.processor';
 import { FollowUpProcessor } from './processors/follow-up.processor';
 import { PostOutboundSyncProcessor } from './processors/post-outbound-sync.processor';
+import { ActiveRecoveryWatchdogProcessor } from './processors/active-recovery-watchdog.processor';
 import { MediaTranscriptionProcessor } from './processors/media-transcription.processor';
 import { MediaTranscriptionQueueService } from './media-transcription-queue.service';
 
@@ -64,6 +65,7 @@ import { AppCacheModule } from '../lib/app-cache.module';
     MediaTranscriptionQueueService,
     FollowUpProcessor,
     PostOutboundSyncProcessor,
+    ActiveRecoveryWatchdogProcessor,
   ],
   exports: [BullModule, MediaTranscriptionQueueService],
 })

@@ -26,6 +26,6 @@ jobs:
             echo "=== RUNNING AISBP VAULT SEED ==="
             docker exec -e SUPABASE_URL -e SUPABASE_SERVICE_ROLE_KEY \
               $(docker ps -qf name=aisbp-backend) \
-              npx tsx apps/backend/scripts/seed-aisbp-vault.ts
+              npx tsx scripts/seed-aisbp-vault.ts
 
             echo "=== DONE ==="

@@ -239,23 +239,48 @@ export class InboundMessageProcessor extends WorkerHost {
         locationId,
       );
 
-      const ingestResult = await ingestInboundMessage({
-        supabase: this.supabase,
-        conversationId: conversation.id,
-        tenantId: tenant.id,
-        direction: 'INBOUND',
-        sender: 'CONTACT',
-        content: resolved.content,
-        contentType: this.mapToDbContentType(resolved.persistContentType),
-        ghlMessageId: ghlInboundMessageId?.trim() || null,
-        webhookEventId: webhookEventId || null,
-        ghlTimestamp: timestamp,
-        ingestSource: 'webhook',
-        sourceMetadata: {
-          receivedAt: timestamp,
-          ...resolved.voiceMetadata,
-        },
-      });
+      const useSharedIngest = process.env['GHL_WEBHOOK_SHARED_INGEST_ENABLED'] === 'true';
+
+      if (useSharedIngest) {
+        const ingestResult = await ingestInboundMessage({
+          supabase: this.supabase,
+          conversationId: conversation.id,
+          tenantId: tenant.id,
+          direction: 'INBOUND',
+          sender: 'CONTACT',
+          content: resolved.content,
+          contentType: this.mapToDbContentType(resolved.persistContentType),
+          ghlMessageId: ghlInboundMessageId?.trim() || null,
+          webhookEventId: webhookEventId || null,
+          ghlTimestamp: timestamp,
+          ingestSource: 'webhook',
+          sourceMetadata: {
+            receivedAt: timestamp,
+            ...resolved.voiceMetadata,
+          },
+        });
+
+        if (ingestResult.duplicate || ingestResult.upgraded) {
+          this.logger.log(
+            `Inbound message deduped: conversationId=${conversation.id} duplicate=${ingestResult.duplicate} upgraded=${ingestResult.upgraded}`,
+          );
+          if (webhookEventId) await this.updateWebhookEventStatus(webhookEventId, 'COMPLETED');
+          return;
+        }
+      } else {
+        await this.addMessage(conversation.id, {
+          direction: 'INBOUND',
+          sender: 'CONTACT',
+          content: resolved.content,
+          contentType: resolved.persistContentType,
+          metadata: {
+            ghlMessageId: ghlInboundMessageId?.trim() || webhookEventId,
+            ...(ghlInboundMessageId?.trim() ? { ghlInboundMessageId: ghlInboundMessageId.trim() } : {}),
+            receivedAt: timestamp,
+            ...resolved.voiceMetadata,
+          },
+        });
+      }
 
       const vm = resolved.voiceMetadata as Record<string, unknown>;
       const voiceDetected =
@@ -284,14 +309,6 @@ export class InboundMessageProcessor extends WorkerHost {
             },
           }),
         );
-      }
-
-      if (ingestResult.duplicate || ingestResult.upgraded) {
-        this.logger.log(
-          `Inbound message deduped: conversationId=${conversation.id} duplicate=${ingestResult.duplicate} upgraded=${ingestResult.upgraded}`,
-        );
-        if (webhookEventId) await this.updateWebhookEventStatus(webhookEventId, 'COMPLETED');
-        return;
       }
 
       this.logger.log(

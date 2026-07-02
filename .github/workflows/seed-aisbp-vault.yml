@@ -1,0 +1,31 @@
+name: Seed AISBP Agency Vault
+
+on:
+  workflow_dispatch:
+
+jobs:
+  seed:
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH and run seed script
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          script: |
+            set -e
+            cd /root/aisbp
+
+            echo "=== PULLING LATEST MAIN ==="
+            git fetch origin main
+            git checkout main
+            git reset --hard origin/main
+
+            echo "=== RUNNING AISBP VAULT SEED ==="
+            docker exec -e SUPABASE_URL -e SUPABASE_SERVICE_ROLE_KEY \
+              $(docker ps -qf name=aisbp-backend) \
+              npx tsx apps/backend/scripts/seed-aisbp-vault.ts
+
+            echo "=== DONE ==="

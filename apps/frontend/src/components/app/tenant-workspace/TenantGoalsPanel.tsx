@@ -481,6 +481,7 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
     setBookingBehaviorNotes(row.bookingBehaviorNotes ?? '');
     setEscalationBehaviorNotes(row.escalationBehaviorNotes ?? '');
     setKnowledgeScopeNotes(row.knowledgeScopeNotes ?? '');
+    setCriticalFacts(row.criticalFacts ?? '');
     const access =
       row.knowledgeAccessMode?.trim() === KNOWLEDGE_ACCESS_SELECTED_VAULTS
         ? KNOWLEDGE_ACCESS_SELECTED_VAULTS

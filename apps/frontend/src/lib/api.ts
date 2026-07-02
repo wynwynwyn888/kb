@@ -1545,6 +1545,7 @@ export async function createTenantBotProfile(
     bookingBehaviorNotes?: string;
     escalationBehaviorNotes?: string;
     knowledgeScopeNotes?: string;
+    criticalFacts?: string;
     knowledgeScopeMode?: string;
     knowledgeAccessMode?: string;
     selectedVaultIds?: string[];
@@ -1574,8 +1575,8 @@ export async function updateTenantBotProfile(
     toneRules: string;
     bookingBehaviorNotes: string;
     escalationBehaviorNotes: string;
-  knowledgeScopeNotes: string;
-  criticalFacts: string;
+    knowledgeScopeNotes: string;
+    criticalFacts: string;
     knowledgeScopeMode: string;
     knowledgeAccessMode?: string;
     selectedVaultIds?: string[];

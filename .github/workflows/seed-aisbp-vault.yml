@@ -11,6 +11,7 @@ on:
         options:
           - seed
           - test-retrieval
+          - inspect
 
 jobs:
   run:
@@ -32,7 +33,89 @@ jobs:
 
             CONTAINER=$(docker ps -qf name=aisbp-backend)
 
-            if [ "${{ github.event.inputs.mode }}" = "test-retrieval" ]; then
+            if [ "${{ github.event.inputs.mode }}" = "inspect" ]; then
+              echo "=== RUNNING PROFILE + VAULT INSPECTION ==="
+              docker exec $CONTAINER node -e "
+                const { createClient } = require('@supabase/supabase-js');
+                const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
+                const TID = '34c62859-95b1-49a8-911c-cc44ced05452';
+                const VID = 'b26f2661-23e9-4689-b2c9-9010735ddaee';
+                (async () => {
+                  const { data: prof } = await supabase.from('tenant_bot_profiles')
+                    .select('name, persona, conversation_goals, business_notes, booking_behavior_notes, escalation_behavior_notes, tone_rules, knowledge_scope_notes, critical_facts, knowledge_access_mode, updated_at')
+                    .eq('tenant_id', TID).eq('is_active', true).maybeSingle();
+                  if (!prof) { console.log('NO ACTIVE PROFILE'); return; }
+                  console.log('=== ACTIVE PROFILE ===');
+                  console.log('Name:', prof.name);
+                  console.log('Updated:', prof.updated_at);
+                  console.log('knowledge_access_mode:', prof.knowledge_access_mode);
+                  console.log('');
+                  const fields = [
+                    ['Critical Facts', prof.critical_facts],
+                    ['Persona', prof.persona],
+                    ['Conversation Goals', prof.conversation_goals],
+                    ['Business Notes', prof.business_notes],
+                    ['Booking Behavior', prof.booking_behavior_notes],
+                    ['Escalation Behavior', prof.escalation_behavior_notes],
+                    ['Tone Rules', prof.tone_rules],
+                    ['Knowledge Scope', prof.knowledge_scope_notes],
+                  ];
+                  console.log('--- Field character counts ---');
+                  for (const [label, val] of fields) {
+                    const v = String(val ?? '');
+                    const warn = (label === 'Critical Facts' && v.length > 1500) || (label === 'Persona' && v.length > 1500) || (label === 'Conversation Goals' && v.length > 5000) || (label === 'Business Notes' && v.length > 5000) || (label === 'Booking Behavior' && v.length > 1000) || (label === 'Escalation Behavior' && v.length > 1000) || (label === 'Tone Rules' && v.length > 1000) || (label === 'Knowledge Scope' && v.length > 500) ? ' ⚠️ OVER CAP' : '';
+                    console.log(label + ': ' + v.length + ' chars' + warn);
+                  }
+
+                  console.log('');
+                  console.log('=== VAULT STATUS ===');
+                  const { data: docs } = await supabase.from('knowledge_documents')
+                    .select('source, status').eq('tenant_id', TID).eq('vault_id', VID);
+                  if (!docs) { console.log('NO DOCS in vault'); return; }
+                  const faqReady = docs.filter(d => d.source === 'faq' && d.status === 'READY').length;
+                  const noteReady = docs.filter(d => d.source === 'rich_text' && d.status === 'READY').length;
+                  console.log('Vault ID:', VID);
+                  console.log('FAQs READY:', faqReady, '/ 10');
+                  console.log('Notes READY:', noteReady, '/ 7');
+
+                  console.log('');
+                  console.log('=== RETRIEVAL QUICK TEST ===');
+                  for (const q of ['price', 'staff replying', 'ChatGPT', 'ROI', 'AI Automation Session', 'auto-reply']) {
+                    const dc = await supabase.from('knowledge_documents').select('id, title, source').eq('tenant_id', TID).eq('vault_id', VID).eq('status', 'READY').order('updated_at', { ascending: false }).limit(200);
+                    if (!dc.data?.length) { console.log(q + ': NO DOCS'); continue; }
+                    const ids = dc.data.map(d => d.id);
+                    const map = new Map(dc.data.map(d => [d.id, d]));
+                    const rc = await supabase.from('knowledge_chunks').select('id, document_id, content, metadata').in('document_id', ids).limit(3000);
+                    if (!rc.data?.length) { console.log(q + ': NO CHUNKS'); continue; }
+                    const chunks = rc.data.map(r => ({ id: r.id, documentId: r.document_id, title: (map.get(r.document_id)?.title ?? '').slice(0, 80), source: map.get(r.document_id)?.source ?? '?', content: r.content, metadata: r.metadata ?? {} }));
+
+                    // Simple substring scoring (same logic as rankChunksByRelevance)
+                    const ql = q.toLowerCase();
+                    const scored = chunks.map(c => {
+                      let s = 0;
+                      const cn = c.content.toLowerCase().replace(/[^\w]+/g, '');
+                      const tn = c.title.toLowerCase().replace(/[^\w]+/g, '');
+                      const sn = String(c.metadata['sectionTitle'] || '').toLowerCase().replace(/[^\w]+/g, '');
+                      for (const tok of ql.split(/\s+/).filter(t => t.length >= 2)) {
+                        if (cn.includes(tok)) s += Math.min(12, tok.length);
+                        if (tn.includes(tok)) s += Math.min(12, tok.length) * 1.15;
+                        if (sn.includes(tok)) s += Math.min(12, tok.length) * 1.85;
+                      }
+                      if (ql.length >= 3 && cn.includes(ql)) s += 2.4;
+                      if (ql.length >= 3 && tn.includes(ql)) s += 2.8;
+                      if (ql.length >= 3 && sn.includes(ql)) s += 8.0;
+                      return { chunk: c, score: s };
+                    }).filter(r => r.score > 0).sort((a, b) => b.score - a.score);
+                    if (!scored.length) { console.log(q + ': NONE'); continue; }
+                    const top = scored[0];
+                    const sec = top.chunk.metadata['sectionTitle'] || '(no section)';
+                    console.log(q + ' → score=' + top.score.toFixed(1) + ' ' + top.chunk.source + ' \"' + top.chunk.title.slice(0, 50) + '\" [' + String(sec).slice(0, 35) + ']');
+                  }
+                  console.log('');
+                  console.log('DONE');
+                })().catch(e => { console.error('ERROR', e.message); process.exit(1); });
+              "
+            elif [ "${{ github.event.inputs.mode }}" = "test-retrieval" ]; then
               echo "=== COPYING RETRIEVAL TEST SCRIPT ==="
               cat > /tmp/test-retrieval.ts << 'SCRIPT_EOF'
             import { createClient } from '@supabase/supabase-js';

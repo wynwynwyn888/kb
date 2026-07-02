@@ -47,6 +47,7 @@ import { FollowUpEngineService } from '../../modules/follow-up-engine/follow-up-
 import { HumanEscalationHoldingReplyService } from '../../modules/human-escalation/human-escalation-holding-reply.service';
 import { MediaTranscriptionQueueService } from '../media-transcription-queue.service';
 import { syncGhlConversationContext } from '../../lib/ghl-conversation-sync';
+import { ingestInboundMessage } from '../../lib/inbound-message-ingest';
 import { MetricsService } from '../../lib/metrics.service';
 import { resolveContactIdIfPhone } from '../../lib/contact-resolve';
 
@@ -238,14 +239,19 @@ export class InboundMessageProcessor extends WorkerHost {
         locationId,
       );
 
-      await this.addMessage(conversation.id, {
+      const ingestResult = await ingestInboundMessage({
+        supabase: this.supabase,
+        conversationId: conversation.id,
+        tenantId: tenant.id,
         direction: 'INBOUND',
         sender: 'CONTACT',
         content: resolved.content,
-        contentType: resolved.persistContentType,
-        metadata: {
-          ghlMessageId: ghlInboundMessageId?.trim() || webhookEventId,
-          ...(ghlInboundMessageId?.trim() ? { ghlInboundMessageId: ghlInboundMessageId.trim() } : {}),
+        contentType: this.mapToDbContentType(resolved.persistContentType),
+        ghlMessageId: ghlInboundMessageId?.trim() || null,
+        webhookEventId: webhookEventId || null,
+        ghlTimestamp: timestamp,
+        ingestSource: 'webhook',
+        sourceMetadata: {
           receivedAt: timestamp,
           ...resolved.voiceMetadata,
         },
@@ -278,6 +284,14 @@ export class InboundMessageProcessor extends WorkerHost {
             },
           }),
         );
+      }
+
+      if (ingestResult.duplicate || ingestResult.upgraded) {
+        this.logger.log(
+          `Inbound message deduped: conversationId=${conversation.id} duplicate=${ingestResult.duplicate} upgraded=${ingestResult.upgraded}`,
+        );
+        if (webhookEventId) await this.updateWebhookEventStatus(webhookEventId, 'COMPLETED');
+        return;
       }
 
       this.logger.log(

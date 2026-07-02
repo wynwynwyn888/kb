@@ -9,11 +9,20 @@ import {
 import { Job } from 'bullmq';
 
 const mockSupabase = createMockSupabase();
+const mockQueueAdd = jestGlobal.fn(async () => {});
+
 jestGlobal.mock('../lib/supabase', () => ({
   getSupabaseService: () => mockSupabase,
 }));
 
-const mockQueueAdd = jestGlobal.fn(async () => {});
+jestGlobal.mock('../lib/inbound-message-ingest', () => ({
+  ingestInboundMessage: jestGlobal.fn(async () => ({
+    inserted: true, duplicate: false, upgraded: false,
+    messageId: 'ingest-test-id-' + Date.now(),
+  })),
+  computeContentFingerprint: jestGlobal.fn(() => 'mock-fingerprint'),
+}));
+
 jestGlobal.mock('@nestjs/bullmq', () => {
   class MockWorkerHost {
     run = jestGlobal.fn();

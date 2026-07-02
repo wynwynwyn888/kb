@@ -1,5 +1,21 @@
 import { jest as jestGlobal } from '@jest/globals';
 
+const mockIngestInboundMessage = jestGlobal.fn(async (params: Record<string, unknown>) => {
+  // Store params for test assertions (backward compat with addMessage() spy pattern)
+  (mockIngestInboundMessage as any).lastParams = params;
+  return {
+    inserted: true,
+    duplicate: false,
+    upgraded: false,
+    messageId: 'ingest-test-id-' + Date.now(),
+  };
+});
+
+jestGlobal.mock('../../lib/inbound-message-ingest', () => ({
+  ingestInboundMessage: mockIngestInboundMessage,
+  computeContentFingerprint: jestGlobal.fn(() => 'mock-fingerprint'),
+}));
+
 jestGlobal.mock('../../modules/orchestration/orchestration.service', () => ({
   ConversationOrchestrationService: class {},
 }));
@@ -242,6 +258,7 @@ describe('InboundMessageProcessor', () => {
 
   beforeEach(() => {
     jestGlobal.clearAllMocks();
+    (mockIngestInboundMessage as any).lastParams = null;
     delete process.env[INBOUND_DEBOUNCE_ENV_KEY];
     delete process.env['GHL_VOICE_FETCH_RECORDING_BY_MESSAGE_ID'];
     delete process.env['GHL_VOICE_DISCOVER_MESSAGE_ID'];
@@ -999,9 +1016,9 @@ describe('InboundMessageProcessor', () => {
         mediaUrl: 'https://cdn.example.com/voice.m4a',
       }),
     );
-    expect(inserted?.['content']).toBe('Please book me for Saturday');
-    expect(inserted?.['contentType']).toBe('TEXT');
-    const meta = inserted?.['metadata'] as Record<string, unknown> | undefined;
+    expect((mockIngestInboundMessage as any).lastParams?.['content']).toBe('Please book me for Saturday');
+    expect((mockIngestInboundMessage as any).lastParams?.['contentType']).toBe('TEXT');
+    const meta = (mockIngestInboundMessage as any).lastParams?.['sourceMetadata'] as Record<string, unknown> | undefined;
     expect(meta?.['voiceTranscriptionStatus']).toBe('succeeded');
     expect(meta?.['inboundVoiceNote']).toBe(true);
   });
@@ -1050,7 +1067,7 @@ describe('InboundMessageProcessor', () => {
     );
 
     expect(mockAudioTranscription.transcribeRemoteMedia).toHaveBeenCalled();
-    expect(inserted?.['content']).toBe('voice transcript');
+    expect((mockIngestInboundMessage as any).lastParams?.['content']).toBe('voice transcript');
   });
 
   it('persist: transcription failure stores safe fallback text', async () => {
@@ -1102,8 +1119,8 @@ describe('InboundMessageProcessor', () => {
       }),
     );
 
-    expect(inserted?.['content']).toBe(VOICE_NOTE_TRANSCRIPTION_FAILED_USER_MESSAGE);
-    expect((inserted?.['metadata'] as Record<string, unknown>)?.['voiceTranscriptionStatus']).toBe('failed');
+    expect((mockIngestInboundMessage as any).lastParams?.['content']).toBe(VOICE_NOTE_TRANSCRIPTION_FAILED_USER_MESSAGE);
+    expect(((mockIngestInboundMessage as any).lastParams?.['sourceMetadata'] as Record<string, unknown>)?.['voiceTranscriptionStatus']).toBe('failed');
   });
 
   it('persist: normal text inbound does not call transcription', async () => {
@@ -1188,8 +1205,8 @@ describe('InboundMessageProcessor', () => {
     );
 
     expect(mockAudioTranscription.transcribeRemoteMedia).not.toHaveBeenCalled();
-    expect(inserted?.['content']).toBe(VOICE_INBOUND_PLACEHOLDER_NO_MEDIA_USER_MESSAGE);
-    const meta = inserted?.['metadata'] as Record<string, unknown> | undefined;
+    expect((mockIngestInboundMessage as any).lastParams?.['content']).toBe(VOICE_INBOUND_PLACEHOLDER_NO_MEDIA_USER_MESSAGE);
+    const meta = (mockIngestInboundMessage as any).lastParams?.['sourceMetadata'] as Record<string, unknown> | undefined;
     expect(meta?.['voiceInboundAudioPlaceholderWithoutMediaUrl']).toBe(true);
     expect(meta?.['inboundVoiceNote']).toBe(true);
     expect(meta?.['voiceTranscriptionStatus']).toBe('media_url_missing');
@@ -1263,8 +1280,8 @@ describe('InboundMessageProcessor', () => {
       });
       expect(mockAudioTranscription.transcribeAudioBuffer).toHaveBeenCalled();
       expect(mockAudioTranscription.transcribeRemoteMedia).not.toHaveBeenCalled();
-      expect(inserted?.['content']).toBe('from ghl recording api');
-      const meta = inserted?.['metadata'] as Record<string, unknown> | undefined;
+      expect((mockIngestInboundMessage as any).lastParams?.['content']).toBe('from ghl recording api');
+      const meta = (mockIngestInboundMessage as any).lastParams?.['sourceMetadata'] as Record<string, unknown> | undefined;
       expect(meta?.['voiceTranscriptionStatus']).toBe('succeeded');
       expect(meta?.['voiceRecordingFetchedFromGhl']).toBe(true);
     } finally {
@@ -1333,8 +1350,8 @@ describe('InboundMessageProcessor', () => {
 
       expect(mockGhlVoiceRecordingFetch.tryFetchRecording).toHaveBeenCalled();
       expect(mockAudioTranscription.transcribeAudioBuffer).not.toHaveBeenCalled();
-      expect(inserted?.['content']).toBe(VOICE_NOTE_TRANSCRIPTION_FAILED_USER_MESSAGE);
-      const meta = inserted?.['metadata'] as Record<string, unknown> | undefined;
+      expect((mockIngestInboundMessage as any).lastParams?.['content']).toBe(VOICE_NOTE_TRANSCRIPTION_FAILED_USER_MESSAGE);
+      const meta = (mockIngestInboundMessage as any).lastParams?.['sourceMetadata'] as Record<string, unknown> | undefined;
       expect(meta?.['voiceTranscriptionStatus']).toBe('failed');
       expect(meta?.['voiceRetrievalFailureReason']).toBe('http_404');
     } finally {
@@ -1425,8 +1442,8 @@ describe('InboundMessageProcessor', () => {
       locationId: 'loc_1',
       messageId: 'ghl_discovered_msg',
     });
-    expect(inserted?.['content']).toBe('from discovery path');
-    const meta = inserted?.['metadata'] as Record<string, unknown> | undefined;
+    expect((mockIngestInboundMessage as any).lastParams?.['content']).toBe('from discovery path');
+    const meta = (mockIngestInboundMessage as any).lastParams?.['sourceMetadata'] as Record<string, unknown> | undefined;
     expect(meta?.['voiceRetrievalMethod']).toBe('ghl_message_discovery_recording_fetch');
     expect(meta?.['voiceDiscoveredMessageId']).toBe(true);
     expect(meta?.['voiceTranscriptionStatus']).toBe('succeeded');
@@ -1487,7 +1504,7 @@ describe('InboundMessageProcessor', () => {
     );
 
     expect(mockGhlVoiceRecordingFetch.tryFetchRecording).not.toHaveBeenCalled();
-    const meta = inserted?.['metadata'] as Record<string, unknown> | undefined;
+    const meta = (mockIngestInboundMessage as any).lastParams?.['sourceMetadata'] as Record<string, unknown> | undefined;
     expect(meta?.['voiceDiscoveredMessageId']).toBe(false);
     expect(meta?.['voiceRetrievalFailureReason']).toBe('message_id_not_found');
     expect(meta?.['voiceTranscriptionStatus']).toBe('media_url_missing');
@@ -1551,8 +1568,8 @@ describe('InboundMessageProcessor', () => {
       }),
     );
 
-    const meta = inserted?.['metadata'] as Record<string, unknown> | undefined;
-    expect(inserted?.['content']).toBe(VOICE_NOTE_TRANSCRIPTION_FAILED_USER_MESSAGE);
+    const meta = (mockIngestInboundMessage as any).lastParams?.['sourceMetadata'] as Record<string, unknown> | undefined;
+    expect((mockIngestInboundMessage as any).lastParams?.['content']).toBe(VOICE_NOTE_TRANSCRIPTION_FAILED_USER_MESSAGE);
     expect(meta?.['voiceDiscoveredMessageId']).toBe(true);
     expect(meta?.['voiceRetrievalFailureReason']).toBe('http_404');
     expect(meta?.['voiceTranscriptionStatus']).toBe('failed');
@@ -1617,8 +1634,8 @@ describe('InboundMessageProcessor', () => {
       }),
     );
 
-    const meta = inserted?.['metadata'] as Record<string, unknown> | undefined;
-    expect(inserted?.['content']).toBe(VOICE_NOTE_TRANSCRIPTION_FAILED_USER_MESSAGE);
+    const meta = (mockIngestInboundMessage as any).lastParams?.['sourceMetadata'] as Record<string, unknown> | undefined;
+    expect((mockIngestInboundMessage as any).lastParams?.['content']).toBe(VOICE_NOTE_TRANSCRIPTION_FAILED_USER_MESSAGE);
     expect(meta?.['voiceRetrievalFailureReason']).toBe('recording_fetch_http_422');
     expect(meta?.['voiceTranscriptionStatus']).toBe('failed');
   });
@@ -1749,8 +1766,8 @@ describe('InboundMessageProcessor', () => {
       locationId: 'loc_1',
       messageId: 'disc_msg_1',
     });
-    const meta = inserted?.['metadata'] as Record<string, unknown> | undefined;
-    expect(inserted?.['content']).toBe('phase1d transcript');
+    const meta = (mockIngestInboundMessage as any).lastParams?.['sourceMetadata'] as Record<string, unknown> | undefined;
+    expect((mockIngestInboundMessage as any).lastParams?.['content']).toBe('phase1d transcript');
     expect(meta?.['voiceRetrievalMethod']).toBe(
       'ghl_conversation_discovery_message_discovery_recording_fetch',
     );
@@ -1831,8 +1848,8 @@ describe('InboundMessageProcessor', () => {
       }),
     );
     expect(mockGhlVoiceRecordingFetch.tryFetchRecording).not.toHaveBeenCalled();
-    const meta = inserted?.['metadata'] as Record<string, unknown> | undefined;
-    expect(inserted?.['content']).toBe('direct media transcript');
+    const meta = (mockIngestInboundMessage as any).lastParams?.['sourceMetadata'] as Record<string, unknown> | undefined;
+    expect((mockIngestInboundMessage as any).lastParams?.['content']).toBe('direct media transcript');
     expect(meta?.['voiceRetrievalMethod']).toBe('ghl_message_history_direct_media_url');
     expect(meta?.['voiceDiscoveredConversationId']).toBe(true);
     expect(meta?.['voiceDiscoveredMessageId']).toBe(true);
@@ -1903,8 +1920,8 @@ describe('InboundMessageProcessor', () => {
     );
 
     expect(mockAudioTranscription.transcribeRemoteMedia).toHaveBeenCalled();
-    expect(inserted?.['content']).toBe(VOICE_NOTE_TRANSCRIPTION_FAILED_USER_MESSAGE);
-    const meta = inserted?.['metadata'] as Record<string, unknown> | undefined;
+    expect((mockIngestInboundMessage as any).lastParams?.['content']).toBe(VOICE_NOTE_TRANSCRIPTION_FAILED_USER_MESSAGE);
+    const meta = (mockIngestInboundMessage as any).lastParams?.['sourceMetadata'] as Record<string, unknown> | undefined;
     expect(meta?.['voiceTranscriptionStatus']).toBe('failed');
     expect(meta?.['voiceRetrievalFailureReason']).toBe('transcription_failed');
   });
@@ -1961,7 +1978,7 @@ describe('InboundMessageProcessor', () => {
       }),
     );
 
-    const meta = inserted?.['metadata'] as Record<string, unknown> | undefined;
+    const meta = (mockIngestInboundMessage as any).lastParams?.['sourceMetadata'] as Record<string, unknown> | undefined;
     expect(meta?.['voiceDiscoveredConversationId']).toBe(false);
     expect(meta?.['voiceDiscoveredMessageId']).toBe(false);
     expect(meta?.['voiceRetrievalFailureReason']).toBe('conversation_id_not_found');
@@ -2020,7 +2037,7 @@ describe('InboundMessageProcessor', () => {
       }),
     );
 
-    const meta = inserted?.['metadata'] as Record<string, unknown> | undefined;
+    const meta = (mockIngestInboundMessage as any).lastParams?.['sourceMetadata'] as Record<string, unknown> | undefined;
     expect(meta?.['voiceRetrievalFailureReason']).toBe('http_401');
     expect(meta?.['voiceTranscriptionStatus']).toBe('media_url_missing');
   });
@@ -2076,7 +2093,7 @@ describe('InboundMessageProcessor', () => {
       }),
     );
 
-    const meta = inserted?.['metadata'] as Record<string, unknown> | undefined;
+    const meta = (mockIngestInboundMessage as any).lastParams?.['sourceMetadata'] as Record<string, unknown> | undefined;
     expect(meta?.['voiceRetrievalFailureReason']).toBe('audio_media_url_not_found');
     expect(meta?.['voiceTranscriptionStatus']).toBe('media_url_missing');
   });
@@ -2218,7 +2235,7 @@ describe('InboundMessageProcessor', () => {
     );
     expect(mockGhlVoiceMessageDiscovery.discoverVoicePlaceholderMessageId).not.toHaveBeenCalled();
     expect(mockGhlVoiceConversationDiscovery.discoverConversationIdByContact).not.toHaveBeenCalled();
-    expect(inserted?.['content']).toBe('from webhook media url');
+    expect((mockIngestInboundMessage as any).lastParams?.['content']).toBe('from webhook media url');
   });
 
   it('persist: placeholder with webhook messageId uses direct recording fetch, not discovery', async () => {

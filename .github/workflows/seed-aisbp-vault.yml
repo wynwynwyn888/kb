@@ -12,6 +12,7 @@ on:
           - seed
           - test-retrieval
           - inspect
+          - bot-test
 
 jobs:
   run:
@@ -114,6 +115,86 @@ jobs:
                   console.log('');
                   console.log('DONE');
                 })().catch(e => { console.error('ERROR', e.message); process.exit(1); });
+              "
+            elif [ "${{ github.event.inputs.mode }}" = "bot-test" ]; then
+              echo "=== RUNNING BOT TEST MESSAGES ==="
+              docker exec $CONTAINER node -e "
+                const jwt = require('jsonwebtoken');
+                const http = require('http');
+
+                const SECRET = process.env.JWT_SECRET;
+                if (!SECRET) { console.error('JWT_SECRET missing'); process.exit(1); }
+                const token = jwt.sign({ sub: 'system-bot-test', agencyRole: 'admin' }, SECRET, { expiresIn: '5m' });
+                const TID = '34c62859-95b1-49a8-911c-cc44ced05452';
+
+                const messages = [
+                  'How much does it cost?',
+                  'I already have staff replying to WhatsApp, why do I need this?',
+                  'Can I just use ChatGPT?',
+                  'What ROI can I expect?',
+                  'What is the AI Automation Session?',
+                  'Thank you for contacting ABC Clinic. Please provide your name and preferred appointment date.',
+                ];
+
+                async function send(msg, idx) {
+                  return new Promise((resolve, reject) => {
+                    const body = JSON.stringify({ message: msg, history: [] });
+                    const req = http.request({
+                      hostname: 'localhost', port: 3001,
+                      path: '/api/v1/tenants/' + TID + '/bot-test',
+                      method: 'POST',
+                      headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + token,
+                        'Content-Length': Buffer.byteLength(body),
+                      },
+                      timeout: 45000,
+                    }, (res) => {
+                      let data = '';
+                      res.on('data', c => data += c);
+                      res.on('end', () => {
+                        try {
+                          const j = JSON.parse(data);
+                          const reply = (j.reply || '').trim();
+                          const preview = reply.length > 200 ? reply.slice(0, 200) + '...' : reply;
+                          const chunks = j.kbChunksUsed || 0;
+                          console.log('');
+                          console.log('=== Message ' + (idx+1) + ' ===');
+                          console.log('User: ' + msg);
+                          console.log('Reply: ' + preview);
+                          console.log('KB chunks used: ' + chunks);
+                          console.log('Model: ' + (j.modelUsed || '?'));
+                          console.log('Skip reason: ' + (j.skipReason || 'none'));
+                          resolve({ reply, chunks, msg });
+                        } catch(e) { reject(e); }
+                      });
+                    });
+                    req.on('error', e => reject(e));
+                    req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
+                    req.write(body);
+                    req.end();
+                  });
+                }
+
+                (async () => {
+                  console.log('Tenant: ' + TID);
+                  console.log('Auth: JWT generated');
+                  const results = [];
+                  for (let i = 0; i < messages.length; i++) {
+                    try {
+                      results.push(await send(messages[i], i));
+                    } catch(e) {
+                      console.log('');
+                      console.log('=== Message ' + (i+1) + ' ===');
+                      console.log('User: ' + messages[i]);
+                      console.log('ERROR: ' + e.message);
+                    }
+                    // short pause between messages
+                    await new Promise(r => setTimeout(r, 2000));
+                  }
+                  console.log('');
+                  console.log('BOT TEST COMPLETE. ' + results.length + '/' + messages.length + ' messages processed.');
+                })().catch(e => { console.error('FATAL', e.message); process.exit(1); });
               "
             elif [ "${{ github.event.inputs.mode }}" = "test-retrieval" ]; then
               echo "=== COPYING RETRIEVAL TEST SCRIPT ==="

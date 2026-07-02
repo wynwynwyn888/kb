@@ -149,12 +149,14 @@ export class ActiveRecoveryWatchdogProcessor extends WorkerHost {
         );
       }
 
-      // Schedule next check
+      // Schedule next check (remove old before re-add — BullMQ silently preserves duplicate jobId)
       const nextAt = Date.now() + delay;
       if (nextAt < new Date(expiresAt).getTime()) {
+        const jid = job.opts.jobId ?? '';
+        if (jid) await this.watchdogQueue.remove(jid).catch(() => {});
         await this.watchdogQueue.add('check', job.data, {
           delay,
-          jobId: job.opts.jobId,
+          jobId: jid,
           removeOnComplete: true,
           attempts: 1,
           backoff: { type: 'fixed', delay: 0 },
@@ -170,8 +172,10 @@ export class ActiveRecoveryWatchdogProcessor extends WorkerHost {
       // Still reschedule if within window
       const nextAt = Date.now() + delay;
       if (nextAt < new Date(expiresAt).getTime()) {
+        const jid = job.opts.jobId ?? '';
+        if (jid) await this.watchdogQueue.remove(jid).catch(() => {});
         await this.watchdogQueue.add('check', job.data, {
-          delay, jobId: job.opts.jobId, removeOnComplete: true, attempts: 1,
+          delay, jobId: jid, removeOnComplete: true, attempts: 1,
         });
       }
     }

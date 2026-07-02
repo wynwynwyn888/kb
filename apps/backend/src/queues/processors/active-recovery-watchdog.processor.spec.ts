@@ -85,6 +85,9 @@ describe('ActiveRecoveryWatchdogProcessor', () => {
     mockResolveInboundDebounceMs.mockReturnValue({ debounceMs: 2000, debounceSource: 'default' });
     mockReadConversationMetadataField.mockReturnValue({});
     mockMergeConversationMetadataForPersist.mockReturnValue({});
+    mockWatchdogQueueRemove.mockResolvedValue(undefined);
+    mockWatchdogQueueAdd.mockClear();
+    mockWatchdogQueueRemove.mockClear();
     processor = new ActiveRecoveryWatchdogProcessor(
       { add: mockInboundQueueAdd } as never,
       { add: mockWatchdogQueueAdd, remove: mockWatchdogQueueRemove } as never,

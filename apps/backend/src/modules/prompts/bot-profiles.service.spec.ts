@@ -375,4 +375,56 @@ describe('BotProfilesService', () => {
       allowedDocumentCount: null,
     });
   });
+
+  describe('criticalFacts validation', () => {
+    it('rejects createBotProfile with criticalFacts > 1500 chars', async () => {
+      await expect(
+        svc.createBotProfile(userId, tenantId, { name: 'Test', criticalFacts: 'A'.repeat(1501) }),
+      ).rejects.toThrow('criticalFacts must not exceed 1,500 characters');
+    });
+
+    it('accepts createBotProfile with criticalFacts exactly 1500 chars (passes validation)', async () => {
+      // Validation fires before any DB call — 1500 chars must not throw validation error
+      // The function will fail later on DB mock, but NOT on criticalFacts validation
+      const promise = svc.createBotProfile(userId, tenantId, { name: 'Test', criticalFacts: 'A'.repeat(1500) });
+      await expect(promise).rejects.toThrow();
+      await expect(promise).rejects.not.toThrow('criticalFacts');
+    });
+
+    it('accepts createBotProfile with criticalFacts < 1500 chars (passes validation)', async () => {
+      const promise = svc.createBotProfile(userId, tenantId, { name: 'Test', criticalFacts: 'OK' });
+      await expect(promise).rejects.toThrow();
+      await expect(promise).rejects.not.toThrow('criticalFacts');
+    });
+
+    it('accepts createBotProfile with empty/omitted criticalFacts (passes validation)', async () => {
+      const promise = svc.createBotProfile(userId, tenantId, { name: 'Test' });
+      await expect(promise).rejects.toThrow();
+      await expect(promise).rejects.not.toThrow('criticalFacts');
+    });
+
+    it('rejects updateBotProfile with criticalFacts > 1500 chars', async () => {
+      await expect(
+        svc.updateBotProfile(userId, tenantId, profileId, { criticalFacts: 'A'.repeat(1501) }),
+      ).rejects.toThrow('criticalFacts must not exceed 1,500 characters');
+    });
+
+    it('accepts updateBotProfile with criticalFacts exactly 1500 chars (passes validation)', async () => {
+      const promise = svc.updateBotProfile(userId, tenantId, profileId, { criticalFacts: 'A'.repeat(1500) });
+      await expect(promise).rejects.toThrow();
+      await expect(promise).rejects.not.toThrow('criticalFacts');
+    });
+
+    it('accepts updateBotProfile with criticalFacts < 1500 chars (passes validation)', async () => {
+      const promise = svc.updateBotProfile(userId, tenantId, profileId, { criticalFacts: 'OK' });
+      await expect(promise).rejects.toThrow();
+      await expect(promise).rejects.not.toThrow('criticalFacts');
+    });
+
+    it('accepts updateBotProfile with empty criticalFacts (passes validation)', async () => {
+      const promise = svc.updateBotProfile(userId, tenantId, profileId, { criticalFacts: '' });
+      await expect(promise).rejects.toThrow();
+      await expect(promise).rejects.not.toThrow('criticalFacts');
+    });
+  });
 });

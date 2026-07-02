@@ -545,6 +545,7 @@ model TenantBotProfile {
   bookingBehaviorNotes      String   @default("") @map("booking_behavior_notes") @db.Text
   escalationBehaviorNotes   String   @default("") @map("escalation_behavior_notes") @db.Text
   knowledgeScopeNotes       String   @default("") @map("knowledge_scope_notes") @db.Text
+  criticalFacts             String   @default("") @map("critical_facts") @db.Text
   /// all_workspace_knowledge | selected_collections (legacy; use knowledgeAccessMode for vaults)
   knowledgeScopeMode        String   @default("all_workspace_knowledge") @map("knowledge_scope_mode")
   /// all_vaults | selected_vaults — controls KB retrieval for this profile when active

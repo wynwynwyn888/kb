@@ -62,6 +62,7 @@ export interface TenantBotProfileDto {
   escalationBehaviorNotes: string;
   knowledgeScopeNotes: string;
   knowledgeScopeMode: string;
+  criticalFacts: string;
   /** all_vaults | selected_vaults */
   knowledgeAccessMode: string;
   selectedVaultIds: string[];
@@ -142,6 +143,7 @@ export class BotProfilesService {
       bookingBehaviorNotes: (row['booking_behavior_notes'] as string) ?? '',
       escalationBehaviorNotes: (row['escalation_behavior_notes'] as string) ?? '',
       knowledgeScopeNotes: (row['knowledge_scope_notes'] as string) ?? '',
+      criticalFacts: (row['critical_facts'] as string) ?? '',
       knowledgeScopeMode:
         String(row['knowledge_scope_mode'] ?? '').trim() || KNOWLEDGE_SCOPE_ALL_WORKSPACE,
       knowledgeAccessMode,
@@ -219,6 +221,7 @@ export class BotProfilesService {
       bookingBehaviorNotes: String(row['booking_behavior_notes'] ?? ''),
       escalationBehaviorNotes: String(row['escalation_behavior_notes'] ?? ''),
       knowledgeScopeNotes: String(row['knowledge_scope_notes'] ?? ''),
+      criticalFacts: String(row['critical_facts'] ?? ''),
       knowledgeAccessSummary: summary,
     };
   }
@@ -464,6 +467,7 @@ export class BotProfilesService {
       knowledgeScopeNotes?: string;
       knowledgeScopeMode?: string;
       knowledgeAccessMode?: string;
+      criticalFacts?: string;
       selectedVaultIds?: string[];
       temperature?: number;
       modelOverride?: string | null;
@@ -474,10 +478,16 @@ export class BotProfilesService {
     if (!(await this.canManage(profileId, tenantId))) {
       throw new ForbiddenException('Insufficient permissions');
     }
-    await this.ensureMigratedForTenant(tenantId);
 
     const name = body.name?.trim();
     if (!name) throw new BadRequestException('name is required');
+
+    const criticalFacts = (body.criticalFacts ?? '').trim();
+    if (criticalFacts.length > 1500) {
+      throw new BadRequestException('criticalFacts must not exceed 1,500 characters');
+    }
+
+    await this.ensureMigratedForTenant(tenantId);
 
     const supabase = getSupabaseService();
     const now = new Date().toISOString();
@@ -517,6 +527,7 @@ export class BotProfilesService {
       knowledge_scope_notes: body.knowledgeScopeNotes ?? '',
       knowledge_scope_mode: effectiveScope,
       knowledge_access_mode: accessMode,
+      critical_facts: criticalFacts,
       is_active: false,
       created_at: now,
       updated_at: now,
@@ -592,6 +603,7 @@ export class BotProfilesService {
       knowledgeScopeMode: string;
       knowledgeAccessMode: string;
       selectedVaultIds: string[];
+      criticalFacts: string;
       temperature: number;
       modelOverride: string | null;
       maxTokens: number | null;
@@ -599,6 +611,10 @@ export class BotProfilesService {
   ): Promise<TenantBotProfileDto> {
     if (!(await this.canManage(profileId, tenantId))) {
       throw new ForbiddenException('Insufficient permissions');
+    }
+
+    if (body.criticalFacts !== undefined && (body.criticalFacts?.trim() ?? '').length > 1500) {
+      throw new BadRequestException('criticalFacts must not exceed 1,500 characters');
     }
 
     const supabase = getSupabaseService();
@@ -646,6 +662,13 @@ export class BotProfilesService {
           ? KNOWLEDGE_ACCESS_SELECTED_VAULTS
           : KNOWLEDGE_ACCESS_ALL_VAULTS
         : String(existing['knowledge_access_mode'] ?? '').trim() || KNOWLEDGE_ACCESS_ALL_VAULTS;
+    const nextCriticalFacts =
+      body.criticalFacts !== undefined
+        ? body.criticalFacts.trim()
+        : String(existing['critical_facts'] ?? '');
+    if (nextCriticalFacts.length > 1500) {
+      throw new BadRequestException('criticalFacts must not exceed 1,500 characters');
+    }
     const effectiveScopeForRow =
       body.knowledgeScopeMode !== undefined
         ? nextScopeMode
@@ -667,6 +690,7 @@ export class BotProfilesService {
         knowledge_scope_notes: nextKnow,
         knowledge_scope_mode: effectiveScopeForRow,
         knowledge_access_mode: nextAccessMode,
+        critical_facts: nextCriticalFacts,
         updated_at: now,
       })
       .eq('id', botProfileId)
@@ -900,6 +924,7 @@ export class BotProfilesService {
     maxTokens: number | null;
     isActive: boolean;
     updatedAt: string | null;
+    profileSections?: Record<string, string | undefined>;
   } | null> {
     await this.ensureMigratedForTenant(tenantId);
     const supabase = getSupabaseService();
@@ -929,6 +954,16 @@ export class BotProfilesService {
         maxTokens: (pr?.['max_tokens'] as number | null) ?? null,
         isActive: true,
         updatedAt: (pr?.['updated_at'] as string) ?? (prof['updated_at'] as string) ?? null,
+        profileSections: {
+          criticalFacts: promptFields.criticalFacts || undefined,
+          persona: promptFields.persona || undefined,
+          goals: promptFields.conversationGoals || undefined,
+          businessNotes: promptFields.businessNotes || undefined,
+          toneRules: promptFields.toneRules || undefined,
+          bookingBehavior: promptFields.bookingBehaviorNotes || undefined,
+          escalationBehavior: promptFields.escalationBehaviorNotes || undefined,
+          knowledgeScope: promptFields.knowledgeScopeNotes || undefined,
+        },
       };
     }
 

@@ -32,6 +32,8 @@ export interface OrchestrationInput {
     isActive: boolean;
     /** ISO timestamp of last config save — used to invalidate stale option memory. */
     updatedAt?: string | null;
+    /** Per-section profile fields (only when PROMPT_SECTION_BUDGETS is enabled). */
+    profileSections?: Record<string, string | undefined> | null;
   } | null;
   /** From `agency_system_policies`; `systemPrompt` is the `content` column. */
   agencyPolicy?: {

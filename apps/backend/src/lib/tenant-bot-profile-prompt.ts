@@ -91,6 +91,7 @@ export interface BotProfilePromptFields {
   bookingBehaviorNotes: string;
   escalationBehaviorNotes: string;
   knowledgeScopeNotes: string;
+  criticalFacts: string;
   /** One line for orchestration / booking appendix, e.g. "Knowledge access: All knowledge vaults" */
   knowledgeAccessSummary: string;
 }

@@ -73,6 +73,9 @@ import { safeTextPreviewForLog } from '../../lib/safe-text-preview-for-log';
 import {
   compactPersonaPolicyForGeneration,
   estimateApproxTokens,
+  compactProfileSections,
+  buildCompactedPromptBody,
+  type ProfileSections,
 } from '../../lib/compact-runtime-system-prompt';
 import { shouldSkipKbShortFollowUpActiveTopic } from '../../lib/short-followup-kb';
 import { WHATSAPP_OUTPUT_CONTRACT_BLOCK } from '../../lib/whatsapp-output-contract';
@@ -81,7 +84,7 @@ import {
   promptCompactTruncationWarnKey,
   shouldEmitPromptCompactTruncationWarn,
 } from '../../lib/prompt-compact-truncation-warn';
-import { promptFootprintDebugEnabled } from '../../lib/production-log-flags';
+import { promptFootprintDebugEnabled, isPromptSectionBudgetsEnabledForTenant } from '../../lib/production-log-flags';
 import {
   isTechnicalOperatorInput,
   TECHNICAL_OPERATOR_DEFLECTION_REPLY,
@@ -1316,6 +1319,48 @@ export class ConversationOrchestrationService {
     input: OrchestrationInput,
     bookingCapability: 'collect_details_only' | 'live_slot_booking',
   ): string {
+    const useSectionBudgets =
+      isPromptSectionBudgetsEnabledForTenant(input.tenantId) &&
+      Boolean(input.promptConfig?.profileSections);
+
+    const tenantTz = input.tenant?.timeZone?.trim();
+    const businessTimezone = tenantTz || resolveAppTimeZone();
+    const snap = getBusinessLocalNow(businessTimezone);
+    const block =
+      `---\nCurrent local time context (use for greetings when appropriate; do not contradict):\n` +
+      `- businessTimezone: ${businessTimezone}\n` +
+      `- localDayPeriod: ${snap.dayPeriod}\n` +
+      `- greetingLabel: ${snap.greetingLabel}\n`;
+    const caps = buildGovernorCapabilityAppendix({
+      bookingCapability,
+      handoverCapability: input.tenant?.ghlLocationId ? 'tag_and_notify' : 'collect_details_only',
+    });
+    const whatsappBlock = WHATSAPP_OUTPUT_CONTRACT_BLOCK;
+
+    if (useSectionBudgets && input.promptConfig?.profileSections) {
+      // Per-section prompt path (new)
+      const sections: ProfileSections = input.promptConfig.profileSections;
+      const compacted = compactProfileSections(sections);
+      const compactedBody = buildCompactedPromptBody(compacted);
+      let base = buildBrandAssistantIdentitySystemContent(input.tenant?.name);
+      base = `${compactedBody}\n\n---\n\n${base}`;
+      const assembled = `${base}\n\n${block}${caps}`;
+
+      if (promptFootprintDebugEnabled()) {
+        this.logger.log(
+          `Runtime prompt footprint (section budgets): ` +
+            Object.entries(compacted.sections).map(([k, v]) => `${k}Len=${v.length}`).join(' ') + ' ' +
+            `anyTruncated=${Object.values(compacted.truncated).some(Boolean)} ` +
+            `totalTenantCharLength=${compacted.totalChars} ` +
+            `runtimePromptCharLength=${assembled.length} ` +
+            `estimatedPromptTokens=${compacted.approxTokens}`,
+        );
+      }
+
+      return `${assembled}\n\n${whatsappBlock}`;
+    }
+
+    // Old single-blob compaction path (unchanged)
     const tenantRaw = (input.promptConfig?.systemPrompt ?? '').trim();
     const agencyRaw = (input.agencyPolicy?.systemPrompt ?? '').trim();
     const compact = compactPersonaPolicyForGeneration({
@@ -1332,21 +1377,6 @@ export class ConversationOrchestrationService {
       base = `${compact.agencyBody.trim()}\n\n---\n\n${base}`;
     }
 
-    const tenantTz = input.tenant?.timeZone?.trim();
-    const businessTimezone = tenantTz || resolveAppTimeZone();
-    const snap = getBusinessLocalNow(businessTimezone);
-    this.logger.log(
-      `Runtime greeting context: resolvedTimeZone=${snap.timeZone} localDayPeriod=${snap.dayPeriod} greetingLabel=${snap.greetingLabel}`,
-    );
-    const block =
-      `---\nCurrent local time context (use for greetings when appropriate; do not contradict):\n` +
-      `- businessTimezone: ${businessTimezone}\n` +
-      `- localDayPeriod: ${snap.dayPeriod}\n` +
-      `- greetingLabel: ${snap.greetingLabel}\n`;
-    const caps = buildGovernorCapabilityAppendix({
-      bookingCapability,
-      handoverCapability: input.tenant?.ghlLocationId ? 'tag_and_notify' : 'collect_details_only',
-    });
     const assembled = `${base}\n\n${block}${caps}`;
     const runtimePromptCharLength = assembled.length;
     const estimatedPromptTokens = estimateApproxTokens(runtimePromptCharLength);
@@ -1367,7 +1397,7 @@ export class ConversationOrchestrationService {
         );
       }
     }
-    return `${assembled}\n\n${WHATSAPP_OUTPUT_CONTRACT_BLOCK}`;
+    return `${assembled}\n\n${whatsappBlock}`;
   }
 
   private buildRoutingRequest(

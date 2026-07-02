@@ -903,6 +903,7 @@ export class BotProfilesService {
     maxTokens: number | null;
     isActive: boolean;
     updatedAt: string | null;
+    profileSections?: Record<string, string | undefined>;
   } | null> {
     await this.ensureMigratedForTenant(tenantId);
     const supabase = getSupabaseService();
@@ -932,6 +933,16 @@ export class BotProfilesService {
         maxTokens: (pr?.['max_tokens'] as number | null) ?? null,
         isActive: true,
         updatedAt: (pr?.['updated_at'] as string) ?? (prof['updated_at'] as string) ?? null,
+        profileSections: {
+          criticalFacts: promptFields.criticalFacts || undefined,
+          persona: promptFields.persona || undefined,
+          goals: promptFields.conversationGoals || undefined,
+          businessNotes: promptFields.businessNotes || undefined,
+          toneRules: promptFields.toneRules || undefined,
+          bookingBehavior: promptFields.bookingBehaviorNotes || undefined,
+          escalationBehavior: promptFields.escalationBehaviorNotes || undefined,
+          knowledgeScope: promptFields.knowledgeScopeNotes || undefined,
+        },
       };
     }
 

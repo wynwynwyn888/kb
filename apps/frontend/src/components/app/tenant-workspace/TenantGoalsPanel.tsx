@@ -36,7 +36,6 @@ import {
   mvpLabelStyle,
   mvpPrimaryButtonStyle,
 } from '@/components/app/mvp-ui';
-import { countWords } from '@/lib/prompt-text-stats';
 
 const DEFAULT_NEW_PROFILE = 'New profile';
 
@@ -76,8 +75,9 @@ const expandModalOverlay: CSSProperties = {
 const expandModalPanel: CSSProperties = {
   background: 'var(--aisbp-modal-bg, #fff)',
   borderRadius: 16,
-  width: 'min(720px, 100%)',
-  maxHeight: 'min(82vh, 640px)',
+  width: 'min(90vw, 1200px)',
+  height: 'min(85vh, 900px)',
+  maxHeight: '90vh',
   overflow: 'hidden',
   display: 'flex',
   flexDirection: 'column',
@@ -398,8 +398,9 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState('');
   const [ok, setOk] = useState('');
-  const [expandField, setExpandField] = useState<null | 'persona' | 'goals' | 'additional'>(null);
+  const [expandField, setExpandField] = useState<null | 'persona' | 'goals' | 'additional' | 'toneRules' | 'bookingBehavior' | 'escalationBehavior' | 'knowledgeScope' | 'criticalFacts'>(null);
   const [expandDraft, setExpandDraft] = useState('');
+  const [activeTab, setActiveTab] = useState('criticalFacts');
 
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [createName, setCreateName] = useState('');
@@ -442,6 +443,7 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
     bookingBehaviorNotes,
     escalationBehaviorNotes,
     knowledgeScopeNotes,
+    criticalFacts,
     knowledgeAccessMode,
     selectedVaultIds,
     tempPreset,
@@ -817,6 +819,29 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
     }
   };
 
+  const INSTRUCTION_TABS = useMemo(() => [
+    { key: 'criticalFacts', label: 'Critical Facts', help: 'Important tenant-specific facts that must be preserved in the AI prompt, such as pricing, guarantees, CTA, positioning, key rules, and non-negotiable sales instructions.', cap: 1500, getValue: () => criticalFacts, setValue: setCriticalFacts },
+    { key: 'persona', label: 'Persona', help: 'How the assistant should sound and behave.', cap: 1500, getValue: () => persona, setValue: setPersona },
+    { key: 'goals', label: 'Conversation Goals', help: 'What this assistant should try to achieve.', cap: 5000, getValue: () => goals, setValue: setGoals },
+    { key: 'additional', label: 'Business Notes', help: 'Facts, policies, and context for this workspace.', cap: 5000, getValue: () => additional, setValue: setAdditional },
+    { key: 'bookingBehavior', label: 'Booking Behavior', help: 'When and how the assistant should guide prospects toward booking, consultation, demo, call, appointment, or the next step.', cap: 1000, getValue: () => bookingBehaviorNotes, setValue: setBookingBehaviorNotes },
+    { key: 'escalationBehavior', label: 'Escalation Behavior', help: 'When the assistant should hand over to a human or team instead of answering.', cap: 1000, getValue: () => escalationBehaviorNotes, setValue: setEscalationBehaviorNotes },
+  ], [criticalFacts, persona, goals, additional, bookingBehaviorNotes, escalationBehaviorNotes]);
+
+  const expandFieldMeta = useMemo(() => {
+    const map: Record<string, { title: string; help: string; cap: number }> = {
+      persona: { title: 'Persona', help: 'How the assistant should sound and behave.', cap: 1500 },
+      goals: { title: 'Conversation goals', help: 'What this assistant should try to achieve.', cap: 5000 },
+      additional: { title: 'Business notes', help: 'Facts, policies, and context for this workspace.', cap: 5000 },
+      toneRules: { title: 'Tone Rules', help: 'How the assistant should sound and format replies. Use this for reply length, WhatsApp style, forbidden phrases, and language style.', cap: 1000 },
+      bookingBehavior: { title: 'Booking Behavior', help: 'When and how the assistant should guide prospects toward booking, consultation, demo, call, appointment, or next step.', cap: 1000 },
+      escalationBehavior: { title: 'Escalation Behavior', help: 'When the assistant should hand over to a human or team instead of answering.', cap: 1000 },
+      knowledgeScope: { title: 'Knowledge Scope', help: 'What the assistant is allowed to answer, what it should avoid, and when it should say information is missing.', cap: 500 },
+      criticalFacts: { title: 'Critical Facts', help: 'Important tenant-specific facts that must be preserved in the AI prompt, such as pricing, guarantees, CTA, positioning, key rules, and non-negotiable sales instructions.', cap: 1500 },
+    };
+    return expandField ? (map[expandField] ?? null) : null;
+  }, [expandField]);
+
   return (
     <div style={mode === 'profiles' ? pageWidthProfiles : mode === 'instructions' ? pageWidthInstructions : undefined}>
       <style
@@ -1131,70 +1156,90 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                     </div>
                   </div>
 
-                  <div style={sectionCard}>
-                    <h3 style={sectionTitleStyle}>Critical Facts</h3>
-                    <p style={{ ...mvpFieldHint, margin: '-0.25rem 0 0.5rem' }}>Important tenant-specific facts that must be preserved in the AI prompt, such as pricing, guarantees, CTA, positioning, key rules, and non-negotiable sales instructions. Max 1,500 characters.</p>
-                    <textarea style={textareaStyle} value={criticalFacts} onChange={e => { const v = e.target.value; if (v.length <= 1500) setCriticalFacts(v); }} aria-label="Critical Facts" />
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginTop: 8 }}>
-                      <span style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted)' }}>{criticalFacts.length} / 1500 characters</span>
+                  {/* Instruction tabs */}
+                  <div style={{ marginBottom: '1.15rem' }}>
+                    <div style={{
+                      display: 'flex',
+                      gap: '0.25rem',
+                      flexWrap: 'wrap',
+                      borderBottom: '2px solid var(--aisbp-border, #e2e8f0)',
+                      paddingBottom: 0,
+                    }}>
+                      {INSTRUCTION_TABS.map(tab => {
+                        const isActive = activeTab === tab.key;
+                        return (
+                          <button
+                            key={tab.key}
+                            type="button"
+                            onClick={() => setActiveTab(tab.key)}
+                            style={{
+                              padding: '0.55rem 0.85rem',
+                              fontSize: '0.82rem',
+                              fontWeight: isActive ? 800 : 600,
+                              border: 'none',
+                              borderBottom: isActive ? '2px solid var(--aisbp-tenant-nav-active-text, rgba(37, 99, 235, 0.85))' : '2px solid transparent',
+                              background: 'transparent',
+                              color: isActive ? 'var(--aisbp-tenant-nav-active-text, rgba(37, 99, 235, 0.85))' : 'var(--aisbp-muted, #64748b)',
+                              cursor: 'pointer',
+                              marginBottom: -2,
+                              whiteSpace: 'nowrap',
+                              transition: 'color 0.15s, border-color 0.15s',
+                            }}
+                          >
+                            {tab.label}
+                          </button>
+                        );
+                      })}
                     </div>
-                  </div>
 
-                  <div style={sectionCard}>
-                    <h3 style={sectionTitleStyle}>Persona</h3>
-                    <p style={{ ...mvpFieldHint, margin: '-0.25rem 0 0.5rem' }}>How the assistant should sound and behave.</p>
-                    <textarea style={textareaStyle} value={persona} onChange={e => setPersona(e.target.value)} aria-label="Persona" />
-                    <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginTop: 8 }}>
-                      <span style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)' }}>{countWords(persona)} words</span>
-                      <button
-                        type="button"
-                        style={expandTextBtn}
-                        onClick={() => {
-                          setExpandDraft(persona);
-                          setExpandField('persona');
-                        }}
-                      >
-                        Expand
-                      </button>
-                    </div>
-                  </div>
-
-                  <div style={sectionCard}>
-                    <h3 style={sectionTitleStyle}>Conversation goals</h3>
-                    <p style={{ ...mvpFieldHint, margin: '-0.25rem 0 0.5rem' }}>What this assistant should try to achieve.</p>
-                    <textarea style={textareaStyle} value={goals} onChange={e => setGoals(e.target.value)} aria-label="Conversation goals" />
-                    <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginTop: 8 }}>
-                      <span style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)' }}>{countWords(goals)} words</span>
-                      <button
-                        type="button"
-                        style={expandTextBtn}
-                        onClick={() => {
-                          setExpandDraft(goals);
-                          setExpandField('goals');
-                        }}
-                      >
-                        Expand
-                      </button>
-                    </div>
-                  </div>
-
-                  <div style={sectionCard}>
-                    <h3 style={sectionTitleStyle}>Business notes</h3>
-                    <p style={{ ...mvpFieldHint, margin: '-0.25rem 0 0.5rem' }}>Facts, policies, and context for this workspace.</p>
-                    <textarea style={textareaStyle} value={additional} onChange={e => setAdditional(e.target.value)} aria-label="Business notes" />
-                    <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginTop: 8 }}>
-                      <span style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)' }}>{countWords(additional)} words</span>
-                      <button
-                        type="button"
-                        style={expandTextBtn}
-                        onClick={() => {
-                          setExpandDraft(additional);
-                          setExpandField('additional');
-                        }}
-                      >
-                        Expand
-                      </button>
-                    </div>
+                    {(() => {
+                      const tab = INSTRUCTION_TABS.find(t => t.key === activeTab);
+                      if (!tab) return null;
+                      const val = tab.getValue();
+                      const overCap = val.length > tab.cap;
+                      return (
+                        <div style={{
+                          border: '1px solid var(--aisbp-border, #e2e8f0)',
+                          borderTop: 'none',
+                          borderRadius: '0 0 12px 12px',
+                          padding: '1.05rem 1.15rem',
+                          background: 'var(--aisbp-surface, #fff)',
+                        }}>
+                          <div style={{ marginBottom: '0.5rem' }}>
+                            <h3 style={{ ...sectionTitleStyle, marginBottom: '0.2rem' }}>{tab.label}</h3>
+                            <p style={{ ...mvpFieldHint, margin: 0 }}>{tab.help}</p>
+                          </div>
+                          <textarea
+                            style={{
+                              ...mvpInputStyle,
+                              width: '100%',
+                              minHeight: '420px',
+                              resize: 'vertical',
+                              fontFamily: 'inherit',
+                              fontSize: '0.9rem',
+                              lineHeight: 1.5,
+                              whiteSpace: 'pre-wrap',
+                              overflowWrap: 'break-word',
+                              borderColor: overCap ? 'var(--aisbp-pill-bad-border, rgb(239, 68, 68))' : undefined,
+                            }}
+                            value={val}
+                            onChange={e => tab.setValue(e.target.value)}
+                            aria-label={tab.label}
+                            spellCheck
+                          />
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginTop: 8 }}>
+                            <span style={{
+                              fontSize: '0.78rem',
+                              color: overCap ? 'var(--aisbp-pill-bad-fg, rgb(185, 28, 28))' : 'var(--aisbp-muted)',
+                              fontWeight: overCap ? 700 : 400,
+                            }}>
+                              {val.length} / {tab.cap} characters
+                              {overCap ? ' — Over cap. Consider shortening before saving.' : ''}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </div>
 
                   <div style={sectionCard}>
@@ -1284,84 +1329,6 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                       </div>
                     ) : null}
                   </div>
-
-                  <details style={{ ...sectionCard, marginBottom: '1.15rem' }}>
-                    <summary style={{ cursor: 'pointer', fontSize: '0.95rem', fontWeight: 700, color: 'var(--aisbp-text-heading, #0f172a)', listStyle: 'none' }}>
-                      Advanced
-                    </summary>
-                    <div style={{ marginTop: '0.65rem', display: 'grid', gap: '0.65rem' }}>
-                      <div style={{ display: 'grid', gap: '0.65rem', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))' }}>
-                        <div>
-                          <label style={mvpLabelStyle}>Reply style</label>
-                          <select value={tempPreset} onChange={e => setTempPreset(e.target.value as TempPreset)} style={mvpInputStyle} disabled={!policy.allowResponseStyleOverride}>
-                            <option value="precise">Precise</option>
-                            <option value="balanced">Balanced</option>
-                            <option value="creative">Creative</option>
-                          </select>
-                        </div>
-                        <div>
-                          <span style={mvpLabelStyle}>Reply length</span>
-                          <select
-                            value={lengthKey}
-                            onChange={e => {
-                              const v = e.target.value as (typeof LENGTH_PRESETS)[number]['value'];
-                              setLengthKey(v);
-                              const opt = LENGTH_PRESETS.find(o => o.value === v);
-                              if (opt && opt.value !== 'custom') setMaxTokens(opt.tokens);
-                            }}
-                            style={mvpInputStyle}
-                            disabled={!policy.allowMaxTokensOverride}
-                          >
-                            {LENGTH_PRESETS.map(o => (
-                              <option key={o.value} value={o.value}>
-                                {o.label}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                        <div>
-                          <label style={mvpLabelStyle}>Maximum reply length</label>
-                          <input
-                            type="number"
-                            value={maxTokens}
-                            onChange={e => setMaxTokens(parseInt(e.target.value, 10) || 0)}
-                            style={mvpInputStyle}
-                            disabled={!policy.allowMaxTokensOverride}
-                            min={policy.maxTokensMin}
-                            max={policy.maxTokensMax}
-                          />
-                        </div>
-                        {showAdvancedModel ? (
-                          <div>
-                            <label style={mvpLabelStyle}>Model override</label>
-                            <input
-                              style={mvpInputStyle}
-                              value={modelOverride}
-                              onChange={e => setModelOverride(e.target.value)}
-                              placeholder="Optional model ID"
-                              autoComplete="off"
-                            />
-                          </div>
-                        ) : null}
-                      </div>
-                      <div>
-                        <label style={mvpLabelStyle}>Tone rules</label>
-                        <textarea style={textareaStyle} value={toneRules} onChange={e => setToneRules(e.target.value)} aria-label="Tone rules" />
-                      </div>
-                      <div>
-                        <label style={mvpLabelStyle}>Booking behavior</label>
-                        <textarea style={textareaStyle} value={bookingBehaviorNotes} onChange={e => setBookingBehaviorNotes(e.target.value)} aria-label="Booking behavior notes" />
-                      </div>
-                      <div>
-                        <label style={mvpLabelStyle}>Escalation behavior</label>
-                        <textarea style={textareaStyle} value={escalationBehaviorNotes} onChange={e => setEscalationBehaviorNotes(e.target.value)} aria-label="Escalation behavior notes" />
-                      </div>
-                      <div>
-                        <label style={mvpLabelStyle}>Knowledge vault notes</label>
-                        <textarea style={textareaStyle} value={knowledgeScopeNotes} onChange={e => setKnowledgeScopeNotes(e.target.value)} aria-label="Knowledge vault notes" />
-                      </div>
-                    </div>
-                  </details>
 
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.45rem', alignItems: 'center', marginBottom: '0.5rem' }}>
                     <button type="submit" style={mvpPrimaryButtonStyle} disabled={saving || !selectedProfileId}>
@@ -1566,9 +1533,28 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                   </div>
 
                   <div style={sectionCard}>
+                    <h3 style={sectionTitleStyle}>Critical Facts</h3>
+                    <p style={{ ...mvpFieldHint, margin: '-0.25rem 0 0.5rem' }}>Important tenant-specific facts that must be preserved in the AI prompt, such as pricing, guarantees, CTA, positioning, key rules, and non-negotiable sales instructions. Max 1,500 characters.</p>
+                    <textarea style={textareaStyle} value={criticalFacts} onChange={e => { const v = e.target.value; if (v.length <= 1500) setCriticalFacts(v); }} aria-label="Critical Facts" />
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginTop: 8 }}>
+                      <span style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted)' }}>{criticalFacts.length} / 1500 characters</span>
+                      <button
+                        type="button"
+                        style={expandTextBtn}
+                        onClick={() => {
+                          setExpandDraft(criticalFacts);
+                          setExpandField('criticalFacts');
+                        }}
+                      >
+                        Expand
+                      </button>
+                    </div>
+                  </div>
+
+                  <div style={sectionCard}>
                     <h3 style={sectionTitleStyle}>Persona</h3>
-                    <p style={{ ...mvpFieldHint, margin: '-0.25rem 0 0.5rem' }}>How the assistant should sound and behave.</p>
-                    <textarea style={textareaStyle} value={persona} onChange={e => setPersona(e.target.value)} aria-label="Persona" />
+                    <p style={{ ...mvpFieldHint, margin: '-0.25rem 0 0.5rem' }}>How the assistant should sound and behave. Max 1,500 characters.</p>
+                    <textarea style={textareaStyle} value={persona} onChange={e => { const v = e.target.value; if (v.length <= 1500) setPersona(v); }} aria-label="Persona" />
                     <div
                       style={{
                         display: 'flex',
@@ -1580,7 +1566,7 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                       }}
                     >
                       <span style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)' }}>
-                        {countWords(persona)} words
+                        {persona.length} / 1500 characters
                       </span>
                       <button
                         type="button"
@@ -1596,8 +1582,8 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                   </div>
                   <div style={sectionCard}>
                     <h3 style={sectionTitleStyle}>Conversation goals</h3>
-                    <p style={{ ...mvpFieldHint, margin: '-0.25rem 0 0.5rem' }}>What this assistant should try to achieve.</p>
-                    <textarea style={textareaStyle} value={goals} onChange={e => setGoals(e.target.value)} aria-label="Conversation goals" />
+                    <p style={{ ...mvpFieldHint, margin: '-0.25rem 0 0.5rem' }}>What this assistant should try to achieve. Max 5,000 characters.</p>
+                    <textarea style={textareaStyle} value={goals} onChange={e => { const v = e.target.value; if (v.length <= 5000) setGoals(v); }} aria-label="Conversation goals" />
                     <div
                       style={{
                         display: 'flex',
@@ -1609,7 +1595,7 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                       }}
                     >
                       <span style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)' }}>
-                        {countWords(goals)} words
+                        {goals.length} / 5000 characters
                       </span>
                       <button
                         type="button"
@@ -1625,8 +1611,8 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                   </div>
                   <div style={sectionCard}>
                     <h3 style={sectionTitleStyle}>Business notes</h3>
-                    <p style={{ ...mvpFieldHint, margin: '-0.25rem 0 0.5rem' }}>Facts, policies, and context for this workspace.</p>
-                    <textarea style={textareaStyle} value={additional} onChange={e => setAdditional(e.target.value)} aria-label="Business notes" />
+                    <p style={{ ...mvpFieldHint, margin: '-0.25rem 0 0.5rem' }}>Facts, policies, and context for this workspace. Max 5,000 characters.</p>
+                    <textarea style={textareaStyle} value={additional} onChange={e => { const v = e.target.value; if (v.length <= 5000) setAdditional(v); }} aria-label="Business notes" />
                     <div
                       style={{
                         display: 'flex',
@@ -1638,7 +1624,7 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                       }}
                     >
                       <span style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)' }}>
-                        {countWords(additional)} words
+                        {additional.length} / 5000 characters
                       </span>
                       <button
                         type="button"
@@ -1646,6 +1632,82 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                         onClick={() => {
                           setExpandDraft(additional);
                           setExpandField('additional');
+                        }}
+                      >
+                        Expand
+                      </button>
+                    </div>
+                  </div>
+
+                  <div style={sectionCard}>
+                    <h3 style={sectionTitleStyle}>Tone Rules</h3>
+                    <p style={{ ...mvpFieldHint, margin: '-0.25rem 0 0.5rem' }}>How the assistant should sound and format replies. Use this for reply length, WhatsApp style, forbidden phrases, and language style. Max 1,000 characters.</p>
+                    <textarea style={textareaStyle} value={toneRules} onChange={e => { const v = e.target.value; if (v.length <= 1000) setToneRules(v); }} aria-label="Tone Rules" />
+                    <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginTop: 8 }}>
+                      <span style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)' }}>{toneRules.length} / 1000 characters</span>
+                      <button
+                        type="button"
+                        style={expandTextBtn}
+                        onClick={() => {
+                          setExpandDraft(toneRules);
+                          setExpandField('toneRules');
+                        }}
+                      >
+                        Expand
+                      </button>
+                    </div>
+                  </div>
+
+                  <div style={sectionCard}>
+                    <h3 style={sectionTitleStyle}>Booking Behavior</h3>
+                    <p style={{ ...mvpFieldHint, margin: '-0.25rem 0 0.5rem' }}>When and how the assistant should guide prospects toward booking, consultation, demo, call, appointment, or next step. Max 1,000 characters.</p>
+                    <textarea style={textareaStyle} value={bookingBehaviorNotes} onChange={e => { const v = e.target.value; if (v.length <= 1000) setBookingBehaviorNotes(v); }} aria-label="Booking Behavior" />
+                    <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginTop: 8 }}>
+                      <span style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)' }}>{bookingBehaviorNotes.length} / 1000 characters</span>
+                      <button
+                        type="button"
+                        style={expandTextBtn}
+                        onClick={() => {
+                          setExpandDraft(bookingBehaviorNotes);
+                          setExpandField('bookingBehavior');
+                        }}
+                      >
+                        Expand
+                      </button>
+                    </div>
+                  </div>
+
+                  <div style={sectionCard}>
+                    <h3 style={sectionTitleStyle}>Escalation Behavior</h3>
+                    <p style={{ ...mvpFieldHint, margin: '-0.25rem 0 0.5rem' }}>When the assistant should hand over to a human or team instead of answering. Max 1,000 characters.</p>
+                    <textarea style={textareaStyle} value={escalationBehaviorNotes} onChange={e => { const v = e.target.value; if (v.length <= 1000) setEscalationBehaviorNotes(v); }} aria-label="Escalation Behavior" />
+                    <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginTop: 8 }}>
+                      <span style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)' }}>{escalationBehaviorNotes.length} / 1000 characters</span>
+                      <button
+                        type="button"
+                        style={expandTextBtn}
+                        onClick={() => {
+                          setExpandDraft(escalationBehaviorNotes);
+                          setExpandField('escalationBehavior');
+                        }}
+                      >
+                        Expand
+                      </button>
+                    </div>
+                  </div>
+
+                  <div style={sectionCard}>
+                    <h3 style={sectionTitleStyle}>Knowledge Scope</h3>
+                    <p style={{ ...mvpFieldHint, margin: '-0.25rem 0 0.5rem' }}>What the assistant is allowed to answer, what it should avoid, and when it should say information is missing. Max 500 characters.</p>
+                    <textarea style={textareaStyle} value={knowledgeScopeNotes} onChange={e => { const v = e.target.value; if (v.length <= 500) setKnowledgeScopeNotes(v); }} aria-label="Knowledge Scope" />
+                    <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginTop: 8 }}>
+                      <span style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)' }}>{knowledgeScopeNotes.length} / 500 characters</span>
+                      <button
+                        type="button"
+                        style={expandTextBtn}
+                        onClick={() => {
+                          setExpandDraft(knowledgeScopeNotes);
+                          setExpandField('knowledgeScope');
                         }}
                       >
                         Expand
@@ -1898,37 +1960,6 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                           </div>
                         ) : null}
                       </div>
-                      <div>
-                        <label style={mvpLabelStyle}>Tone rules</label>
-                        <textarea style={textareaStyle} value={toneRules} onChange={e => setToneRules(e.target.value)} aria-label="Tone rules" />
-                      </div>
-                      <div>
-                        <label style={mvpLabelStyle}>Booking behavior</label>
-                        <textarea
-                          style={textareaStyle}
-                          value={bookingBehaviorNotes}
-                          onChange={e => setBookingBehaviorNotes(e.target.value)}
-                          aria-label="Booking behavior notes"
-                        />
-                      </div>
-                      <div>
-                        <label style={mvpLabelStyle}>Escalation behavior</label>
-                        <textarea
-                          style={textareaStyle}
-                          value={escalationBehaviorNotes}
-                          onChange={e => setEscalationBehaviorNotes(e.target.value)}
-                          aria-label="Escalation behavior notes"
-                        />
-                      </div>
-                      <div>
-                        <label style={mvpLabelStyle}>Knowledge vault notes</label>
-                        <textarea
-                          style={textareaStyle}
-                          value={knowledgeScopeNotes}
-                          onChange={e => setKnowledgeScopeNotes(e.target.value)}
-                          aria-label="Knowledge vault notes"
-                        />
-                      </div>
                     </div>
                   </details>
 
@@ -2003,18 +2034,21 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                 padding: '1rem 1.15rem',
                 borderBottom: '1px solid var(--aisbp-modal-divider, #f1f5f9)',
                 display: 'flex',
-                alignItems: 'center',
+                alignItems: 'flex-start',
                 justifyContent: 'space-between',
                 gap: 12,
               }}
             >
-              <h2 style={{ fontSize: '1.05rem', fontWeight: 700, margin: 0, flex: 1, color: 'var(--aisbp-text-heading, #0f172a)' }}>
-                {expandField === 'persona'
-                  ? 'Persona'
-                  : expandField === 'goals'
-                    ? 'Conversation goals'
-                    : 'Business notes'}
-              </h2>
+              <div style={{ flex: 1 }}>
+                <h2 style={{ fontSize: '1.05rem', fontWeight: 700, margin: 0, color: 'var(--aisbp-text-heading, #0f172a)' }}>
+                  {expandFieldMeta?.title ?? ''}
+                </h2>
+                {expandFieldMeta?.help ? (
+                  <p style={{ margin: '0.35rem 0 0', fontSize: '0.8rem', color: 'var(--aisbp-muted, #64748b)', lineHeight: 1.4 }}>
+                    {expandFieldMeta.help}
+                  </p>
+                ) : null}
+              </div>
               <button
                 type="button"
                 onClick={() => setExpandField(null)}
@@ -2028,22 +2062,23 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                   fontSize: '1.1rem',
                   lineHeight: 1,
                   color: 'var(--aisbp-muted, #475569)',
+                  flexShrink: 0,
                 }}
                 aria-label="Close"
               >
                 ×
               </button>
             </div>
-            <div style={{ padding: '1rem 1.15rem', overflowY: 'auto', flex: 1, minHeight: 0 }}>
+            <div style={{ padding: '1rem 1.15rem', overflowY: 'auto', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
               <textarea
                 value={expandDraft}
                 onChange={e => setExpandDraft(e.target.value)}
-                rows={18}
                 style={{
                   ...mvpInputStyle,
                   width: '100%',
-                  minHeight: 320,
-                  resize: 'vertical' as const,
+                  flex: 1,
+                  minHeight: 300,
+                  resize: 'none',
                   fontFamily: 'inherit',
                   fontSize: '0.9rem',
                   lineHeight: 1.5,
@@ -2051,7 +2086,7 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                 spellCheck
               />
               <p style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)', margin: '0.65rem 0 0' }}>
-                {countWords(expandDraft)} words
+                {expandDraft.length} / {expandFieldMeta?.cap ?? 0} characters
               </p>
             </div>
             <div
@@ -2072,7 +2107,12 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                 onClick={() => {
                   if (expandField === 'persona') setPersona(expandDraft);
                   else if (expandField === 'goals') setGoals(expandDraft);
-                  else setAdditional(expandDraft);
+                  else if (expandField === 'additional') setAdditional(expandDraft);
+                  else if (expandField === 'toneRules') setToneRules(expandDraft);
+                  else if (expandField === 'bookingBehavior') setBookingBehaviorNotes(expandDraft);
+                  else if (expandField === 'escalationBehavior') setEscalationBehaviorNotes(expandDraft);
+                  else if (expandField === 'knowledgeScope') setKnowledgeScopeNotes(expandDraft);
+                  else if (expandField === 'criticalFacts') setCriticalFacts(expandDraft);
                   setExpandField(null);
                 }}
                 style={mvpPrimaryButtonStyle}

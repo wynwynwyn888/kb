@@ -801,6 +801,7 @@ export class BotProfilesService {
       bookingBehaviorNotes: src.bookingBehaviorNotes,
       escalationBehaviorNotes: src.escalationBehaviorNotes,
       knowledgeScopeNotes: src.knowledgeScopeNotes,
+      criticalFacts: src.criticalFacts,
       knowledgeScopeMode: src.knowledgeScopeMode,
       knowledgeAccessMode: src.knowledgeAccessMode,
       selectedVaultIds: src.selectedVaultIds,

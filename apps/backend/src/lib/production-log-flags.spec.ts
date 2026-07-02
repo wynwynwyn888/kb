@@ -3,6 +3,7 @@ import {
   ghlWebhookShapeDiagnosticsEnabled,
   outboundWhitespaceDebugEnabled,
   promptFootprintDebugEnabled,
+  isPromptSectionBudgetsEnabledForTenant,
 } from './production-log-flags';
 
 describe('production-log-flags', () => {
@@ -41,5 +42,48 @@ describe('production-log-flags', () => {
     expect(promptFootprintDebugEnabled()).toBe(true);
     process.env.PROMPT_FOOTPRINT_DEBUG = 'false';
     expect(promptFootprintDebugEnabled()).toBe(false);
+  });
+
+  describe('isPromptSectionBudgetsEnabledForTenant', () => {
+    it('PROMPT_SECTION_BUDGETS unset = false', () => {
+      delete process.env.PROMPT_SECTION_BUDGETS;
+      expect(isPromptSectionBudgetsEnabledForTenant('t1')).toBe(false);
+    });
+
+    it('PROMPT_SECTION_BUDGETS=false = false', () => {
+      process.env.PROMPT_SECTION_BUDGETS = 'false';
+      expect(isPromptSectionBudgetsEnabledForTenant('t1')).toBe(false);
+    });
+
+    it('PROMPT_SECTION_BUDGETS=true + no allowlist = all enabled', () => {
+      process.env.PROMPT_SECTION_BUDGETS = 'true';
+      delete process.env.PROMPT_SECTION_BUDGETS_TENANTS;
+      expect(isPromptSectionBudgetsEnabledForTenant('any-tenant')).toBe(true);
+    });
+
+    it('PROMPT_SECTION_BUDGETS=true + empty allowlist = all enabled', () => {
+      process.env.PROMPT_SECTION_BUDGETS = 'true';
+      process.env.PROMPT_SECTION_BUDGETS_TENANTS = '';
+      expect(isPromptSectionBudgetsEnabledForTenant('any-tenant')).toBe(true);
+    });
+
+    it('tenant in allowlist = enabled', () => {
+      process.env.PROMPT_SECTION_BUDGETS = 'true';
+      process.env.PROMPT_SECTION_BUDGETS_TENANTS = 't1,t2,t3';
+      expect(isPromptSectionBudgetsEnabledForTenant('t1')).toBe(true);
+      expect(isPromptSectionBudgetsEnabledForTenant('t2')).toBe(true);
+    });
+
+    it('tenant not in allowlist = disabled', () => {
+      process.env.PROMPT_SECTION_BUDGETS = 'true';
+      process.env.PROMPT_SECTION_BUDGETS_TENANTS = 't1,t2';
+      expect(isPromptSectionBudgetsEnabledForTenant('t3')).toBe(false);
+    });
+
+    it('global off overrides allowlist', () => {
+      delete process.env.PROMPT_SECTION_BUDGETS;
+      process.env.PROMPT_SECTION_BUDGETS_TENANTS = 't1';
+      expect(isPromptSectionBudgetsEnabledForTenant('t1')).toBe(false);
+    });
   });
 });

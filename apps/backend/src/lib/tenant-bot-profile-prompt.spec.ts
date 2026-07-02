@@ -95,4 +95,36 @@ describe('tenant-bot-profile-prompt', () => {
     expect(s).toContain('P');
     expect(s).toContain('Tone rules: T');
   });
+
+  it('Critical Facts NOT present in old buildOrchestrationTenantPromptFromProfile output', () => {
+    const out = buildOrchestrationTenantPromptFromProfile({
+      name: 'Test',
+      description: '',
+      persona: 'Friendly',
+      conversationGoals: 'Sell',
+      businessNotes: 'Notes',
+      toneRules: '',
+      bookingBehaviorNotes: '',
+      escalationBehaviorNotes: '',
+      knowledgeScopeNotes: '',
+      criticalFacts: 'Prices: $50-200. Guarantee: 30 days.',
+      knowledgeAccessSummary: buildKnowledgeAccessSummaryLine(KNOWLEDGE_ACCESS_ALL_VAULTS, []),
+    });
+    // Old path should NOT contain critical facts
+    expect(out).not.toContain('Prices: $50-200');
+    expect(out).not.toContain('Critical facts');
+    expect(out).toContain('### Bot Persona');
+  });
+
+  it('criticalFacts field is included in BotProfilePromptFields (type check)', () => {
+    const fields = {
+      name: 'Test', description: '', persona: '', conversationGoals: '', businessNotes: '',
+      toneRules: '', bookingBehaviorNotes: '', escalationBehaviorNotes: '', knowledgeScopeNotes: '',
+      criticalFacts: 'Test facts',
+      knowledgeAccessSummary: buildKnowledgeAccessSummaryLine(KNOWLEDGE_ACCESS_ALL_VAULTS, []),
+    };
+    // Just verifies the field is accepted — old path doesn't use it
+    const out = buildOrchestrationTenantPromptFromProfile(fields);
+    expect(typeof out).toBe('string');
+  });
 });

@@ -467,6 +467,7 @@ export class BotProfilesService {
       knowledgeScopeNotes?: string;
       knowledgeScopeMode?: string;
       knowledgeAccessMode?: string;
+      criticalFacts?: string;
       selectedVaultIds?: string[];
       temperature?: number;
       modelOverride?: string | null;
@@ -481,6 +482,11 @@ export class BotProfilesService {
 
     const name = body.name?.trim();
     if (!name) throw new BadRequestException('name is required');
+
+    const criticalFacts = (body.criticalFacts ?? '').trim();
+    if (criticalFacts.length > 1500) {
+      throw new BadRequestException('criticalFacts must not exceed 1,500 characters');
+    }
 
     const supabase = getSupabaseService();
     const now = new Date().toISOString();
@@ -520,6 +526,7 @@ export class BotProfilesService {
       knowledge_scope_notes: body.knowledgeScopeNotes ?? '',
       knowledge_scope_mode: effectiveScope,
       knowledge_access_mode: accessMode,
+      critical_facts: criticalFacts,
       is_active: false,
       created_at: now,
       updated_at: now,
@@ -595,6 +602,7 @@ export class BotProfilesService {
       knowledgeScopeMode: string;
       knowledgeAccessMode: string;
       selectedVaultIds: string[];
+      criticalFacts: string;
       temperature: number;
       modelOverride: string | null;
       maxTokens: number | null;
@@ -649,6 +657,13 @@ export class BotProfilesService {
           ? KNOWLEDGE_ACCESS_SELECTED_VAULTS
           : KNOWLEDGE_ACCESS_ALL_VAULTS
         : String(existing['knowledge_access_mode'] ?? '').trim() || KNOWLEDGE_ACCESS_ALL_VAULTS;
+    const nextCriticalFacts =
+      body.criticalFacts !== undefined
+        ? body.criticalFacts.trim()
+        : String(existing['critical_facts'] ?? '');
+    if (nextCriticalFacts.length > 1500) {
+      throw new BadRequestException('criticalFacts must not exceed 1,500 characters');
+    }
     const effectiveScopeForRow =
       body.knowledgeScopeMode !== undefined
         ? nextScopeMode
@@ -670,6 +685,7 @@ export class BotProfilesService {
         knowledge_scope_notes: nextKnow,
         knowledge_scope_mode: effectiveScopeForRow,
         knowledge_access_mode: nextAccessMode,
+        critical_facts: nextCriticalFacts,
         updated_at: now,
       })
       .eq('id', botProfileId)

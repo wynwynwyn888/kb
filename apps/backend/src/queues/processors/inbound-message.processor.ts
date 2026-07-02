@@ -27,6 +27,7 @@ import {
 import { excludeChatResetInboundRows, matchChatResetCommand } from '../../lib/chat-reset-command';
 import { computeOrchestrateQueueWaitMs } from '../../lib/orchestrate-queue-timing';
 import { safeTextPreviewForLog } from '../../lib/safe-text-preview-for-log';
+import { AppCacheService } from '../../lib/app-cache.service';
 import { ConversationResetService } from '../../modules/conversations/conversation-reset.service';
 import { InboundAutoTaggingService } from '../../modules/intent-tags/inbound-auto-tagging.service';
 import {
@@ -132,6 +133,7 @@ export class InboundMessageProcessor extends WorkerHost {
     @InjectQueue(QUEUES.SEND_BUBBLE) private readonly sendBubbleQueue: Queue,
     @InjectQueue(QUEUES.INBOUND_MESSAGE_PROCESSOR) private readonly inboundQueue: Queue,
     @Optional() private readonly metrics?: MetricsService,
+    @Optional() private readonly appCache?: AppCacheService,
   ) {
     super();
   }
@@ -260,9 +262,9 @@ export class InboundMessageProcessor extends WorkerHost {
           },
         });
 
-        if (ingestResult.duplicate || ingestResult.upgraded) {
+        if (ingestResult.duplicate || ingestResult.upgraded || ingestResult.skippedCrossPathDuplicate) {
           this.logger.log(
-            `Inbound message deduped: conversationId=${conversation.id} duplicate=${ingestResult.duplicate} upgraded=${ingestResult.upgraded}`,
+            `Inbound message deduped: conversationId=${conversation.id} duplicate=${ingestResult.duplicate} upgraded=${ingestResult.upgraded} skippedCrossPath=${ingestResult.skippedCrossPathDuplicate ?? false}`,
           );
           if (webhookEventId) await this.updateWebhookEventStatus(webhookEventId, 'COMPLETED');
           return;
@@ -1374,9 +1376,23 @@ export class InboundMessageProcessor extends WorkerHost {
       },
     };
 
+    // Orchestration idempotency: acquire atomic Redis lock on latest inbound message
+    // to prevent duplicate orchestration when shared ingest + webhook both enqueue jobs.
+    const lockToken = await this.tryClaimInboundForOrchestration(tenantId, conversationId);
+    if (!lockToken) {
+      this.logger.log(
+        `Orchestration skipped (already locked/completed): conversationId=${conversationId}`,
+      );
+      if (webhookEventId) await this.updateWebhookEventStatus(webhookEventId, 'COMPLETED');
+      return;
+    }
+
+    const latestMsgId = lockToken === 'empty-claim' ? '' : (await this.fetchLatestInboundOrchestrationContext(conversationId)).id ?? '';
     const result = await this.orchestrationService.orchestrate(orchestrationInput);
 
     if (result.outcome === 'SKIP_HANDOVER_ACTIVE') {
+      // Release lock so future orchestration can proceed
+      await this.releaseOrchestrationLock(latestMsgId, lockToken);
       await this.humanEscalationHolding.tryEnqueueHoldingReply({
         tenantId,
         conversationId,
@@ -1417,6 +1433,10 @@ export class InboundMessageProcessor extends WorkerHost {
           `Send-bubble job enqueued: conversationId=${conversationId}, bubbleCount=${result.replyPlan.bubbles.length}`,
         );
       }
+      await this.markOrchestrationCompleted(latestMsgId);
+    } else {
+      // Non-PROCEED outcome (e.g. guard blocked, complaint) — release lock
+      await this.releaseOrchestrationLock(latestMsgId, lockToken);
     }
 
     this.logger.log(
@@ -1535,11 +1555,79 @@ export class InboundMessageProcessor extends WorkerHost {
     return { orchestrationBatch, resetDetectionBatch };
   }
 
+  /**
+   * Acquire an atomic Redis lock to prevent duplicate orchestration for the same
+   * inbound message. Uses Redis SET NX with TTL via AppCacheService.
+   * Returns the lock owner token if acquired, or null if already locked/completed/unavailable.
+   */
+  private async tryClaimInboundForOrchestration(tenantId: string, conversationId: string): Promise<string | null> {
+    const latest = await this.fetchLatestInboundOrchestrationContext(conversationId);
+    if (!latest.id) {
+      // No inbound message to claim — allow orchestration (empty conversation)
+      return 'empty-claim';
+    }
+
+    // Check: already completed?
+    if (latest.metadata?.['orchestrationCompletedAt']) {
+      return null;
+    }
+
+    // Atomic Redis lock — Redis unavailable means skip to avoid duplicate replies
+    if (!this.appCache) {
+      this.logger.warn(
+        `Orchestration skipped (no cache): conversationId=${conversationId}`,
+      );
+      return null;
+    }
+
+    const lockKey = `lock:orch:${tenantId}:${latest.id}`;
+    const ownerToken = randomUUID();
+    const result = await this.appCache.acquireLock(lockKey, ownerToken, 120);
+
+    if (result === 'acquired') {
+      return ownerToken;
+    }
+
+    if (result === 'held') {
+      this.logger.log(
+        `Orchestration skipped (lock held): conversationId=${conversationId} messageId=${latest.id.slice(0, 8)}`,
+      );
+      return null;
+    }
+
+    // 'unavailable' — Redis down, skip to prevent duplicate replies
+    this.logger.warn(
+      `Orchestration skipped (lock unavailable): conversationId=${conversationId}`,
+    );
+    return null;
+  }
+
+  private async releaseOrchestrationLock(messageId: string, ownerToken: string): Promise<void> {
+    if (!messageId || messageId === 'empty-claim' || !ownerToken || !this.appCache) return;
+    const lockKey = `lock:orch:${messageId}`;
+    await this.appCache.releaseLock(lockKey, ownerToken);
+  }
+
+  private async markOrchestrationCompleted(messageId: string): Promise<void> {
+    if (!messageId || messageId === 'empty-claim') return;
+    const now = new Date().toISOString();
+    await this.supabase
+      .from('messages')
+      .update({
+        metadata: {
+          orchestrationCompletedAt: now,
+        },
+        updated_at: now,
+      })
+      .eq('id', messageId);
+  }
+
   private async fetchLatestInboundOrchestrationContext(conversationId: string): Promise<{
     id: string | null;
     messageType: InboundMessageJobData['messageType'];
     imageMediaUrl: string | null;
     preferredMessageId: string | null;
+    metadata: Record<string, unknown>;
   }> {
     const { data, error } = await this.supabase
       .from('messages')
@@ -1551,7 +1639,7 @@ export class InboundMessageProcessor extends WorkerHost {
       .limit(1)
       .maybeSingle();
     if (error || !data) {
-      return { id: null, messageType: 'text', imageMediaUrl: null, preferredMessageId: null };
+      return { id: null, messageType: 'text', imageMediaUrl: null, preferredMessageId: null, metadata: {} };
     }
     const id = typeof data.id === 'string' ? data.id : null;
     const content = typeof data.content === 'string' ? data.content : '';
@@ -1573,7 +1661,7 @@ export class InboundMessageProcessor extends WorkerHost {
       typeof meta['ghlInboundMessageId'] === 'string' && meta['ghlInboundMessageId'].trim()
         ? meta['ghlInboundMessageId'].trim()
         : null;
-    return { id, messageType, imageMediaUrl, preferredMessageId };
+    return { id, messageType, imageMediaUrl, preferredMessageId, metadata: meta };
   }
 
   private async fetchRecentStoredInboundImageUrl(conversationId: string): Promise<string | null> {

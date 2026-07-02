@@ -56,7 +56,10 @@ export class ActiveRecoveryWatchdogProcessor extends WorkerHost {
     }
 
     // Guard: stale job — a newer outbound started a fresh watchdog
-    if (job.opts.jobId && !(await this.isLatestWatchdog(conversationId, job.opts.jobId))) {
+    const outboundTs = new Date(job.data.latestOutboundAt).getTime();
+    const startedTs = new Date(job.data.startedAt).getTime();
+    const latest = await this.getLatestKbOutboundTimestamp(conversationId);
+    if (latest && latest > outboundTs) {
       this.logger.log(`active_recovery_stale_job_skipped: conversationId=${conversationId}`);
       return;
     }
@@ -174,23 +177,19 @@ export class ActiveRecoveryWatchdogProcessor extends WorkerHost {
     }
   }
 
-  private async isLatestWatchdog(conversationId: string, jobId: string): Promise<boolean> {
-    // Check latest outbound timestamp — if a newer outbound happened, this watchdog is stale
+  private async getLatestKbOutboundTimestamp(conversationId: string): Promise<number | null> {
     const { data } = await this.supabase
       .from('messages')
-      .select('id')
+      .select('created_at')
       .eq('conversation_id', conversationId)
       .eq('direction', 'OUTBOUND')
       .eq('sender', 'AI')
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle();
-    // Staleness is checked via job replacement in send-bubble —
-    // if we're running, we're the latest unless the DB shows a newer outbound
-    // that was sent AFTER our startedAt timestamp.
-    // We rely on BullMQ job replacement for staleness — if a newer job replaced us,
-    // this job wouldn't be running.
-    return true;
+    if (!data) return null;
+    try { return new Date(String((data as Record<string,unknown>)['created_at'])).getTime(); }
+    catch { return null; }
   }
 
   @OnWorkerEvent('failed')

@@ -13,6 +13,7 @@ on:
           - test-retrieval
           - inspect
           - bot-test
+          - diagnose
 
 jobs:
   run:
@@ -155,7 +156,67 @@ jobs:
               docker cp /tmp/run-bot-test.sh $CONTAINER:/tmp/run-bot-test.sh
               docker exec $CONTAINER sh /tmp/run-bot-test.sh "$TOKEN"
               rm /tmp/run-bot-test.sh
-            elif [ "${{ github.event.inputs.mode }}" = "test-retrieval" ]; then
+            elif [ "${{ github.event.inputs.mode }}" = "diagnose" ]; then
+              echo "=== DIAGNOSING DUPLICATE OUTBOUND ==="
+              docker exec $CONTAINER node -e "
+                const { createClient } = require('@supabase/supabase-js');
+                const s = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
+                const CID = 'acecd96e-4871-4e4d-8160-eae445ebe6e2';
+                const TID = '34c62859-95b1-49a8-911c-cc44ced05452';
+
+                async function main() {
+                  console.log('Conversation: ' + CID);
+                  console.log('Tenant: ' + TID);
+
+                  // 1. All messages
+                  const { data: msgs } = await s.from('messages').select('id, direction, content, metadata, created_at').eq('conversation_id', CID).order('created_at', { ascending: true });
+                  if (!msgs?.length) { console.log('NO MESSAGES FOUND'); return; }
+                  console.log('\\n=== MESSAGES (' + msgs.length + ' total) ===');
+                  for (const m of msgs) {
+                    const dir = m.direction === 'INBOUND' ? 'IN ' : 'OUT';
+                    const preview = (m.content || '').slice(0, 100).replace(/\\n/g, ' ');
+                    const metaKeys = Object.keys(m.metadata || {}).filter(k => k !== 'ghlMessageId').join(',');
+                    console.log(dir + ' ' + m.id.slice(0,8) + ' ' + m.created_at.slice(11,19) + ' ' + preview + (metaKeys ? ' [meta: ' + metaKeys + ']' : ''));
+                  }
+
+                  // 2. Outbound sends
+                  const { data: sends } = await s.from('outbound_sends').select('id, reply_id, bubble_sequence, status, attempt, content_hash, sent_at, created_at, last_error_code').eq('conversation_id', CID).order('created_at', { ascending: true });
+                  console.log('\\n=== OUTBOUND SENDS (' + (sends?.length || 0) + ' total) ===');
+                  if (sends) for (const os of sends) {
+                    console.log('bubble=' + os.bubble_sequence + ' reply=' + (os.reply_id||'').slice(0,8) + ' status=' + os.status + ' attempt=' + os.attempt + ' hash=' + (os.content_hash||'').slice(0,12) + ' sent=' + (os.sent_at||'').slice(11,19) + ' created=' + os.created_at.slice(11,19) + (os.last_error_code ? ' err=' + os.last_error_code : ''));
+                  }
+
+                  // 3. Duplicate prevention events
+                  const { data: dups } = await s.from('metrics_events').select('event_type, metadata, created_at').eq('conversation_id', CID).in('event_type', ['duplicate_send_prevented', 'stale_send_cancelled', 'conv_ordering_blocked', 'outbound_send_sent', 'outbound_send_failed']).order('created_at', { ascending: true });
+                  console.log('\\n=== GUARD EVENTS (' + (dups?.length || 0) + ' total) ===');
+                  if (dups) for (const d of dups) {
+                    const meta = d.metadata ? JSON.stringify(d.metadata).slice(0, 120) : '';
+                    console.log(d.created_at.slice(11,19) + ' ' + d.event_type + ' ' + meta);
+                  }
+
+                  // 4. Webhook events for this tenant recently
+                  const { data: wh } = await s.from('webhook_events').select('id, external_event_id, event_type, processing_status, dedupe_key, received_at').eq('tenant_id', TID).order('received_at', { ascending: false }).limit(20);
+                  console.log('\\n=== RECENT WEBHOOK EVENTS (last 20) ===');
+                  if (wh) for (const w of wh) {
+                    console.log(w.received_at.slice(11,19) + ' ' + w.event_type.slice(0,25) + ' status=' + w.processing_status + ' extId=' + (w.external_event_id||'').slice(0,16) + ' dedupe=' + (w.dedupe_key||'').slice(0,12));
+                  }
+
+                  // 5. Orchestration logs for this conversation
+                  const { data: orch } = await s.from('orchestration_logs').select('outcome, guard_reason, created_at').eq('conversation_id', CID).order('created_at', { ascending: true });
+                  console.log('\\n=== ORCHESTRATION LOGS (' + (orch?.length || 0) + ' total) ===');
+                  if (orch) for (const o of orch) {
+                    console.log(o.created_at.slice(11,19) + ' ' + o.outcome + (o.guard_reason ? ' (' + o.guard_reason + ')' : ''));
+                  }
+
+                  // 6. Check BullMQ queues (via Redis) - limited to counts
+                  console.log('\\n=== BULLMQ QUEUE COUNTS (Redis) ===');
+                  // Can't query Redis from here, note it
+                  console.log('(BullMQ jobs live in Redis — check via docker exec redis-cli)');
+
+                  console.log('\\nDIAGNOSIS COMPLETE.');
+                }
+                main().catch(e => { console.error('ERROR', e.message); process.exit(1); });
+              "
               echo "=== COPYING RETRIEVAL TEST SCRIPT ==="
               cat > /tmp/test-retrieval.ts << 'SCRIPT_EOF'
             import { createClient } from '@supabase/supabase-js';

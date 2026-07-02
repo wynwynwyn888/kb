@@ -3,22 +3,58 @@ import { ingestInboundMessage, computeContentFingerprint } from './inbound-messa
 
 type Response = { data: unknown; error: unknown };
 
-function makeSupabase(responses: Response[], insertError?: { message: string; code: string } | null) {
+// Chainable mock builder that supports:
+//   .eq().filter().maybeSingle()  (Tier 1, Tier 2, upgrade)
+//   .eq().eq().gte().order().limit()  (Tier 2.5 cross-path)
+function buildChain(responses: Response[], crossPathRes?: Response | null) {
   let i = 0;
+
   const maybeSingle = jestGlobal.fn(async () => {
     const r = responses[i] ?? { data: null, error: null };
     i++;
     return r;
   });
+
+  let crossPathCalled = false;
+  const limitFn = jestGlobal.fn(async () => {
+    crossPathCalled = true;
+    const r = crossPathRes ?? { data: null, error: null };
+    // Supabase .limit() returns { data: rows[], error: null }
+    return { data: r.data ? [r.data] : [], error: null };
+  });
+
+  // Fluid builder: all methods available on the same object, each returns a fluent chain
+  function makeFluent(): Record<string, jestGlobal.Mock> {
+    const chain: Record<string, jestGlobal.Mock> = {
+      eq: jestGlobal.fn((_k: string, _v: string) => chain),
+      filter: jestGlobal.fn((_k: string, _op: string, _v: string) => chain),
+      gte: jestGlobal.fn((_k: string, _v: string) => chain),
+      order: jestGlobal.fn((_k: string, _opts?: unknown) => chain),
+      limit: limitFn,
+      maybeSingle,
+    };
+    return chain;
+  }
+
   return {
+    fluent: makeFluent(),
+    getCrossPathCalled: () => crossPathCalled,
+    getCallCount: () => i,
+  };
+}
+
+function makeSupabase(
+  responses: Response[],
+  insertError?: { message: string; code: string } | null,
+  crossPathResponse?: Response | null,
+) {
+  const chain = buildChain(responses, crossPathResponse);
+
+  return {
+    crossPathWasCalled: chain.getCrossPathCalled,
+    callCount: chain.getCallCount,
     from: jestGlobal.fn((_table: string) => ({
-      select: jestGlobal.fn((_cols: string) => ({
-        eq: jestGlobal.fn((_k: string, _v: string) => ({
-          filter: jestGlobal.fn((_k: string, _op: string, _v: string) => ({
-            maybeSingle,
-          })),
-        })),
-      })),
+      select: jestGlobal.fn((_cols: string) => chain.fluent),
       insert: jestGlobal.fn((_data: unknown) => ({
         select: jestGlobal.fn(() => ({
           single: jestGlobal.fn(async () => {
@@ -278,6 +314,115 @@ describe('ingestInboundMessage', () => {
       const p1 = makeParams({ content: 'Hello' });
       const p2 = makeParams({ content: 'World' });
       expect(computeContentFingerprint(p1)).not.toBe(computeContentFingerprint(p2));
+    });
+  });
+
+  describe('tier 2.5 — cross-path dedupe (same content, different timestamp/fingerprint)', () => {
+    const STAFF_MSG = 'I already have staff replying to WhatsApp, why do I need this?';
+
+    it('skips shared ingest duplicate when webhook already inserted (different ghlTimestamp)', async () => {
+      // Tier 1: ghlMessageId not found → Tier 2: fingerprint not found (different timestamps)
+      // → Tier 2.5: cross-path check finds recent same-content message → skipped
+      const supabase = makeSupabase(
+        [R(null), R(null)],  // Tier 1 miss, Tier 2 miss
+        null,                 // no insert error
+        R('existing-msg-id'), // cross-path check: found
+      );
+      const result = await ingestInboundMessage(makeParams({
+        supabase,
+        ghlMessageId: null,
+        ingestSource: 'ghl-sync',
+        ghlTimestamp: '2026-07-02T16:25:31.000Z', // different from webhook timestamp
+        content: STAFF_MSG,
+      }));
+      expect(result.inserted).toBe(false);
+      expect(result.skippedCrossPathDuplicate).toBe(true);
+      expect(result.messageId).toBe('existing-msg-id');
+      expect(supabase.crossPathWasCalled()).toBe(true);
+    });
+
+    it('skips webhook duplicate when shared ingest already inserted (different ghlTimestamp)', async () => {
+      const supabase = makeSupabase(
+        [R(null), R(null)],
+        null,
+        R('ingest-msg-id'),
+      );
+      const result = await ingestInboundMessage(makeParams({
+        supabase,
+        ghlMessageId: null,
+        ingestSource: 'webhook',
+        ghlTimestamp: '2026-07-02T16:26:33.000Z',
+        content: 'Can I just use ChatGPT?',
+      }));
+      expect(result.inserted).toBe(false);
+      expect(result.skippedCrossPathDuplicate).toBe(true);
+      expect(result.messageId).toBe('ingest-msg-id');
+    });
+
+    it('allows insertion when no recent same-content message found', async () => {
+      const supabase = makeSupabase(
+        [R(null), R(null)],  // Tier 1 miss, Tier 2 miss
+        null,
+        { data: null, error: null }, // cross-path: NOT FOUND
+      );
+      const result = await ingestInboundMessage(makeParams({
+        supabase,
+        ghlMessageId: null,
+        content: STAFF_MSG,
+      }));
+      expect(result.inserted).toBe(true);
+      expect(result.skippedCrossPathDuplicate).toBeUndefined();
+    });
+
+    it('allows insertion when same content but different conversation', async () => {
+      // Different conversation → cross-path check uses conversation_id in query,
+      // so it won't find messages from a different conversation.
+      // We simulate this by having the cross-path check return empty.
+      const supabase = makeSupabase(
+        [R(null), R(null)],
+        null,
+        { data: null, error: null }, // not found (different conversation)
+      );
+      const result = await ingestInboundMessage(makeParams({
+        supabase,
+        ghlMessageId: null,
+        conversationId: 'conv-different',
+        content: STAFF_MSG,
+      }));
+      expect(result.inserted).toBe(true);
+    });
+
+    it('does not trigger cross-path check for OUTBOUND direction', async () => {
+      // OUTBOUND messages should never be skipped by cross-path check
+      const supabase = makeSupabase(
+        [R(null), R(null)],
+        null,
+        R('should-not-match'), // cross-path would find this, but direction is OUTBOUND
+      );
+      const result = await ingestInboundMessage(makeParams({
+        supabase,
+        ghlMessageId: null,
+        direction: 'OUTBOUND',
+        sender: 'BOT',
+        content: STAFF_MSG,
+      }));
+      // For OUTBOUND, cross-path check returns null early → normal insert
+      expect(result.inserted).toBe(true);
+      expect(result.skippedCrossPathDuplicate).toBeUndefined();
+    });
+
+    it('still inserts when fingerprint matches normally (Tier 2 wins, Tier 2.5 not reached)', async () => {
+      // If fingerprint matches, we return early before Tier 2.5
+      // ghlMessageId=null → Tier 1 skipped → only Tier 2 fingerprint check runs
+      const supabase = makeSupabase([R('fp-match-id')]); // fingerprint HIT
+      const result = await ingestInboundMessage(makeParams({
+        supabase,
+        ghlMessageId: null,
+        content: STAFF_MSG,
+      }));
+      expect(result.inserted).toBe(false);
+      expect(result.duplicate).toBe(true);
+      expect(result.skippedCrossPathDuplicate).toBeUndefined();
     });
   });
 });

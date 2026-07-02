@@ -1,7 +1,11 @@
-// Shared inbound / external message ingest with 3-tier dedupe.
+// Shared inbound / external message ingest with 4-tier dedupe.
 //
 // Tier 1: Dedupe by ghlMessageId (GHL's internal message ID from webhook data.id or API).
-// Tier 2: If no ghlMessageId, dedupe by contentFingerprint within the same conversation.
+// Tier 2: Dedupe by contentFingerprint within the same conversation.
+// Tier 2.5: Cross-path dedupe — if fingerprint missed (different timestamps), check recent
+//   same-content messages within CROSS_PATH_DEDUPE_WINDOW_MS (120s). Prevents duplicate
+//   inbound when shared ingest and webhook/recovery sync deliver the same message with
+//   different timestamps.
 // Tier 3: Upgrade: when sync later discovers a real ghlMessageId for a fallback row,
 //   update the existing row's metadata rather than inserting a duplicate.
 //
@@ -11,6 +15,8 @@
 import { createHash } from 'crypto';
 import { randomUUID } from 'crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
+
+const CROSS_PATH_DEDUPE_WINDOW_MS = 120_000; // 120 seconds
 
 export interface IngestInboundParams {
   supabase: SupabaseClient;
@@ -33,6 +39,7 @@ export interface IngestResult {
   upgraded: boolean;            // Fallback row was upgraded with real ghlMessageId
   messageId: string;
   fingerprintConflict?: boolean; // Fingerprint matched but both rows have different real ghlMessageIds
+  skippedCrossPathDuplicate?: boolean; // Tier 2.5: same content within 120s window, skipped insertion
 }
 
 export function computeContentFingerprint(params: IngestInboundParams): string {
@@ -80,6 +87,49 @@ function buildMessageMetadata(params: IngestInboundParams, fingerprint: string):
     ghlTimestampRaw: rawTs || undefined,
     ...(params.sourceMetadata ?? {}),
   };
+}
+
+/**
+ * Tier 2.5: Cross-path duplicate check.
+ *
+ * When the fingerprint-based dedupe (Tier 2) misses because timestamps differ
+ * between shared ingest and webhook/recovery sync paths, this checks for recent
+ * messages with the same content in the same conversation.
+ */
+async function checkCrossPathDuplicate(
+  supabase: SupabaseClient,
+  params: IngestInboundParams,
+): Promise<{ id: string } | null> {
+  const content = params.content.trim();
+  if (!content) return null;
+
+  // Only meaningful for INBOUND messages
+  if (params.direction !== 'INBOUND') return null;
+
+  const windowStart = new Date(Date.now() - CROSS_PATH_DEDUPE_WINDOW_MS).toISOString();
+
+  // Use GHL timestamp as fallback window start if available and valid
+  const ghlTs = params.ghlTimestamp?.trim();
+  const ghlWindowStart = ghlTs && isValidIsoTimestamp(ghlTs)
+    ? new Date(new Date(ghlTs).getTime() - CROSS_PATH_DEDUPE_WINDOW_MS).toISOString()
+    : windowStart;
+
+  // Query: find messages in same conversation with matching content created recently
+  const { data: recent } = await supabase
+    .from('messages')
+    .select('id')
+    .eq('conversation_id', params.conversationId)
+    .eq('content', content)
+    .gte('created_at', ghlWindowStart)
+    .order('created_at', { ascending: true })
+    .limit(1);
+
+  const first = recent?.[0];
+  if (first) {
+    return { id: first.id as string };
+  }
+
+  return null;
 }
 
 export async function ingestInboundMessage(
@@ -142,6 +192,19 @@ export async function ingestInboundMessage(
 
     // Same fingerprint, same or no ghlMessageId → genuine duplicate
     return { inserted: false, duplicate: true, upgraded: false, messageId: fpMatch.id as string };
+  }
+
+  // Tier 2.5: Cross-path dedupe — fingerprint missed (different timestamps) but same content
+  // may exist from another ingest path (shared ingest vs webhook vs recovery sync)
+  const crossPathMatch = await checkCrossPathDuplicate(supabase, params);
+  if (crossPathMatch) {
+    return {
+      inserted: false,
+      duplicate: false,
+      upgraded: false,
+      messageId: crossPathMatch.id,
+      skippedCrossPathDuplicate: true,
+    };
   }
 
   // Insert new message — with DB-level conflict handling

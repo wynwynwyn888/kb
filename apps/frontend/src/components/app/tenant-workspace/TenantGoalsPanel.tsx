@@ -603,6 +603,7 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
         bookingBehaviorNotes,
         escalationBehaviorNotes,
         knowledgeScopeNotes,
+        criticalFacts,
         knowledgeAccessMode,
         selectedVaultIds:
           knowledgeAccessMode === KNOWLEDGE_ACCESS_SELECTED_VAULTS ? selectedVaultIds : undefined,

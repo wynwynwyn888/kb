@@ -2,12 +2,21 @@ name: Seed AISBP Agency Vault
 
 on:
   workflow_dispatch:
+    inputs:
+      mode:
+        description: 'seed | test-retrieval'
+        required: true
+        default: 'seed'
+        type: choice
+        options:
+          - seed
+          - test-retrieval
 
 jobs:
-  seed:
+  run:
     runs-on: ubuntu-latest
     steps:
-      - name: SSH and run seed script
+      - name: SSH and run
         uses: appleboy/ssh-action@v1
         with:
           host: ${{ secrets.VPS_HOST }}
@@ -17,17 +26,61 @@ jobs:
           script: |
             set -e
             cd /root/aisbp
-
-            echo "=== PULLING LATEST MAIN ==="
             git fetch origin main
             git checkout main
             git reset --hard origin/main
 
-            echo "=== COPYING SEED SCRIPT INTO CONTAINER ==="
             CONTAINER=$(docker ps -qf name=aisbp-backend)
-            docker cp apps/backend/scripts/seed-aisbp-vault.ts $CONTAINER:/app/apps/backend/scripts/seed-aisbp-vault.ts
 
-            echo "=== RUNNING AISBP VAULT SEED ==="
-            docker exec $CONTAINER npx tsx scripts/seed-aisbp-vault.ts
+            if [ "${{ github.event.inputs.mode }}" = "test-retrieval" ]; then
+              echo "=== COPYING RETRIEVAL TEST SCRIPT ==="
+              cat > /tmp/test-retrieval.ts << 'SCRIPT_EOF'
+            import { createClient } from '@supabase/supabase-js';
+            import { rankChunksByRelevance } from '../lib/kb-retrieval-score';
 
-            echo "=== DONE ==="
+            const TID = '34c62859-95b1-49a8-911c-cc44ced05452';
+            const VID = 'b26f2661-23e9-4689-b2c9-9010735ddaee';
+            const TOP = 5;
+
+            const supabase = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, { auth: { autoRefreshToken: false, persistSession: false } });
+
+            async function load() {
+              const { data: docs } = await supabase.from('knowledge_documents').select('id, title, source').eq('tenant_id', TID).eq('vault_id', VID).eq('status', 'READY').order('updated_at', { ascending: false }).limit(200);
+              if (!docs?.length) return [];
+              const map = new Map(docs.map(d => [d.id, d]));
+              const { data: rows } = await supabase.from('knowledge_chunks').select('id, document_id, content, metadata').in('document_id', [...map.keys()]).limit(3000);
+              if (!rows?.length) return [];
+              return rows.map(r => { const d = map.get(r.document_id); return { id: r.id, documentId: r.document_id, title: (d?.title ?? r.document_id).slice(0, 200), source: d?.source ?? '?', content: r.content, metadata: (r.metadata ?? {}) }; });
+            }
+
+            async function test(q: string) {
+              console.log('\nQUERY: "' + q + '"');
+              const chunks = await load();
+              if (!chunks.length) { console.log('  NO CHUNKS'); return; }
+              const ranked = rankChunksByRelevance(q, chunks);
+              if (!ranked.length) { console.log('  NONE (all scored 0)'); return; }
+              for (let i = 0; i < Math.min(ranked.length, TOP); i++) {
+                const c = ranked[i].chunk;
+                const s = c.metadata['sectionTitle'] || '(no section)';
+                const p = c.content.slice(0, 100).replace(/\n/g, ' ');
+                console.log('  #'+(i+1)+' score='+ranked[i].score.toFixed(1)+' src='+c.source+' doc="'+c.title.slice(0,60)+'"');
+                console.log('     section="'+String(s).slice(0,50)+'" preview: '+p+'...');
+              }
+            }
+
+            (async () => {
+              console.log('Tenant: '+TID+'\nVault: '+VID+'\nTop K: '+TOP);
+              for (const q of ['How much does it cost?','I already have staff replying to WhatsApp','Can I just use ChatGPT?','What ROI can I expect?','What is the AI Automation Session?','Thank you for contacting ABC Clinic. Please provide your name and preferred appointment date.']) await test(q);
+              console.log('\nDONE.');
+            })().catch(e => { console.error('ERROR', e); process.exit(1); });
+            SCRIPT_EOF
+              docker cp /tmp/test-retrieval.ts $CONTAINER:/app/apps/backend/test-retrieval.ts
+              echo "=== RUNNING RETRIEVAL TESTS ==="
+              docker exec $CONTAINER npx tsx test-retrieval.ts
+              rm /tmp/test-retrieval.ts
+            else
+              echo "=== COPYING SEED SCRIPT INTO CONTAINER ==="
+              docker cp apps/backend/scripts/seed-aisbp-vault.ts $CONTAINER:/app/apps/backend/scripts/seed-aisbp-vault.ts
+              echo "=== RUNNING AISBP VAULT SEED ==="
+              docker exec $CONTAINER npx tsx scripts/seed-aisbp-vault.ts
+            fi

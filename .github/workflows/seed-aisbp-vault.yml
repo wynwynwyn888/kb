@@ -23,9 +23,13 @@ jobs:
             git checkout main
             git reset --hard origin/main
 
+            echo "=== COPYING SEED SCRIPT INTO CONTAINER ==="
+            CONTAINER=$(docker ps -qf name=aisbp-backend)
+            docker cp apps/backend/scripts/seed-aisbp-vault.ts $CONTAINER:/app/apps/backend/scripts/seed-aisbp-vault.ts
+
             echo "=== RUNNING AISBP VAULT SEED ==="
             docker exec -e SUPABASE_URL -e SUPABASE_SERVICE_ROLE_KEY \
-              $(docker ps -qf name=aisbp-backend) \
+              $CONTAINER \
               npx tsx scripts/seed-aisbp-vault.ts
 
             echo "=== DONE ==="

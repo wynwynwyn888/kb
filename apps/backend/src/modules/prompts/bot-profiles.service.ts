@@ -62,6 +62,7 @@ export interface TenantBotProfileDto {
   escalationBehaviorNotes: string;
   knowledgeScopeNotes: string;
   knowledgeScopeMode: string;
+  criticalFacts: string;
   /** all_vaults | selected_vaults */
   knowledgeAccessMode: string;
   selectedVaultIds: string[];
@@ -142,6 +143,7 @@ export class BotProfilesService {
       bookingBehaviorNotes: (row['booking_behavior_notes'] as string) ?? '',
       escalationBehaviorNotes: (row['escalation_behavior_notes'] as string) ?? '',
       knowledgeScopeNotes: (row['knowledge_scope_notes'] as string) ?? '',
+      criticalFacts: (row['critical_facts'] as string) ?? '',
       knowledgeScopeMode:
         String(row['knowledge_scope_mode'] ?? '').trim() || KNOWLEDGE_SCOPE_ALL_WORKSPACE,
       knowledgeAccessMode,
@@ -219,6 +221,7 @@ export class BotProfilesService {
       bookingBehaviorNotes: String(row['booking_behavior_notes'] ?? ''),
       escalationBehaviorNotes: String(row['escalation_behavior_notes'] ?? ''),
       knowledgeScopeNotes: String(row['knowledge_scope_notes'] ?? ''),
+      criticalFacts: String(row['critical_facts'] ?? ''),
       knowledgeAccessSummary: summary,
     };
   }

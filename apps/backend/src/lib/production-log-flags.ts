@@ -35,3 +35,11 @@ export function outboundWhitespaceDebugEnabled(): boolean {
 export function promptFootprintDebugEnabled(): boolean {
   return process.env['PROMPT_FOOTPRINT_DEBUG'] !== 'false';
 }
+
+/** Per-section prompt budgets enabled for a specific tenant. */
+export function isPromptSectionBudgetsEnabledForTenant(tenantId: string): boolean {
+  if (process.env['PROMPT_SECTION_BUDGETS'] !== 'true') return false;
+  const allowlist = (process.env['PROMPT_SECTION_BUDGETS_TENANTS'] ?? '').trim();
+  if (!allowlist) return true; // global on + empty allowlist = all tenants
+  return allowlist.split(',').map(s => s.trim()).filter(Boolean).includes(tenantId);
+}

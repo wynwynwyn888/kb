@@ -177,43 +177,86 @@ describe('ingestInboundMessage', () => {
 
   describe('ghlTimestamp validation', () => {
     it('accepts valid ISO timestamp as created_at', async () => {
+      let insertedRow: Record<string, unknown> | null = null;
       const supabase = makeSupabase([R(null)]);
+      // Override the insert mock to capture the row
+      const origFrom = supabase.from;
+      supabase.from = jestGlobal.fn((table: string) => {
+        const result = origFrom(table);
+        if (table === 'messages') {
+          const origInsert = (result as any).insert;
+          (result as any).insert = jestGlobal.fn((row: Record<string, unknown>) => {
+            insertedRow = row;
+            return { select: () => ({ single: async () => ({ data: { id: 'test-id' }, error: null }) }) };
+          });
+        }
+        return result;
+      });
       const result = await ingestInboundMessage(makeParams({
         supabase, ghlTimestamp: '2026-07-02T03:55:00.000Z',
       }));
       expect(result.inserted).toBe(true);
+      expect(insertedRow?.['created_at']).toBe('2026-07-02T03:55:00.000Z');
     });
 
-    it('falls back when ghlTimestamp is HH:MM only (like "11:54")', async () => {
+    it('omits created_at when ghlTimestamp is HH:MM only (DB default now())', async () => {
+      let insertedRow: Record<string, unknown> | null = null;
       const supabase = makeSupabase([R(null)]);
+      const origFrom = supabase.from;
+      supabase.from = jestGlobal.fn((table: string) => {
+        const result = origFrom(table);
+        if (table === 'messages') {
+          const origInsert = (result as any).insert;
+          (result as any).insert = jestGlobal.fn((row: Record<string, unknown>) => {
+            insertedRow = row;
+            return { select: () => ({ single: async () => ({ data: { id: 'test-id' }, error: null }) }) };
+          });
+        }
+        return result;
+      });
       const result = await ingestInboundMessage(makeParams({
         supabase, ghlTimestamp: '11:54',
       }));
       expect(result.inserted).toBe(true);
-      // Should not throw 'invalid input syntax for type timestamp'
+      expect(insertedRow?.['created_at']).toBeUndefined();
+      expect(insertedRow?.['metadata']?.ghlTimestamp).toBeUndefined();
+      expect(insertedRow?.['metadata']?.ghlTimestampRaw).toBe('11:54');
+    });
+
+    it('metadata.ghlTimestamp is present for valid ISO', async () => {
+      let insertedRow: Record<string, unknown> | null = null;
+      const supabase = makeSupabase([R(null)]);
+      const origFrom = supabase.from;
+      supabase.from = jestGlobal.fn((table: string) => {
+        const result = origFrom(table);
+        if (table === 'messages') {
+          (result as any).insert = jestGlobal.fn((row: Record<string, unknown>) => {
+            insertedRow = row;
+            return { select: () => ({ single: async () => ({ data: { id: 'test-id' }, error: null }) }) };
+          });
+        }
+        return result;
+      });
+      await ingestInboundMessage(makeParams({ supabase, ghlTimestamp: '2026-07-02T03:55:00Z' }));
+      expect(insertedRow?.['metadata']?.ghlTimestamp).toBe('2026-07-02T03:55:00Z');
+      expect(insertedRow?.['metadata']?.ghlTimestampRaw).toBe('2026-07-02T03:55:00Z');
     });
 
     it('falls back when ghlTimestamp is empty string', async () => {
       const supabase = makeSupabase([R(null)]);
-      const result = await ingestInboundMessage(makeParams({
-        supabase, ghlTimestamp: '',
-      }));
+      const result = await ingestInboundMessage(makeParams({ supabase, ghlTimestamp: '' }));
       expect(result.inserted).toBe(true);
     });
 
     it('falls back when ghlTimestamp is null', async () => {
       const supabase = makeSupabase([R(null)]);
-      const result = await ingestInboundMessage(makeParams({
-        supabase, ghlTimestamp: null,
-      }));
+      const result = await ingestInboundMessage(makeParams({ supabase, ghlTimestamp: null }));
       expect(result.inserted).toBe(true);
     });
 
     it('falls back when ghlTimestamp is invalid string', async () => {
       const supabase = makeSupabase([R(null)]);
-      const result = await ingestInboundMessage(makeParams({
-        supabase, ghlTimestamp: 'not-a-date',
-      }));
+      const result = await ingestInboundMessage(makeParams({ supabase, ghlTimestamp: 'not-a-date' }));
       expect(result.inserted).toBe(true);
     });
   });

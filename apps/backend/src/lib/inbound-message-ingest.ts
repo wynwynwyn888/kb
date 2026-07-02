@@ -56,14 +56,15 @@ function isValidIsoTimestamp(ts: string): boolean {
 }
 
 function resolveCreatedAt(ghlTimestamp?: string | null): {
-  createdAt: string;
+  createdAt: string | undefined;
   ghlTimestampValid: boolean;
 } {
   const raw = ghlTimestamp?.trim();
   if (raw && isValidIsoTimestamp(raw)) {
     return { createdAt: raw, ghlTimestampValid: true };
   }
-  return { createdAt: new Date().toISOString(), ghlTimestampValid: false };
+  // Invalid/missing → omit created_at so DB default now() applies
+  return { createdAt: undefined, ghlTimestampValid: false };
 }
 
 function buildMessageMetadata(params: IngestInboundParams, fingerprint: string): Record<string, unknown> {
@@ -148,7 +149,7 @@ export async function ingestInboundMessage(
   const metadata = buildMessageMetadata(params, fingerprint);
   const { createdAt } = resolveCreatedAt(params.ghlTimestamp);
 
-  const { error: insErr } = await supabase.from('messages').insert({
+  const insertRow: Record<string, unknown> = {
     id: newId,
     conversation_id: conversationId,
     direction: params.direction,
@@ -156,8 +157,12 @@ export async function ingestInboundMessage(
     content: params.content,
     contentType: params.contentType,
     metadata,
-    created_at: createdAt,
-  }).select('id').single();
+  };
+  if (createdAt) {
+    insertRow['created_at'] = createdAt;
+  }
+
+  const { error: insErr } = await supabase.from('messages').insert(insertRow).select('id').single();
 
   if (insErr) {
     const msg = String(insErr?.message ?? insErr ?? '');

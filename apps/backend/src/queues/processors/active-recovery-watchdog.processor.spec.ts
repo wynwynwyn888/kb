@@ -134,28 +134,57 @@ describe('ActiveRecoveryWatchdogProcessor', () => {
     expect(mockWatchdogQueueAdd).toHaveBeenCalled();
   });
 
-  it.skip('stale watchdog no-ops when newer KB outbound exists', async () => {
+  it('stale watchdog no-ops when newer KB outbound exists', async () => {
     process.env['GHL_ACTIVE_RECOVERY_WATCHDOG_ENABLED'] = 'true';
     const now = Date.now();
-    // Mock: latest KB outbound at 5s ago (newer than job's outbound at 30s ago)
-    mockGetSupabaseService.mockReturnValue({
+    const newerOutboundTs = new Date(now - 5_000).toISOString(); // 5s ago
+    const oldWatchdogTs = new Date(now - 30_000).toISOString();   // 30s ago
+
+    // Create fresh supabase mock where the order path returns a newer outbound
+    const mockSupa = {
       from: jestGlobal.fn(() => ({
         select: jestGlobal.fn(() => ({
           eq: jestGlobal.fn(() => ({
             single: jestGlobal.fn(async () => ({ data: { metadata: {} }, error: null })),
             eq: jestGlobal.fn(() => ({
               eq: jestGlobal.fn(() => ({
-                order: jestGlobal.fn(() => ({ limit: () => ({ maybeSingle: async () => ({ data: { created_at: new Date(now - 5_000).toISOString() }, error: null }) }) })),
-                gte: jestGlobal.fn(() => ({ limit: () => ({ maybeSingle: async () => ({ data: null, error: null }) }) })),
+                order: jestGlobal.fn(() => ({
+                  limit: jestGlobal.fn(() => ({
+                    maybeSingle: jestGlobal.fn(async () => ({ data: { created_at: newerOutboundTs }, error: null })),
+                  })),
+                })),
+                gte: jestGlobal.fn(() => ({
+                  limit: jestGlobal.fn(() => ({
+                    maybeSingle: jestGlobal.fn(async () => ({ data: null, error: null })),
+                  })),
+                })),
               })),
             })),
           })),
         })),
         update: jestGlobal.fn(() => ({ eq: jestGlobal.fn(async () => ({})) })),
       })),
-    });
+    };
+
+    mockGetSupabaseService.mockReturnValue(mockSupa);
+    // Fresh processor with the new mock
+    const p = new ActiveRecoveryWatchdogProcessor(
+      { add: jestGlobal.fn() } as never,
+      { add: jestGlobal.fn(), remove: jestGlobal.fn() } as never,
+    );
+
     mockSyncGhlConversationContext.mockClear();
-    await processor.process(makeJob({ latestOutboundAt: new Date(now - 30_000).toISOString() }));
+
+    await p.process({
+      id: 'wdog-stale', opts: { jobId: 'wdog:t1:conv1' }, name: 'check',
+      data: {
+        tenantId: 't1', conversationId: 'conv1', ghlLocationId: 'loc1', contactId: 'c1',
+        latestOutboundAt: oldWatchdogTs,
+        startedAt: oldWatchdogTs,
+        expiresAt: new Date(now + 30 * 60 * 1000).toISOString(),
+      },
+    } as unknown as Job);
+
     expect(mockSyncGhlConversationContext).not.toHaveBeenCalled();
   });
 

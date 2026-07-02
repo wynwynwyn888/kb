@@ -613,6 +613,10 @@ export class BotProfilesService {
       throw new ForbiddenException('Insufficient permissions');
     }
 
+    if (body.criticalFacts !== undefined && (body.criticalFacts?.trim() ?? '').length > 1500) {
+      throw new BadRequestException('criticalFacts must not exceed 1,500 characters');
+    }
+
     const supabase = getSupabaseService();
     const { data: existing, error: fe } = await supabase
       .from('tenant_bot_profiles')

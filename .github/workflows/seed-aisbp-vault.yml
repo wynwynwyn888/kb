@@ -117,85 +117,44 @@ jobs:
                 })().catch(e => { console.error('ERROR', e.message); process.exit(1); });
               "
             elif [ "${{ github.event.inputs.mode }}" = "bot-test" ]; then
-              echo "=== COPYING BOT TEST SCRIPT ==="
-              cat > /tmp/bot-test.ts << 'BOTSCRIPT'
-            import jwt from 'jsonwebtoken';
-            import http from 'http';
+              echo "=== GENERATING AUTH TOKEN ==="
+              TOKEN=$(docker exec $CONTAINER node -e "
+                const crypto = require('crypto');
+                const secret = process.env.JWT_SECRET;
+                const h = Buffer.from(JSON.stringify({alg:'HS256',typ:'JWT'})).toString('base64url');
+                const p = Buffer.from(JSON.stringify({sub:'bot-test',agencyRole:'admin',iat:Math.floor(Date.now()/1000),exp:Math.floor(Date.now()/1000)+600})).toString('base64url');
+                const s = crypto.createHmac('sha256', secret).update(h+'.'+p).digest('base64url');
+                console.log(h+'.'+p+'.'+s);
+              ")
 
-            const SECRET = process.env.JWT_SECRET!;
-            const token = jwt.sign({ sub: 'system-bot-test', agencyRole: 'admin' }, SECRET, { expiresIn: '5m' });
-            const TID = '34c62859-95b1-49a8-911c-cc44ced05452';
-
-            const messages = [
-              'How much does it cost?',
-              'I already have staff replying to WhatsApp, why do I need this?',
-              'Can I just use ChatGPT?',
-              'What ROI can I expect?',
-              'What is the AI Automation Session?',
-              'Thank you for contacting ABC Clinic. Please provide your name and preferred appointment date.',
-            ];
-
-            function send(msg: string, idx: number): Promise<{reply: string, chunks: number, msg: string}> {
-              return new Promise((resolve, reject) => {
-                const body = JSON.stringify({ message: msg, history: [] });
-                const req = http.request({
-                  hostname: 'localhost', port: 3001,
-                  path: '/api/v1/tenants/' + TID + '/bot-test',
-                  method: 'POST',
-                  headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': 'Bearer ' + token,
-                    'Content-Length': Buffer.byteLength(body),
-                  },
-                  timeout: 60000,
-                }, (res) => {
-                  let data = '';
-                  res.on('data', c => data += c);
-                  res.on('end', () => {
-                    try {
-                      const j = JSON.parse(data);
-                      const reply = (j.reply || '').trim();
-                      const preview = reply.length > 250 ? reply.slice(0, 250) + '...' : reply;
-                      console.log('');
-                      console.log('=== Message ' + (idx+1) + ' ===');
-                      console.log('User: ' + msg);
-                      console.log('Reply: ' + preview);
-                      console.log('KB chunks: ' + (j.kbChunksUsed ?? '?'));
-                      console.log('Model: ' + (j.modelUsed || '?'));
-                      console.log('Skip: ' + (j.skipReason || 'none'));
-                      resolve({ reply, chunks: j.kbChunksUsed || 0, msg });
-                    } catch(e) { reject(e); }
-                  });
-                });
-                req.on('error', e => reject(e));
-                req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
-                req.write(body);
-                req.end();
-              });
-            }
-
-            (async () => {
-              console.log('Tenant: ' + TID);
-              const results: any[] = [];
-              for (let i = 0; i < messages.length; i++) {
-                try {
-                  results.push(await send(messages[i], i));
-                } catch(e: any) {
-                  console.log('');
-                  console.log('=== Message ' + (i+1) + ' ===');
-                  console.log('User: ' + messages[i]);
-                  console.log('ERROR: ' + e.message);
-                }
-                await new Promise(r => setTimeout(r, 2000));
-              }
-              console.log('');
-              console.log('DONE. ' + results.length + '/' + messages.length + ' processed.');
-            })().catch(e => { console.error('FATAL', e.message); process.exit(1); });
-            BOTSCRIPT
-              docker cp /tmp/bot-test.ts $CONTAINER:/app/apps/backend/bot-test.ts
-              echo "=== RUNNING BOT TEST ==="
-              docker exec $CONTAINER npx tsx bot-test.ts
-              rm /tmp/bot-test.ts
+              echo "=== COPYING TEST SCRIPT ==="
+              cat > /tmp/run-bot-test.sh << 'TESTEOF'
+            #!/bin/sh
+            TOKEN="$1"
+            TID="34c62859-95b1-49a8-911c-cc44ced05452"
+            for msg in \
+              "How much does it cost?" \
+              "I already have staff replying to WhatsApp, why do I need this?" \
+              "Can I just use ChatGPT?" \
+              "What ROI can I expect?" \
+              "What is the AI Automation Session?" \
+              "Thank you for contacting ABC Clinic. Please provide your name and preferred appointment date."; do
+              echo ""
+              echo ">>> User: $msg"
+              printf '{"message":"%s","history":[]}' "$msg" | curl -s --max-time 90 -X POST \
+                "http://localhost:3001/api/v1/tenants/$TID/bot-test" \
+                -H "Content-Type: application/json" \
+                -H "Authorization: Bearer $TOKEN" \
+                -d @-
+              echo ""
+              sleep 3
+            done
+            echo ""
+            echo "BOT TEST COMPLETE."
+            TESTEOF
+              docker cp /tmp/run-bot-test.sh $CONTAINER:/tmp/run-bot-test.sh
+              docker exec $CONTAINER sh /tmp/run-bot-test.sh "$TOKEN"
+              rm /tmp/run-bot-test.sh
             elif [ "${{ github.event.inputs.mode }}" = "test-retrieval" ]; then
               echo "=== COPYING RETRIEVAL TEST SCRIPT ==="
               cat > /tmp/test-retrieval.ts << 'SCRIPT_EOF'

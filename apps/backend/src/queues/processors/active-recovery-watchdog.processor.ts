@@ -149,19 +149,21 @@ export class ActiveRecoveryWatchdogProcessor extends WorkerHost {
         );
       }
 
-      // Schedule next check (remove old before re-add — BullMQ silently preserves duplicate jobId)
+      // Schedule next check with versioned jobId (worker cannot remove its own active job)
       const nextAt = Date.now() + delay;
       if (nextAt < new Date(expiresAt).getTime()) {
-        const jid = job.opts.jobId ?? '';
-        if (jid) await this.watchdogQueue.remove(jid).catch(() => {});
-        await this.watchdogQueue.add('check', job.data, {
+        const version = ((job.data as unknown as Record<string, unknown>)['watchdogVersion'] as number) ?? 0;
+        const nextVersion = version + 1;
+        const nextData = { ...job.data, watchdogVersion: nextVersion };
+        const nextJobId = `${job.opts.jobId ?? 'wdog'}_v${nextVersion}`;
+        await this.watchdogQueue.add('check', nextData, {
           delay,
-          jobId: jid,
+          jobId: nextJobId,
           removeOnComplete: true,
           attempts: 1,
           backoff: { type: 'fixed', delay: 0 },
         });
-        this.logger.log(`active_recovery_next_delay_ms: conversationId=${conversationId} delay=${delay}`);
+        this.logger.log(`active_recovery_next_delay_ms: conversationId=${conversationId} delay=${delay} version=${nextVersion}`);
       }
     } catch (e) {
       this.logger.error(
@@ -169,13 +171,15 @@ export class ActiveRecoveryWatchdogProcessor extends WorkerHost {
           conversationId, message: e instanceof Error ? e.message : String(e),
         })}`,
       );
-      // Still reschedule if within window
+      // Still reschedule if within window (versioned jobId)
       const nextAt = Date.now() + delay;
       if (nextAt < new Date(expiresAt).getTime()) {
-        const jid = job.opts.jobId ?? '';
-        if (jid) await this.watchdogQueue.remove(jid).catch(() => {});
-        await this.watchdogQueue.add('check', job.data, {
-          delay, jobId: jid, removeOnComplete: true, attempts: 1,
+        const version = ((job.data as unknown as Record<string, unknown>)['watchdogVersion'] as number) ?? 0;
+        const nextVersion = version + 1;
+        const nextData = { ...job.data, watchdogVersion: nextVersion };
+        const nextJobId = `${job.opts.jobId ?? 'wdog'}_v${nextVersion}`;
+        await this.watchdogQueue.add('check', nextData, {
+          delay, jobId: nextJobId, removeOnComplete: true, attempts: 1,
         });
       }
     }

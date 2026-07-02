@@ -28,6 +28,9 @@ export const QUEUES = {
 
   // Post-outbound GHL recovery sync (checks for missed webhook messages)
   POST_OUTBOUND_SYNC: 'post-outbound-sync',
+
+  // Active conversation recovery watchdog (self-rescheduling, per-conversation)
+  ACTIVE_RECOVERY_WATCHDOG: 'active-recovery-watchdog',
 } as const;
 
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];
@@ -106,6 +109,14 @@ export const queueConfig: Record<QueueName, {
     },
   },
   [QUEUES.POST_OUTBOUND_SYNC]: {
+    defaultJobOptions: {
+      attempts: 1,
+      backoff: { type: 'fixed', delay: 0 },
+      removeOnComplete: true,
+      removeOnFail: true,
+    },
+  },
+  [QUEUES.ACTIVE_RECOVERY_WATCHDOG]: {
     defaultJobOptions: {
       attempts: 1,
       backoff: { type: 'fixed', delay: 0 },

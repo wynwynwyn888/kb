@@ -478,7 +478,6 @@ export class BotProfilesService {
     if (!(await this.canManage(profileId, tenantId))) {
       throw new ForbiddenException('Insufficient permissions');
     }
-    await this.ensureMigratedForTenant(tenantId);
 
     const name = body.name?.trim();
     if (!name) throw new BadRequestException('name is required');
@@ -487,6 +486,8 @@ export class BotProfilesService {
     if (criticalFacts.length > 1500) {
       throw new BadRequestException('criticalFacts must not exceed 1,500 characters');
     }
+
+    await this.ensureMigratedForTenant(tenantId);
 
     const supabase = getSupabaseService();
     const now = new Date().toISOString();

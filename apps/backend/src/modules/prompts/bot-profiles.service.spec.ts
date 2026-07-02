@@ -375,4 +375,30 @@ describe('BotProfilesService', () => {
       allowedDocumentCount: null,
     });
   });
+
+  describe('criticalFacts validation', () => {
+    it('rejects createBotProfile with criticalFacts > 1500 chars', async () => {
+      await expect(
+        svc.createBotProfile(userId, tenantId, {
+          name: 'Test', criticalFacts: 'A'.repeat(1501),
+        }),
+      ).rejects.toThrow('criticalFacts must not exceed 1,500 characters');
+    });
+
+    it('validation fires before DB — 1500 chars passes validation, hits DB error', async () => {
+      await expect(
+        svc.createBotProfile(userId, tenantId, { name: 'Test', criticalFacts: 'A'.repeat(1500) }),
+      ).rejects.toThrow(); // fails on DB, not on validation
+      // Verify it's NOT the criticalFacts validation error
+      await expect(
+        svc.createBotProfile(userId, tenantId, { name: 'Test', criticalFacts: 'A'.repeat(1500) }),
+      ).rejects.not.toThrow('criticalFacts');
+    });
+
+    it('empty/omitted criticalFacts accepted (hits DB error, not validation)', async () => {
+      await expect(
+        svc.createBotProfile(userId, tenantId, { name: 'Test' }),
+      ).rejects.not.toThrow('criticalFacts');
+    });
+  });
 });

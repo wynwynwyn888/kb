@@ -36,7 +36,7 @@ jobs:
               echo "=== COPYING RETRIEVAL TEST SCRIPT ==="
               cat > /tmp/test-retrieval.ts << 'SCRIPT_EOF'
             import { createClient } from '@supabase/supabase-js';
-            import { rankChunksByRelevance } from '../lib/kb-retrieval-score';
+            import { rankChunksByRelevance } from './src/lib/kb-retrieval-score';
 
             const TID = '34c62859-95b1-49a8-911c-cc44ced05452';
             const VID = 'b26f2661-23e9-4689-b2c9-9010735ddaee';

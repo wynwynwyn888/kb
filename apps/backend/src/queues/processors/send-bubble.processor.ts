@@ -338,7 +338,7 @@ export class SendBubbleProcessor extends WorkerHost {
       try {
         const now = new Date().toISOString();
         const expiresAt = new Date(Date.now() + 30 * 60 * 1000).toISOString();
-        const jobId = `wdog:${tenantId}:${conversationId}`;
+        const jobId = `wdog_${tenantId}_${conversationId}`;
         // Remove any existing watchdog for this conversation (stale/older)
         await this.watchdogQueue.remove(jobId).catch(() => {});
         await this.watchdogQueue.add('check', {

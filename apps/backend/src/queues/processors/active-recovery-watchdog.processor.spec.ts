@@ -32,7 +32,7 @@ function makeJob(overrides: Partial<{
 }> = {}): Job {
   const now = new Date();
   return {
-    id: 'wdog:t1:conv1', opts: { jobId: 'wdog:t1:conv1' }, name: 'check',
+    id: 'wdog_t1_conv1', opts: { jobId: 'wdog_t1_conv1' }, name: 'check',
     data: {
       tenantId: 't1', conversationId: 'conv1', ghlLocationId: 'loc1', contactId: 'c1',
       latestOutboundAt: now.toISOString(), startedAt: now.toISOString(),
@@ -176,7 +176,7 @@ describe('ActiveRecoveryWatchdogProcessor', () => {
     mockSyncGhlConversationContext.mockClear();
 
     await p.process({
-      id: 'wdog-stale', opts: { jobId: 'wdog:t1:conv1' }, name: 'check',
+      id: 'wdog-stale', opts: { jobId: 'wdog_t1_conv1' }, name: 'check',
       data: {
         tenantId: 't1', conversationId: 'conv1', ghlLocationId: 'loc1', contactId: 'c1',
         latestOutboundAt: oldWatchdogTs,
@@ -219,5 +219,21 @@ describe('ActiveRecoveryWatchdogProcessor', () => {
     });
     await processor.process(makeJob());
     expect(mockInboundQueueAdd).not.toHaveBeenCalled();
+  });
+
+  it('job ID contains no colons (BullMQ-safe)', () => {
+    const tid = '34c62859-95b1-49a8-911c-cc44ced05452';
+    const cid = 'acecd96e-4871-4e4d-8160-eae445ebe6e2';
+    const jobId = `wdog_${tid}_${cid}`;
+    expect(jobId).not.toMatch(/:/);
+    expect(jobId).toMatch(/^wdog_/);
+  });
+
+  it('job IDs are deterministic per tenant+conversation', () => {
+    const j1 = 'wdog_tid-1_cid-1';
+    const j2 = 'wdog_tid-1_cid-1';
+    expect(j1).toBe(j2);
+    const j3 = 'wdog_tid-2_cid-1';
+    expect(j1).not.toBe(j3);
   });
 });

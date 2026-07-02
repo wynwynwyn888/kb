@@ -1,5 +1,21 @@
 import { jest as jestGlobal } from '@jest/globals';
 
+const mockIngestInboundMessage = jestGlobal.fn(async (params: Record<string, unknown>) => {
+  // Store params for test assertions (backward compat with addMessage() spy pattern)
+  (mockIngestInboundMessage as any).lastParams = params;
+  return {
+    inserted: true,
+    duplicate: false,
+    upgraded: false,
+    messageId: 'ingest-test-id-' + Date.now(),
+  };
+});
+
+jestGlobal.mock('../../lib/inbound-message-ingest', () => ({
+  ingestInboundMessage: mockIngestInboundMessage,
+  computeContentFingerprint: jestGlobal.fn(() => 'mock-fingerprint'),
+}));
+
 jestGlobal.mock('../../modules/orchestration/orchestration.service', () => ({
   ConversationOrchestrationService: class {},
 }));
@@ -242,6 +258,8 @@ describe('InboundMessageProcessor', () => {
 
   beforeEach(() => {
     jestGlobal.clearAllMocks();
+    delete process.env['GHL_WEBHOOK_SHARED_INGEST_ENABLED']; // default OFF
+    (mockIngestInboundMessage as any).lastParams = null;
     delete process.env[INBOUND_DEBOUNCE_ENV_KEY];
     delete process.env['GHL_VOICE_FETCH_RECORDING_BY_MESSAGE_ID'];
     delete process.env['GHL_VOICE_DISCOVER_MESSAGE_ID'];
@@ -2281,6 +2299,47 @@ describe('InboundMessageProcessor', () => {
       tenantId: 'tenant-1',
       locationId: 'loc_1',
       messageId: 'webhook_msg_direct',
+    });
+  });
+
+  describe('shared ingest feature flag', () => {
+    const persistData = {
+      locationId: 'loc_1', ghlConversationId: 'ghl_conv_1', ghlContactId: 'ct_1',
+      messageContent: 'Hello', messageType: 'text', timestamp: '2026-01-01T00:00:00Z',
+      smokeImmediate: false,
+    };
+
+    it('flag OFF uses old addMessage path (ingestInboundMessage not called)', async () => {
+      delete process.env['GHL_WEBHOOK_SHARED_INGEST_ENABLED'];
+      mockIngestInboundMessage.mockClear();
+      await processor.process(makeJob('persist', persistData));
+      expect(mockIngestInboundMessage).not.toHaveBeenCalled();
+    });
+
+    it('flag ON uses shared ingest path', async () => {
+      process.env['GHL_WEBHOOK_SHARED_INGEST_ENABLED'] = 'true';
+      mockIngestInboundMessage.mockClear();
+      await processor.process(makeJob('persist', persistData));
+      expect(mockIngestInboundMessage).toHaveBeenCalled();
+    });
+
+    it('flag ON duplicate returns early without orchestration', async () => {
+      process.env['GHL_WEBHOOK_SHARED_INGEST_ENABLED'] = 'true';
+      mockIngestInboundMessage.mockResolvedValueOnce({
+        inserted: false, duplicate: true, upgraded: false, messageId: 'dup-1',
+      });
+      await processor.process(makeJob('persist', persistData));
+      // Should not reach debounce bump / orchestrate enqueue
+      expect(mockInboundQueueAdd).not.toHaveBeenCalled();
+    });
+
+    it('flag ON inserted proceeds to orchestration', async () => {
+      process.env['GHL_WEBHOOK_SHARED_INGEST_ENABLED'] = 'true';
+      mockIngestInboundMessage.mockResolvedValueOnce({
+        inserted: true, duplicate: false, upgraded: false, messageId: 'new-1',
+      });
+      await processor.process(makeJob('persist', persistData));
+      expect(mockInboundQueueAdd).toHaveBeenCalled();
     });
   });
 });

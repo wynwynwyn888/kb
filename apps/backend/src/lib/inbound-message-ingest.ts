@@ -42,14 +42,41 @@ export function computeContentFingerprint(params: IngestInboundParams): string {
   return createHash('sha256').update(raw, 'utf8').digest('hex').slice(0, 40);
 }
 
+function isValidIsoTimestamp(ts: string): boolean {
+  try {
+    const trimmed = ts.trim();
+    // Must contain 'T' (ISO 8601 datetime separator) or be a full RFC 3339 date
+    // Reject bare dates like "2026-01-01" and bare times like "11:54"
+    if (!trimmed.includes('T') && !trimmed.includes(' ')) return false;
+    const d = new Date(trimmed);
+    return !isNaN(d.getTime());
+  } catch {
+    return false;
+  }
+}
+
+function resolveCreatedAt(ghlTimestamp?: string | null): {
+  createdAt: string;
+  ghlTimestampValid: boolean;
+} {
+  const raw = ghlTimestamp?.trim();
+  if (raw && isValidIsoTimestamp(raw)) {
+    return { createdAt: raw, ghlTimestampValid: true };
+  }
+  return { createdAt: new Date().toISOString(), ghlTimestampValid: false };
+}
+
 function buildMessageMetadata(params: IngestInboundParams, fingerprint: string): Record<string, unknown> {
+  const rawTs = params.ghlTimestamp?.trim();
+  const { createdAt, ghlTimestampValid } = resolveCreatedAt(params.ghlTimestamp);
   return {
     ghlMessageId: params.ghlMessageId?.trim() || undefined,
     webhookEventId: params.webhookEventId?.trim() || undefined,
     contentFingerprint: fingerprint,
     ingestSource: params.ingestSource,
     ingestedAt: new Date().toISOString(),
-    ghlTimestamp: params.ghlTimestamp?.trim() || undefined,
+    ghlTimestamp: ghlTimestampValid ? rawTs : undefined,
+    ghlTimestampRaw: rawTs || undefined,
     ...(params.sourceMetadata ?? {}),
   };
 }
@@ -119,6 +146,7 @@ export async function ingestInboundMessage(
   // Insert new message — with DB-level conflict handling
   const newId = randomUUID();
   const metadata = buildMessageMetadata(params, fingerprint);
+  const { createdAt } = resolveCreatedAt(params.ghlTimestamp);
 
   const { error: insErr } = await supabase.from('messages').insert({
     id: newId,
@@ -128,7 +156,7 @@ export async function ingestInboundMessage(
     content: params.content,
     contentType: params.contentType,
     metadata,
-    created_at: params.ghlTimestamp?.trim() || new Date().toISOString(),
+    created_at: createdAt,
   }).select('id').single();
 
   if (insErr) {

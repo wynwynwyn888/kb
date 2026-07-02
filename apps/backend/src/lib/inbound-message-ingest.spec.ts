@@ -175,6 +175,49 @@ describe('ingestInboundMessage', () => {
     });
   });
 
+  describe('ghlTimestamp validation', () => {
+    it('accepts valid ISO timestamp as created_at', async () => {
+      const supabase = makeSupabase([R(null)]);
+      const result = await ingestInboundMessage(makeParams({
+        supabase, ghlTimestamp: '2026-07-02T03:55:00.000Z',
+      }));
+      expect(result.inserted).toBe(true);
+    });
+
+    it('falls back when ghlTimestamp is HH:MM only (like "11:54")', async () => {
+      const supabase = makeSupabase([R(null)]);
+      const result = await ingestInboundMessage(makeParams({
+        supabase, ghlTimestamp: '11:54',
+      }));
+      expect(result.inserted).toBe(true);
+      // Should not throw 'invalid input syntax for type timestamp'
+    });
+
+    it('falls back when ghlTimestamp is empty string', async () => {
+      const supabase = makeSupabase([R(null)]);
+      const result = await ingestInboundMessage(makeParams({
+        supabase, ghlTimestamp: '',
+      }));
+      expect(result.inserted).toBe(true);
+    });
+
+    it('falls back when ghlTimestamp is null', async () => {
+      const supabase = makeSupabase([R(null)]);
+      const result = await ingestInboundMessage(makeParams({
+        supabase, ghlTimestamp: null,
+      }));
+      expect(result.inserted).toBe(true);
+    });
+
+    it('falls back when ghlTimestamp is invalid string', async () => {
+      const supabase = makeSupabase([R(null)]);
+      const result = await ingestInboundMessage(makeParams({
+        supabase, ghlTimestamp: 'not-a-date',
+      }));
+      expect(result.inserted).toBe(true);
+    });
+  });
+
   describe('contentFingerprint stability', () => {
     it('same content same minute → same fingerprint', () => {
       const p1 = makeParams({ ghlTimestamp: '2026-07-01T12:51:05Z', content: 'Hello' });

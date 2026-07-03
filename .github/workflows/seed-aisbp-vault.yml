@@ -264,18 +264,44 @@ jobs:
               docker exec $CONTAINER npx tsx test-retrieval.ts
               rm /tmp/test-retrieval.ts
             elif [ "${{ github.event.inputs.mode }}" = "find-conv" ]; then
-              echo "=== FINDING CONVERSATION FOdPCJQfeaKnUUcSz76e ==="
+              echo "=== CONVERSATION ID MAPPING ==="
               docker exec $CONTAINER node -e "
                 const { createClient } = require('@supabase/supabase-js');
                 const s = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
+                const TID = '34c62859-95b1-49a8-911c-cc44ced05452';
                 (async () => {
-                  const { data: conv } = await s.from('conversations').select('id, ghl_conversation_id, contact_id, created_at, status, tenant_id').eq('ghl_conversation_id', 'FOdPCJQfeaKnUUcSz76e').maybeSingle();
-                  if (!conv) { console.log('NOT FOUND'); return; }
-                  console.log('id=' + conv.id + ' contact=' + conv.contact_id + ' tenant=' + conv.tenant_id + ' created=' + conv.created_at + ' status=' + conv.status);
-                  const { data: msgs } = await s.from('messages').select('id, direction, content, metadata, created_at').eq('conversation_id', conv.id).order('created_at', { ascending: true });
-                  if (msgs) { console.log('\\nMESSAGES (' + msgs.length + '):'); for (const m of msgs) { const dir = m.direction === 'INBOUND' ? 'IN' : 'OT'; const p = (m.content || '').slice(0, 100).replace(/\\n/g, ' '); const mk = Object.keys(m.metadata || {}).filter(k => !['ghlMessageId','contentFingerprint'].includes(k)).join(','); console.log(dir + ' ' + m.id.slice(0,8) + ' ' + m.created_at.slice(11,19) + ' ' + p + (mk ? ' [' + mk + ']' : '')); } }
-                  const { data: sends } = await s.from('outbound_sends').select('reply_id, bubble_sequence, status, created_at').eq('conversation_id', conv.id).order('created_at', { ascending: true });
-                  if (sends) { console.log('\\nSENDS (' + sends.length + '):'); for (const os of sends) { console.log('bubble=' + os.bubble_sequence + ' status=' + os.status + ' created=' + os.created_at.slice(11,19)); } }
+                  // 1. Look up acecd96e and get its ghl_conversation_id
+                  const { data: c1 } = await s.from('conversations').select('id, ghl_conversation_id, contact_id, created_at, status, tenant_id, metadata').eq('id', 'acecd96e-4871-4e4d-8160-eae445ebe6e2').maybeSingle();
+                  console.log('=== acecd96e (KB internal) ===');
+                  if (c1) console.log('id=' + c1.id + ' ghlConvId=' + c1.ghl_conversation_id + ' contact=' + c1.contact_id + ' tenant=' + c1.tenant_id + ' created=' + c1.created_at + ' status=' + c1.status);
+
+                  // 2. Look up FOdPCJQfeaKnUUcSz76e
+                  const { data: c2 } = await s.from('conversations').select('id, ghl_conversation_id, contact_id, created_at').eq('ghl_conversation_id', 'FOdPCJQfeaKnUUcSz76e').maybeSingle();
+                  console.log('=== FOdPCJQfeaKnUUcSz76e ===');
+                  if (c2) console.log('FOUND: id=' + c2.id + ' contact=' + c2.contact_id + ' created=' + c2.created_at);
+                  else console.log('NOT FOUND by ghl_conversation_id');
+
+                  // 3. List ALL conversations for this contact
+                  const { data: allConvs } = await s.from('conversations').select('id, ghl_conversation_id, contact_id, created_at').eq('contact_id', 'h4G5p2YNhgxZQPAJ8dQt').order('created_at', { ascending: true });
+                  console.log('\\n=== ALL CONVERSATIONS for contact h4G5p2 ===');
+                  if (allConvs) for (const c of allConvs) console.log('kbId=' + c.id.slice(0,12) + ' ghlId=' + c.ghl_conversation_id + ' created=' + c.created_at.slice(0,19));
+
+                  // 4. Recent webhook events for this tenant
+                  const { data: wh } = await s.from('webhook_events').select('id, external_event_id, event_type, processing_status, metadata, received_at').eq('tenant_id', TID).order('received_at', { ascending: false }).limit(15);
+                  console.log('\\n=== RECENT WEBHOOK EVENTS ===');
+                  if (wh) for (const w of wh) console.log(w.received_at.slice(11,19) + ' ' + w.event_type.slice(0,20) + ' status=' + w.processing_status + ' extId=' + (w.external_event_id||'').slice(0,20));
+
+                  // 5. Latest orchestration logs for acecd96e
+                  const { data: orch } = await s.from('orchestration_logs').select('outcome, guard_reason, created_at').eq('conversation_id', 'acecd96e-4871-4e4d-8160-eae445ebe6e2').order('created_at', { ascending: false }).limit(8);
+                  console.log('\\n=== LAST 8 ORCHESTRATION LOGS (acecd96e) ===');
+                  if (orch) for (const o of orch) console.log(o.created_at.slice(11,19) + ' ' + o.outcome + (o.guard_reason ? ' (' + o.guard_reason + ')' : ''));
+
+                  // 6. Check for messages after 01:17 in acecd96e
+                  const { data: recentMsgs } = await s.from('messages').select('id, direction, content, metadata, created_at').eq('conversation_id', 'acecd96e-4871-4e4d-8160-eae445ebe6e2').gte('created_at', '2026-07-03T01:17:00Z').order('created_at', { ascending: true });
+                  console.log('\\n=== MESSAGES AFTER 01:17 UTC (acecd96e) ===');
+                  if (recentMsgs && recentMsgs.length) for (const m of recentMsgs) { const dir = m.direction === 'INBOUND' ? 'IN' : 'OT'; const p = (m.content || '').slice(0, 80); const keys = Object.keys(m.metadata||{}).filter(k => k.length < 20).join(','); console.log(dir + ' ' + m.id.slice(0,8) + ' ' + m.created_at.slice(11,19) + ' ' + p + ' [' + keys + ']'); }
+                  else console.log('(none)');
+
                   console.log('\\nDONE');
                 })().catch(e => { console.error('ERR', e.message); process.exit(1); });
               "

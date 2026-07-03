@@ -254,6 +254,9 @@ export class ActiveRecoveryWatchdogProcessor extends WorkerHost {
             conversationId, version: newVersion, recoveredAgeMs: Date.now() - latestRecoveredTs,
           })}`,
         );
+      } else {
+        // Sync short-circuited — check for stored but uncovered inbound messages
+        await this.recoverUncoveredInbound(tenantId, conversationId, contactId, ghlLocationId, latestOutboundAt);
       }
 
       // Schedule next check with versioned jobId (worker cannot remove its own active job)
@@ -289,6 +292,117 @@ export class ActiveRecoveryWatchdogProcessor extends WorkerHost {
           delay, jobId: nextJobId, removeOnComplete: true, attempts: 1,
         });
       }
+    }
+  }
+
+  /**
+   * Check for stored CONTACT/INBOUND messages that have no later OUTBOUND/AI reply.
+   * Called when sync short-circuits but messages may already be in the DB.
+   */
+  private async recoverUncoveredInbound(
+    tenantId: string,
+    conversationId: string,
+    contactId: string,
+    ghlLocationId: string,
+    latestOutboundAt: string,
+  ): Promise<void> {
+    try {
+      // Find the latest uncovered inbound, preferring one with a ghlMessageId
+      const { data: recentInbounds } = await this.supabase
+        .from('messages')
+        .select('id, metadata, created_at')
+        .eq('conversation_id', conversationId)
+        .eq('direction', 'INBOUND')
+        .eq('sender', 'CONTACT')
+        .order('created_at', { ascending: false })
+        .limit(5);
+
+      if (!recentInbounds?.length) return;
+
+      let bestInbound: Record<string, unknown> | null = null;
+      for (const row of recentInbounds) {
+        const r = row as Record<string, unknown>;
+        const createdAt = r['created_at'] as string;
+        const rMeta = (r['metadata'] ?? {}) as Record<string, unknown>;
+        const hasGhlId = typeof rMeta['ghlMessageId'] === 'string' && rMeta['ghlMessageId'].trim();
+
+        // Check if already handled
+        const { data: laterOb } = await this.supabase
+          .from('messages')
+          .select('id')
+          .eq('conversation_id', conversationId)
+          .eq('direction', 'OUTBOUND')
+          .eq('sender', 'AI')
+          .gte('created_at', createdAt)
+          .limit(1)
+          .maybeSingle();
+        if (laterOb) continue;
+
+        if (hasGhlId) { bestInbound = r; break; }
+        if (!bestInbound) bestInbound = r;
+      }
+
+      if (!bestInbound) return;
+      const inboundAt = bestInbound['created_at'] as string;
+      const meta = (bestInbound['metadata'] ?? {}) as Record<string, unknown>;
+
+      // Horizon check
+      const inboundTs = new Date(inboundAt).getTime();
+      const outboundTs = new Date(latestOutboundAt).getTime();
+      if (inboundTs <= outboundTs) return;
+      if (inboundTs > outboundTs + RECOVERY_HORIZON_MS) return;
+
+      const ghlMsgId = typeof meta['ghlMessageId'] === 'string' ? meta['ghlMessageId'] : null;
+      const ghlTs = typeof meta['ghlTimestamp'] === 'string' ? meta['ghlTimestamp'] : null;
+
+      // Provider gate
+      const providerGate = await checkProviderOrchestrationGate({
+        appCache: this.appCache,
+        logger: this.logger,
+        tenantId,
+        conversationId,
+        ghlMessageId: ghlMsgId,
+        ghlTimestamp: ghlTs ?? inboundAt,
+        source: 'fallback',
+      });
+      if (!providerGate.allowed) return;
+
+      // Schedule orchestration
+      const { data: convMetaRow } = await this.supabase
+        .from('conversations')
+        .select('metadata')
+        .eq('id', conversationId)
+        .single();
+
+      const currentMeta = readConversationMetadataField(convMetaRow?.metadata);
+      const { merged: debounceBump, newVersion } = bumpInboundDebounceMeta(currentMeta);
+      const merged = mergeConversationMetadataForPersist(currentMeta, debounceBump);
+
+      await this.supabase
+        .from('conversations')
+        .update({ metadata: merged, updated_at: new Date().toISOString() })
+        .eq('id', conversationId);
+
+      const { debounceMs } = resolveInboundDebounceMs();
+
+      await this.inboundQueue.add('orchestrate', {
+        tenantId, conversationId, locationId: ghlLocationId, ghlContactId: contactId,
+        ghlConversationId: '', debounceVersion: newVersion,
+        debounceConfiguredMs: debounceMs, orchestrateEnqueuedAtMs: Date.now(),
+        ghlInboundMessageId: ghlMsgId || undefined,
+      } satisfies OrchestrateDebouncedJobData, {
+        delay: debounceMs,
+        jobId: `deb:${conversationId}:${newVersion}`,
+        attempts: 2, backoff: { type: 'exponential', delay: 1500 }, removeOnComplete: true,
+      });
+
+      this.logger.log(
+        `watchdog_uncovered_orch_scheduled: conversationId=${conversationId} ghlMsgId=${(ghlMsgId || '').slice(0, 12)}`,
+      );
+    } catch (err) {
+      this.logger.warn(
+        `watchdog_uncovered_recovery_failed: conversationId=${conversationId} error=${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   }
 

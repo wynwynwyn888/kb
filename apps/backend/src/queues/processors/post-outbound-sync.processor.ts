@@ -90,9 +90,47 @@ export class PostOutboundSyncProcessor extends WorkerHost {
       const hasRecoveredGhlId = !!syncResult.latestRecoveredGhlMessageId;
       const hasRecoveredTs = !!syncResult.latestRecoveredContactInboundAt;
 
-      // Skip only if we have no recovered INBOUND/CONTACT message at all
+      // Skip only if we have no recovered INBOUND/CONTACT message at all and
+      // no stored uncovered inbound messages.
       if (syncResult.insertedContactInboundIds.length === 0 && !(hasRecoveredGhlId && hasRecoveredTs)) {
-        return;
+        // Check for stored but uncovered inbound (sync short-circuit case),
+        // preferring a message WITH ghlMessageId over webhook-only duplicates.
+        const { data: recentInbounds } = await this.supabase
+          .from('messages')
+          .select('id, metadata, created_at')
+          .eq('conversation_id', conversationId)
+          .eq('direction', 'INBOUND')
+          .eq('sender', 'CONTACT')
+          .order('created_at', { ascending: false })
+          .limit(5);
+
+        let hasUncovered = false;
+        if (recentInbounds?.length) {
+          for (const row of recentInbounds) {
+            const r = row as Record<string, unknown>;
+            const inboundAt = r['created_at'] as string;
+            if (new Date(inboundAt).getTime() <= new Date(outboundCompletedAt).getTime()) continue;
+
+            const { data: laterOb } = await this.supabase
+              .from('messages')
+              .select('id')
+              .eq('conversation_id', conversationId)
+              .eq('direction', 'OUTBOUND')
+              .eq('sender', 'AI')
+              .gte('created_at', inboundAt)
+              .limit(1)
+              .maybeSingle();
+            if (laterOb) continue;
+
+            // Uncovered inbound found — prefer one with ghlMessageId
+            const rowMeta = (r['metadata'] ?? {}) as Record<string, unknown>;
+            const hasGhlId = typeof rowMeta['ghlMessageId'] === 'string' && rowMeta['ghlMessageId'].trim();
+            if (hasGhlId) { hasUncovered = true; break; }
+            hasUncovered = true; // fallback without ghlMessageId
+          }
+        }
+        if (!hasUncovered) return;
+        // Fall through — uncovered inbound exists, proceed with scheduling below
       }
 
       // Guard 1: Check if recovered inbound is within the active recovery horizon

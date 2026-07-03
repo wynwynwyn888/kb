@@ -230,6 +230,72 @@ describe('inbound-decision', () => {
     });
   });
 
+  // ── Decision update payload (no updated_at) ──────────────────────────
+  describe('update payload shape', () => {
+    it('recordTerminalDecision update does NOT include updated_at', async () => {
+      let updatePayload: Record<string, unknown> = {};
+      mockSupabaseFrom.mockReturnValue({
+        select: jestGlobal.fn(() => ({
+          eq: jestGlobal.fn(() => ({
+            maybeSingle: jestGlobal.fn(async () => ({ data: { metadata: {} }, error: null })),
+          })),
+        })),
+        update: jestGlobal.fn((payload: Record<string, unknown>) => {
+          updatePayload = payload;
+          return { eq: jestGlobal.fn(async () => ({ error: null })) };
+        }),
+      } as any);
+
+      await recordTerminalDecision({
+        supabase: mockSupabase as any,
+        logger: makeLogger(),
+        messageId: 'msg-payload',
+        decision: {
+          status: 'PROCEED',
+          outboundMessageId: 'r1',
+          triggerSource: 'webhook',
+          decidedAt: new Date().toISOString(),
+        },
+      });
+
+      expect(updatePayload).toHaveProperty('metadata');
+      expect(updatePayload).not.toHaveProperty('updated_at');
+      expect(updatePayload).not.toHaveProperty('updatedAt');
+      // Only metadata should be present (no extra columns)
+      expect(Object.keys(updatePayload)).toEqual(['metadata']);
+    });
+
+    it('recordInterimDecision update does NOT include updated_at', async () => {
+      let updatePayload: Record<string, unknown> = {};
+      mockSupabaseFrom.mockReturnValue({
+        select: jestGlobal.fn(() => ({
+          eq: jestGlobal.fn(() => ({
+            maybeSingle: jestGlobal.fn(async () => ({ data: { metadata: {} }, error: null })),
+          })),
+        })),
+        update: jestGlobal.fn((payload: Record<string, unknown>) => {
+          updatePayload = payload;
+          return { eq: jestGlobal.fn(async () => ({ error: null })) };
+        }),
+      } as any);
+
+      await recordInterimDecision({
+        supabase: mockSupabase as any,
+        messageId: 'msg-payload-2',
+        decision: {
+          status: 'PENDING',
+          triggerSource: 'webhook',
+          decidedAt: new Date().toISOString(),
+        },
+      });
+
+      expect(updatePayload).toHaveProperty('metadata');
+      expect(updatePayload).not.toHaveProperty('updated_at');
+      expect(updatePayload).not.toHaveProperty('updatedAt');
+      expect(Object.keys(updatePayload)).toEqual(['metadata']);
+    });
+  });
+
   // ── findUnrepliedInboundMessages ────────────────────────────────────
   describe('findUnrepliedInboundMessages', () => {
     it('returns empty when no candidates', async () => {

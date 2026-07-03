@@ -82,7 +82,7 @@ export async function recordTerminalDecision(params: {
     meta[DECISION_KEY] = decision;
     const { error } = await supabase
       .from('messages')
-      .update({ metadata: meta, updated_at: new Date().toISOString() })
+      .update({ metadata: meta })
       .eq('id', messageId);
 
     if (error) {
@@ -124,7 +124,7 @@ export async function recordInterimDecision(params: {
     meta[DECISION_KEY] = decision;
     await supabase
       .from('messages')
-      .update({ metadata: meta, updated_at: new Date().toISOString() })
+      .update({ metadata: meta })
       .eq('id', messageId);
   } catch {
     // Non-critical — interim

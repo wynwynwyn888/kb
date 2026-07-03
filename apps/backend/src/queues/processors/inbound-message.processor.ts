@@ -1789,40 +1789,56 @@ export class InboundMessageProcessor extends WorkerHost {
     ghlMessageId: string | null;
     createdAt: string | null;
   } | null> {
-    const { data: latestInbound } = await this.supabase
+    // Fetch the latest few CONTACT/INBOUND messages and prefer one with a ghlMessageId.
+    // Webhook duplicates (no ghlMessageId) can be the latest entry but can't satisfy
+    // the provider gate, so we skip them in favor of the sync entry that has the real ID.
+    const { data: recentInbounds } = await this.supabase
       .from('messages')
       .select('id, metadata, created_at')
       .eq('conversation_id', conversationId)
       .eq('direction', 'INBOUND')
       .eq('sender', 'CONTACT')
       .order('created_at', { ascending: false })
-      .limit(1);
+      .limit(5);
 
-    const inbound = latestInbound?.[0];
-    if (!inbound) return null;
+    if (!recentInbounds?.length) return null;
 
-    const inboundCreatedAt = typeof inbound.created_at === 'string' ? inbound.created_at : null;
+    // Prefer the message WITH a ghlMessageId
+    let bestInbound: Record<string, unknown> | null = null;
+    for (const row of recentInbounds) {
+      const meta = (row.metadata ?? {}) as Record<string, unknown>;
+      const hasGhlId = typeof meta['ghlMessageId'] === 'string' && meta['ghlMessageId'].trim();
+      const createdAt = typeof row.created_at === 'string' ? row.created_at : null;
 
-    // Check if a later outbound already exists
-    if (inboundCreatedAt) {
-      const { data: laterOutbound } = await this.supabase
-        .from('messages')
-        .select('id')
-        .eq('conversation_id', conversationId)
-        .eq('direction', 'OUTBOUND')
-        .eq('sender', 'AI')
-        .gte('created_at', inboundCreatedAt)
-        .limit(1)
-        .maybeSingle();
+      // Check if a later outbound already exists for this message
+      if (createdAt) {
+        const { data: laterOutbound } = await this.supabase
+          .from('messages')
+          .select('id')
+          .eq('conversation_id', conversationId)
+          .eq('direction', 'OUTBOUND')
+          .eq('sender', 'AI')
+          .gte('created_at', createdAt)
+          .limit(1)
+          .maybeSingle();
 
-      if (laterOutbound) return null; // already handled
+        if (laterOutbound) continue; // already handled
+      }
+
+      if (hasGhlId) {
+        bestInbound = row as Record<string, unknown>;
+        break; // prefer first match with ghlMessageId
+      }
+      // Fallback: use the latest even without ghlMessageId (will likely fail provider gate)
+      if (!bestInbound) bestInbound = row as Record<string, unknown>;
     }
 
-    const meta = (inbound.metadata ?? {}) as Record<string, unknown>;
+    if (!bestInbound) return null;
+    const meta = (bestInbound['metadata'] ?? {}) as Record<string, unknown>;
     return {
-      id: inbound.id as string,
+      id: bestInbound['id'] as string,
       ghlMessageId: typeof meta['ghlMessageId'] === 'string' ? meta['ghlMessageId'] : null,
-      createdAt: inboundCreatedAt,
+      createdAt: typeof bestInbound['created_at'] === 'string' ? bestInbound['created_at'] : null,
     };
   }
 

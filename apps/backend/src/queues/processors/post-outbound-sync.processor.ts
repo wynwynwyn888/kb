@@ -5,9 +5,11 @@
 
 import { Processor, WorkerHost, OnWorkerEvent } from '@nestjs/bullmq';
 import { Job } from 'bullmq';
-import { Logger } from '@nestjs/common';
+import { Logger, Optional } from '@nestjs/common';
 import { getSupabaseService } from '../../lib/supabase';
 import { syncGhlConversationContext } from '../../lib/ghl-conversation-sync';
+import { AppCacheService } from '../../lib/app-cache.service';
+import { checkProviderOrchestrationGate } from '../../lib/schedule-orchestration-if-new';
 import {
   bumpInboundDebounceMeta,
 } from '../../lib/inbound-debounce';
@@ -49,6 +51,7 @@ export class PostOutboundSyncProcessor extends WorkerHost {
   constructor(
     @InjectQueue(QUEUES.INBOUND_MESSAGE_PROCESSOR)
     private readonly inboundQueue: Queue,
+    @Optional() private readonly appCache?: AppCacheService,
   ) {
     super();
   }
@@ -160,6 +163,23 @@ export class PostOutboundSyncProcessor extends WorkerHost {
 
       const { debounceMs } = resolveInboundDebounceMs();
 
+      // Provider-level idempotency gate
+      const providerGate = await checkProviderOrchestrationGate({
+        appCache: this.appCache,
+        logger: this.logger,
+        tenantId,
+        conversationId,
+        ghlMessageId: syncResult.latestRecoveredGhlMessageId,
+        ghlTimestamp: syncResult.latestRecoveredContactInboundAt,
+        source: 'fallback',
+      });
+      if (!providerGate.allowed) {
+        this.logger.log(
+          `post_sync_orch_skip_provider_gate: conversationId=${conversationId} reason=${providerGate.reason}`,
+        );
+        return;
+      }
+
       await this.inboundQueue.add(
         'orchestrate',
         {
@@ -171,6 +191,7 @@ export class PostOutboundSyncProcessor extends WorkerHost {
           debounceVersion: newVersion,
           debounceConfiguredMs: debounceMs,
           orchestrateEnqueuedAtMs: Date.now(),
+          ghlInboundMessageId: syncResult.latestRecoveredGhlMessageId || undefined,
         } satisfies OrchestrateDebouncedJobData,
         {
           delay: debounceMs,

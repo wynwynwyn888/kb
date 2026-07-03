@@ -50,6 +50,7 @@ import { MediaTranscriptionQueueService } from '../media-transcription-queue.ser
 import { syncGhlConversationContext } from '../../lib/ghl-conversation-sync';
 import { ingestInboundMessage } from '../../lib/inbound-message-ingest';
 import { MetricsService } from '../../lib/metrics.service';
+import { checkProviderOrchestrationGate, markProviderOrchestrationDone } from '../../lib/schedule-orchestration-if-new';
 import { resolveContactIdIfPhone } from '../../lib/contact-resolve';
 
 export interface InboundMessageJobData {
@@ -112,6 +113,8 @@ export interface OrchestrateDebouncedJobData {
   orchestrateEnqueuedAtMs?: number;
   /** GHL inbound channel at debounce schedule time (facebook, instagram, whatsapp, …). */
   channelRaw?: string;
+  /** GHL inbound message ID for provider-level orchestration idempotency. */
+  ghlInboundMessageId?: string;
 }
 
 @Processor(QUEUES.INBOUND_MESSAGE_PROCESSOR, { concurrency: 3 })
@@ -382,6 +385,25 @@ export class InboundMessageProcessor extends WorkerHost {
       const { debounceMs, debounceSource } = resolveInboundDebounceMs();
       const orchestrateEnqueuedAtMs = Date.now();
 
+      // Provider-level idempotency gate: prevent duplicate orchestration when
+      // sync fallback and webhook both see the same GHL message.
+      const providerGate = await checkProviderOrchestrationGate({
+        appCache: this.appCache,
+        logger: this.logger,
+        tenantId: tenant.id,
+        conversationId: conversation.id,
+        ghlMessageId: ghlInboundMessageId?.trim() || null,
+        ghlTimestamp: timestamp,
+        source: 'webhook',
+      });
+      if (!providerGate.allowed) {
+        this.logger.log(
+          `Orchestration skipped (provider gate): conversationId=${conversation.id} reason=${providerGate.reason}`,
+        );
+        if (webhookEventId) await this.updateWebhookEventStatus(webhookEventId, 'COMPLETED');
+        return;
+      }
+
       await this.inboundQueue.add(
         'orchestrate',
         {
@@ -400,6 +422,7 @@ export class InboundMessageProcessor extends WorkerHost {
           debounceConfiguredMs: debounceMs,
           orchestrateEnqueuedAtMs,
           channelRaw,
+          ghlInboundMessageId: ghlInboundMessageId?.trim() || undefined,
         } satisfies OrchestrateDebouncedJobData,
         {
           delay: debounceMs,
@@ -1206,6 +1229,7 @@ export class InboundMessageProcessor extends WorkerHost {
       orchestrateQueueWaitMs,
       debounceConfiguredMs: debounceConfiguredMs ?? null,
       channelRaw: job.data.channelRaw,
+      ghlInboundMessageId: job.data.ghlInboundMessageId,
     });
   }
 
@@ -1232,6 +1256,7 @@ export class InboundMessageProcessor extends WorkerHost {
     orchestrateQueueWaitMs?: number | null;
     debounceConfiguredMs?: number | null;
     channelRaw?: string;
+    ghlInboundMessageId?: string;
   }): Promise<void> {
     const {
       tenantId,
@@ -1255,6 +1280,7 @@ export class InboundMessageProcessor extends WorkerHost {
       orchestrateQueueWaitMs,
       debounceConfiguredMs,
       channelRaw,
+      ghlInboundMessageId: ctxGhlMsgId,
     } = ctx;
 
     if (
@@ -1434,6 +1460,7 @@ export class InboundMessageProcessor extends WorkerHost {
         );
       }
       await this.markOrchestrationCompleted(latestMsgId);
+      await markProviderOrchestrationDone(this.appCache, tenantId, ctxGhlMsgId);
     } else {
       // Non-PROCEED outcome (e.g. guard blocked, complaint) — release lock
       await this.releaseOrchestrationLock(latestMsgId, lockToken);

@@ -99,6 +99,7 @@ describe('PostOutboundSyncProcessor', () => {
       dedupedIds: [],
       upgradedMetadataIds: [],
       latestRecoveredContactInboundAt: null,
+      latestRecoveredGhlMessageId: null,
     });
     mockBumpInboundDebounceMeta.mockReturnValue({ merged: {}, newVersion: 5 });
     mockResolveInboundDebounceMs.mockReturnValue({ debounceMs: 2000, debounceSource: 'default' });
@@ -106,7 +107,10 @@ describe('PostOutboundSyncProcessor', () => {
     mockMergeConversationMetadataForPersist.mockReturnValue({});
     // Create processor with mock queue
     const MockInboundQueue = { add: mockQueueAdd } as never;
-    processor = new PostOutboundSyncProcessor(MockInboundQueue);
+    processor = new PostOutboundSyncProcessor(
+      MockInboundQueue,
+      { acquireLock: jest.fn().mockResolvedValue('acquired'), releaseLock: jest.fn(), redis: { exists: jest.fn().mockResolvedValue(0) } } as never,
+    );
   });
 
   // ===========================================================================
@@ -177,15 +181,18 @@ describe('PostOutboundSyncProcessor', () => {
   describe('recovery — schedules orchestration', () => {
     it('schedules orchestration when new contact inbound recovered after KB outbound', async () => {
       process.env['GHL_POST_OUTBOUND_RECOVERY_SYNC_ALL'] = 'true';
+      const outboundTs = new Date(Date.now() - 60_000).toISOString();
+      const recoverTs = new Date(Date.now() - 30_000).toISOString();
       mockSyncGhlConversationContext.mockResolvedValue({
         synced: 1, deduped: 0, appSkipped: 0, latencyMs: 100,
         insertedContactInboundIds: ['in-1'],
         insertedAppOutboundIds: [],
         dedupedIds: [],
         upgradedMetadataIds: [],
-        latestRecoveredContactInboundAt: '2026-07-01T12:01:00Z', // after outbound at 12:00
+        latestRecoveredContactInboundAt: recoverTs,
+        latestRecoveredGhlMessageId: 'ghl-msg-recovered',
       });
-      await processor.process(makeJob({ outboundCompletedAt: '2026-07-01T12:00:00Z' }));
+      await processor.process(makeJob({ outboundCompletedAt: outboundTs }));
       expect(mockQueueAdd).toHaveBeenCalledWith(
         'orchestrate',
         expect.objectContaining({
@@ -202,15 +209,18 @@ describe('PostOutboundSyncProcessor', () => {
     it('includes debounceVersion from bumpInboundDebounceMeta', async () => {
       process.env['GHL_POST_OUTBOUND_RECOVERY_SYNC_ALL'] = 'true';
       mockBumpInboundDebounceMeta.mockReturnValue({ merged: {}, newVersion: 42 });
+      const outboundTs = new Date(Date.now() - 45_000).toISOString();
+      const recoverTs = new Date(Date.now() - 15_000).toISOString();
       mockSyncGhlConversationContext.mockResolvedValue({
         synced: 1, deduped: 0, appSkipped: 0, latencyMs: 100,
         insertedContactInboundIds: ['in-1'],
         insertedAppOutboundIds: [],
         dedupedIds: [],
         upgradedMetadataIds: [],
-        latestRecoveredContactInboundAt: '2026-07-01T12:01:00Z',
+        latestRecoveredContactInboundAt: recoverTs,
+        latestRecoveredGhlMessageId: 'ghl-msg-batch',
       });
-      await processor.process(makeJob({ outboundCompletedAt: '2026-07-01T12:00:00Z' }));
+      await processor.process(makeJob({ outboundCompletedAt: outboundTs }));
       expect(mockQueueAdd).toHaveBeenCalledWith(
         'orchestrate',
         expect.objectContaining({ debounceVersion: 42 }),
@@ -284,7 +294,10 @@ describe('PostOutboundSyncProcessor', () => {
         latestRecoveredContactInboundAt: '2026-07-01T12:01:00Z',
       });
       const MockInboundQueue = { add: mockQueueAdd } as never;
-      const p = new PostOutboundSyncProcessor(MockInboundQueue);
+      const p = new PostOutboundSyncProcessor(
+        MockInboundQueue,
+        { acquireLock: jestGlobal.fn().mockResolvedValue('acquired'), releaseLock: jestGlobal.fn(), redis: { exists: jestGlobal.fn().mockResolvedValue(0) } } as never,
+      );
       await p.process(makeJob({ outboundCompletedAt: '2026-07-01T12:00:00Z' }));
       expect(mockQueueAdd).not.toHaveBeenCalled();
     });

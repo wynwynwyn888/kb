@@ -80,6 +80,7 @@ describe('ActiveRecoveryWatchdogProcessor', () => {
       synced: 0, deduped: 0, appSkipped: 0, latencyMs: 0,
       insertedContactInboundIds: [], insertedAppOutboundIds: [],
       dedupedIds: [], upgradedMetadataIds: [], latestRecoveredContactInboundAt: null,
+      latestRecoveredGhlMessageId: null,
     });
     mockBumpInboundDebounceMeta.mockReturnValue({ merged: {}, newVersion: 1 });
     mockResolveInboundDebounceMs.mockReturnValue({ debounceMs: 2000, debounceSource: 'default' });
@@ -91,6 +92,7 @@ describe('ActiveRecoveryWatchdogProcessor', () => {
     processor = new ActiveRecoveryWatchdogProcessor(
       { add: mockInboundQueueAdd } as never,
       { add: mockWatchdogQueueAdd, remove: mockWatchdogQueueRemove } as never,
+      { acquireLock: jest.fn().mockResolvedValue('acquired'), releaseLock: jest.fn(), redis: { exists: jest.fn().mockResolvedValue(0) } } as never,
     );
   });
 
@@ -114,6 +116,7 @@ describe('ActiveRecoveryWatchdogProcessor', () => {
       insertedContactInboundIds: ['new-msg'], insertedAppOutboundIds: [],
       dedupedIds: [], upgradedMetadataIds: [],
       latestRecoveredContactInboundAt: new Date(now - 5_000).toISOString(),
+      latestRecoveredGhlMessageId: 'ghl-msg-1',
     });
     await processor.process(makeJob({
       latestOutboundAt: new Date(now - 20_000).toISOString(),
@@ -174,6 +177,7 @@ describe('ActiveRecoveryWatchdogProcessor', () => {
     const p = new ActiveRecoveryWatchdogProcessor(
       { add: jestGlobal.fn() } as never,
       { add: jestGlobal.fn(), remove: jestGlobal.fn() } as never,
+      { acquireLock: jestGlobal.fn().mockResolvedValue('acquired'), releaseLock: jestGlobal.fn(), redis: { exists: jestGlobal.fn().mockResolvedValue(0) } } as never,
     );
 
     mockSyncGhlConversationContext.mockClear();
@@ -219,6 +223,7 @@ describe('ActiveRecoveryWatchdogProcessor', () => {
       insertedAppOutboundIds: ['app-1'], // only app/outbound
       dedupedIds: [], upgradedMetadataIds: [],
       latestRecoveredContactInboundAt: null,
+      latestRecoveredGhlMessageId: null,
     });
     await processor.process(makeJob());
     expect(mockInboundQueueAdd).not.toHaveBeenCalled();

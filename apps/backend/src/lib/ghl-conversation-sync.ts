@@ -19,6 +19,7 @@ interface SyncResult {
   dedupedIds: string[];
   upgradedMetadataIds: string[];
   latestRecoveredContactInboundAt: string | null;
+  latestRecoveredGhlMessageId: string | null;
 }
 
 export async function syncGhlConversationContext(params: {
@@ -36,6 +37,7 @@ export async function syncGhlConversationContext(params: {
     insertedContactInboundIds: [], insertedAppOutboundIds: [],
     dedupedIds: [], upgradedMetadataIds: [],
     latestRecoveredContactInboundAt: null,
+    latestRecoveredGhlMessageId: null,
   };
 
   if (!contactId) {
@@ -167,6 +169,7 @@ export async function syncGhlConversationContext(params: {
       result.synced++;
       if (direction === 'INBOUND' && sender === 'CONTACT') {
         result.insertedContactInboundIds.push(ingestResult.messageId);
+        if (msg.id) result.latestRecoveredGhlMessageId = msg.id;
         const ts = msg.dateAdded || new Date().toISOString();
         if (!result.latestRecoveredContactInboundAt || ts > result.latestRecoveredContactInboundAt) {
           result.latestRecoveredContactInboundAt = ts;

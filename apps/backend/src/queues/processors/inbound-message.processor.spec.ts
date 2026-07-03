@@ -331,10 +331,10 @@ describe('InboundMessageProcessor', () => {
         ghlContactId: 'ct_1',
         messageContent: 'Hello',
         messageType: 'text',
-        timestamp: '2026-01-01T00:00:00Z',
+        timestamp: new Date().toISOString(),
         smokeImmediate: false,
-      }),
-    );
+        ghlInboundMessageId: 'test-ghl-msg',
+      }),    );
 
     expect(mockInboundQueueAdd).toHaveBeenCalledWith(
       'orchestrate',
@@ -383,8 +383,9 @@ describe('InboundMessageProcessor', () => {
         ghlContactId: 'ct_1',
         messageContent: 'Hello',
         messageType: 'text',
-        timestamp: '2026-01-01T00:00:00Z',
-        smokeImmediate: false,
+        timestamp: new Date().toISOString(),
+         smokeImmediate: false,
+        ghlInboundMessageId: 'test-ghl-msg',
         resolvedTenantId: 'tenant-1',
       }),
     );
@@ -424,10 +425,10 @@ describe('InboundMessageProcessor', () => {
         ghlContactId: 'ct_1',
         messageContent: 'Hello',
         messageType: 'text',
-        timestamp: '2026-01-01T00:00:00Z',
+        timestamp: new Date().toISOString(),
         smokeImmediate: false,
-      }),
-    );
+        ghlInboundMessageId: 'test-ghl-msg',
+      }),    );
 
     expect(mockInboundQueueAdd).toHaveBeenCalledWith(
       'orchestrate',
@@ -489,10 +490,10 @@ describe('InboundMessageProcessor', () => {
         ghlContactId: 'ct_1',
         messageContent: 'Hello',
         messageType: 'text',
-        timestamp: '2026-01-01T00:00:00Z',
+        timestamp: new Date().toISOString(),
         smokeImmediate: false,
-      }),
-    );
+        ghlInboundMessageId: 'test-ghl-msg',
+      }),    );
 
     expect(createCalls).toBe(1);
     expect(mockInboundQueueAdd).toHaveBeenCalledWith(
@@ -511,8 +512,8 @@ describe('InboundMessageProcessor', () => {
         messageType: 'text',
         timestamp: '2026-01-01T00:00:01Z',
         smokeImmediate: false,
-      }),
-    );
+        ghlInboundMessageId: 'test-ghl-msg',
+      }),    );
     expect(createCalls).toBe(1);
   });
 
@@ -1004,7 +1005,7 @@ describe('InboundMessageProcessor', () => {
         ghlContactId: 'ct_1',
         messageContent: '',
         messageType: 'audio',
-        timestamp: '2026-01-01T00:00:00Z',
+        timestamp: new Date().toISOString(),
         smokeImmediate: false,
         audioMediaUrl: 'https://cdn.example.com/voice.m4a',
         voiceInboundNeedsTranscribe: true,
@@ -1060,7 +1061,7 @@ describe('InboundMessageProcessor', () => {
         ghlContactId: 'ct_1',
         messageContent: '',
         messageType: 'unknown',
-        timestamp: '2026-01-01T00:00:00Z',
+        timestamp: new Date().toISOString(),
         smokeImmediate: false,
         audioMediaUrl: 'https://cdn.example.com/note.mp3',
         voiceInboundNeedsTranscribe: true,
@@ -1113,7 +1114,7 @@ describe('InboundMessageProcessor', () => {
         ghlContactId: 'ct_1',
         messageContent: '',
         messageType: 'audio',
-        timestamp: '2026-01-01T00:00:00Z',
+        timestamp: new Date().toISOString(),
         smokeImmediate: false,
         audioMediaUrl: 'https://cdn.example.com/bad.m4a',
         voiceInboundNeedsTranscribe: true,
@@ -1154,10 +1155,10 @@ describe('InboundMessageProcessor', () => {
         ghlContactId: 'ct_1',
         messageContent: 'Hello',
         messageType: 'text',
-        timestamp: '2026-01-01T00:00:00Z',
+        timestamp: new Date().toISOString(),
         smokeImmediate: false,
-      }),
-    );
+        ghlInboundMessageId: 'test-ghl-msg',
+      }),    );
 
     expect(mockAudioTranscription.transcribeRemoteMedia).not.toHaveBeenCalled();
   });
@@ -1198,7 +1199,7 @@ describe('InboundMessageProcessor', () => {
         ghlContactId: 'ct_1',
         messageContent: VOICE_INBOUND_PLACEHOLDER_NO_MEDIA_USER_MESSAGE,
         messageType: 'text',
-        timestamp: '2026-01-01T00:00:00Z',
+        timestamp: new Date().toISOString(),
         smokeImmediate: false,
         voiceInboundNeedsTranscribe: false,
         voiceInboundAudioPlaceholderWithoutMediaUrl: true,
@@ -1265,7 +1266,7 @@ describe('InboundMessageProcessor', () => {
           ghlContactId: 'ct_1',
           messageContent: VOICE_INBOUND_PLACEHOLDER_NO_MEDIA_USER_MESSAGE,
           messageType: 'text',
-          timestamp: '2026-01-01T00:00:00Z',
+          timestamp: new Date().toISOString(),
           smokeImmediate: false,
           voiceInboundNeedsTranscribe: false,
           voiceInboundAudioPlaceholderWithoutMediaUrl: true,
@@ -1339,7 +1340,7 @@ describe('InboundMessageProcessor', () => {
           ghlContactId: 'ct_1',
           messageContent: VOICE_INBOUND_PLACEHOLDER_NO_MEDIA_USER_MESSAGE,
           messageType: 'text',
-          timestamp: '2026-01-01T00:00:00Z',
+          timestamp: new Date().toISOString(),
           smokeImmediate: false,
           voiceInboundNeedsTranscribe: false,
           voiceInboundAudioPlaceholderWithoutMediaUrl: true,
@@ -1421,7 +1422,7 @@ describe('InboundMessageProcessor', () => {
         ghlContactId: 'ct_1',
         messageContent: VOICE_INBOUND_PLACEHOLDER_NO_MEDIA_USER_MESSAGE,
         messageType: 'text',
-        timestamp: '2026-01-01T00:00:00Z',
+        timestamp: new Date().toISOString(),
         smokeImmediate: false,
         voiceInboundNeedsTranscribe: false,
         voiceInboundAudioPlaceholderWithoutMediaUrl: true,
@@ -1495,7 +1496,7 @@ describe('InboundMessageProcessor', () => {
         ghlContactId: 'ct_1',
         messageContent: VOICE_INBOUND_PLACEHOLDER_NO_MEDIA_USER_MESSAGE,
         messageType: 'text',
-        timestamp: '2026-01-01T00:00:00Z',
+        timestamp: new Date().toISOString(),
         smokeImmediate: false,
         voiceInboundNeedsTranscribe: false,
         voiceInboundAudioPlaceholderWithoutMediaUrl: true,
@@ -1560,7 +1561,7 @@ describe('InboundMessageProcessor', () => {
         ghlContactId: 'ct_1',
         messageContent: VOICE_INBOUND_PLACEHOLDER_NO_MEDIA_USER_MESSAGE,
         messageType: 'text',
-        timestamp: '2026-01-01T00:00:00Z',
+        timestamp: new Date().toISOString(),
         smokeImmediate: false,
         voiceInboundNeedsTranscribe: false,
         voiceInboundAudioPlaceholderWithoutMediaUrl: true,
@@ -1626,7 +1627,7 @@ describe('InboundMessageProcessor', () => {
         ghlContactId: 'ct_1',
         messageContent: VOICE_INBOUND_PLACEHOLDER_NO_MEDIA_USER_MESSAGE,
         messageType: 'text',
-        timestamp: '2026-01-01T00:00:00Z',
+        timestamp: new Date().toISOString(),
         smokeImmediate: false,
         voiceInboundNeedsTranscribe: false,
         voiceInboundAudioPlaceholderWithoutMediaUrl: true,
@@ -1673,10 +1674,10 @@ describe('InboundMessageProcessor', () => {
         ghlContactId: 'ct_1',
         messageContent: 'Hello there',
         messageType: 'text',
-        timestamp: '2026-01-01T00:00:00Z',
+        timestamp: new Date().toISOString(),
         smokeImmediate: false,
-      }),
-    );
+        ghlInboundMessageId: 'test-ghl-msg',
+      }),    );
 
     expect(mockGhlVoiceMessageDiscovery.discoverVoicePlaceholderMessageId).not.toHaveBeenCalled();
     expect(mockGhlVoiceConversationDiscovery.discoverConversationIdByContact).not.toHaveBeenCalled();
@@ -1743,7 +1744,7 @@ describe('InboundMessageProcessor', () => {
         ghlContactId: 'ct_1',
         messageContent: VOICE_INBOUND_PLACEHOLDER_NO_MEDIA_USER_MESSAGE,
         messageType: 'text',
-        timestamp: '2026-01-01T00:00:00Z',
+        timestamp: new Date().toISOString(),
         smokeImmediate: false,
         voiceInboundNeedsTranscribe: false,
         voiceInboundAudioPlaceholderWithoutMediaUrl: true,
@@ -1834,7 +1835,7 @@ describe('InboundMessageProcessor', () => {
         ghlContactId: 'ct_1',
         messageContent: VOICE_INBOUND_PLACEHOLDER_NO_MEDIA_USER_MESSAGE,
         messageType: 'text',
-        timestamp: '2026-01-01T00:00:00Z',
+        timestamp: new Date().toISOString(),
         smokeImmediate: false,
         voiceInboundNeedsTranscribe: false,
         voiceInboundAudioPlaceholderWithoutMediaUrl: true,
@@ -1912,7 +1913,7 @@ describe('InboundMessageProcessor', () => {
         ghlContactId: 'ct_1',
         messageContent: VOICE_INBOUND_PLACEHOLDER_NO_MEDIA_USER_MESSAGE,
         messageType: 'text',
-        timestamp: '2026-01-01T00:00:00Z',
+        timestamp: new Date().toISOString(),
         smokeImmediate: false,
         voiceInboundNeedsTranscribe: false,
         voiceInboundAudioPlaceholderWithoutMediaUrl: true,
@@ -1971,7 +1972,7 @@ describe('InboundMessageProcessor', () => {
         ghlContactId: 'ct_1',
         messageContent: VOICE_INBOUND_PLACEHOLDER_NO_MEDIA_USER_MESSAGE,
         messageType: 'text',
-        timestamp: '2026-01-01T00:00:00Z',
+        timestamp: new Date().toISOString(),
         smokeImmediate: false,
         voiceInboundNeedsTranscribe: false,
         voiceInboundAudioPlaceholderWithoutMediaUrl: true,
@@ -2030,7 +2031,7 @@ describe('InboundMessageProcessor', () => {
         ghlContactId: 'ct_1',
         messageContent: VOICE_INBOUND_PLACEHOLDER_NO_MEDIA_USER_MESSAGE,
         messageType: 'text',
-        timestamp: '2026-01-01T00:00:00Z',
+        timestamp: new Date().toISOString(),
         smokeImmediate: false,
         voiceInboundNeedsTranscribe: false,
         voiceInboundAudioPlaceholderWithoutMediaUrl: true,
@@ -2086,7 +2087,7 @@ describe('InboundMessageProcessor', () => {
         ghlContactId: 'ct_1',
         messageContent: VOICE_INBOUND_PLACEHOLDER_NO_MEDIA_USER_MESSAGE,
         messageType: 'text',
-        timestamp: '2026-01-01T00:00:00Z',
+        timestamp: new Date().toISOString(),
         smokeImmediate: false,
         voiceInboundNeedsTranscribe: false,
         voiceInboundAudioPlaceholderWithoutMediaUrl: true,
@@ -2129,7 +2130,7 @@ describe('InboundMessageProcessor', () => {
         ghlContactId: 'ct_1',
         messageContent: VOICE_INBOUND_PLACEHOLDER_NO_MEDIA_USER_MESSAGE,
         messageType: 'text',
-        timestamp: '2026-01-01T00:00:00Z',
+        timestamp: new Date().toISOString(),
         smokeImmediate: false,
         voiceInboundNeedsTranscribe: false,
         voiceInboundAudioPlaceholderWithoutMediaUrl: true,
@@ -2170,7 +2171,7 @@ describe('InboundMessageProcessor', () => {
         ghlContactId: 'ct_1',
         messageContent: VOICE_INBOUND_PLACEHOLDER_NO_MEDIA_USER_MESSAGE,
         messageType: 'text',
-        timestamp: '2026-01-01T00:00:00Z',
+        timestamp: new Date().toISOString(),
         smokeImmediate: false,
         voiceInboundNeedsTranscribe: false,
         voiceInboundAudioPlaceholderWithoutMediaUrl: true,
@@ -2223,7 +2224,7 @@ describe('InboundMessageProcessor', () => {
         messageContent: '',
         messageType: 'audio',
         audioMediaUrl: 'https://cdn.example.com/inbound.webm',
-        timestamp: '2026-01-01T00:00:00Z',
+        timestamp: new Date().toISOString(),
         smokeImmediate: false,
         voiceInboundNeedsTranscribe: true,
       }),
@@ -2285,7 +2286,7 @@ describe('InboundMessageProcessor', () => {
         ghlContactId: 'ct_1',
         messageContent: VOICE_INBOUND_PLACEHOLDER_NO_MEDIA_USER_MESSAGE,
         messageType: 'text',
-        timestamp: '2026-01-01T00:00:00Z',
+        timestamp: new Date().toISOString(),
         smokeImmediate: false,
         voiceInboundNeedsTranscribe: false,
         voiceInboundAudioPlaceholderWithoutMediaUrl: true,
@@ -2305,8 +2306,8 @@ describe('InboundMessageProcessor', () => {
   describe('shared ingest feature flag', () => {
     const persistData = {
       locationId: 'loc_1', ghlConversationId: 'ghl_conv_1', ghlContactId: 'ct_1',
-      messageContent: 'Hello', messageType: 'text', timestamp: '2026-01-01T00:00:00Z',
-      smokeImmediate: false,
+      messageContent: 'Hello', messageType: 'text', timestamp: new Date().toISOString(),
+      smokeImmediate: false, ghlInboundMessageId: 'test-ghl-msg',
     };
 
     it('flag OFF uses old addMessage path (ingestInboundMessage not called)', async () => {

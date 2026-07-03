@@ -2,7 +2,7 @@
 // Each guard is a focused, testable function.
 // Guards are run in order of priority.
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
 import { getSupabaseService } from '../../lib/supabase';
 import type {
   OrchestrationInput,
@@ -11,11 +11,14 @@ import type {
   GuardDecision,
 } from './dto';
 import { ghlBodyIndicatesImagePlaceholder } from '../webhooks/ghl-inbound-image-media';
+import { GhlService } from '../ghl/ghl.service';
 
 @Injectable()
 export class OrchestrationGuards {
   private readonly logger = new Logger(OrchestrationGuards.name);
   private readonly supabase = getSupabaseService();
+
+  constructor(@Optional() private readonly ghlService?: GhlService) {}
 
   /**
    * Run all guards against the orchestration input.
@@ -72,6 +75,13 @@ export class OrchestrationGuards {
     guards.push(channelGuard);
     if (channelGuard.decision !== 'PROCEED') {
       return this.buildOutcome(channelGuard.decision, guards);
+    }
+
+    // Guard 8: AI off tag — skip reply if contact has "AI off" tag
+    const aiOffGuard = await this.checkAiOffTag(input);
+    guards.push(aiOffGuard);
+    if (aiOffGuard.decision !== 'PROCEED') {
+      return this.buildOutcome(aiOffGuard.decision, guards);
     }
 
     return this.buildOutcome('PROCEED', guards);
@@ -270,6 +280,68 @@ export class OrchestrationGuards {
       };
     }
     return { decision: 'PROCEED', guardName: 'channel' };
+  }
+
+  /**
+   * Guard 8: Skip AI reply if the GHL contact has an "AI off" tag (case-insensitive).
+   */
+  private async checkAiOffTag(input: OrchestrationInput): Promise<GuardResult> {
+    const contactId = input.conversation?.contactId?.trim();
+    if (!contactId) {
+      return { decision: 'PROCEED', guardName: 'ai_off_tag', reason: 'no_contact_id' };
+    }
+
+    try {
+      if (!this.ghlService) {
+        return { decision: 'PROCEED', guardName: 'ai_off_tag', reason: 'no_ghl_service' };
+      }
+
+      const { client } = await this.ghlService.createGhlClientForConnectedTenantWorkerOrThrow(
+        input.tenantId,
+      );
+      const result = await client.getContact(contactId);
+      if (!result.success || !result.contact) {
+        // API failure — fail closed (do not reply)
+        this.logger.warn(
+          `ai_off_tag_check_failed_blocking: tenantId=${input.tenantId} contactId=${contactId} error=${result.error || 'no contact'}`,
+        );
+        return {
+          decision: 'SKIP_AI_OFF_TAG',
+          guardName: 'ai_off_tag',
+          reason: `GHL contact lookup failed: ${result.error || 'no contact returned'}`,
+        };
+      }
+
+      const tags: unknown = result.contact['tags'];
+      const tagList: string[] = Array.isArray(tags)
+        ? tags.map((t: unknown) => (typeof t === 'string' ? t : (t as any)?.name ?? ''))
+        : [];
+
+      const hasAiOff = tagList.some((t) => t.trim().toLowerCase() === 'ai off');
+
+      if (hasAiOff) {
+        this.logger.log(
+          `ai_off_tag_present: tenantId=${input.tenantId} contactId=${contactId}`,
+        );
+        return {
+          decision: 'SKIP_AI_OFF_TAG',
+          guardName: 'ai_off_tag',
+          reason: 'Contact has AI off tag',
+        };
+      }
+
+      return { decision: 'PROCEED', guardName: 'ai_off_tag' };
+    } catch (err) {
+      // GHL API failure — fail closed (do not reply) to be safe
+      this.logger.warn(
+        `ai_off_tag_check_failed_blocking: tenantId=${input.tenantId} contactId=${contactId} error=${err instanceof Error ? err.message : String(err)}`,
+      );
+      return {
+        decision: 'SKIP_AI_OFF_TAG',
+        guardName: 'ai_off_tag',
+        reason: `Tag lookup failed: ${err instanceof Error ? err.message : 'unknown'}`,
+      };
+    }
   }
 
   private buildOutcome(final: GuardDecision, guards: GuardResult[]): GuardOutcome {

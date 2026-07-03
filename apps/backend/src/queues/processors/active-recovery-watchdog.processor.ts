@@ -5,9 +5,11 @@
 
 import { Processor, WorkerHost, OnWorkerEvent, InjectQueue } from '@nestjs/bullmq';
 import { Job, Queue } from 'bullmq';
-import { Logger } from '@nestjs/common';
+import { Logger, Optional } from '@nestjs/common';
 import { getSupabaseService } from '../../lib/supabase';
 import { syncGhlConversationContext } from '../../lib/ghl-conversation-sync';
+import { AppCacheService } from '../../lib/app-cache.service';
+import { checkProviderOrchestrationGate } from '../../lib/schedule-orchestration-if-new';
 import { bumpInboundDebounceMeta } from '../../lib/inbound-debounce';
 import { resolveInboundDebounceMs } from '../../lib/inbound-burst-batch';
 import { readConversationMetadataField, mergeConversationMetadataForPersist } from '../../lib/conversation-metadata-merge';
@@ -44,6 +46,7 @@ export class ActiveRecoveryWatchdogProcessor extends WorkerHost {
     private readonly inboundQueue: Queue,
     @InjectQueue(QUEUES.ACTIVE_RECOVERY_WATCHDOG)
     private readonly watchdogQueue: Queue,
+    @Optional() private readonly appCache?: AppCacheService,
   ) {
     super();
   }
@@ -132,10 +135,28 @@ export class ActiveRecoveryWatchdogProcessor extends WorkerHost {
 
         const { debounceMs } = resolveInboundDebounceMs();
 
+        // Provider-level idempotency gate
+        const providerGate = await checkProviderOrchestrationGate({
+          appCache: this.appCache,
+          logger: this.logger,
+          tenantId,
+          conversationId,
+          ghlMessageId: syncResult.latestRecoveredGhlMessageId,
+          ghlTimestamp: syncResult.latestRecoveredContactInboundAt,
+          source: 'fallback',
+        });
+        if (!providerGate.allowed) {
+          this.logger.log(
+            `recovery_orch_skip_provider_gate: conversationId=${conversationId} reason=${providerGate.reason}`,
+          );
+          return;
+        }
+
         await this.inboundQueue.add('orchestrate', {
           tenantId, conversationId, locationId: ghlLocationId, ghlContactId: contactId,
           ghlConversationId: '', debounceVersion: newVersion,
           debounceConfiguredMs: debounceMs, orchestrateEnqueuedAtMs: Date.now(),
+          ghlInboundMessageId: syncResult.latestRecoveredGhlMessageId || undefined,
         } satisfies OrchestrateDebouncedJobData, {
           delay: debounceMs,
           jobId: `deb:${conversationId}:${newVersion}`,

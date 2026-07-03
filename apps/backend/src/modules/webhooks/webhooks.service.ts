@@ -123,7 +123,18 @@ export class WebhooksService {
       return { success: true, eventId: externalEventId, duplicate: false };
     }
 
+    // Route TagAdded events: update conversation ai_status metadata
+    // TagRemoved is not needed — next InboundMessage webhook sets active (GHL workflow
+    // only fires Customer Replied when AI off tag is absent).
+    if (eventLower === 'tagadded') {
+      await this.handleTagEvent(payload, tenantId, eventLower, opts?.workflowFlatRaw);
+      return { success: true, eventId: externalEventId, duplicate: false };
+    }
+
     // --- Inbound message processing continues below ---
+    // GHL Customer Replied workflow only fires when AI off tag is absent.
+    // Set ai_status = "active" as an authoritative signal that AI is not off.
+    void this.setContactAiStatusFromWebhook(tenantId, payload, opts?.workflowFlatRaw);
 
     if (route.routeSource === 'tenant_ghl_connection') {
       const legacy = (route.tenantLegacyGhlLocationId ?? '').trim();
@@ -537,6 +548,123 @@ export class WebhooksService {
           message: e instanceof Error ? e.message : String(e),
         })}`,
       );
+    }
+  }
+
+  /**
+   * Handle GHL TagAdded event for "AI off" tag.
+   * Sets conversation.metadata.ai_status = "off" for all contact conversations.
+   * TagRemoved is not needed — the next InboundMessage webhook sets it back to "active"
+   * (GHL Customer Replied workflow only fires when AI off tag is absent).
+   */
+  private async handleTagEvent(
+    payload: GhlWebhookPayload,
+    tenantId: string,
+    _eventType: string,
+    workflowFlatRaw?: Record<string, unknown>,
+  ): Promise<void> {
+    // Extract tag name from workflow flat body or payload data
+    const sources: Record<string, unknown>[] = [];
+    if (workflowFlatRaw) sources.push(workflowFlatRaw);
+    const dataRecord = payload.data ? payload.data : {};
+    sources.push(dataRecord as unknown as Record<string, unknown>);
+    sources.push(payload as unknown as Record<string, unknown>);
+
+    const tagName = (() => {
+      for (const src of sources) {
+        for (const key of ['tag', 'tagName', 'tag_name', 'name']) {
+          const v = src[key];
+          if (typeof v === 'string' && v.trim()) return v.trim();
+        }
+      }
+      return null;
+    })();
+
+    if (!tagName || tagName.toLowerCase() !== 'ai off') {
+      this.logger.log(
+        `tag_event_skipped: tenantId=${tenantId} tagName=${tagName ?? 'NONE'}`,
+      );
+      return;
+    }
+
+    const contactId = (payload.data && typeof payload.data === 'object'
+        ? (payload.data as unknown as Record<string, unknown>)['contactId'] as string
+        : null)
+      ?? (workflowFlatRaw?.['contactId'] as string)
+      ?? (workflowFlatRaw?.['contact_id'] as string)
+      ?? null;
+    if (!contactId) {
+      this.logger.warn(
+        `tag_event_no_contact: tenantId=${tenantId} tagName=${tagName}`,
+      );
+      return;
+    }
+
+    await this.updateContactConversationsAiStatus(tenantId, contactId, 'off');
+    this.logger.log(
+      `tag_event_applied: tenantId=${tenantId} contactId=${contactId} aiStatus=off`,
+    );
+  }
+
+  /**
+   * Set ai_status on all conversations for a contact.
+   * Best-effort: errors are logged but not thrown.
+   */
+  private async updateContactConversationsAiStatus(
+    tenantId: string,
+    contactId: string,
+    status: string,
+  ): Promise<void> {
+    try {
+      const { data: conversations } = await this.supabase
+        .from('conversations')
+        .select('id, metadata')
+        .eq('tenant_id', tenantId)
+        .eq('contact_id', contactId);
+
+      if (!conversations?.length) return;
+
+      for (const conv of conversations) {
+        const meta = (conv.metadata as Record<string, unknown>) ?? {};
+        if (meta['ai_status'] === status) continue;
+
+        meta['ai_status'] = status;
+        meta['ai_status_updated_at'] = new Date().toISOString();
+        await this.supabase
+          .from('conversations')
+          .update({ metadata: meta, updated_at: new Date().toISOString() })
+          .eq('id', conv.id);
+      }
+    } catch (err) {
+      this.logger.warn(
+        `updateContactAiStatus_failed: tenantId=${tenantId} contactId=${contactId} status=${status} error=${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  /**
+   * InboundMessage webhook: GHL's Customer Replied workflow only fires when AI off
+   * tag is absent. Set ai_status = "active" as an authoritative signal.
+   * Fire-and-forget — does not block webhook processing.
+   */
+  private async setContactAiStatusFromWebhook(
+    tenantId: string,
+    payload: GhlWebhookPayload,
+    workflowFlatRaw?: Record<string, unknown>,
+  ): Promise<void> {
+    try {
+      const contactId = (payload.data && typeof payload.data === 'object'
+          ? (payload.data as unknown as Record<string, unknown>)['contactId'] as string
+          : null)
+        ?? (workflowFlatRaw?.['contactId'] as string)
+        ?? (workflowFlatRaw?.['contact_id'] as string)
+        ?? null;
+
+      if (!contactId) return;
+
+      await this.updateContactConversationsAiStatus(tenantId, contactId, 'active');
+    } catch (err) {
+      // Best-effort — don't block inbound processing
     }
   }
 

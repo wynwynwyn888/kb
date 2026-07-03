@@ -267,7 +267,7 @@ export function coerceGhlWebhookPayload(raw: unknown): {
   }
 
   const locationId = extractLocationId(r, sources);
-  const event = pickFromSources(sources, ['event']);
+  const event = pickFromSources(sources, ['event', 'type']);
   if (!locationId || !event) {
     throw new Error(
       'Invalid webhook payload: locationId and event are required (top-level or customData)',

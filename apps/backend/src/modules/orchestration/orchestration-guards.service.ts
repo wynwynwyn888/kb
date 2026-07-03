@@ -284,6 +284,10 @@ export class OrchestrationGuards {
 
   /**
    * Guard 8: Skip AI reply if the GHL contact has an "AI off" tag (case-insensitive).
+   *
+   * Checks conversation metadata ai_status first (synced copy from TagAdded/Removed webhooks).
+   * Falls back to GHL getContact API when metadata is missing and updates metadata on success.
+   * Fails closed on any error (no reply).
    */
   private async checkAiOffTag(input: OrchestrationInput): Promise<GuardResult> {
     const contactId = input.conversation?.contactId?.trim();
@@ -291,6 +295,28 @@ export class OrchestrationGuards {
       return { decision: 'PROCEED', guardName: 'ai_off_tag', reason: 'no_contact_id' };
     }
 
+    const conversationId = input.conversationId;
+    const metadata = (input.conversation?.metadata ?? {}) as Record<string, unknown>;
+    const aiStatus = typeof metadata['ai_status'] === 'string' ? metadata['ai_status'].trim().toLowerCase() : null;
+
+    // 1. Metadata has explicit status
+    // "off" is authoritative — no TTL, always block.
+    // "active" is cached — re-verify via GHL if older than 5 minutes to prevent
+    // stale trust when a TagRemoved→TagAdded transition's webhook was missed.
+    const AI_STATUS_TTL_MS = 5 * 60 * 1000;
+    const updatedAtRaw = metadata['ai_status_updated_at'];
+    const updatedAt = typeof updatedAtRaw === 'string' ? new Date(updatedAtRaw).getTime() : 0;
+    const activeIsFresh = aiStatus === 'active' && updatedAt > 0 && (Date.now() - updatedAt) < AI_STATUS_TTL_MS;
+
+    if (aiStatus === 'off') {
+      return { decision: 'SKIP_AI_OFF_TAG', guardName: 'ai_off_tag', reason: 'ai_status=off (metadata)' };
+    }
+    if (activeIsFresh) {
+      return { decision: 'PROCEED', guardName: 'ai_off_tag', reason: 'ai_status=active (metadata, fresh)' };
+    }
+    // "active" but stale, or missing — fall through to GHL lookup
+
+    // 2. Metadata missing — fallback to GHL API
     try {
       if (!this.ghlService) {
         return { decision: 'PROCEED', guardName: 'ai_off_tag', reason: 'no_ghl_service' };
@@ -319,6 +345,10 @@ export class OrchestrationGuards {
 
       const hasAiOff = tagList.some((t) => t.trim().toLowerCase() === 'ai off');
 
+      // Update metadata so future checks hit the fast path
+      const newStatus = hasAiOff ? 'off' : 'active';
+      await this.updateConversationAiStatus(input.tenantId, input.conversationId, metadata, newStatus);
+
       if (hasAiOff) {
         this.logger.log(
           `ai_off_tag_present: tenantId=${input.tenantId} contactId=${contactId}`,
@@ -341,6 +371,38 @@ export class OrchestrationGuards {
         guardName: 'ai_off_tag',
         reason: `Tag lookup failed: ${err instanceof Error ? err.message : 'unknown'}`,
       };
+    }
+  }
+
+  /**
+   * Persist ai_status to conversation metadata.
+   * Non-critical — best-effort, errors are logged but not thrown.
+   */
+  private async updateConversationAiStatus(
+    tenantId: string,
+    conversationId: string | undefined,
+    currentMetadata: Record<string, unknown>,
+    status: string,
+  ): Promise<void> {
+    if (!conversationId) return;
+    try {
+      // Re-read fresh metadata to avoid overwriting concurrent updates
+      const { data: conv } = await this.supabase
+        .from('conversations')
+        .select('metadata')
+        .eq('id', conversationId)
+        .maybeSingle();
+      const fresh = (conv?.metadata as Record<string, unknown>) ?? currentMetadata;
+      fresh['ai_status'] = status;
+      fresh['ai_status_updated_at'] = new Date().toISOString();
+      await this.supabase
+        .from('conversations')
+        .update({ metadata: fresh, updated_at: new Date().toISOString() })
+        .eq('id', conversationId);
+    } catch (err) {
+      this.logger.warn(
+        `ai_off_update_metadata_failed: tenantId=${tenantId} conversationId=${conversationId} status=${status} error=${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   }
 

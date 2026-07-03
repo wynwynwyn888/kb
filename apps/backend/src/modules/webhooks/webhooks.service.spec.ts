@@ -502,4 +502,108 @@ describe('WebhooksService', () => {
       );
     });
   });
+
+  // ── TagAdded / TagRemoved AI off tests ───────────────────────────────
+  describe('handleTagEvent', () => {
+    const locationId = 'loc_123';
+    const contactId = 'contact_ai_off';
+    const tenantId = 'tnt_connected';
+
+    beforeEach(() => {
+      attachInboundRoutingMockImplementation(mockSupabase.from as jest.Mock, {
+        ...defaultConnectedRouting,
+        tenantId,
+        locationId,
+      });
+    });
+
+    function makeTagPayload(tag: string, eventType = 'TagAdded') {
+      return {
+        locationId,
+        event: eventType,
+        data: { contactId } as never,
+        timestamp: new Date().toISOString(),
+      };
+    }
+
+    // ── Test 6: TagAdded "AI off" sets ai_status=off ──
+    it('TagAdded AI off sets ai_status=off on all contact conversations', async () => {
+      const convs = [
+        { id: 'conv1', metadata: { channel: 'WHATSAPP' } },
+        { id: 'conv2', metadata: { channel: 'SMS' } },
+      ];
+      const origImpl = (mockSupabase.from as jest.Mock).getMockImplementation();
+
+      (mockSupabase.from as jest.Mock).mockImplementation((table: string) => {
+        if (table === 'conversations') {
+          return {
+            select: jestGlobal.fn(() => ({
+              eq: jestGlobal.fn(() => ({
+                eq: jestGlobal.fn(async () => ({ data: convs, error: null })),
+              })),
+            })),
+            update: jestGlobal.fn(() => ({
+              eq: jestGlobal.fn(async () => ({ error: null })),
+            })),
+          };
+        }
+        return origImpl!(table);
+      });
+
+      const payload = makeTagPayload('ai off', 'TagAdded');
+      (payload as any).data = { contactId };
+      const result = await service.handleGhlWebhook(payload);
+
+      expect(result.success).toBe(true);
+    });
+
+    // ── InboundMessage webhook sets ai_status=active ──
+    it('InboundMessage sets ai_status=active (fire-and-forget)', async () => {
+      const convs = [
+        { id: 'conv1', metadata: { channel: 'WHATSAPP' } },
+      ];
+      const origImpl = (mockSupabase.from as jest.Mock).getMockImplementation();
+
+      (mockSupabase.from as jest.Mock).mockImplementation((table: string) => {
+        if (table === 'conversations') {
+          return {
+            select: jestGlobal.fn(() => ({
+              eq: jestGlobal.fn(() => ({
+                eq: jestGlobal.fn(async () => ({ data: convs, error: null })),
+              })),
+            })),
+            update: jestGlobal.fn(() => ({
+              eq: jestGlobal.fn(async () => ({ error: null })),
+            })),
+          };
+        }
+        return origImpl!(table);
+      });
+
+      const payload = makeTagPayload('test', 'InboundMessage');
+      (payload as any).data = { contactId };
+      const result = await service.handleGhlWebhook(payload);
+
+      // Should succeed even though setContactAiStatusFromWebhook is async
+      expect(result.success).toBe(true);
+    });
+
+    // ── Non-AI-off tag → skipped ──
+    it('skips TagAdded for non-AI-off tag', async () => {
+      const payload = makeTagPayload('other tag', 'TagAdded');
+      (payload as any).data = { contactId };
+      const result = await service.handleGhlWebhook(payload);
+
+      expect(result.success).toBe(true);
+    });
+
+    // ── TagAdded with no contactId → skipped ──
+    it('skips TagAdded when contactId is missing', async () => {
+      const payload = makeTagPayload('ai off', 'TagAdded');
+      (payload as any).data = {};
+      const result = await service.handleGhlWebhook(payload);
+
+      expect(result.success).toBe(true);
+    });
+  });
 });

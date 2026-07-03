@@ -20,6 +20,8 @@ import { getSupabaseService } from '../../lib/supabase';
 import { bumpInboundDebounceMeta } from '../../lib/inbound-debounce';
 import { resolveInboundDebounceMs } from '../../lib/inbound-burst-batch';
 import { readConversationMetadataField, mergeConversationMetadataForPersist } from '../../lib/conversation-metadata-merge';
+import { markProviderOrchestrationDone } from '../../lib/schedule-orchestration-if-new';
+import { recordTerminalDecision } from '../../lib/inbound-decision';
 
 export interface SendBubbleJobData {
   conversationId: string;
@@ -37,6 +39,10 @@ export interface SendBubbleJobData {
   aiJobStartedAt: number;
   /** Worker wall-clock start for downstream latency logs (omit for manual/controller enqueues). */
   replyLatencyTrace?: { pipelineWallStartMs: number };
+  /** Inbound provider GHL message ID — used to mark provider done after successful send. */
+  providerGhlMessageId?: string;
+  /** Latest inbound KB message ID at orchestration start — for decision recording. */
+  inboundMessageId?: string;
 }
 
 @Processor(QUEUES.SEND_BUBBLE)
@@ -223,6 +229,54 @@ export class SendBubbleProcessor extends WorkerHost {
       // All paths should have returned inside the try block if send was skipped.
       // This is a safety guard for unexpected flow.
       return {} as SendSummary;
+    }
+
+    // Fix 2: Mark provider done ONLY after successful send is confirmed.
+    // Fix 1: Record PROCEED / FAILED_SEND terminal decision on the inbound message.
+    const providerGhlMsgId = job.data.providerGhlMessageId;
+    const inboundMsgId = job.data.inboundMessageId;
+    if (summary.succeeded > 0) {
+      // Successful send → record PROCEED terminal decision first
+      let decisionOk = true;
+      if (inboundMsgId) {
+        const outboundMsgId = summary.bubbleResults?.[0]?.ghlMessageId;
+        decisionOk = await recordTerminalDecision({
+          supabase: getSupabaseService(),
+          logger: this.logger,
+          messageId: inboundMsgId,
+          decision: {
+            status: 'PROCEED',
+            outboundMessageId: replyId,
+            outboundGhlMessageId: typeof outboundMsgId === 'string' ? outboundMsgId : undefined,
+            triggerSource: 'webhook',
+            decidedAt: new Date().toISOString(),
+          },
+        });
+      }
+      // Only mark provider done if decision write succeeded (or no inboundMsgId)
+      if (providerGhlMsgId && (decisionOk || !inboundMsgId)) {
+        await markProviderOrchestrationDone(this.appCache, tenantId, providerGhlMsgId);
+      } else if (providerGhlMsgId && !decisionOk) {
+        this.logger.error(
+          `providerDoneWithheld_decisionWriteFailed: tenantId=${tenantId} conversationId=${conversationId} providerMsgId=${providerGhlMsgId} inboundMsgId=${inboundMsgId}`,
+        );
+      }
+    } else if (summary.failed > 0) {
+      // Failed send → record FAILED_SEND, do NOT mark provider done (retryable)
+      if (inboundMsgId) {
+        await recordTerminalDecision({
+          supabase: getSupabaseService(),
+          logger: this.logger,
+          messageId: inboundMsgId,
+          decision: {
+            status: 'FAILED_SEND',
+            reason: `failed=${summary.failed} succeeded=${summary.succeeded}`,
+            triggerSource: 'webhook',
+            decidedAt: new Date().toISOString(),
+          },
+        });
+      }
+      // Do NOT mark provider done — let scanner/retry handle it
     }
 
     const total_backend_reply_ms = replyLatencyTrace?.pipelineWallStartMs

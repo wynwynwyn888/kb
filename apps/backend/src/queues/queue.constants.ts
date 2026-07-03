@@ -31,6 +31,9 @@ export const QUEUES = {
 
   // Active conversation recovery watchdog (self-rescheduling, per-conversation)
   ACTIVE_RECOVERY_WATCHDOG: 'active-recovery-watchdog',
+
+  // Unreplied inbound scanner (background safety net)
+  UNREPLIED_SCANNER: 'unreplied-scanner',
 } as const;
 
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];
@@ -117,6 +120,14 @@ export const queueConfig: Record<QueueName, {
     },
   },
   [QUEUES.ACTIVE_RECOVERY_WATCHDOG]: {
+    defaultJobOptions: {
+      attempts: 1,
+      backoff: { type: 'fixed', delay: 0 },
+      removeOnComplete: true,
+      removeOnFail: true,
+    },
+  },
+  [QUEUES.UNREPLIED_SCANNER]: {
     defaultJobOptions: {
       attempts: 1,
       backoff: { type: 'fixed', delay: 0 },

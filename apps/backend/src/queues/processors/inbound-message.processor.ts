@@ -52,6 +52,23 @@ import { ingestInboundMessage } from '../../lib/inbound-message-ingest';
 import { MetricsService } from '../../lib/metrics.service';
 import { checkProviderOrchestrationGate, markProviderOrchestrationDone } from '../../lib/schedule-orchestration-if-new';
 import { resolveContactIdIfPhone } from '../../lib/contact-resolve';
+import { recordTerminalDecision, recordInterimDecision, recordDuplicateDecision } from '../../lib/inbound-decision';
+import type { InboundDecisionStatus } from '../../lib/inbound-decision';
+
+function mapOutcomeToDecisionStatus(outcome: string): InboundDecisionStatus | null {
+  switch (outcome) {
+    case 'SKIP_AI_OFF_TAG': return 'SKIP_AI_OFF_TAG';
+    case 'SKIP_DUPLICATE': return 'SKIP_DUPLICATE_PROVIDER_DONE';
+    case 'SKIP_BOT_DISABLED':
+    case 'SKIP_GHL_DISCONNECTED':
+    case 'SKIP_AUTOMATION_PAUSED':
+    case 'SKIP_QUOTA_EXHAUSTED':
+    case 'SKIP_UNSUPPORTED_MESSAGE_TYPE':
+    case 'SKIP_UNSUPPORTED_CHANNEL':
+      return 'SKIP_HUMAN_TAKEOVER';
+    default: return null;
+  }
+}
 
 export interface InboundMessageJobData {
   locationId: string;
@@ -1464,6 +1481,8 @@ export class InboundMessageProcessor extends WorkerHost {
           latestInboundMsgIdAtStart,
           aiJobStartedAt,
           replyLatencyTrace: { pipelineWallStartMs: pipelineWallStartMs ?? Date.now() },
+          providerGhlMessageId: ctxGhlMsgId || undefined,
+          inboundMessageId: latestMsgId || undefined,
         });
 
         this.logger.log(
@@ -1471,9 +1490,40 @@ export class InboundMessageProcessor extends WorkerHost {
         );
       }
       await this.markOrchestrationCompleted(latestMsgId);
-      await markProviderOrchestrationDone(this.appCache, tenantId, ctxGhlMsgId);
+      // Provider done marker is now set in send-bubble.processor.ts after successful send.
+      // Record interim pending decision — finalized by send-bubble with PROCEED or FAILED_SEND.
+      if (latestMsgId) {
+        void recordInterimDecision({
+          supabase: this.supabase,
+          messageId: latestMsgId,
+          decision: {
+            status: 'PENDING',
+            reason: 'enqueued for send',
+            triggerSource: 'webhook',
+            decidedAt: new Date().toISOString(),
+          },
+        });
+      }
     } else {
-      // Non-PROCEED outcome (e.g. guard blocked, complaint) — release lock
+      // Non-PROCEED outcome (e.g. guard blocked) — record terminal decision and release lock
+      const skipStatus = mapOutcomeToDecisionStatus(result.outcome as string);
+      if (latestMsgId && skipStatus) {
+        await recordTerminalDecision({
+          supabase: this.supabase,
+          logger: this.logger,
+          messageId: latestMsgId,
+          decision: {
+            status: skipStatus,
+            reason: result.outcome,
+            triggerSource: 'webhook',
+            decidedAt: new Date().toISOString(),
+          },
+        });
+        // Mark provider done AFTER terminal decision is recorded
+        if (['SKIP_AI_OFF_TAG', 'SKIP_DUPLICATE_PROVIDER_DONE', 'SKIP_HUMAN_TAKEOVER'].includes(skipStatus)) {
+          await markProviderOrchestrationDone(this.appCache, tenantId, ctxGhlMsgId);
+        }
+      }
       await this.releaseOrchestrationLock(latestMsgId, lockToken);
     }
 

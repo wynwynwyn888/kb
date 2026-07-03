@@ -166,8 +166,22 @@ export class ActiveRecoveryWatchdogProcessor extends WorkerHost {
         const outboundTs = new Date(latestOutboundAt).getTime();
 
         // Guards
-        if (latestRecoveredTs <= outboundTs) return; // before outbound
-        if (latestRecoveredTs > outboundTs + RECOVERY_HORIZON_MS) return; // outside horizon
+        if (latestRecoveredTs <= outboundTs) {
+          this.logger.log(
+            `watchdog_skip_recovered_before_or_equal_outbound: conversationId=${conversationId} ` +
+            `latestRecoveredAt=${syncResult.latestRecoveredContactInboundAt} ` +
+            `outboundAt=${latestOutboundAt}`,
+          );
+          return;
+        }
+        if (latestRecoveredTs > outboundTs + RECOVERY_HORIZON_MS) {
+          this.logger.log(
+            `watchdog_skip_recovered_beyond_horizon: conversationId=${conversationId} ` +
+            `latestRecoveredAt=${syncResult.latestRecoveredContactInboundAt} ` +
+            `outboundAt=${latestOutboundAt} horizonMs=${RECOVERY_HORIZON_MS}`,
+          );
+          return;
+        }
 
         // Check if already handled
         const { data: laterOutbound } = await this.supabase
@@ -180,7 +194,14 @@ export class ActiveRecoveryWatchdogProcessor extends WorkerHost {
           .limit(1)
           .maybeSingle();
 
-        if (laterOutbound) return;
+        if (laterOutbound) {
+          this.logger.log(
+            `watchdog_skip_later_outbound_exists: conversationId=${conversationId} ` +
+            `recoveredAt=${syncResult.latestRecoveredContactInboundAt} ` +
+            `laterOutboundId=${laterOutbound.id}`,
+          );
+          return;
+        }
 
         // Bump debounce + schedule orchestration
         const { data: convMetaRow } = await this.supabase

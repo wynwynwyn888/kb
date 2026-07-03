@@ -167,7 +167,7 @@ describe('OrchestrationGuards — checkConversationAutomationPaused', () => {
       mockFrom(mockSupabase, 'quota_wallets', { total_quota: 100, used_quota: 10 });
       const result = await guards.runGuards(input);
       expect(result.final).toBe('PROCEED');
-      expect(result.guards.length).toBe(7); // 7 guards now (added automation_paused)
+      expect(result.guards.length).toBe(8); // 8 guards (added ai_off_tag)
     });
   });
 });

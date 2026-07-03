@@ -62,7 +62,7 @@ export class SendBubbleProcessor extends WorkerHost {
     @InjectQueue(QUEUES.INBOUND_MESSAGE_PROCESSOR) private readonly inboundQueue: Queue,
     @InjectQueue(QUEUES.POST_OUTBOUND_SYNC) private readonly postOutboundSyncQueue: Queue,
     @InjectQueue(QUEUES.ACTIVE_RECOVERY_WATCHDOG) private readonly watchdogQueue: Queue,
-    @Optional() private readonly appCache?: AppCacheService,
+    private readonly appCache: AppCacheService,
     @Optional() private readonly metrics?: MetricsService,
   ) {
     super();
@@ -256,6 +256,9 @@ export class SendBubbleProcessor extends WorkerHost {
       // Only mark provider done if decision write succeeded (or no inboundMsgId)
       if (providerGhlMsgId && (decisionOk || !inboundMsgId)) {
         await markProviderOrchestrationDone(this.appCache, tenantId, providerGhlMsgId);
+        this.logger.log(
+          `providerDoneWritten: tenantId=${tenantId} providerMsgId=${providerGhlMsgId.slice(0, 12)}`,
+        );
       } else if (providerGhlMsgId && !decisionOk) {
         this.logger.error(
           `providerDoneWithheld_decisionWriteFailed: tenantId=${tenantId} conversationId=${conversationId} providerMsgId=${providerGhlMsgId} inboundMsgId=${inboundMsgId}`,

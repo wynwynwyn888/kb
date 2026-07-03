@@ -150,6 +150,8 @@ describe('SendBubbleProcessor — provider done-after-send', () => {
       quotaDebited: 0,
     });
 
+    const mockAppCache = { acquireLock: jestGlobal.fn(), releaseLock: jestGlobal.fn(), redis: { exists: jestGlobal.fn(), set: jestGlobal.fn() } } as any;
+
     processor = new SendBubbleProcessor(
       outboundSendStub as any,
       {} as any,
@@ -162,7 +164,7 @@ describe('SendBubbleProcessor — provider done-after-send', () => {
       { add: mockInboundQueueAdd } as any,
       { add: jestGlobal.fn() } as any,
       { add: jestGlobal.fn(), remove: jestGlobal.fn(async () => {}) } as any,
-      undefined,
+      mockAppCache,
       undefined,
     );
   });
@@ -239,5 +241,19 @@ describe('SendBubbleProcessor — provider done-after-send', () => {
     expect(mockSendReply).toHaveBeenCalled();
     expect(mockRecordTerminalDecision).not.toHaveBeenCalled();
     expect(mockMarkProviderOrchestrationDone).toHaveBeenCalledTimes(1);
+  });
+
+  // ── Test 6: Provider done marker arguments are correct ──────────────
+  it('passes correct tenantId and providerGhlMessageId to markProviderOrchestrationDone', async () => {
+    await processor.process(makeJob({
+      providerGhlMessageId: 'specific-ghl-id-123',
+      tenantId: 'tenant-abc',
+    }));
+
+    expect(mockMarkProviderOrchestrationDone).toHaveBeenCalledTimes(1);
+    const doneCall = mockMarkProviderOrchestrationDone.mock.calls[0];
+    expect(doneCall[0]).toBeDefined(); // appCache
+    expect(doneCall[1]).toBe('tenant-abc');
+    expect(doneCall[2]).toBe('specific-ghl-id-123');
   });
 });

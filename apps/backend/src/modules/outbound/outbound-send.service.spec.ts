@@ -1055,4 +1055,85 @@ describe('OutboundSendService', () => {
       expect(result).toBe('wait');
     });
   });
+
+  // ── isReplyStale tests (pre-send stale check) ─────────────────────────
+  describe('isReplyStale', () => {
+    it('returns true when latest inbound differs from start snapshot', async () => {
+      // Simulate: at start, latest inbound was msg-old; now latest is msg-new
+      (mockSupabase.from as jest.Mock).mockReturnValue({
+        select: jestGlobal.fn(() => ({
+          eq: jestGlobal.fn(() => ({
+            eq: jestGlobal.fn(() => ({
+              eq: jestGlobal.fn(() => ({
+                order: jestGlobal.fn(() => ({
+                  limit: jestGlobal.fn(() => ({
+                    maybeSingle: jestGlobal.fn(async () => ({
+                      data: { id: 'msg-new' },
+                      error: null,
+                    })),
+                  })),
+                })),
+              })),
+            })),
+          })),
+        })),
+      } as never);
+
+      const result = await service.isReplyStale('conv1', 'msg-old');
+      expect(result).toBe(true);
+    });
+
+    it('returns false when latest inbound matches start snapshot', async () => {
+      (mockSupabase.from as jest.Mock).mockReturnValue({
+        select: jestGlobal.fn(() => ({
+          eq: jestGlobal.fn(() => ({
+            eq: jestGlobal.fn(() => ({
+              eq: jestGlobal.fn(() => ({
+                order: jestGlobal.fn(() => ({
+                  limit: jestGlobal.fn(() => ({
+                    maybeSingle: jestGlobal.fn(async () => ({
+                      data: { id: 'msg-same' },
+                      error: null,
+                    })),
+                  })),
+                })),
+              })),
+            })),
+          })),
+        })),
+      } as never);
+
+      const result = await service.isReplyStale('conv1', 'msg-same');
+      expect(result).toBe(false);
+    });
+
+    it('returns false when latestInboundMsgIdAtStart is empty', async () => {
+      const result = await service.isReplyStale('conv1', '');
+      expect(result).toBe(false);
+    });
+
+    it('returns false when query fails', async () => {
+      (mockSupabase.from as jest.Mock).mockReturnValue({
+        select: jestGlobal.fn(() => ({
+          eq: jestGlobal.fn(() => ({
+            eq: jestGlobal.fn(() => ({
+              eq: jestGlobal.fn(() => ({
+                order: jestGlobal.fn(() => ({
+                  limit: jestGlobal.fn(() => ({
+                    maybeSingle: jestGlobal.fn(async () => ({
+                      data: null,
+                      error: { message: 'DB error' },
+                    })),
+                  })),
+                })),
+              })),
+            })),
+          })),
+        })),
+      } as never);
+
+      const result = await service.isReplyStale('conv1', 'msg-old');
+      expect(result).toBe(false); // fail safe
+    });
+  });
 });

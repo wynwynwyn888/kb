@@ -16,6 +16,10 @@ import { HumanEscalationRuntimeService } from '../../modules/human-escalation/hu
 import { HumanEscalationHoldingReplyService } from '../../modules/human-escalation/human-escalation-holding-reply.service';
 import { AppCacheService } from '../../lib/app-cache.service';
 import { MetricsService } from '../../lib/metrics.service';
+import { getSupabaseService } from '../../lib/supabase';
+import { bumpInboundDebounceMeta } from '../../lib/inbound-debounce';
+import { resolveInboundDebounceMs } from '../../lib/inbound-burst-batch';
+import { readConversationMetadataField, mergeConversationMetadataForPersist } from '../../lib/conversation-metadata-merge';
 
 export interface SendBubbleJobData {
   conversationId: string;
@@ -125,20 +129,42 @@ export class SendBubbleProcessor extends WorkerHost {
     let summary: SendSummary | undefined;
     let outbound_send_ms = 0;
     try {
-      // Stale check
-      const staleEnabled = process.env['AISBP_STALE_SEND_CHECK_ENABLED'] === 'true';
-      if (staleEnabled && latestInboundMsgIdAtStart) {
+      // Pre-send stale check: abort if newer customer inbound arrived after
+      // orchestration started. Reschedule with properly bumped debounce version.
+      if (latestInboundMsgIdAtStart) {
         const isStale = await this.outboundSend.isReplyStale(conversationId, latestInboundMsgIdAtStart);
-          if (isStale) {
+        if (isStale) {
           this.metrics?.emit({ tenantId, conversationId, eventType: 'stale_send_cancelled', eventSource: 'send-bubble', severity: 'warn', metadata: { replyId, latestInboundMsgIdAtStart } });
           this.logger.log(
-            `staleReplyCancelled: conversationId=${conversationId} replyId=${replyId} — newer inbound detected, requeuing orchestration`,
+            `staleReplyCancelled: conversationId=${conversationId} replyId=${replyId} — newer inbound detected, rescheduling orchestration`,
           );
+
+          // Bump debounce version and reschedule with correct version
+          const supabase = getSupabaseService();
+          const { data: convMetaRow } = await supabase
+            .from('conversations')
+            .select('metadata')
+            .eq('id', conversationId)
+            .single();
+          const currentMeta = readConversationMetadataField(convMetaRow?.metadata);
+          const { merged: debounceBump, newVersion } = bumpInboundDebounceMeta(currentMeta);
+          const merged = mergeConversationMetadataForPersist(currentMeta, debounceBump);
+          await supabase
+            .from('conversations')
+            .update({ metadata: merged, updated_at: new Date().toISOString() })
+            .eq('id', conversationId);
+
+          const { debounceMs } = resolveInboundDebounceMs();
           await this.inboundQueue.add('orchestrate', {
-            conversationId, tenantId, ghlLocationId, contactId,
-            debounceVersion: 0,
-            aiJobStartedAt: Date.now(),
-          } as any);
+            tenantId, conversationId, locationId: ghlLocationId, ghlContactId: contactId,
+            ghlConversationId: '', debounceVersion: newVersion,
+            debounceConfiguredMs: debounceMs, orchestrateEnqueuedAtMs: Date.now(),
+          } as any, {
+            delay: debounceMs,
+            jobId: `deb:${conversationId}:${newVersion}`,
+            attempts: 2, backoff: { type: 'exponential', delay: 1500 }, removeOnComplete: true,
+          });
+
           return {
             conversationId, tenantId, totalBubbles: 0, succeeded: 0, failed: 0,
             bubbleResults: [], quotaDebited: 0,

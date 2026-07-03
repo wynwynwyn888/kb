@@ -1014,7 +1014,6 @@ export class OutboundSendService {
     latestInboundMsgIdAtStart: string,
   ): Promise<boolean> {
     if (!latestInboundMsgIdAtStart) return false;
-    if (process.env['AISBP_STALE_SEND_CHECK_ENABLED'] !== 'true') return false;
     try {
       const { data, error } = await this.supabase
         .from('messages')

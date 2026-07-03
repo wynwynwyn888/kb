@@ -1624,37 +1624,48 @@ export class InboundMessageProcessor extends WorkerHost {
       const hasRecoveredGhlId = !!syncResult.latestRecoveredGhlMessageId;
       const hasRecoveredTs = !!syncResult.latestRecoveredContactInboundAt;
 
-      // Skip only if we have no recovered message at all (no inserts AND no existing
-      // INBOUND/CONTACT message discovered via dedupe, upgrade, or short-circuit).
+      let recoveredGhlId = syncResult.latestRecoveredGhlMessageId;
+      let recoveredTs = syncResult.latestRecoveredContactInboundAt;
+
+      // If sync returned no new inserts, check for stored but uncovered inbound messages
+      // (short-circuit case — messages already in DB but never orchestrated)
       if (!syncResult.insertedContactInboundIds.length && !(hasRecoveredGhlId && hasRecoveredTs)) {
+        const uncovered = await this.fetchLatestUncoveredInbound(conversationId);
+        if (!uncovered) {
+          this.logger.log(
+            `recovery_sync_no_new_inbound: conversationId=${conversationId}`,
+          );
+          return;
+        }
         this.logger.log(
-          `recovery_sync_no_new_inbound: conversationId=${conversationId}`,
+          `recovery_sync_uncovered_inbound: conversationId=${conversationId} kbMsgId=${(uncovered.id ?? '').slice(0, 8)}`,
         );
-        return;
+        recoveredGhlId = uncovered.ghlMessageId ?? null;
+        recoveredTs = uncovered.createdAt ?? null;
       }
 
-      if (syncResult.insertedContactInboundIds.length === 0 && hasRecoveredGhlId && hasRecoveredTs) {
+      if (syncResult.insertedContactInboundIds.length === 0 && recoveredGhlId && recoveredTs) {
         this.logger.log(
-          `recovery_sync_existing_inbound_recovered: conversationId=${conversationId} ghlMessageId=${syncResult.latestRecoveredGhlMessageId!.slice(0, 12)}`,
+          `recovery_sync_existing_inbound_recovered: conversationId=${conversationId} ghlMessageId=${recoveredGhlId.slice(0, 12)}`,
         );
       }
 
       // Guard: skip if a later KB outbound already handled this inbound
-      if (syncResult.latestRecoveredContactInboundAt) {
+      if (recoveredTs) {
         const { data: laterOutbound } = await this.supabase
           .from('messages')
           .select('id')
           .eq('conversation_id', conversationId)
           .eq('direction', 'OUTBOUND')
           .eq('sender', 'AI')
-          .gte('created_at', syncResult.latestRecoveredContactInboundAt)
+          .gte('created_at', recoveredTs)
           .limit(1)
           .maybeSingle();
 
         if (laterOutbound) {
           this.logger.log(
             `recovery_sync_later_outbound_exists: conversationId=${conversationId} ` +
-            `recoveredAt=${syncResult.latestRecoveredContactInboundAt}`,
+            `recoveredAt=${recoveredTs}`,
           );
           return;
         }
@@ -1666,8 +1677,8 @@ export class InboundMessageProcessor extends WorkerHost {
         logger: this.logger,
         tenantId,
         conversationId,
-        ghlMessageId: syncResult.latestRecoveredGhlMessageId,
-        ghlTimestamp: syncResult.latestRecoveredContactInboundAt,
+        ghlMessageId: recoveredGhlId,
+        ghlTimestamp: recoveredTs,
         source: 'fallback',
       });
 
@@ -1699,7 +1710,7 @@ export class InboundMessageProcessor extends WorkerHost {
           tenantId, conversationId, locationId: ghlLocationId, ghlContactId,
           ghlConversationId: '', debounceVersion: newVersion,
           debounceConfiguredMs: debounceMs, orchestrateEnqueuedAtMs: Date.now(),
-          ghlInboundMessageId: syncResult.latestRecoveredGhlMessageId || undefined,
+          ghlInboundMessageId: recoveredGhlId || undefined,
         } satisfies OrchestrateDebouncedJobData,
         {
           delay: debounceMs,
@@ -1709,13 +1720,60 @@ export class InboundMessageProcessor extends WorkerHost {
       );
 
       this.logger.log(
-        `recovery_sync_orch_scheduled: conversationId=${conversationId} providerMsgId=${(syncResult.latestRecoveredGhlMessageId || '').slice(0, 12)}`,
+        `recovery_sync_orch_scheduled: conversationId=${conversationId} providerMsgId=${(recoveredGhlId || '').slice(0, 12)}`,
       );
     } catch (err) {
       this.logger.warn(
         `recovery_sync_failed: conversationId=${conversationId} error=${err instanceof Error ? err.message : String(err)}`,
       );
     }
+  }
+
+  /**
+   * Check for stored CONTACT/INBOUND messages that have no later OUTBOUND/AI reply.
+   * Used by recovery sync when the GHL sync short-circuits but messages were already
+   * stored in the DB without being orchestrated.
+   */
+  private async fetchLatestUncoveredInbound(conversationId: string): Promise<{
+    id: string;
+    ghlMessageId: string | null;
+    createdAt: string | null;
+  } | null> {
+    const { data: latestInbound } = await this.supabase
+      .from('messages')
+      .select('id, metadata, created_at')
+      .eq('conversation_id', conversationId)
+      .eq('direction', 'INBOUND')
+      .eq('sender', 'CONTACT')
+      .order('created_at', { ascending: false })
+      .limit(1);
+
+    const inbound = latestInbound?.[0];
+    if (!inbound) return null;
+
+    const inboundCreatedAt = typeof inbound.created_at === 'string' ? inbound.created_at : null;
+
+    // Check if a later outbound already exists
+    if (inboundCreatedAt) {
+      const { data: laterOutbound } = await this.supabase
+        .from('messages')
+        .select('id')
+        .eq('conversation_id', conversationId)
+        .eq('direction', 'OUTBOUND')
+        .eq('sender', 'AI')
+        .gte('created_at', inboundCreatedAt)
+        .limit(1)
+        .maybeSingle();
+
+      if (laterOutbound) return null; // already handled
+    }
+
+    const meta = (inbound.metadata ?? {}) as Record<string, unknown>;
+    return {
+      id: inbound.id as string,
+      ghlMessageId: typeof meta['ghlMessageId'] === 'string' ? meta['ghlMessageId'] : null,
+      createdAt: inboundCreatedAt,
+    };
   }
 
   private async tryClaimInboundForOrchestration(tenantId: string, conversationId: string): Promise<string | null> {

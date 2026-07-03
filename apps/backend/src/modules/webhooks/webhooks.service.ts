@@ -563,16 +563,23 @@ export class WebhooksService {
     _eventType: string,
     workflowFlatRaw?: Record<string, unknown>,
   ): Promise<void> {
-    // Extract tag name from workflow flat body or payload data
+    // Extract tag name from workflow flat body or payload data.
+    // GHL workflow custom webhooks often nest fields under `customData`.
     const sources: Record<string, unknown>[] = [];
-    if (workflowFlatRaw) sources.push(workflowFlatRaw);
+    if (workflowFlatRaw) {
+      sources.push(workflowFlatRaw);
+      const cd = workflowFlatRaw['customData'];
+      if (cd && typeof cd === 'object' && !Array.isArray(cd)) {
+        sources.push(cd as Record<string, unknown>);
+      }
+    }
     const dataRecord = payload.data ? payload.data : {};
     sources.push(dataRecord as unknown as Record<string, unknown>);
     sources.push(payload as unknown as Record<string, unknown>);
 
     const tagName = (() => {
       for (const src of sources) {
-        for (const key of ['tag', 'tagName', 'tag_name', 'name']) {
+        for (const key of ['tag', 'tagName', 'tag_name', 'name', 'value', 'label']) {
           const v = src[key];
           if (typeof v === 'string' && v.trim()) return v.trim();
         }

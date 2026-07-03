@@ -403,7 +403,7 @@ export class InboundMessageProcessor extends WorkerHost {
 
         // No ghlMessageId → trigger focused GHL sync to recover the real ID
         if (providerGate.reason === 'no_ghl_message_id') {
-          void this.recoverOrchestrationViaSync(
+          await this.recoverOrchestrationViaSync(
             tenant.id,
             conversation.id,
             locationId,
@@ -1621,11 +1621,43 @@ export class InboundMessageProcessor extends WorkerHost {
         contactId: ghlContactId,
       });
 
-      if (!syncResult.insertedContactInboundIds.length) {
+      const hasRecoveredGhlId = !!syncResult.latestRecoveredGhlMessageId;
+      const hasRecoveredTs = !!syncResult.latestRecoveredContactInboundAt;
+
+      // Skip only if we have no recovered message at all (no inserts AND no existing
+      // INBOUND/CONTACT message discovered via dedupe, upgrade, or short-circuit).
+      if (!syncResult.insertedContactInboundIds.length && !(hasRecoveredGhlId && hasRecoveredTs)) {
         this.logger.log(
           `recovery_sync_no_new_inbound: conversationId=${conversationId}`,
         );
         return;
+      }
+
+      if (syncResult.insertedContactInboundIds.length === 0 && hasRecoveredGhlId && hasRecoveredTs) {
+        this.logger.log(
+          `recovery_sync_existing_inbound_recovered: conversationId=${conversationId} ghlMessageId=${syncResult.latestRecoveredGhlMessageId!.slice(0, 12)}`,
+        );
+      }
+
+      // Guard: skip if a later KB outbound already handled this inbound
+      if (syncResult.latestRecoveredContactInboundAt) {
+        const { data: laterOutbound } = await this.supabase
+          .from('messages')
+          .select('id')
+          .eq('conversation_id', conversationId)
+          .eq('direction', 'OUTBOUND')
+          .eq('sender', 'AI')
+          .gte('created_at', syncResult.latestRecoveredContactInboundAt)
+          .limit(1)
+          .maybeSingle();
+
+        if (laterOutbound) {
+          this.logger.log(
+            `recovery_sync_later_outbound_exists: conversationId=${conversationId} ` +
+            `recoveredAt=${syncResult.latestRecoveredContactInboundAt}`,
+          );
+          return;
+        }
       }
 
       // Schedule orchestration with the recovered GHL message ID

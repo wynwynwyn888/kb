@@ -17,7 +17,7 @@ import { QUEUES } from '../../queues/queue.constants';
 import type { OrchestrateDebouncedJobData } from '../processors/inbound-message.processor';
 
 const ACTIVE_WINDOW_MS = 30 * 60 * 1000; // 30 minutes
-const RECOVERY_HORIZON_MS = 5 * 60 * 1000; // 5 minutes
+const RECOVERY_HORIZON_MS = 30 * 60 * 1000; // 30 minutes
 
 interface WatchdogJobData {
   tenantId: string;

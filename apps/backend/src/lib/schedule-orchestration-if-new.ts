@@ -58,12 +58,15 @@ export async function checkProviderOrchestrationGate(
     return { allowed: false, reason: 'no_ghl_message_id' };
   }
 
-  // Gate 2: require recent message (≤ 5 min)
+  // Gate 2: require recent message — source-aware max age
+  // Webhook (primary trigger): strict 5-minute window
+  // Fallback (sync/watchdog recovery): up to 30-minute window
   if (!ghlTimestamp) {
     return { allowed: false, reason: 'no_timestamp' };
   }
+  const maxAgeMs = isFallback ? 30 * 60 * 1000 : 5 * 60 * 1000;
   const ageMs = Date.now() - new Date(ghlTimestamp).getTime();
-  if (ageMs < 0 || ageMs > 5 * 60 * 1000) {
+  if (ageMs < 0 || ageMs > maxAgeMs) {
     return { allowed: false, reason: `stale_${ageMs}ms` };
   }
 

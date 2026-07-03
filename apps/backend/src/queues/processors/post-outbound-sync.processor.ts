@@ -22,7 +22,7 @@ import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import type { OrchestrateDebouncedJobData } from '../processors/inbound-message.processor';
 
-const RECOVERY_HORIZON_MS = 5 * 60 * 1000; // 5 minutes
+const RECOVERY_HORIZON_MS = 30 * 60 * 1000; // 30 minutes
 
 function isRecoveryEnabledForTenant(tenantId: string): boolean {
   const allowlist = (process.env['GHL_POST_OUTBOUND_RECOVERY_SYNC_TENANTS'] ?? '').trim();
@@ -87,7 +87,11 @@ export class PostOutboundSyncProcessor extends WorkerHost {
         })}`,
       );
 
-      if (syncResult.insertedContactInboundIds.length === 0) {
+      const hasRecoveredGhlId = !!syncResult.latestRecoveredGhlMessageId;
+      const hasRecoveredTs = !!syncResult.latestRecoveredContactInboundAt;
+
+      // Skip only if we have no recovered INBOUND/CONTACT message at all
+      if (syncResult.insertedContactInboundIds.length === 0 && !(hasRecoveredGhlId && hasRecoveredTs)) {
         return;
       }
 

@@ -191,6 +191,15 @@ export async function syncGhlConversationContext(params: {
     }
     if (ingestResult.upgraded) {
       result.upgradedMetadataIds.push(ingestResult.messageId);
+      // Upgraded INBOUND/CONTACT messages with real ghlMessageId are also recoverable
+      if (direction === 'INBOUND' && sender === 'CONTACT' && msg.id) {
+        if (!result.latestRecoveredGhlMessageId) result.latestRecoveredGhlMessageId = msg.id;
+        const ts = msg.dateAdded || new Date().toISOString();
+        if (!result.latestRecoveredContactInboundAt || ts > result.latestRecoveredContactInboundAt) {
+          result.latestRecoveredContactInboundAt = ts;
+        }
+        result.insertedContactInboundIds.push(ingestResult.messageId);
+      }
     }
     if (ingestResult.fingerprintConflict) {
       logger.warn(

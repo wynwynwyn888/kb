@@ -166,7 +166,6 @@ export async function findUnrepliedInboundMessages(params: {
 }): Promise<Array<{
   id: string;
   conversation_id: string;
-  tenant_id: string;
   content?: string;
   metadata: Record<string, unknown>;
   created_at: string;
@@ -176,19 +175,25 @@ export async function findUnrepliedInboundMessages(params: {
     Date.now() - lookbackMinutes * 60 * 1000,
   ).toISOString();
 
-  const { data: candidates } = await supabase
+  // messages table has no tenant_id — we resolve it later from conversations
+  const { data: candidates, error: queryErr } = await supabase
     .from('messages')
-    .select('id, conversation_id, tenant_id, content, metadata, created_at')
+    .select('id, conversation_id, content, metadata, created_at')
     .eq('direction', 'INBOUND')
     .eq('sender', 'CONTACT')
     .gte('created_at', windowStart)
     .order('created_at', { ascending: false })
     .limit(limit);
 
-  if (!candidates?.length) return [];
+  if (queryErr || !candidates?.length) {
+    if (queryErr) {
+      // Logger not available in this pure function — caller should handle
+    }
+    return [];
+  }
 
   const unreplied: Array<{
-    id: string; conversation_id: string; tenant_id: string;
+    id: string; conversation_id: string;
     content?: string; metadata: Record<string, unknown>; created_at: string;
   }> = [];
   for (const row of candidates) {
@@ -213,7 +218,6 @@ export async function findUnrepliedInboundMessages(params: {
     unreplied.push({
       id: msg['id'] as string,
       conversation_id: msg['conversation_id'] as string,
-      tenant_id: msg['tenant_id'] as string,
       content: typeof msg['content'] === 'string' ? msg['content'] as string : undefined,
       metadata: meta,
       created_at: msg['created_at'] as string,

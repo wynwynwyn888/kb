@@ -339,7 +339,6 @@ describe('inbound-decision', () => {
                           {
                             id: 'cand-1',
                             conversation_id: 'conv1',
-                            tenant_id: 't1',
                             content: 'Hi',
                             metadata: {},
                             created_at: new Date().toISOString(),

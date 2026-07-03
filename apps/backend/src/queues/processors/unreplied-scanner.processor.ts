@@ -92,8 +92,18 @@ export class UnrepliedScannerProcessor extends WorkerHost {
       for (const msg of candidates) {
         const meta = (msg.metadata ?? {}) as Record<string, unknown>;
 
+        // Resolve tenant_id from conversation (messages table has no tenant_id)
+        const { data: convRow } = await this.supabase
+          .from('conversations')
+          .select('tenant_id, metadata')
+          .eq('id', msg.conversation_id)
+          .single();
+        if (!convRow) continue;
+        const tenantId = (convRow as Record<string, unknown>)['tenant_id'] as string;
+        const convMeta = (convRow as Record<string, unknown>)['metadata'] as Record<string, unknown> | undefined;
+
         // Respect AI off metadata
-        if (meta['ai_status'] === 'off') {
+        if ((convMeta?.['ai_status'] ?? meta['ai_status']) === 'off') {
           skippedAiOff++;
           continue;
         }
@@ -134,7 +144,7 @@ export class UnrepliedScannerProcessor extends WorkerHost {
         const gate = await checkProviderOrchestrationGate({
           appCache: this.appCache,
           logger: this.logger,
-          tenantId: msg.tenant_id,
+          tenantId,
           conversationId: msg.conversation_id,
           ghlMessageId: ghlMsgId,
           ghlTimestamp: ghlTs,
@@ -188,7 +198,7 @@ export class UnrepliedScannerProcessor extends WorkerHost {
         const { debounceMs } = resolveInboundDebounceMs();
 
         await this.inboundQueue.add('orchestrate', {
-          tenantId: msg.tenant_id,
+          tenantId,
           conversationId: msg.conversation_id,
           locationId: '',
           ghlContactId: '',

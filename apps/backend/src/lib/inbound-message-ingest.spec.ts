@@ -319,20 +319,21 @@ describe('ingestInboundMessage', () => {
 
   describe('tier 2.5 — cross-path dedupe (same content, different timestamp/fingerprint)', () => {
     const STAFF_MSG = 'I already have staff replying to WhatsApp, why do I need this?';
+    const CHATGPT_MSG = 'Can I just use ChatGPT?';
+    const SAME_TS = '2026-07-02T16:25:31.000Z';
 
-    it('skips shared ingest duplicate when webhook already inserted (different ghlTimestamp)', async () => {
-      // Tier 1: ghlMessageId not found → Tier 2: fingerprint not found (different timestamps)
-      // → Tier 2.5: cross-path check finds recent same-content message → skipped
+    it('skips when same content + same GHL timestamp (within 5s)', async () => {
+      // Both paths have same ghlTimestamp → same original GHL message → dedupe
       const supabase = makeSupabase(
         [R(null), R(null)],  // Tier 1 miss, Tier 2 miss
-        null,                 // no insert error
-        R('existing-msg-id'), // cross-path check: found
+        null,
+        R('existing-msg-id', { ghlTimestamp: SAME_TS }), // cross-path: found with same ts
       );
       const result = await ingestInboundMessage(makeParams({
         supabase,
         ghlMessageId: null,
         ingestSource: 'ghl-sync',
-        ghlTimestamp: '2026-07-02T16:25:31.000Z', // different from webhook timestamp
+        ghlTimestamp: SAME_TS,
         content: STAFF_MSG,
       }));
       expect(result.inserted).toBe(false);
@@ -341,27 +342,79 @@ describe('ingestInboundMessage', () => {
       expect(supabase.crossPathWasCalled()).toBe(true);
     });
 
-    it('skips webhook duplicate when shared ingest already inserted (different ghlTimestamp)', async () => {
+    it('allows when same content + different GHL timestamp (2 min later)', async () => {
+      // Different timestamp → genuinely new user message → allowed
       const supabase = makeSupabase(
         [R(null), R(null)],
         null,
-        R('ingest-msg-id'),
+        R('existing-msg-id', { ghlTimestamp: '2026-07-02T16:23:48.000Z' }), // 103s earlier
       );
       const result = await ingestInboundMessage(makeParams({
         supabase,
         ghlMessageId: null,
         ingestSource: 'webhook',
-        ghlTimestamp: '2026-07-02T16:26:33.000Z',
-        content: 'Can I just use ChatGPT?',
+        ghlTimestamp: '2026-07-02T16:25:31.000Z',
+        content: STAFF_MSG,
       }));
-      expect(result.inserted).toBe(false);
-      expect(result.skippedCrossPathDuplicate).toBe(true);
-      expect(result.messageId).toBe('ingest-msg-id');
+      expect(result.inserted).toBe(true);
+      expect(result.skippedCrossPathDuplicate).toBeUndefined();
+    });
+
+    it('allows when same content + different GHL timestamp (30s later)', async () => {
+      const supabase = makeSupabase(
+        [R(null), R(null)],
+        null,
+        R('existing-msg-id', { ghlTimestamp: '2026-07-02T16:25:00.000Z' }),
+      );
+      const result = await ingestInboundMessage(makeParams({
+        supabase,
+        ghlMessageId: null,
+        ingestSource: 'webhook',
+        ghlTimestamp: '2026-07-02T16:25:30.000Z', // 30s later
+        content: CHATGPT_MSG,
+      }));
+      expect(result.inserted).toBe(true);
+      expect(result.skippedCrossPathDuplicate).toBeUndefined();
+    });
+
+    it('allows when existing has no ghlTimestamp (cannot confirm identity)', async () => {
+      // Existing row has no ghlTimestamp → can't confirm it's the same message → allow
+      const supabase = makeSupabase(
+        [R(null), R(null)],
+        null,
+        R('existing-msg-id', {}), // no ghlTimestamp in metadata
+      );
+      const result = await ingestInboundMessage(makeParams({
+        supabase,
+        ghlMessageId: null,
+        ingestSource: 'webhook',
+        ghlTimestamp: SAME_TS,
+        content: STAFF_MSG,
+      }));
+      expect(result.inserted).toBe(true);
+      expect(result.skippedCrossPathDuplicate).toBeUndefined();
+    });
+
+    it('allows when incoming has no ghlTimestamp (cannot confirm identity)', async () => {
+      const supabase = makeSupabase(
+        [R(null), R(null)],
+        null,
+        R('existing-msg-id', { ghlTimestamp: SAME_TS }),
+      );
+      const result = await ingestInboundMessage(makeParams({
+        supabase,
+        ghlMessageId: null,
+        ingestSource: 'webhook',
+        ghlTimestamp: null, // no timestamp on incoming
+        content: STAFF_MSG,
+      }));
+      expect(result.inserted).toBe(true);
+      expect(result.skippedCrossPathDuplicate).toBeUndefined();
     });
 
     it('allows insertion when no recent same-content message found', async () => {
       const supabase = makeSupabase(
-        [R(null), R(null)],  // Tier 1 miss, Tier 2 miss
+        [R(null), R(null)],
         null,
         { data: null, error: null }, // cross-path: NOT FOUND
       );
@@ -371,17 +424,13 @@ describe('ingestInboundMessage', () => {
         content: STAFF_MSG,
       }));
       expect(result.inserted).toBe(true);
-      expect(result.skippedCrossPathDuplicate).toBeUndefined();
     });
 
     it('allows insertion when same content but different conversation', async () => {
-      // Different conversation → cross-path check uses conversation_id in query,
-      // so it won't find messages from a different conversation.
-      // We simulate this by having the cross-path check return empty.
       const supabase = makeSupabase(
         [R(null), R(null)],
         null,
-        { data: null, error: null }, // not found (different conversation)
+        { data: null, error: null },
       );
       const result = await ingestInboundMessage(makeParams({
         supabase,
@@ -393,27 +442,24 @@ describe('ingestInboundMessage', () => {
     });
 
     it('does not trigger cross-path check for OUTBOUND direction', async () => {
-      // OUTBOUND messages should never be skipped by cross-path check
       const supabase = makeSupabase(
         [R(null), R(null)],
         null,
-        R('should-not-match'), // cross-path would find this, but direction is OUTBOUND
+        R('should-not-match', { ghlTimestamp: SAME_TS }),
       );
       const result = await ingestInboundMessage(makeParams({
         supabase,
         ghlMessageId: null,
         direction: 'OUTBOUND',
         sender: 'BOT',
+        ghlTimestamp: SAME_TS,
         content: STAFF_MSG,
       }));
-      // For OUTBOUND, cross-path check returns null early → normal insert
       expect(result.inserted).toBe(true);
       expect(result.skippedCrossPathDuplicate).toBeUndefined();
     });
 
     it('still inserts when fingerprint matches normally (Tier 2 wins, Tier 2.5 not reached)', async () => {
-      // If fingerprint matches, we return early before Tier 2.5
-      // ghlMessageId=null → Tier 1 skipped → only Tier 2 fingerprint check runs
       const supabase = makeSupabase([R('fp-match-id')]); // fingerprint HIT
       const result = await ingestInboundMessage(makeParams({
         supabase,

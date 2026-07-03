@@ -94,7 +94,9 @@ function buildMessageMetadata(params: IngestInboundParams, fingerprint: string):
  *
  * When the fingerprint-based dedupe (Tier 2) misses because timestamps differ
  * between shared ingest and webhook/recovery sync paths, this checks for recent
- * messages with the same content in the same conversation.
+ * messages with the same content AND same original GHL/provider timestamp.
+ * Only skips when timestamps match within 5 seconds — if the text is the same
+ * but the GHL timestamp differs, it is a genuinely new user message.
  */
 async function checkCrossPathDuplicate(
   supabase: SupabaseClient,
@@ -106,18 +108,19 @@ async function checkCrossPathDuplicate(
   // Only meaningful for INBOUND messages
   if (params.direction !== 'INBOUND') return null;
 
-  const windowStart = new Date(Date.now() - CROSS_PATH_DEDUPE_WINDOW_MS).toISOString();
-
-  // Use GHL timestamp as fallback window start if available and valid
   const ghlTs = params.ghlTimestamp?.trim();
-  const ghlWindowStart = ghlTs && isValidIsoTimestamp(ghlTs)
+  const hasTs = ghlTs && isValidIsoTimestamp(ghlTs);
+
+  const windowStart = new Date(Date.now() - CROSS_PATH_DEDUPE_WINDOW_MS).toISOString();
+  const ghlWindowStart = hasTs
     ? new Date(new Date(ghlTs).getTime() - CROSS_PATH_DEDUPE_WINDOW_MS).toISOString()
     : windowStart;
 
   // Query: find messages in same conversation with matching content created recently
+  // Include metadata to compare ghlTimestamp
   const { data: recent } = await supabase
     .from('messages')
-    .select('id')
+    .select('id, metadata')
     .eq('conversation_id', params.conversationId)
     .eq('content', content)
     .gte('created_at', ghlWindowStart)
@@ -125,10 +128,30 @@ async function checkCrossPathDuplicate(
     .limit(1);
 
   const first = recent?.[0];
-  if (first) {
-    return { id: first.id as string };
+  if (!first) return null;
+
+  // Compare GHL timestamps: only skip if timestamps match within 5 seconds.
+  // This ensures same-text messages at different times are NOT blocked.
+  if (hasTs) {
+    const existingMeta = (first.metadata ?? {}) as Record<string, unknown>;
+    const existingTs = typeof existingMeta['ghlTimestamp'] === 'string'
+      ? existingMeta['ghlTimestamp'].trim()
+      : null;
+
+    if (existingTs && isValidIsoTimestamp(existingTs)) {
+      const diffMs = Math.abs(new Date(ghlTs).getTime() - new Date(existingTs).getTime());
+      if (diffMs > 5000) {
+        // Different original GHL message (timestamps differ by > 5s) → allow insertion
+        return null;
+      }
+      // Timestamps match within 5s → same original message arriving via two paths → dedupe
+      return { id: first.id as string };
+    }
+    // Existing has no valid ghlTimestamp — can't confirm identity → allow insertion
+    return null;
   }
 
+  // Incoming has no ghlTimestamp — can't confirm it's the same message → allow insertion
   return null;
 }
 

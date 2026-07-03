@@ -179,6 +179,15 @@ export async function syncGhlConversationContext(params: {
     } else if (ingestResult.duplicate) {
       result.deduped++;
       result.dedupedIds.push(ingestResult.messageId);
+      // Track GHL message ID even for duplicates — needed by sync recovery
+      if (direction === 'INBOUND' && sender === 'CONTACT' && msg.id) {
+        if (!result.latestRecoveredGhlMessageId) result.latestRecoveredGhlMessageId = msg.id;
+        const ts = msg.dateAdded || new Date().toISOString();
+        if (!result.latestRecoveredContactInboundAt || ts > result.latestRecoveredContactInboundAt) {
+          result.latestRecoveredContactInboundAt = ts;
+        }
+        result.insertedContactInboundIds.push(ingestResult.messageId);
+      }
     }
     if (ingestResult.upgraded) {
       result.upgradedMetadataIds.push(ingestResult.messageId);

@@ -400,6 +400,17 @@ export class InboundMessageProcessor extends WorkerHost {
         this.logger.log(
           `Orchestration skipped (provider gate): conversationId=${conversation.id} reason=${providerGate.reason}`,
         );
+
+        // No ghlMessageId → trigger focused GHL sync to recover the real ID
+        if (providerGate.reason === 'no_ghl_message_id') {
+          void this.recoverOrchestrationViaSync(
+            tenant.id,
+            conversation.id,
+            locationId,
+            ghlContactId,
+          );
+        }
+
         if (webhookEventId) await this.updateWebhookEventStatus(webhookEventId, 'COMPLETED');
         return;
       }
@@ -1587,6 +1598,94 @@ export class InboundMessageProcessor extends WorkerHost {
    * inbound message. Uses Redis SET NX with TTL via AppCacheService.
    * Returns the lock owner token if acquired, or null if already locked/completed/unavailable.
    */
+  /**
+   * Recovery: when webhook lacks ghlMessageId, run a focused GHL sync to
+   * discover the real message ID and schedule orchestration through the
+   * provider gate with proper identity.
+   */
+  private async recoverOrchestrationViaSync(
+    tenantId: string,
+    conversationId: string,
+    ghlLocationId: string,
+    ghlContactId: string,
+  ): Promise<void> {
+    try {
+      this.logger.log(
+        `recovery_sync_started: conversationId=${conversationId}`,
+      );
+      const syncResult = await syncGhlConversationContext({
+        supabase: this.supabase,
+        tenantId,
+        ghlLocationId,
+        conversationId,
+        contactId: ghlContactId,
+      });
+
+      if (!syncResult.insertedContactInboundIds.length) {
+        this.logger.log(
+          `recovery_sync_no_new_inbound: conversationId=${conversationId}`,
+        );
+        return;
+      }
+
+      // Schedule orchestration with the recovered GHL message ID
+      const recoveryGate = await checkProviderOrchestrationGate({
+        appCache: this.appCache,
+        logger: this.logger,
+        tenantId,
+        conversationId,
+        ghlMessageId: syncResult.latestRecoveredGhlMessageId,
+        ghlTimestamp: syncResult.latestRecoveredContactInboundAt,
+        source: 'fallback',
+      });
+
+      if (!recoveryGate.allowed) {
+        this.logger.log(
+          `recovery_sync_gate_blocked: conversationId=${conversationId} reason=${recoveryGate.reason}`,
+        );
+        return;
+      }
+
+      // Bump debounce + schedule orchestration
+      const { data: convMetaRow } = await this.supabase
+        .from('conversations')
+        .select('metadata')
+        .eq('id', conversationId)
+        .single();
+      const currentMeta = readConversationMetadataField(convMetaRow?.metadata);
+      const { merged: debounceBump, newVersion } = bumpInboundDebounceMeta(currentMeta);
+      const merged = mergeConversationMetadataForPersist(currentMeta, debounceBump);
+      await this.supabase
+        .from('conversations')
+        .update({ metadata: merged, updated_at: new Date().toISOString() })
+        .eq('id', conversationId);
+
+      const { debounceMs } = resolveInboundDebounceMs();
+      await this.inboundQueue.add(
+        'orchestrate',
+        {
+          tenantId, conversationId, locationId: ghlLocationId, ghlContactId,
+          ghlConversationId: '', debounceVersion: newVersion,
+          debounceConfiguredMs: debounceMs, orchestrateEnqueuedAtMs: Date.now(),
+          ghlInboundMessageId: syncResult.latestRecoveredGhlMessageId || undefined,
+        } satisfies OrchestrateDebouncedJobData,
+        {
+          delay: debounceMs,
+          jobId: `deb:${conversationId}:${newVersion}`,
+          attempts: 2, backoff: { type: 'exponential', delay: 1500 }, removeOnComplete: true,
+        },
+      );
+
+      this.logger.log(
+        `recovery_sync_orch_scheduled: conversationId=${conversationId} providerMsgId=${(syncResult.latestRecoveredGhlMessageId || '').slice(0, 12)}`,
+      );
+    } catch (err) {
+      this.logger.warn(
+        `recovery_sync_failed: conversationId=${conversationId} error=${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
   private async tryClaimInboundForOrchestration(tenantId: string, conversationId: string): Promise<string | null> {
     const latest = await this.fetchLatestInboundOrchestrationContext(conversationId);
     if (!latest.id) {

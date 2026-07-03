@@ -51,6 +51,71 @@ export class ActiveRecoveryWatchdogProcessor extends WorkerHost {
     super();
   }
 
+  @OnWorkerEvent('ready')
+  async onReady() {
+    if (process.env['GHL_ACTIVE_RECOVERY_WATCHDOG_ENABLED'] !== 'true') return;
+
+    try {
+      // Resume watchdog for conversations with recent outbound activity
+      const windowStart = new Date(Date.now() - ACTIVE_WINDOW_MS).toISOString();
+      const { data: recent } = await this.supabase
+        .from('outbound_sends')
+        .select('tenant_id, conversation_id, ghl_location_id, sent_at')
+        .eq('status', 'sent')
+        .gte('sent_at', windowStart)
+        .order('sent_at', { ascending: false })
+        .limit(50);
+
+      if (!recent?.length) {
+        this.logger.log('watchdog_ready_no_active_conversations');
+        return;
+      }
+
+      // Dedupe by conversation and resolve contactId from conversations table
+      const seen = new Set<string>();
+      const convIds = [...new Set(recent.map(r => r.conversation_id as string))];
+      const { data: convs } = await this.supabase
+        .from('conversations')
+        .select('id, contact_id')
+        .in('id', convIds);
+      const contactMap = new Map((convs || []).map(c => [c.id, c.contact_id as string]));
+
+      let scheduled = 0;
+      for (const row of recent) {
+        const cid = row.conversation_id as string;
+        if (seen.has(cid)) continue;
+        seen.add(cid);
+
+        const contactId = contactMap.get(cid);
+        if (!contactId) continue;
+
+        const sentAt = new Date(row.sent_at as string).getTime();
+        const expiresAt = new Date(sentAt + ACTIVE_WINDOW_MS).toISOString();
+        if (Date.now() > new Date(expiresAt).getTime()) continue;
+
+        await this.watchdogQueue.add('check', {
+          tenantId: row.tenant_id as string,
+          conversationId: cid,
+          ghlLocationId: row.ghl_location_id as string,
+          contactId,
+          latestOutboundAt: row.sent_at as string,
+          startedAt: new Date().toISOString(),
+          expiresAt,
+        } satisfies WatchdogJobData, {
+          delay: 5000,
+          jobId: `wdog:${cid}:resume`,
+          removeOnComplete: true,
+        });
+
+        scheduled++;
+      }
+
+      this.logger.log(`watchdog_ready_resumed: scheduled=${scheduled} conversations=${seen.size}`);
+    } catch (err) {
+      this.logger.warn(`watchdog_ready_resume_failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
   async process(job: Job<WatchdogJobData>): Promise<void> {
     const { tenantId, conversationId, ghlLocationId, contactId, latestOutboundAt, startedAt, expiresAt } = job.data;
 

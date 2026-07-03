@@ -34,6 +34,8 @@ const SCAN_LIMIT = 50;
 
 interface ScannerJobData {
   startedAt: string;
+  /** Monotonic version counter to avoid removeOnComplete race with same jobId. */
+  scanVersion?: number;
 }
 
 @Processor(QUEUES.UNREPLIED_SCANNER)
@@ -57,9 +59,10 @@ export class UnrepliedScannerProcessor extends WorkerHost {
     this.logger.log('unreplied_scanner_ready: scheduling first scan');
     await this.scannerQueue.add('scan', {
       startedAt: new Date().toISOString(),
+      scanVersion: 0,
     } satisfies ScannerJobData, {
       delay: 10_000,
-      jobId: 'unreplied-scanner',
+      jobId: 'unreplied-scanner_v0',
       removeOnComplete: true,
       attempts: 1,
     });
@@ -214,12 +217,14 @@ export class UnrepliedScannerProcessor extends WorkerHost {
       );
     }
 
-    // Self-reschedule
+    // Self-reschedule with versioned jobId to avoid removeOnComplete race
+    const nextVersion = (job.data.scanVersion ?? 0) + 1;
     await this.scannerQueue.add('scan', {
       startedAt: new Date().toISOString(),
+      scanVersion: nextVersion,
     } satisfies ScannerJobData, {
       delay: SCAN_INTERVAL_MS,
-      jobId: 'unreplied-scanner',
+      jobId: `unreplied-scanner_v${nextVersion}`,
       removeOnComplete: true,
       attempts: 1,
     });

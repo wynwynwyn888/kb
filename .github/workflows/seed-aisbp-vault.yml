@@ -14,6 +14,7 @@ on:
           - inspect
           - bot-test
           - diagnose
+          - find-conv
 
 jobs:
   run:
@@ -262,6 +263,22 @@ jobs:
               echo "=== RUNNING RETRIEVAL TESTS ==="
               docker exec $CONTAINER npx tsx test-retrieval.ts
               rm /tmp/test-retrieval.ts
+            elif [ "${{ github.event.inputs.mode }}" = "find-conv" ]; then
+              echo "=== FINDING CONVERSATION FOdPCJQfeaKnUUcSz76e ==="
+              docker exec $CONTAINER node -e "
+                const { createClient } = require('@supabase/supabase-js');
+                const s = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
+                (async () => {
+                  const { data: conv } = await s.from('conversations').select('id, ghl_conversation_id, contact_id, created_at, status, tenant_id').eq('ghl_conversation_id', 'FOdPCJQfeaKnUUcSz76e').maybeSingle();
+                  if (!conv) { console.log('NOT FOUND'); return; }
+                  console.log('id=' + conv.id + ' contact=' + conv.contact_id + ' tenant=' + conv.tenant_id + ' created=' + conv.created_at + ' status=' + conv.status);
+                  const { data: msgs } = await s.from('messages').select('id, direction, content, metadata, created_at').eq('conversation_id', conv.id).order('created_at', { ascending: true });
+                  if (msgs) { console.log('\\nMESSAGES (' + msgs.length + '):'); for (const m of msgs) { const dir = m.direction === 'INBOUND' ? 'IN' : 'OT'; const p = (m.content || '').slice(0, 100).replace(/\\n/g, ' '); const mk = Object.keys(m.metadata || {}).filter(k => !['ghlMessageId','contentFingerprint'].includes(k)).join(','); console.log(dir + ' ' + m.id.slice(0,8) + ' ' + m.created_at.slice(11,19) + ' ' + p + (mk ? ' [' + mk + ']' : '')); } }
+                  const { data: sends } = await s.from('outbound_sends').select('reply_id, bubble_sequence, status, created_at').eq('conversation_id', conv.id).order('created_at', { ascending: true });
+                  if (sends) { console.log('\\nSENDS (' + sends.length + '):'); for (const os of sends) { console.log('bubble=' + os.bubble_sequence + ' status=' + os.status + ' created=' + os.created_at.slice(11,19)); } }
+                  console.log('\\nDONE');
+                })().catch(e => { console.error('ERR', e.message); process.exit(1); });
+              "
             else
               echo "=== COPYING SEED SCRIPT INTO CONTAINER ==="
               docker cp apps/backend/scripts/seed-aisbp-vault.ts $CONTAINER:/app/apps/backend/scripts/seed-aisbp-vault.ts

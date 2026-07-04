@@ -47,6 +47,9 @@ const TERMINAL_STATUSES: ReadonlySet<InboundDecisionStatus> = new Set([
   'SKIP_HUMAN_TAKEOVER',
 ]);
 
+/** Scanner-dedup window: skip RECOVERY_SCHEDULED messages if scheduled within this window. */
+const RECOVERY_SCHEDULED_DEDUP_MS = 5 * 60 * 1000; // 5 minutes
+
 export function isTerminalDecision(status: InboundDecisionStatus): boolean {
   return TERMINAL_STATUSES.has(status);
 }
@@ -202,6 +205,17 @@ export async function findUnrepliedInboundMessages(params: {
     const decision = meta[DECISION_KEY] as InboundDecisionRecord | undefined;
 
     if (decision && isTerminalDecision(decision.status)) continue;
+    // Skip recently scheduled recovery (avoids duplicate scheduling),
+    // but allow re-pick if stale and no terminal decision yet
+    if (decision?.status === 'RECOVERY_SCHEDULED') {
+      const scheduledAt = typeof decision.decidedAt === 'string'
+        ? new Date(decision.decidedAt).getTime()
+        : 0;
+      if (scheduledAt > 0 && (Date.now() - scheduledAt) < RECOVERY_SCHEDULED_DEDUP_MS) {
+        continue; // recently scheduled — skip
+      }
+      // Stale RECOVERY_SCHEDULED > 5 min → allow re-pick (orchestration may have failed)
+    }
 
     const { data: laterOb } = await supabase
       .from('messages')

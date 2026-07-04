@@ -166,10 +166,11 @@ export class UnrepliedScannerProcessor extends WorkerHost {
           continue;
         }
 
-        // Record recovery-scheduled decision BEFORE scheduling orchestration
-        await recordTerminalDecision({
+        // Record recovery-scheduled marker BEFORE scheduling orchestration.
+        // RECOVERY_SCHEDULED is interim (not terminal) — findUnrepliedInboundMessages
+        // skips it for 5 minutes, then allows re-pick if orchestration never completed.
+        await recordInterimDecision({
           supabase: this.supabase,
-          logger: this.logger,
           messageId: msg.id,
           decision: {
             status: 'RECOVERY_SCHEDULED',

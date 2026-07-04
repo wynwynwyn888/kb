@@ -1893,15 +1893,29 @@ export class InboundMessageProcessor extends WorkerHost {
   private async markOrchestrationCompleted(messageId: string): Promise<void> {
     if (!messageId || messageId === 'empty-claim') return;
     const now = new Date().toISOString();
-    await this.supabase
-      .from('messages')
-      .update({
-        metadata: {
-          orchestrationCompletedAt: now,
-        },
-        updated_at: now,
-      })
-      .eq('id', messageId);
+    try {
+      // Read current metadata to merge (not replace) — preserves ghlMessageId, fingerprint, etc.
+      const { data: msg } = await this.supabase
+        .from('messages')
+        .select('metadata')
+        .eq('id', messageId)
+        .maybeSingle();
+      const meta = (msg?.metadata ?? {}) as Record<string, unknown>;
+      meta['orchestrationCompletedAt'] = now;
+      const { error } = await this.supabase
+        .from('messages')
+        .update({ metadata: meta })
+        .eq('id', messageId);
+      if (error) {
+        this.logger.warn(
+          `markOrchestrationCompleted_write_failed: messageId=${messageId.slice(0, 8)} error=${error.message}`,
+        );
+      }
+    } catch (err) {
+      this.logger.warn(
+        `markOrchestrationCompleted_exception: messageId=${messageId.slice(0, 8)} error=${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 
   private async fetchLatestInboundOrchestrationContext(conversationId: string): Promise<{

@@ -379,5 +379,223 @@ describe('inbound-decision', () => {
       expect(result).toHaveLength(1);
       expect(result[0].id).toBe('cand-1');
     });
+
+    it('skips recently RECOVERY_SCHEDULED messages (within 5 min)', async () => {
+      let callCount = 0;
+      mockSupabaseFrom.mockImplementation((_table: string) => {
+        callCount++;
+        if (callCount <= 1) {
+          return {
+            select: jestGlobal.fn(() => ({
+              eq: jestGlobal.fn(() => ({
+                eq: jestGlobal.fn(() => ({
+                  gte: jestGlobal.fn(() => ({
+                    order: jestGlobal.fn(() => ({
+                      limit: jestGlobal.fn(async () => ({
+                        data: [{
+                          id: 'cand-scheduled', conversation_id: 'conv1',
+                          content: 'Hi',
+                          metadata: {
+                            inbound_decision: {
+                              status: 'RECOVERY_SCHEDULED',
+                              decidedAt: new Date().toISOString(), // just now → recent
+                            },
+                          },
+                          created_at: new Date().toISOString(),
+                        }],
+                        error: null,
+                      })),
+                    })),
+                  })),
+                })),
+              })),
+            })),
+          } as any;
+        }
+        return {
+          select: jestGlobal.fn(() => ({
+            eq: jestGlobal.fn(() => ({
+              eq: jestGlobal.fn(() => ({
+                eq: jestGlobal.fn(() => ({
+                  gte: jestGlobal.fn(() => ({
+                    limit: jestGlobal.fn(() => ({
+                      maybeSingle: jestGlobal.fn(async () => ({ data: null, error: null })),
+                    })),
+                  })),
+                })),
+              })),
+            })),
+          })),
+        } as any;
+      });
+
+      const result = await findUnrepliedInboundMessages({
+        supabase: mockSupabase as any,
+        lookbackMinutes: 30,
+        limit: 50,
+      });
+      // Recently scheduled (< 5 min) → skipped
+      expect(result).toHaveLength(0);
+    });
+
+    it('does NOT skip stale RECOVERY_SCHEDULED (> 5 min, allows re-pick)', async () => {
+      let callCount = 0;
+      mockSupabaseFrom.mockImplementation((_table: string) => {
+        callCount++;
+        if (callCount <= 1) {
+          return {
+            select: jestGlobal.fn(() => ({
+              eq: jestGlobal.fn(() => ({
+                eq: jestGlobal.fn(() => ({
+                  gte: jestGlobal.fn(() => ({
+                    order: jestGlobal.fn(() => ({
+                      limit: jestGlobal.fn(async () => ({
+                        data: [{
+                          id: 'cand-stale', conversation_id: 'conv1',
+                          content: 'Hi',
+                          metadata: {
+                            inbound_decision: {
+                              status: 'RECOVERY_SCHEDULED',
+                              decidedAt: new Date(Date.now() - 10 * 60 * 1000).toISOString(), // 10 min ago
+                            },
+                          },
+                          created_at: new Date().toISOString(),
+                        }],
+                        error: null,
+                      })),
+                    })),
+                  })),
+                })),
+              })),
+            })),
+          } as any;
+        }
+        return {
+          select: jestGlobal.fn(() => ({
+            eq: jestGlobal.fn(() => ({
+              eq: jestGlobal.fn(() => ({
+                eq: jestGlobal.fn(() => ({
+                  gte: jestGlobal.fn(() => ({
+                    limit: jestGlobal.fn(() => ({
+                      maybeSingle: jestGlobal.fn(async () => ({ data: null, error: null })),
+                    })),
+                  })),
+                })),
+              })),
+            })),
+          })),
+        } as any;
+      });
+
+      const result = await findUnrepliedInboundMessages({
+        supabase: mockSupabase as any,
+        lookbackMinutes: 30,
+        limit: 50,
+      });
+      // Stale (> 5 min) + no later outbound → allowed re-pick
+      expect(result).toHaveLength(1);
+    });
+
+    it('skips messages with terminal PROCEED decision', async () => {
+      let callCount = 0;
+      mockSupabaseFrom.mockImplementation((_table: string) => {
+        callCount++;
+        if (callCount <= 1) {
+          return {
+            select: jestGlobal.fn(() => ({
+              eq: jestGlobal.fn(() => ({
+                eq: jestGlobal.fn(() => ({
+                  gte: jestGlobal.fn(() => ({
+                    order: jestGlobal.fn(() => ({
+                      limit: jestGlobal.fn(async () => ({
+                        data: [{
+                          id: 'cand-proceed', conversation_id: 'conv1',
+                          content: 'Hi', metadata: { inbound_decision: { status: 'PROCEED' } },
+                          created_at: new Date().toISOString(),
+                        }],
+                        error: null,
+                      })),
+                    })),
+                  })),
+                })),
+              })),
+            })),
+          } as any;
+        }
+        return {
+          select: jestGlobal.fn(() => ({
+            eq: jestGlobal.fn(() => ({
+              eq: jestGlobal.fn(() => ({
+                eq: jestGlobal.fn(() => ({
+                  gte: jestGlobal.fn(() => ({
+                    limit: jestGlobal.fn(() => ({
+                      maybeSingle: jestGlobal.fn(async () => ({ data: null, error: null })),
+                    })),
+                  })),
+                })),
+              })),
+            })),
+          })),
+        } as any;
+      });
+
+      const result = await findUnrepliedInboundMessages({
+        supabase: mockSupabase as any,
+        lookbackMinutes: 30,
+        limit: 50,
+      });
+      expect(result).toHaveLength(0);
+    });
+
+    it('skips messages with terminal SKIP_AI_OFF_TAG decision', async () => {
+      let callCount = 0;
+      mockSupabaseFrom.mockImplementation((_table: string) => {
+        callCount++;
+        if (callCount <= 1) {
+          return {
+            select: jestGlobal.fn(() => ({
+              eq: jestGlobal.fn(() => ({
+                eq: jestGlobal.fn(() => ({
+                  gte: jestGlobal.fn(() => ({
+                    order: jestGlobal.fn(() => ({
+                      limit: jestGlobal.fn(async () => ({
+                        data: [{
+                          id: 'cand-ai-off', conversation_id: 'conv1',
+                          content: 'Hi', metadata: { inbound_decision: { status: 'SKIP_AI_OFF_TAG' } },
+                          created_at: new Date().toISOString(),
+                        }],
+                        error: null,
+                      })),
+                    })),
+                  })),
+                })),
+              })),
+            })),
+          } as any;
+        }
+        return {
+          select: jestGlobal.fn(() => ({
+            eq: jestGlobal.fn(() => ({
+              eq: jestGlobal.fn(() => ({
+                eq: jestGlobal.fn(() => ({
+                  gte: jestGlobal.fn(() => ({
+                    limit: jestGlobal.fn(() => ({
+                      maybeSingle: jestGlobal.fn(async () => ({ data: null, error: null })),
+                    })),
+                  })),
+                })),
+              })),
+            })),
+          })),
+        } as any;
+      });
+
+      const result = await findUnrepliedInboundMessages({
+        supabase: mockSupabase as any,
+        lookbackMinutes: 30,
+        limit: 50,
+      });
+      expect(result).toHaveLength(0);
+    });
   });
 });

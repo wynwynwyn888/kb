@@ -29,8 +29,8 @@ const shellDefault: React.CSSProperties = {
 
 const shellEmbedded: React.CSSProperties = {
   ...shellDefault,
-  height: 'min(420px, calc(100vh - 14rem))',
-  maxHeight: 480,
+  height: '100%',
+  maxHeight: 'none',
   borderRadius: 14,
 };
 
@@ -49,7 +49,6 @@ const messagesBox: React.CSSProperties = {
 
 const messagesBoxEmbedded: React.CSSProperties = {
   ...messagesBox,
-  minHeight: 160,
 };
 
 function formatBotTestFailure(message: string, status?: number): { headline: string; detail?: string } {

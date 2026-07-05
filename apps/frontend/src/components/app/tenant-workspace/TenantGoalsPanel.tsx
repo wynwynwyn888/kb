@@ -2306,9 +2306,6 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                 <p style={{ textAlign: 'center', color: 'var(--aisbp-muted, #64748b)' }}>Loading…</p>
               )}
             </div>
-            <div style={{ padding: '0.4rem 1.15rem', borderTop: '1px solid var(--aisbp-modal-divider, #f1f5f9)', fontSize: '0.75rem', color: 'var(--aisbp-muted, #94a3b8)', textAlign: 'center', flexShrink: 0 }}>
-              Preview only. This message will not be sent to customers.
-            </div>
           </div>
         </div>
       ) : null}

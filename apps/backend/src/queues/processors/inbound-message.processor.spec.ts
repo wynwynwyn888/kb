@@ -2324,14 +2324,15 @@ describe('InboundMessageProcessor', () => {
       expect(mockIngestInboundMessage).toHaveBeenCalled();
     });
 
-    it('flag ON duplicate returns early without orchestration', async () => {
+    it('flag ON duplicate still enqueues orchestration (provider gate handles idempotency)', async () => {
       process.env['GHL_WEBHOOK_SHARED_INGEST_ENABLED'] = 'true';
       mockIngestInboundMessage.mockResolvedValueOnce({
         inserted: false, duplicate: true, upgraded: false, messageId: 'dup-1',
       });
       await processor.process(makeJob('persist', persistData));
-      // Should not reach debounce bump / orchestrate enqueue
-      expect(mockInboundQueueAdd).not.toHaveBeenCalled();
+      // Duplicate should still enqueue — the provider gate handles idempotency.
+      // Without this, shared-ingest dedup can persist a message but skip orchestration.
+      expect(mockInboundQueueAdd).toHaveBeenCalled();
     });
 
     it('flag ON inserted proceeds to orchestration', async () => {

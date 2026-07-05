@@ -288,7 +288,11 @@ export class InboundMessageProcessor extends WorkerHost {
             `Inbound message deduped: conversationId=${conversation.id} duplicate=${ingestResult.duplicate} upgraded=${ingestResult.upgraded} skippedCrossPath=${ingestResult.skippedCrossPathDuplicate ?? false}`,
           );
           if (webhookEventId) await this.updateWebhookEventStatus(webhookEventId, 'COMPLETED');
-          return;
+          // Do NOT return early — fall through to ensure orchestration is scheduled.
+          // The provider gate below handles idempotency (done marker / lock) so
+          // duplicate webhooks won't double-process. Without this fall-through,
+          // shared-ingest dedup can persist a message but skip orchestration,
+          // creating unrecoverable "unknown no-reply" gaps.
         }
       } else {
         await this.addMessage(conversation.id, {

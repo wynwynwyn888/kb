@@ -21,7 +21,7 @@ import {
   recordTerminalDecision,
   recordInterimDecision,
 } from '../../lib/inbound-decision';
-import { checkProviderOrchestrationGate } from '../../lib/schedule-orchestration-if-new';
+import { checkProviderOrchestrationGate, markProviderOrchestrationDone } from '../../lib/schedule-orchestration-if-new';
 import { bumpInboundDebounceMeta } from '../../lib/inbound-debounce';
 import { resolveInboundDebounceMs } from '../../lib/inbound-burst-batch';
 import { readConversationMetadataField, mergeConversationMetadataForPersist } from '../../lib/conversation-metadata-merge';
@@ -118,6 +118,27 @@ export class UnrepliedScannerProcessor extends WorkerHost {
           .maybeSingle();
         if (handover) {
           skippedGate++;
+          // Write terminal decision + provider done marker so this message
+          // is never "unknown no-reply". The scanner must not send outbound
+          // or bypass the handover guard, but it MUST record the skip.
+          void recordTerminalDecision({
+            supabase: this.supabase,
+            logger: this.logger,
+            messageId: msg.id,
+            decision: {
+              status: 'SKIP_HANDOVER_ACTIVE',
+              reason: 'HANDOVER_ACTIVE_SCANNER_TERMINAL_SKIP',
+              triggerSource: 'scanner',
+              decidedAt: new Date().toISOString(),
+            },
+          });
+          const ghlMsgId = typeof meta['ghlMessageId'] === 'string' ? meta['ghlMessageId'] : null;
+          if (ghlMsgId && tenantId) {
+            void markProviderOrchestrationDone(this.appCache, tenantId, ghlMsgId);
+          }
+          this.logger.log(
+            `SCANNER_HANDOVER_TERMINAL_SKIP: conversationId=${msg.conversation_id} messageId=${msg.id.slice(0, 8)}`,
+          );
           continue;
         }
 

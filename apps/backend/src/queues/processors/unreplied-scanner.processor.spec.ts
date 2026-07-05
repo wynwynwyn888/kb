@@ -348,4 +348,71 @@ describe('UnrepliedScannerProcessor — send context', () => {
 
     expect(mockInboundAdd).not.toHaveBeenCalled();
   });
+
+  // ── Test 6: Handover active candidate gets terminal SKIP without outbound ──
+  it('records SKIP_HANDOVER_ACTIVE for candidates with active handover (no outbound)', async () => {
+    const candidate = makeCandidate({ ghlMessageId: 'ghl_ho_test' });
+    mockFindUnrepliedInboundMessages.mockResolvedValue([candidate]);
+    mockRecordTerminalDecision.mockClear();
+    const mockMarkDone = jestGlobal.fn();
+    jestGlobal.mock('../../lib/schedule-orchestration-if-new', () => ({
+      checkProviderOrchestrationGate: mockCheckProviderGate,
+      markProviderOrchestrationDone: mockMarkDone,
+      releaseProviderLock: jestGlobal.fn(),
+    }));
+
+    mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'conversations') {
+        return {
+          select: jestGlobal.fn(() => ({
+            eq: jestGlobal.fn(() => ({
+              single: jestGlobal.fn(async () => ({
+                data: mockConversationRow({ locationId: 'loc1', metadata: { ai_status: 'active' } }),
+                error: null,
+              })),
+            })),
+          })),
+          update: jestGlobal.fn(() => ({ eq: jestGlobal.fn(async () => ({ error: null })) })),
+        };
+      }
+      if (table === 'handover_events') {
+        return {
+          select: jestGlobal.fn(() => ({
+            eq: jestGlobal.fn(() => ({
+              eq: jestGlobal.fn(() => ({
+                maybeSingle: jestGlobal.fn(async () => ({ data: { id: 'he_active' }, error: null })),
+              })),
+            })),
+          })),
+        };
+      }
+      if (table === 'messages') {
+        return {
+          update: jestGlobal.fn(() => ({ eq: jestGlobal.fn(async () => ({ error: null })) })),
+        };
+      }
+      return {
+        select: jestGlobal.fn(() => ({
+          eq: jestGlobal.fn(() => ({
+            maybeSingle: jestGlobal.fn(async () => ({ data: null, error: null })),
+          })),
+        })),
+      };
+    });
+
+    await processor.process(makeScannerJob());
+
+    // Must write terminal decision
+    expect(mockRecordTerminalDecision).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messageId: candidate.id,
+        decision: expect.objectContaining({
+          status: 'SKIP_HANDOVER_ACTIVE',
+          reason: 'HANDOVER_ACTIVE_SCANNER_TERMINAL_SKIP',
+        }),
+      }),
+    );
+    // Must NOT schedule orchestration
+    expect(mockInboundAdd).not.toHaveBeenCalled();
+  });
 });

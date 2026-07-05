@@ -2,14 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { buildTenantSidebarNav } from './tenant-workspace-nav';
 
 describe('tenant sidebar nav', () => {
-  it('shows Assistant children: Profiles, Instructions, Preview only', () => {
+  it('shows Assistant children: Profiles, Instructions only', () => {
     const tid = 't_nav';
     const nodes = buildTenantSidebarNav(tid, { showAdvanced: true, showLogs: true });
     const assistant = nodes.find(n => n.kind === 'group' && n.label === 'Assistant');
     if (!assistant || assistant.kind !== 'group') throw new Error('Assistant group missing');
-    expect(assistant.children.map(c => c.label)).toEqual(['Profiles', 'Instructions', 'Preview']);
-    const preview = assistant.children.find(c => c.label === 'Preview');
-    expect(preview?.href).toBe(`/app/tenant/${tid}/assistant/preview`);
+    expect(assistant.children.map(c => c.label)).toEqual(['Profiles', 'Instructions']);
   });
 
   it('shows Automation as top-level group with Tagging/Follow-up/Human Escalation', () => {

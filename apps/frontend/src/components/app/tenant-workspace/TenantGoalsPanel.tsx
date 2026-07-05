@@ -2280,8 +2280,8 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
             if (e.target === e.currentTarget) setTestModalOpen(false);
           }}
         >
-          <div style={{ ...modalPanel, maxWidth: 680, width: 'calc(100vw - 2rem)' }} role="dialog" aria-modal="true" onClick={e => e.stopPropagation()}>
-            <div style={{ padding: '1rem 1.15rem', borderBottom: '1px solid var(--aisbp-modal-divider, #f1f5f9)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ ...modalPanel, maxWidth: 1000, width: 'calc(100vw - 2rem)', maxHeight: '90vh', display: 'flex', flexDirection: 'column' }} role="dialog" aria-modal="true" onClick={e => e.stopPropagation()}>
+            <div style={{ padding: '1rem 1.15rem', borderBottom: '1px solid var(--aisbp-modal-divider, #f1f5f9)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
               <div>
                 <h2 style={{ fontSize: '1.05rem', fontWeight: 800, margin: 0, color: 'var(--aisbp-text-heading, #0f172a)' }}>
                   Test AI
@@ -2299,14 +2299,14 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                 Close
               </button>
             </div>
-            <div style={{ padding: '1rem 1.15rem' }}>
+            <div style={{ padding: '1rem 1.15rem', flex: 1, minHeight: 520, display: 'flex', flexDirection: 'column' }}>
               {token && subaccountId ? (
                 <BotTestPanel token={token} subaccountId={subaccountId} variant="embedded" />
               ) : (
                 <p style={{ textAlign: 'center', color: 'var(--aisbp-muted, #64748b)' }}>Loading…</p>
               )}
             </div>
-            <div style={{ padding: '0.65rem 1.15rem', borderTop: '1px solid var(--aisbp-modal-divider, #f1f5f9)', fontSize: '0.78rem', color: 'var(--aisbp-muted, #94a3b8)', textAlign: 'center' }}>
+            <div style={{ padding: '0.65rem 1.15rem', borderTop: '1px solid var(--aisbp-modal-divider, #f1f5f9)', fontSize: '0.78rem', color: 'var(--aisbp-muted, #94a3b8)', textAlign: 'center', flexShrink: 0 }}>
               Preview only. This message will not be sent to customers.
             </div>
           </div>

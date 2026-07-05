@@ -2105,8 +2105,8 @@ export default function SubaccountKnowledgePage() {
             }}
           >
             Create and manage reusable content for your assistants. To try replies with the live assistant profile, use{' '}
-            <Link href={`/app/tenant/${subId}/assistant/preview`} style={{ color: PRIMARY, fontWeight: 600 }}>
-              Assistant → Preview
+            <Link href={`/app/tenant/${subId}/assistant/instructions`} style={{ color: PRIMARY, fontWeight: 600 }}>
+              Assistant → Instructions
             </Link>
             .
           </p>

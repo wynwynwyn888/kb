@@ -121,14 +121,11 @@ export function buildTenantSidebarNav(
           label: 'Instructions',
           match: p =>
             p === `${assistantBase}/instructions` ||
+            p === `${assistantBase}/preview` ||
+            p === `${assistantBase}/test-bot` ||
             p === `${base}/goals` ||
             p === `${base}/bot` ||
             p === `${base}/prompt`,
-        },
-        {
-          href: `${assistantBase}/preview`,
-          label: 'Preview',
-          match: p => p === `${assistantBase}/preview` || p === `${assistantBase}/test-bot`,
         },
       ],
     },

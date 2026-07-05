@@ -92,14 +92,15 @@ export class UnrepliedScannerProcessor extends WorkerHost {
       for (const msg of candidates) {
         const meta = (msg.metadata ?? {}) as Record<string, unknown>;
 
-        // Resolve tenant_id from conversation (messages table has no tenant_id)
+        // Resolve tenant_id, contact_id, location from conversation
         const { data: convRow } = await this.supabase
           .from('conversations')
-          .select('tenant_id, metadata')
+          .select('tenant_id, contact_id, metadata')
           .eq('id', msg.conversation_id)
           .single();
         if (!convRow) continue;
         const tenantId = (convRow as Record<string, unknown>)['tenant_id'] as string;
+        const contactId = (convRow as Record<string, unknown>)['contact_id'] as string;
         const convMeta = (convRow as Record<string, unknown>)['metadata'] as Record<string, unknown> | undefined;
 
         // Respect AI off metadata
@@ -180,6 +181,38 @@ export class UnrepliedScannerProcessor extends WorkerHost {
           },
         });
 
+        // Resolve GHL locationId for send context
+        let locationId = (convMeta?.['locationId'] ?? convMeta?.['ghlLocationId']) as string | undefined;
+        if (!locationId) {
+          // Fallback: resolve from tenant_ghl_connections
+          const { data: ghlConn } = await this.supabase
+            .from('tenant_ghl_connections')
+            .select('ghl_location_id')
+            .eq('tenant_id', tenantId)
+            .eq('status', 'CONNECTED')
+            .maybeSingle();
+          locationId = (ghlConn as Record<string, unknown> | null)?.['ghl_location_id'] as string | undefined;
+        }
+
+        // Cannot send without location context
+        if (!locationId || !contactId) {
+          skippedGate++;
+          void recordInterimDecision({
+            supabase: this.supabase,
+            messageId: msg.id,
+            decision: {
+              status: 'PENDING_RECOVERY',
+              reason: `scanner missing send context: locationId=${!!locationId} contactId=${!!contactId}`,
+              triggerSource: 'scanner',
+              decidedAt: new Date().toISOString(),
+            },
+          });
+          this.logger.warn(
+            `scanner_missing_send_context: conversationId=${msg.conversation_id} tenantId=${tenantId} locationId=${!!locationId} contactId=${!!contactId}`,
+          );
+          continue;
+        }
+
         // Bump debounce + schedule orchestration
         const { data: convMetaRow } = await this.supabase
           .from('conversations')
@@ -201,8 +234,8 @@ export class UnrepliedScannerProcessor extends WorkerHost {
         await this.inboundQueue.add('orchestrate', {
           tenantId,
           conversationId: msg.conversation_id,
-          locationId: '',
-          ghlContactId: '',
+          locationId,
+          ghlContactId: contactId,
           ghlConversationId: '',
           debounceVersion: newVersion,
           debounceConfiguredMs: debounceMs,

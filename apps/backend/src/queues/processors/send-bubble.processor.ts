@@ -21,7 +21,7 @@ import { bumpInboundDebounceMeta } from '../../lib/inbound-debounce';
 import { resolveInboundDebounceMs } from '../../lib/inbound-burst-batch';
 import { readConversationMetadataField, mergeConversationMetadataForPersist } from '../../lib/conversation-metadata-merge';
 import { markProviderOrchestrationDone } from '../../lib/schedule-orchestration-if-new';
-import { recordTerminalDecision } from '../../lib/inbound-decision';
+import { recordTerminalDecision, recordInterimDecision } from '../../lib/inbound-decision';
 
 export interface SendBubbleJobData {
   conversationId: string;
@@ -265,11 +265,10 @@ export class SendBubbleProcessor extends WorkerHost {
         );
       }
     } else if (summary.failed > 0) {
-      // Failed send → record FAILED_SEND, do NOT mark provider done (retryable)
+      // Failed send → record FAILED_SEND as interim retryable, do NOT mark provider done
       if (inboundMsgId) {
-        await recordTerminalDecision({
+        await recordInterimDecision({
           supabase: getSupabaseService(),
-          logger: this.logger,
           messageId: inboundMsgId,
           decision: {
             status: 'FAILED_SEND',

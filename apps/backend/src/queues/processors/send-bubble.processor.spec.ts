@@ -35,9 +35,10 @@ jestGlobal.mock('../../modules/outbound/outbound-send.service', () => ({
 
 // Mocks for lib functions
 const mockRecordTerminalDecision = jestGlobal.fn(async () => true);
+const mockRecordInterimDecision = jestGlobal.fn(async () => {});
 jestGlobal.mock('../../lib/inbound-decision', () => ({
   recordTerminalDecision: mockRecordTerminalDecision,
-  recordInterimDecision: jestGlobal.fn(async () => {}),
+  recordInterimDecision: mockRecordInterimDecision,
 }));
 
 const mockMarkProviderOrchestrationDone = jestGlobal.fn(async () => {});
@@ -203,7 +204,8 @@ describe('SendBubbleProcessor — provider done-after-send', () => {
 
     await processor.process(makeJob());
 
-    const decisionCall = mockRecordTerminalDecision.mock.calls[0][0];
+    // FAILED_SEND uses recordInterimDecision (retryable, not terminal)
+    const decisionCall = mockRecordInterimDecision.mock.calls[0][0];
     expect(decisionCall.decision.status).toBe('FAILED_SEND');
     expect(decisionCall.decision.reason).toContain('failed=1');
 

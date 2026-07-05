@@ -18,6 +18,7 @@ import {
   type SubaccountBehaviorPolicy,
   type TenantBotProfileRow,
 } from '@/lib/api';
+import { BotTestPanel } from '@/components/app/bot-test/BotTestPanel';
 import {
   KNOWLEDGE_ACCESS_ALL_VAULTS,
   KNOWLEDGE_ACCESS_SELECTED_VAULTS,
@@ -403,6 +404,7 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
   const [activeTab, setActiveTab] = useState('criticalFacts');
 
   const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [testModalOpen, setTestModalOpen] = useState(false);
   const [createName, setCreateName] = useState('');
   const [createDescription, setCreateDescription] = useState('');
   const [createSubmitting, setCreateSubmitting] = useState(false);
@@ -1339,8 +1341,8 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                         Set active
                       </button>
                     ) : null}
-                    <button type="button" onClick={() => selectedProfileId && duplicateProfileById(selectedProfileId)} style={secondaryBtnStyle} disabled={!selectedProfileId}>
-                      Duplicate
+                    <button type="button" onClick={() => setTestModalOpen(true)} style={secondaryBtnStyle}>
+                      Test AI
                     </button>
                     <button
                       type="button"
@@ -1987,11 +1989,10 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                     ) : null}
                     <button
                       type="button"
-                      onClick={() => selectedProfileId && duplicateProfileById(selectedProfileId)}
+                      onClick={() => setTestModalOpen(true)}
                       style={secondaryBtnStyle}
-                      disabled={!selectedProfileId}
                     >
-                      Duplicate
+                      Test AI
                     </button>
                     <button
                       type="button"
@@ -2266,6 +2267,47 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
               >
                 {deleteSubmitting ? 'Deleting…' : 'Delete profile'}
               </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {testModalOpen ? (
+        <div
+          style={expandModalOverlay}
+          role="presentation"
+          onClick={e => {
+            if (e.target === e.currentTarget) setTestModalOpen(false);
+          }}
+        >
+          <div style={{ ...modalPanel, maxWidth: 680, width: 'calc(100vw - 2rem)' }} role="dialog" aria-modal="true" onClick={e => e.stopPropagation()}>
+            <div style={{ padding: '1rem 1.15rem', borderBottom: '1px solid var(--aisbp-modal-divider, #f1f5f9)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <h2 style={{ fontSize: '1.05rem', fontWeight: 800, margin: 0, color: 'var(--aisbp-text-heading, #0f172a)' }}>
+                  Test AI
+                </h2>
+                <p style={{ margin: '0.25rem 0 0', fontSize: '0.8125rem', color: 'var(--aisbp-muted, #64748b)', lineHeight: 1.45 }}>
+                  Send a sample customer message to preview how this assistant would respond. This will not send anything to customers.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setTestModalOpen(false)}
+                style={{ ...secondaryBtnStyle, padding: '0.35rem 0.65rem', fontSize: '0.8rem' }}
+                aria-label="Close test AI"
+              >
+                Close
+              </button>
+            </div>
+            <div style={{ padding: '1rem 1.15rem' }}>
+              {token && subaccountId ? (
+                <BotTestPanel token={token} subaccountId={subaccountId} variant="embedded" />
+              ) : (
+                <p style={{ textAlign: 'center', color: 'var(--aisbp-muted, #64748b)' }}>Loading…</p>
+              )}
+            </div>
+            <div style={{ padding: '0.65rem 1.15rem', borderTop: '1px solid var(--aisbp-modal-divider, #f1f5f9)', fontSize: '0.78rem', color: 'var(--aisbp-muted, #94a3b8)', textAlign: 'center' }}>
+              Preview only. This message will not be sent to customers.
             </div>
           </div>
         </div>

@@ -58,6 +58,7 @@ import type { InboundDecisionStatus } from '../../lib/inbound-decision';
 function mapOutcomeToDecisionStatus(outcome: string): InboundDecisionStatus | null {
   switch (outcome) {
     case 'SKIP_AI_OFF_TAG': return 'SKIP_AI_OFF_TAG';
+    case 'SKIP_HANDOVER_ACTIVE': return 'SKIP_HANDOVER_ACTIVE';
     case 'SKIP_DUPLICATE': return 'SKIP_DUPLICATE_PROVIDER_DONE';
     case 'SKIP_BOT_DISABLED':
     case 'SKIP_GHL_DISCONNECTED':
@@ -1445,6 +1446,24 @@ export class InboundMessageProcessor extends WorkerHost {
     const result = await this.orchestrationService.orchestrate(orchestrationInput);
 
     if (result.outcome === 'SKIP_HANDOVER_ACTIVE') {
+      // Write terminal decision + provider done marker BEFORE firing holding reply.
+      // This ensures no "unknown no-reply" — every SKIP_HANDOVER_ACTIVE is recorded,
+      // regardless of whether the holding reply is sent, queued, suppressed, or fails.
+      const skipStatus = mapOutcomeToDecisionStatus(result.outcome as string);
+      if (latestMsgId && skipStatus && ctxGhlMsgId) {
+        await recordTerminalDecision({
+          supabase: this.supabase,
+          logger: this.logger,
+          messageId: latestMsgId,
+          decision: {
+            status: skipStatus,
+            reason: result.outcome,
+            triggerSource: 'webhook',
+            decidedAt: new Date().toISOString(),
+          },
+        });
+        await markProviderOrchestrationDone(this.appCache, tenantId, ctxGhlMsgId);
+      }
       // Release lock so future orchestration can proceed
       await this.releaseOrchestrationLock(latestMsgId, lockToken);
       await this.humanEscalationHolding.tryEnqueueHoldingReply({
@@ -1520,7 +1539,7 @@ export class InboundMessageProcessor extends WorkerHost {
           },
         });
         // Mark provider done AFTER terminal decision is recorded
-        if (['SKIP_AI_OFF_TAG', 'SKIP_DUPLICATE_PROVIDER_DONE', 'SKIP_HUMAN_TAKEOVER'].includes(skipStatus)) {
+        if (['SKIP_AI_OFF_TAG', 'SKIP_HANDOVER_ACTIVE', 'SKIP_DUPLICATE_PROVIDER_DONE', 'SKIP_HUMAN_TAKEOVER'].includes(skipStatus)) {
           await markProviderOrchestrationDone(this.appCache, tenantId, ctxGhlMsgId);
         }
       }

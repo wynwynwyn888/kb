@@ -1,4 +1,4 @@
-import { Controller, Get, Query, UseGuards, ForbiddenException, Req } from '@nestjs/common';
+import { Controller, Get, Post, Param, Query, UseGuards, ForbiddenException, Req, NotFoundException, HttpCode, HttpStatus } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { OpsService } from './ops.service';
@@ -130,5 +130,16 @@ export class OpsController {
   async getQueues(@Req() req: Request) {
     this.assertAgency(req);
     return this.opsService.getQueueHealth();
+  }
+
+  @Post('conversations/:id/clear-handover')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Internal: clear active handover for a conversation (no outbound sent)' })
+  async clearHandover(
+    @Req() req: Request,
+    @Param('id') conversationId: string,
+  ) {
+    this.assertAgency(req);
+    return this.opsService.clearHandover(conversationId);
   }
 }

@@ -532,4 +532,84 @@ export class OpsService {
       return 0;
     }
   }
+
+  /**
+   * Internal/admin-only: clear active handover for a conversation.
+   * Resolves ACTIVE handover events and restores conversation status to ACTIVE.
+   * Does NOT send any outbound. Does NOT reset bot state or memory.
+   * ai_status is preserved — if ai_status=off, AI remains blocked.
+   */
+  async clearHandover(conversationId: string): Promise<{
+    ok: boolean;
+    handoverCleared: boolean;
+    activeHandoverFound: boolean;
+    handoverEventsResolved: number;
+    conversationStatusBefore: string | null;
+    conversationStatusAfter: string | null;
+    tenantId: string | null;
+  }> {
+    // Resolve the conversation first
+    const { data: convRow } = await this.supabase
+      .from('conversations')
+      .select('id, tenant_id, status, metadata')
+      .eq('id', conversationId)
+      .maybeSingle();
+
+    if (!convRow) {
+      return { ok: false, handoverCleared: false, activeHandoverFound: false, handoverEventsResolved: 0, conversationStatusBefore: null, conversationStatusAfter: null, tenantId: null };
+    }
+
+    const tenantId = (convRow as Record<string, unknown>)['tenant_id'] as string;
+    const statusBefore = (convRow as Record<string, unknown>)['status'] as string | null;
+
+    const { data: activeRows } = await this.supabase
+      .from('handover_events')
+      .select('id')
+      .eq('conversation_id', conversationId)
+      .eq('status', 'ACTIVE');
+
+    const ids = (activeRows ?? []).map((r: { id: string }) => r.id).filter(Boolean);
+    const now = new Date().toISOString();
+
+    if (ids.length > 0) {
+      await this.supabase
+        .from('handover_events')
+        .update({ status: 'RESUMED', resumed_at: now })
+        .in('id', ids);
+    }
+
+    // Restore conversation status to ACTIVE
+    await this.supabase
+      .from('conversations')
+      .update({ status: 'ACTIVE', updated_at: now })
+      .eq('id', conversationId);
+
+    // Write audit metadata
+    const { data: convAfter } = await this.supabase
+      .from('conversations')
+      .select('metadata')
+      .eq('id', conversationId)
+      .maybeSingle();
+    const currentMeta = (convAfter?.metadata ?? {}) as Record<string, unknown>;
+    currentMeta['handoverClearedAt'] = now;
+    currentMeta['handoverClearedBy'] = 'ops/clear-handover';
+    await this.supabase
+      .from('conversations')
+      .update({ metadata: currentMeta, updated_at: now })
+      .eq('id', conversationId);
+
+    this.logger.log(
+      `ops_clear_handover: conversationId=${conversationId} tenantId=${tenantId} activeFound=${ids.length > 0} resolved=${ids.length}`,
+    );
+
+    return {
+      ok: true,
+      handoverCleared: true,
+      activeHandoverFound: ids.length > 0,
+      handoverEventsResolved: ids.length,
+      conversationStatusBefore: statusBefore,
+      conversationStatusAfter: 'ACTIVE',
+      tenantId,
+    };
+  }
 }

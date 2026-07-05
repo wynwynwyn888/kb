@@ -9,6 +9,7 @@ export type InboundDecisionStatus =
   | 'PENDING'
   | 'PROCEED'
   | 'SKIP_AI_OFF_TAG'
+  | 'SKIP_HANDOVER_ACTIVE'
   | 'SKIP_DUPLICATE_PROVIDER_DONE'
   | 'SKIP_STALE_DEBOUNCE'
   | 'SKIP_STALE_SEND'
@@ -43,6 +44,7 @@ const DECISION_KEY = 'inbound_decision';
 const TERMINAL_STATUSES: ReadonlySet<InboundDecisionStatus> = new Set([
   'PROCEED',
   'SKIP_AI_OFF_TAG',
+  'SKIP_HANDOVER_ACTIVE',
   'SKIP_DUPLICATE_PROVIDER_DONE',
   'SKIP_HUMAN_TAKEOVER',
 ]);

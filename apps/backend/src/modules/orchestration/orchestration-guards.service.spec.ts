@@ -355,5 +355,56 @@ describe('OrchestrationGuards', () => {
       expect(result.final).toBe('PROCEED');
       expect(result.guards.length).toBe(8);
     });
+
+    it('AI off Guard #1 wins over handover Guard #5 when both conditions exist', async () => {
+      // Conversation is HANDOVER with active handover event AND ai_status=off.
+      // Guard 1 must return SKIP_AI_OFF_TAG before Guard 5 can return SKIP_HANDOVER_ACTIVE.
+      const input = makeInput({
+        conversationId: 'conv_handover_ai_off',
+        tenant: { id: 't1', botEnabled: true, handoverPaused: false, ghlLocationId: 'loc_1' },
+        conversation: {
+          channel: 'WHATSAPP',
+          id: 'conv_handover_ai_off',
+          ghlConversationId: 'gc',
+          contactId: 'ct_off',
+          status: 'HANDOVER',
+          metadata: { ai_status: 'off' },
+        },
+      });
+      mockFrom(mockSupabase, 'tenant_ghl_connections', { status: 'CONNECTED' });
+      mockFrom(mockSupabase, 'handover_events', [{ id: 'he_1' }]);
+      mockFrom(mockSupabase, 'quota_wallets', { total_quota: 100, used_quota: 10 });
+      const result = await guards.runGuards(input);
+      // Guard 1 must win — only 1 guard runs before short-circuit
+      expect(result.final).toBe('SKIP_AI_OFF_TAG');
+      expect(result.guards.length).toBe(1);
+      expect(result.guards[0]!.guardName).toBe('ai_off_tag');
+    });
+
+    it('handover Guard #5 fires when AI is active but conversation is HANDOVER', async () => {
+      // ai_status=active but conversation is HANDOVER → Guard 5 should fire.
+      const input = makeInput({
+        conversationId: 'conv_ho_active',
+        tenant: { id: 't1', botEnabled: true, handoverPaused: false, ghlLocationId: 'loc_1' },
+        conversation: {
+          channel: 'WHATSAPP',
+          id: 'conv_ho_active',
+          ghlConversationId: 'gc',
+          contactId: 'ct_1',
+          status: 'HANDOVER',
+          metadata: { ai_status: 'active', ai_status_updated_at: new Date().toISOString() },
+        },
+      });
+      mockFrom(mockSupabase, 'tenant_ghl_connections', { status: 'CONNECTED' });
+      mockFrom(mockSupabase, 'handover_events', [{ id: 'he_2' }]);
+      mockFrom(mockSupabase, 'quota_wallets', { total_quota: 100, used_quota: 10 });
+      const result = await guards.runGuards(input);
+      // Guard 1 passes (AI active with contactId, metadata is fresh) →
+      // Guard 5 fires (handover active)
+      expect(result.final).toBe('SKIP_HANDOVER_ACTIVE');
+      expect(result.guards.length).toBe(5);
+      expect(result.guards[0]!.guardName).toBe('ai_off_tag');
+      expect(result.guards[4]!.guardName).toBe('handover_paused');
+    });
   });
 });

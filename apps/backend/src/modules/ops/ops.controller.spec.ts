@@ -24,6 +24,11 @@ describe('OpsController', () => {
       getAuditEvents: jest.fn().mockResolvedValue({ data: [], total: 0, page: 1, pageSize: 20 }),
       getTenants: jest.fn().mockResolvedValue([]),
       getQueueHealth: jest.fn().mockResolvedValue([]),
+      clearHandover: jest.fn().mockResolvedValue({
+        ok: true, handoverCleared: true, activeHandoverFound: true,
+        handoverEventsResolved: 2, conversationStatusBefore: 'HANDOVER',
+        conversationStatusAfter: 'ACTIVE', tenantId: 'tenant-1',
+      }),
     } as unknown as OpsService;
     controller = new OpsController(service);
   });
@@ -110,6 +115,20 @@ describe('OpsController', () => {
     it('returns queue health', async () => {
       const result = await controller.getQueues(mockReq('ADMIN'));
       expect(Array.isArray(result)).toBe(true);
+    });
+  });
+
+  describe('clear-handover', () => {
+    it('clears handover for a conversation and returns result', async () => {
+      const result = await controller.clearHandover(mockReq('OWNER'), 'conv-1');
+      expect(service.clearHandover).toHaveBeenCalledWith('conv-1');
+      expect(result.handoverCleared).toBe(true);
+      expect(result.conversationStatusAfter).toBe('ACTIVE');
+      expect(result.activeHandoverFound).toBe(true);
+    });
+
+    it('requires agency role', async () => {
+      await expect(controller.clearHandover(mockReq(undefined), 'conv-1')).rejects.toThrow('Agency membership required');
     });
   });
 });

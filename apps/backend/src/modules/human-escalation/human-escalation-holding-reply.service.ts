@@ -119,6 +119,23 @@ export class HumanEscalationHoldingReplyService {
       return;
     }
 
+    // Hard invariant: never send a holding reply when AI is off.
+    // Belt-and-suspenders check — the orchestration guard reordering
+    // already prevents reaching this path when AI is off, but this
+    // protects against direct calls bypassing the guard pipeline.
+    const aiOffCheck = await this.readConversationAiStatus(conversationId);
+    if (aiOffCheck === 'off') {
+      this.logger.warn(
+        `HANDOVER_HOLDING_REPLY_BLOCKED_BY_AI_OFF ${JSON.stringify({
+          conversationId,
+          tenantId,
+          reason: 'ai_status=off',
+        })}`,
+      );
+      await this.writeAiOffTerminalDecision(conversationId, tenantId);
+      return;
+    }
+
     if (isTechnicalOperatorInput(latestInboundText)) {
       await this.enqueueDeterministicHoldingReply({
         tenantId,
@@ -310,6 +327,59 @@ export class HumanEscalationHoldingReplyService {
         logReason,
       })}`,
     );
+  }
+
+  private async readConversationAiStatus(conversationId: string): Promise<string | null> {
+    const { data } = await this.supabase
+      .from('conversations')
+      .select('metadata')
+      .eq('id', conversationId)
+      .maybeSingle();
+    const meta = (data?.metadata ?? {}) as Record<string, unknown>;
+    const raw = meta['ai_status'];
+    return typeof raw === 'string' ? raw.trim().toLowerCase() : null;
+  }
+
+  /** Write SKIP_AI_OFF_TAG terminal decision on the latest inbound message for this conversation. */
+  private async writeAiOffTerminalDecision(conversationId: string, _tenantId: string): Promise<void> {
+    try {
+      const { data: msgs } = await this.supabase
+        .from('messages')
+        .select('id, metadata')
+        .eq('conversation_id', conversationId)
+        .eq('direction', 'INBOUND')
+        .eq('sender', 'CONTACT')
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      const latest = msgs?.[0];
+      if (!latest) return;
+
+      const msgMeta = (latest.metadata ?? {}) as Record<string, unknown>;
+      const existingDecision = msgMeta['inbound_decision'];
+      if (existingDecision && typeof existingDecision === 'object' && 'status' in existingDecision) {
+        const s = (existingDecision as Record<string, unknown>)['status'];
+        if (s === 'PROCEED' || s === 'SKIP_AI_OFF_TAG' || s === 'SKIP_DUPLICATE_PROVIDER_DONE' || s === 'SKIP_HUMAN_TAKEOVER') {
+          return;
+        }
+      }
+
+      msgMeta['inbound_decision'] = {
+        status: 'SKIP_AI_OFF_TAG',
+        reason: 'ai_status=off (holding reply blocked)',
+        triggerSource: 'webhook',
+        decidedAt: new Date().toISOString(),
+      };
+
+      await this.supabase
+        .from('messages')
+        .update({ metadata: msgMeta })
+        .eq('id', latest.id);
+    } catch (err) {
+      this.logger.warn(
+        `writeAiOffTerminalDecision_failed: conversationId=${conversationId} error=${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 
   private async readLastHoldingMeta(conversationId: string): Promise<{

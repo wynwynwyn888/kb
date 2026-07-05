@@ -337,10 +337,13 @@ describe('OrchestrationGuards', () => {
 
   describe('runGuards (cascade)', () => {
     it('short-circuits on first non-PROCEED guard', async () => {
+      // AI off is Guard #1 — it runs first and returns PROCEED (no contactId).
+      // Bot disabled is Guard #2 — returns SKIP_BOT_DISABLED, short-circuit at 2 guards.
       const input = makeInput({ tenant: { id: 't1', botEnabled: false, handoverPaused: false, ghlLocationId: 'loc_1' } });
+      mockFrom(mockSupabase, 'tenant_ghl_connections', null, { code: 'PGRST116' });
       const result = await guards.runGuards(input);
       expect(result.final).toBe('SKIP_BOT_DISABLED');
-      expect(result.guards.length).toBe(1);
+      expect(result.guards.length).toBe(2);
     });
 
     it('runs all guards when all pass', async () => {

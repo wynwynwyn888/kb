@@ -88,7 +88,15 @@ describe('Handover Active → No Outbound Reply', () => {
           return { insert: jestGlobal.fn(async () => ({ data: null, error: null })) };
         }
         if (table === 'conversations') {
-          return { update: jestGlobal.fn(async () => ({ data: null, error: null })) };
+          return {
+            update: jestGlobal.fn(async () => ({ data: null, error: null })),
+            select: () => ({
+              eq: () => ({
+                eq: () => ({ single: async () => ({ data: null, error: null }) }),
+                maybeSingle: async () => ({ data: { metadata: { ai_status: 'active' } }, error: null }),
+              }),
+            }),
+          };
         }
         if (table === 'quota_ledgers') {
           return { insert: jestGlobal.fn(async () => ({ data: null, error: null })) };

@@ -28,60 +28,62 @@ export class OrchestrationGuards {
   async runGuards(input: OrchestrationInput): Promise<GuardOutcome> {
     const guards: GuardResult[] = [];
 
-    // Guard 1: Bot enabled
+    // Guard 1: AI off tag — hard invariant: no outbound while AI is off.
+    // Must be the highest-priority guard so no other guard can
+    // trigger a reply (including handover holding replies) when AI is off.
+    const aiOffGuard = await this.checkAiOffTag(input);
+    guards.push(aiOffGuard);
+    if (aiOffGuard.decision !== 'PROCEED') {
+      return this.buildOutcome(aiOffGuard.decision, guards);
+    }
+
+    // Guard 2: Bot enabled
     const botGuard = await this.checkBotEnabled(input);
     guards.push(botGuard);
     if (botGuard.decision !== 'PROCEED') {
       return this.buildOutcome(botGuard.decision, guards);
     }
 
-    // Guard 2: GHL integration connected
+    // Guard 3: GHL integration connected
     const ghlGuard = await this.checkGhlConnected(input);
     guards.push(ghlGuard);
     if (ghlGuard.decision !== 'PROCEED') {
       return this.buildOutcome(ghlGuard.decision, guards);
     }
 
-    // Guard 3: Conversation automation paused (GHL conversation status)
+    // Guard 4: Conversation automation paused (GHL conversation status)
     const automationGuard = await this.checkConversationAutomationPaused(input);
     guards.push(automationGuard);
     if (automationGuard.decision !== 'PROCEED') {
       return this.buildOutcome(automationGuard.decision, guards);
     }
 
-    // Guard 4: Handover paused
+    // Guard 5: Handover paused
     const handoverGuard = await this.checkHandoverPaused(input);
     guards.push(handoverGuard);
     if (handoverGuard.decision !== 'PROCEED') {
       return this.buildOutcome(handoverGuard.decision, guards);
     }
 
-    // Guard 5: Quota available
+    // Guard 6: Quota available
     const quotaGuard = await this.checkQuotaAvailable(input);
     guards.push(quotaGuard);
     if (quotaGuard.decision !== 'PROCEED') {
       return this.buildOutcome(quotaGuard.decision, guards);
     }
 
-    // Guard 6: Supported message type
+    // Guard 7: Supported message type
     const typeGuard = await this.checkMessageType(input);
     guards.push(typeGuard);
     if (typeGuard.decision !== 'PROCEED') {
       return this.buildOutcome(typeGuard.decision, guards);
     }
 
-    // Guard 7: Supported channel
+    // Guard 8: Supported channel
     const channelGuard = await this.checkChannel(input);
     guards.push(channelGuard);
     if (channelGuard.decision !== 'PROCEED') {
       return this.buildOutcome(channelGuard.decision, guards);
-    }
-
-    // Guard 8: AI off tag — skip reply if contact has "AI off" tag
-    const aiOffGuard = await this.checkAiOffTag(input);
-    guards.push(aiOffGuard);
-    if (aiOffGuard.decision !== 'PROCEED') {
-      return this.buildOutcome(aiOffGuard.decision, guards);
     }
 
     return this.buildOutcome('PROCEED', guards);
@@ -283,7 +285,10 @@ export class OrchestrationGuards {
   }
 
   /**
-   * Guard 8: Skip AI reply if the GHL contact has an "AI off" tag (case-insensitive).
+   * Guard 1 (highest priority): Skip AI reply if the GHL contact has an "AI off" tag.
+   *
+   * Hard invariant — no outbound (normal, holding, fallback, scanner, retry, recovery)
+   * may be sent while AI is off. This guard must fire before all other guards.
    *
    * Checks conversation metadata ai_status first (synced copy from TagAdded/Removed webhooks).
    * Falls back to GHL getContact API when metadata is missing and updates metadata on success.

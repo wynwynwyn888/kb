@@ -178,6 +178,19 @@ export class SendBubbleProcessor extends WorkerHost {
         }
       }
 
+      // Hard invariant: AI off check as final pre-send blocker.
+      // Blocks every outbound path (AI reply, holding reply, chat reset, etc.)
+      // regardless of how it reached this processor. Guard ordering ensures
+      // orchestration never reaches PROCEED while AI is off, but this is the
+      // safety net for any path that enqueues send-bubble directly.
+      const aiOffPreSendCheck = await this.checkAiOffBeforeSend(conversationId, tenantId, job);
+      if (!aiOffPreSendCheck.allowed) {
+        return {
+          conversationId, tenantId, totalBubbles: 0, succeeded: 0, failed: 0,
+          bubbleResults: [], quotaDebited: 0,
+        };
+      }
+
       // Prior-bubble gate (inside lock)
       if (orderingEnabled) {
         const bubbles = (replyPlan as any)?.bubbles as Array<{ index: number }> | undefined;
@@ -476,6 +489,67 @@ export class SendBubbleProcessor extends WorkerHost {
     );
 
     return summary;
+  }
+
+  /**
+   * Hard invariant: never send any outbound when AI is off.
+   * Checks conversation metadata ai_status. If 'off', writes SKIP_AI_OFF_TAG
+   * terminal decision and marks provider done so recovery paths don't retry.
+   */
+  private async checkAiOffBeforeSend(
+    conversationId: string,
+    tenantId: string,
+    job: Job<SendBubbleJobData>,
+  ): Promise<{ allowed: boolean }> {
+    try {
+      const supabase = getSupabaseService();
+      const { data } = await supabase
+        .from('conversations')
+        .select('metadata')
+        .eq('id', conversationId)
+        .maybeSingle();
+
+      const meta = (data?.metadata ?? {}) as Record<string, unknown>;
+      const aiStatus = typeof meta['ai_status'] === 'string' ? meta['ai_status'].trim().toLowerCase() : null;
+
+      if (aiStatus !== 'off') {
+        return { allowed: true };
+      }
+
+      this.logger.warn(
+        `AI_OFF_FINAL_SEND_BLOCK: conversationId=${conversationId} tenantId=${tenantId} — AI is off, aborting send`,
+      );
+
+      const inboundMsgId = job.data.inboundMessageId;
+      const providerGhlMsgId = job.data.providerGhlMessageId;
+
+      if (inboundMsgId) {
+        await recordTerminalDecision({
+          supabase,
+          logger: this.logger,
+          messageId: inboundMsgId,
+          decision: {
+            status: 'SKIP_AI_OFF_TAG',
+            reason: 'ai_status=off (pre-send check)',
+            triggerSource: 'webhook',
+            decidedAt: new Date().toISOString(),
+          },
+        });
+      }
+
+      if (providerGhlMsgId) {
+        await markProviderOrchestrationDone(this.appCache, tenantId, providerGhlMsgId);
+      }
+
+      return { allowed: false };
+    } catch (err) {
+      // Fail closed: if we cannot verify AI status, do NOT send.
+      // A blocked no-send is safer than texting a customer while AI off is on.
+      this.logger.error(
+        `AI_OFF_STATUS_CHECK_FAILED_SEND_BLOCKED: conversationId=${conversationId} error=${err instanceof Error ? err.message : String(err)}`,
+      );
+      return { allowed: false };
+    }
   }
 
   @OnWorkerEvent('completed')

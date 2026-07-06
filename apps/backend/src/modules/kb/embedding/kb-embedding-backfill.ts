@@ -42,6 +42,7 @@ export interface BackfillKnowledgeChunk {
 
 export interface KbEmbeddingBackfillOptions {
   tenantId: string;
+  documentId?: string;
   statuses?: BackfillEmbeddingStatus[];
   limit?: number;
   batchSize?: number;
@@ -111,14 +112,17 @@ export async function loadReadyKnowledgeChunksForEmbedding(
   tenantId: string,
   statuses: BackfillEmbeddingStatus[],
   limit: number,
+  documentId?: string,
 ): Promise<{ ok: true; chunks: BackfillKnowledgeChunk[] } | { ok: false; reason: string }> {
-  const docsRes = await supabase
+  let docsQuery = supabase
     .from('knowledge_documents')
     .select('id')
     .eq('tenant_id', tenantId)
-    .eq('status', 'READY')
-    .order('updated_at', { ascending: false })
-    .limit(10000);
+    .eq('status', 'READY');
+  if (documentId?.trim()) {
+    docsQuery = docsQuery.eq('id', documentId.trim());
+  }
+  const docsRes = await docsQuery.order('updated_at', { ascending: false }).limit(10000);
 
   if (docsRes.error) return { ok: false, reason: asErrorMessage(docsRes.error) };
 
@@ -201,6 +205,7 @@ export async function runKbEmbeddingBackfill(
     options.tenantId,
     statuses,
     limit,
+    options.documentId,
   );
   if (loaded.ok === false) return { ...summary, reason: loaded.reason };
 

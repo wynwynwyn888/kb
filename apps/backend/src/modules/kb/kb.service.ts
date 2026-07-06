@@ -3,7 +3,9 @@
 // All operations are tenant-scoped.
 
 import { randomUUID } from 'node:crypto';
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
+import type { Queue } from 'bullmq';
 import { getSupabaseService } from '../../lib/supabase';
 import type {
   RetrievalQuery,
@@ -32,6 +34,9 @@ import {
 } from '../../lib/kb-rich-text-source';
 import { KB_VAULT_DELETE_HAS_DOCUMENTS_MSG, kbDuplicateVaultDisplayName } from './kb-vault-messages';
 import { cosineSimilarity, hasPseudoCompatibleEmbedding, pseudoEmbedFromText, readEmbeddingVector, PSEUDO_EMBED_DIMS } from '../../lib/kb-vector-score';
+import { QUEUES } from '../../queues/queue.constants';
+import type { KbIngestJobData } from '../../queues/processors/kb-ingest.processor';
+import { kbEmbeddingJobsEnabledForTenant } from './embedding/kb-embedding-job-flags';
 
 const DEFAULT_TOP_K = 5;
 /** Default rows returned for KB search UI (client may display fewer). */
@@ -69,6 +74,12 @@ function inferDocumentKind(
 export class KbService {
   private readonly logger = new Logger(KbService.name);
   private readonly supabase = getSupabaseService();
+
+  constructor(
+    @Optional()
+    @InjectQueue(QUEUES.KB_INGEST)
+    private readonly kbIngestQueue?: Queue<KbIngestJobData>,
+  ) {}
 
   /**
    * Retrieve relevant KB chunks for a tenant query.
@@ -438,6 +449,7 @@ export class KbService {
       metadata: { kind: 'faq' },
     });
     if (ce) throw new Error(`FAQ chunk: ${ce.message}`);
+    this.enqueueKbEmbeddingRefresh(tenantId, doc.id, 'create');
     return { id: doc.id };
   }
 
@@ -499,6 +511,7 @@ export class KbService {
         );
       }
     }
+    this.enqueueKbEmbeddingRefresh(tenantId, doc.id, 'create');
     return { id: doc.id };
   }
 
@@ -694,6 +707,8 @@ export class KbService {
 
     const dr = docRow as { id: string; title: string; status: string; updated_at: string; size: number };
 
+    this.enqueueKbEmbeddingRefresh(tenantId, documentId, 'update');
+
     return {
       document: {
         id: dr.id,
@@ -840,6 +855,7 @@ export class KbService {
       metadata: { kind: 'file' },
     });
     if (ce) throw new Error(`File chunk: ${ce.message}`);
+    this.enqueueKbEmbeddingRefresh(tenantId, doc.id, 'create');
     return { id: doc.id, status: 'READY' };
   }
 
@@ -890,10 +906,17 @@ export class KbService {
       .update({
         content: a,
         token_count: Math.ceil(a.length / 4),
+        embedding: null,
+        embedding_model: null,
+        embedding_input_hash: null,
+        embedding_status: 'pending',
+        embedding_updated_at: null,
+        embedding_error: null,
       })
       .eq('document_id', documentId);
     if (ce) throw new Error(ce.message);
 
+    this.enqueueKbEmbeddingRefresh(tenantId, documentId, 'update');
     return { ok: true };
   }
 
@@ -1045,12 +1068,31 @@ export class KbService {
     }
 
     this.logger.log(`Manual KB chunk seeded: doc=${docId}, chunk=${chunkRec.id}`);
+    this.enqueueKbEmbeddingRefresh(tenantId, docId, 'manual');
     return chunkRec.id;
   }
 
   // ---------------------------------------------------------------------------
   // Private helpers
   // ---------------------------------------------------------------------------
+
+  private enqueueKbEmbeddingRefresh(
+    tenantId: string,
+    documentId: string,
+    reason: KbIngestJobData['reason'],
+  ): void {
+    if (!kbEmbeddingJobsEnabledForTenant(tenantId)) return;
+    if (!this.kbIngestQueue) {
+      this.logger.warn(`KB embedding enqueue skipped: tenant=${tenantId} documentId=${documentId} reason=no_queue`);
+      return;
+    }
+    void this.kbIngestQueue
+      .add('kb-embedding-refresh', { tenantId, documentId, reason })
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        this.logger.warn(`KB embedding enqueue failed: tenant=${tenantId} documentId=${documentId} reason=${message}`);
+      });
+  }
 
   private buildAnswerPreviewForList(
     chunks: Array<{ content: string; metadata: Record<string, unknown> }>,

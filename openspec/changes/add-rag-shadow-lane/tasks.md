@@ -21,17 +21,17 @@
 - [x] 2.3 Add SHA-256 `embedding_input_hash` helper over the exact truncated/normalized input; reuse in worker and write paths.
 - [x] 2.4 Add agency OpenAI key resolver (tenant→agency→`agency_model_providers` OPENAI), reusing `isUsableOpenAiFallbackKey`; honor `endpoint`.
 - [x] 2.5 Add pgvector text serializer (`number[]` → `'[...]'`).
-- [ ] 2.6 Implement a real embedding processor (dedicated processor or a real KB embedding job path; do not leave it acknowledgement-only).
+- [x] 2.6 Implement a real embedding processor (dedicated processor or a real KB embedding job path; do not leave it acknowledgement-only).
 - [x] 2.7 Batch embedding inputs per OpenAI request with bounded concurrency.
 - [x] 2.8 Add transient retry/backoff for 429/5xx/network; treat missing docs/chunks as benign no-ops.
 - [x] 2.9 Store via `set_knowledge_chunk_embedding`; mark permanent failures via `mark_knowledge_chunk_embedding_failed`.
-- [ ] 2.10 Add safe structured logs for embedding jobs (no raw content/secrets).
+- [x] 2.10 Add safe structured logs for embedding jobs (no raw content/secrets).
 
 ## 3. Staging Backfill (tenant-limited, idempotent)
 
 - [x] 3.1 Add `scripts/backfill-kb-embeddings.ts` requiring `--tenant` (allow `--all-tenants` only in non-prod).
 - [x] 3.2 Skip already-embedded chunks; process `pending`/`failed`/`skipped` when requested.
-- [ ] 3.3 Rate-limit calls, continue on single-chunk failure, log approximate tokens.
+- [x] 3.3 Rate-limit calls, continue on single-chunk failure, log approximate tokens.
 - [x] 3.4 Add `KB_EMBEDDING_BACKFILL_ALLOW` guard so it refuses to run against prod without acknowledgement.
 - [ ] 3.5 Print embedded/skipped/failed summary; run for the staging test tenant.
 
@@ -80,6 +80,7 @@
 ## 8. Staging Validation and Canary Gates (no prod DB until approved)
 
 - [x] 8.0 Add a staging/local-only RAG context evaluation harness (`scripts/evaluate-kb-rag-context.ts` + pure helpers in `kb-rag-eval.ts`): env guard refuses prod, forces the vector-context flags for one tenant, compares `runKbVectorContext` vs keyword `KbService.retrieve`, supports a kill-switch check mode, and logs ids/scores/previews only.
+- [x] 8.0a Add staging-only automatic embedding maintenance for KB writes: `KB_INGEST` now embeds pending/failed chunks for one document when `KB_EMBEDDING_JOBS_ENABLED=true` and the tenant is allowlisted.
 - [ ] 8.1 Complete the staging/local validation checklist (migration idempotency, index used, backfill no-op rerun, RPC isolation, safe logs, latency parity, kill switch, cost).
 - [ ] 8.2 Obtain explicit approval before any production additive migration.
 - [ ] 8.3 Apply prod additive migration in a low-traffic window; confirm existing KB reads/writes unaffected and `KB_VECTOR_RETRIEVAL_ENABLED=false`.

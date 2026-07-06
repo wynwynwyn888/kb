@@ -133,4 +133,55 @@ describe('KbService', () => {
       expect(result.relevanceScore).toBe(0.8);
     });
   });
+
+  describe('embedding maintenance enqueue', () => {
+    const withEnv = async (vars: Record<string, string | undefined>, fn: () => Promise<void>) => {
+      const prev: Record<string, string | undefined> = {};
+      for (const k of Object.keys(vars)) {
+        prev[k] = process.env[k];
+        if (vars[k] === undefined) delete process.env[k];
+        else process.env[k] = vars[k];
+      }
+      try {
+        await fn();
+      } finally {
+        for (const k of Object.keys(vars)) {
+          if (prev[k] === undefined) delete process.env[k];
+          else process.env[k] = prev[k];
+        }
+      }
+    };
+
+    it('does not enqueue when embedding jobs are disabled', async () => {
+      const queue = { add: jestGlobal.fn(async () => undefined) };
+      const svc = new KbService(queue as never);
+
+      await withEnv(
+        { NODE_ENV: 'staging', KB_EMBEDDING_JOBS_ENABLED: undefined, KB_EMBEDDING_JOB_TENANT_IDS: undefined },
+        async () => {
+          (svc as never)['enqueueKbEmbeddingRefresh']('tenant-1', 'doc-1', 'create');
+        },
+      );
+
+      expect(queue.add).not.toHaveBeenCalled();
+    });
+
+    it('enqueues a document embedding refresh for allowlisted staging tenants', async () => {
+      const queue = { add: jestGlobal.fn(async () => undefined) };
+      const svc = new KbService(queue as never);
+
+      await withEnv(
+        { NODE_ENV: 'staging', KB_EMBEDDING_JOBS_ENABLED: 'true', KB_EMBEDDING_JOB_TENANT_IDS: 'tenant-1' },
+        async () => {
+          (svc as never)['enqueueKbEmbeddingRefresh']('tenant-1', 'doc-1', 'update');
+        },
+      );
+
+      expect(queue.add).toHaveBeenCalledWith('kb-embedding-refresh', {
+        tenantId: 'tenant-1',
+        documentId: 'doc-1',
+        reason: 'update',
+      });
+    });
+  });
 });

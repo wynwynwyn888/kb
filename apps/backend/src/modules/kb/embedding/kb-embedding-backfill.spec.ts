@@ -168,6 +168,28 @@ describe('kb-embedding-backfill', () => {
     );
   });
 
+  it('can scope embedding work to one document', async () => {
+    const supabase = makeSupabaseStub({
+      docs: [{ id: 'doc-1' }],
+      chunks: [{ id: 'chunk-1', content: 'hello' }],
+    });
+
+    await runKbEmbeddingBackfill(supabase, {
+      tenantId: 'tenant-1',
+      documentId: 'doc-1',
+      dryRun: true,
+    });
+
+    const docsQuery = supabase.queries.find((q) => q.table === 'knowledge_documents')?.query;
+    expect(docsQuery?.filters).toEqual(
+      expect.arrayContaining([
+        { op: 'eq', column: 'tenant_id', value: 'tenant-1' },
+        { op: 'eq', column: 'status', value: 'READY' },
+        { op: 'eq', column: 'id', value: 'doc-1' },
+      ]),
+    );
+  });
+
   it('embeds prepared inputs and stores successful embeddings', async () => {
     const supabase = makeSupabaseStub({
       docs: [{ id: 'doc-1' }],

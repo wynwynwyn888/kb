@@ -1,6 +1,6 @@
-/** Cosine similarity for embedding vectors stored in chunk metadata (pgvector-ready). */
+/** Legacy/test-only pseudo-vector helpers. Live KB retrieval ignores metadata embeddings. */
 
-/** Dimension count for `pseudoEmbedFromText` — only embeddings of this size are vector-scored in-process. */
+/** Dimension count for the deprecated `pseudoEmbedFromText` representation. */
 export const PSEUDO_EMBED_DIMS = 64;
 
 export function readEmbeddingVector(meta: Record<string, unknown> | undefined): number[] | null {
@@ -29,13 +29,13 @@ export function cosineSimilarity(a: number[], b: number[]): number {
   return dot / (Math.sqrt(na) * Math.sqrt(nb));
 }
 
-/** True when chunk metadata carries a pseudo-compatible embedding (same dims as in-process query vec). */
+/** True when chunk metadata carries a legacy pseudo-compatible embedding. */
 export function hasPseudoCompatibleEmbedding(meta: Record<string, unknown> | undefined): boolean {
   const emb = readEmbeddingVector(meta);
   return emb !== null && emb.length === PSEUDO_EMBED_DIMS;
 }
 
-/** Lightweight bag-of-words fallback when query embedding is unavailable. */
+/** Deprecated deterministic bag-of-words pseudo-embedding, retained for legacy tests only. */
 export function pseudoEmbedFromText(text: string, dims = PSEUDO_EMBED_DIMS): number[] {
   const tokens = text
     .toLowerCase()

@@ -184,4 +184,233 @@ describe('KbService', () => {
       });
     });
   });
+
+  describe('retrieve - legacy metadata.embedding ignored', () => {
+    const PSEUDO_EMBED_DIMS = 64;
+
+    function makeChain(data: unknown) {
+      const self: any = {};
+      self.select = jestGlobal.fn().mockReturnValue(self);
+      self.eq = jestGlobal.fn().mockReturnValue(self);
+      self.in = jestGlobal.fn().mockReturnValue(self);
+      self.order = jestGlobal.fn().mockReturnValue(self);
+      self.limit = jestGlobal.fn().mockResolvedValue({ data, error: null });
+      self.single = jestGlobal.fn().mockResolvedValue({ data, error: null });
+      self.maybeSingle = jestGlobal.fn().mockResolvedValue({ data, error: null });
+      return self;
+    }
+
+    function setupMockChunks(
+      chunks: Array<{ id: string; documentId: string; title?: string; source?: string; content: string; metadata: Record<string, unknown> }>,
+    ) {
+      const docIds = [...new Set(chunks.map(c => c.documentId))];
+      const docs = docIds.map(id => {
+        const c = chunks.find(x => x.documentId === id)!;
+        return { id, title: c.title ?? 'Doc', source: c.source ?? 'manual', updated_at: '2020-01-01' };
+      });
+
+      mockSupabase.from.mockImplementation((table: string) => {
+        if (table === 'knowledge_documents') {
+          return makeChain(docs);
+        }
+        if (table === 'knowledge_chunks') {
+          return makeChain(chunks.map(c => ({
+            id: c.id,
+            document_id: c.documentId,
+            content: c.content,
+            metadata: c.metadata,
+          })));
+        }
+        return makeChain(null);
+      });
+    }
+
+    beforeEach(() => {
+      jestGlobal.clearAllMocks();
+      service = new KbService();
+    });
+
+    it('returns retrievalMode=keyword when chunks have 64-dim metadata.embedding', async () => {
+      setupMockChunks([
+        {
+          id: 'ch1',
+          documentId: 'd1',
+          title: 'Hours',
+          source: 'manual',
+          content: 'Appointment booking hours are 9am to 5pm',
+          metadata: { embedding: new Array(PSEUDO_EMBED_DIMS).fill(0.1) },
+        },
+      ]);
+
+      const result = await service.retrieve({
+        tenantId: 't1',
+        conversationId: 'c1',
+        query: 'appointment booking',
+      });
+
+      expect(result.retrievalMode).toBe('keyword');
+      expect(result.chunks.length).toBeGreaterThan(0);
+    });
+
+    it('still scores content by keyword relevance when embeddings exist', async () => {
+      setupMockChunks([
+        {
+          id: 'ch1',
+          documentId: 'd1',
+          content: 'Appointment booking hours are 9am to 5pm',
+          metadata: { embedding: new Array(PSEUDO_EMBED_DIMS).fill(0.1) },
+        },
+        {
+          id: 'ch2',
+          documentId: 'd2',
+          content: 'Unrelated content about parking',
+          metadata: { embedding: new Array(PSEUDO_EMBED_DIMS).fill(0.2) },
+        },
+      ]);
+
+      const result = await service.retrieve({
+        tenantId: 't1',
+        conversationId: 'c1',
+        query: 'appointment booking',
+      });
+
+      expect(result.retrievalMode).toBe('keyword');
+      for (const c of result.chunks) {
+        expect(c.relevanceScore).toBeGreaterThanOrEqual(0);
+        expect(c.relevanceScore).toBeLessThanOrEqual(1);
+      }
+    });
+
+    it('preserves keyword retrieval when embedding jobs flags are unset', async () => {
+      setupMockChunks([
+        {
+          id: 'ch1',
+          documentId: 'd1',
+          content: 'Business hours are 9 to 5',
+          metadata: { embedding: new Array(PSEUDO_EMBED_DIMS).fill(0.1) },
+        },
+      ]);
+
+      const result = await service.retrieve({
+        tenantId: 't1',
+        conversationId: 'c1',
+        query: 'business hours',
+      });
+
+      expect(result.retrievalMode).toBe('keyword');
+      expect(result.chunks).toHaveLength(1);
+      expect(result.chunks[0]!.content).toBe('Business hours are 9 to 5');
+    });
+
+    it('non-canary tenant unaffected (same keyword retrieval)', async () => {
+      setupMockChunks([
+        {
+          id: 'ch1',
+          documentId: 'd1',
+          content: 'Returns and refunds are processed within 30 days',
+          metadata: { embedding: new Array(PSEUDO_EMBED_DIMS).fill(0.1) },
+        },
+      ]);
+
+      // Use a tenant ID that is NOT in any allowlist
+      const result = await service.retrieve({
+        tenantId: 'non-canary-tenant',
+        conversationId: 'c1',
+        query: 'returns policy',
+      });
+
+      expect(result.retrievalMode).toBe('keyword');
+    });
+  });
+
+  describe('searchKnowledge - legacy metadata.embedding ignored', () => {
+    const PSEUDO_EMBED_DIMS = 64;
+
+    function makeChain(data: unknown) {
+      const self: any = {};
+      self.select = jestGlobal.fn().mockReturnValue(self);
+      self.eq = jestGlobal.fn().mockReturnValue(self);
+      self.in = jestGlobal.fn().mockReturnValue(self);
+      self.order = jestGlobal.fn().mockReturnValue(self);
+      self.limit = jestGlobal.fn().mockResolvedValue({ data, error: null });
+      self.single = jestGlobal.fn().mockResolvedValue({ data, error: null });
+      self.maybeSingle = jestGlobal.fn().mockResolvedValue({ data, error: null });
+      return self;
+    }
+
+    function setupMockChunks(
+      chunks: Array<{ id: string; documentId: string; title?: string; source?: string; content: string; metadata: Record<string, unknown> }>,
+    ) {
+      const docIds = [...new Set(chunks.map(c => c.documentId))];
+      const docs = docIds.map(id => {
+        const c = chunks.find(x => x.documentId === id)!;
+        return { id, title: c.title ?? 'Doc', source: c.source ?? 'manual', updated_at: '2020-01-01' };
+      });
+
+      mockSupabase.from.mockImplementation((table: string) => {
+        if (table === 'knowledge_documents') {
+          return makeChain(docs);
+        }
+        if (table === 'knowledge_chunks') {
+          return makeChain(chunks.map(c => ({
+            id: c.id,
+            document_id: c.documentId,
+            content: c.content,
+            metadata: c.metadata,
+          })));
+        }
+        return makeChain(null);
+      });
+    }
+
+    beforeEach(() => {
+      jestGlobal.clearAllMocks();
+      service = new KbService();
+    });
+
+    it('returns retrievalMode=keyword when chunks have 64-dim metadata.embedding', async () => {
+      setupMockChunks([
+        {
+          id: 'ch1',
+          documentId: 'd1',
+          content: 'Appointment booking hours are 9am to 5pm',
+          metadata: { embedding: new Array(PSEUDO_EMBED_DIMS).fill(0.1) },
+        },
+      ]);
+
+      const result = await service.searchKnowledge({
+        tenantId: 't1',
+        query: 'appointment booking',
+      });
+
+      expect(result.retrievalMode).toBe('keyword');
+    });
+
+    it('uses keyword scoring for ranking when embeddings exist', async () => {
+      setupMockChunks([
+        {
+          id: 'ch1',
+          documentId: 'd1',
+          content: 'Appointment booking hours are 9am to 5pm',
+          metadata: { embedding: new Array(PSEUDO_EMBED_DIMS).fill(0.1) },
+        },
+        {
+          id: 'ch2',
+          documentId: 'd2',
+          content: 'Parking is free on weekends',
+          metadata: { embedding: new Array(PSEUDO_EMBED_DIMS).fill(0.2) },
+        },
+      ]);
+
+      const result = await service.searchKnowledge({
+        tenantId: 't1',
+        query: 'booking hours',
+      });
+
+      expect(result.retrievalMode).toBe('keyword');
+      expect(result.hits.length).toBeGreaterThan(0);
+      // The booking-related chunk should rank higher by keyword score
+      expect(result.hits[0]!.documentId).toBe('d1');
+    });
+  });
 });

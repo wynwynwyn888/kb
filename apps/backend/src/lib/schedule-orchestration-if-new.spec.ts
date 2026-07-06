@@ -1,6 +1,6 @@
-// schedule-orchestration-if-new tests — provider gate, source-aware age, done/lock markers
+// schedule-orchestration-if-new tests — provider gate, fallback identity, source-aware age, done/lock markers
 import { jest as jestGlobal } from '@jest/globals';
-import { checkProviderOrchestrationGate, markProviderOrchestrationDone, releaseProviderLock } from './schedule-orchestration-if-new';
+import { checkProviderOrchestrationGate, markProviderOrchestrationDone, releaseProviderLock, resolveProviderIdentity } from './schedule-orchestration-if-new';
 import type { AppCacheService } from './app-cache.service';
 
 const mockRedisExists = jestGlobal.fn();
@@ -35,6 +35,33 @@ const baseParams = {
   source: 'webhook' as 'webhook' | 'fallback',
 };
 
+describe('resolveProviderIdentity', () => {
+  it('returns ghl_message_id when ghlMessageId provided', () => {
+    const id = resolveProviderIdentity({ ghlMessageId: 'ghl-1' });
+    expect(id).toEqual({ kind: 'ghl_message_id', value: 'ghl-1' });
+  });
+
+  it('prefers ghlMessageId over kbMessageId', () => {
+    const id = resolveProviderIdentity({ ghlMessageId: 'ghl-1', kbMessageId: 'kb-1' });
+    expect(id).toEqual({ kind: 'ghl_message_id', value: 'ghl-1' });
+  });
+
+  it('falls back to kb_fallback when ghlMessageId missing', () => {
+    const id = resolveProviderIdentity({ kbMessageId: 'kb-1' });
+    expect(id).toEqual({ kind: 'kb_fallback', value: 'kb-1' });
+  });
+
+  it('returns null when neither provided', () => {
+    const id = resolveProviderIdentity({});
+    expect(id).toBeNull();
+  });
+
+  it('trims whitespace', () => {
+    const id = resolveProviderIdentity({ ghlMessageId: '  ghl-1  ' });
+    expect(id).toEqual({ kind: 'ghl_message_id', value: 'ghl-1' });
+  });
+});
+
 describe('checkProviderOrchestrationGate', () => {
   beforeEach(() => {
     jestGlobal.clearAllMocks();
@@ -44,39 +71,58 @@ describe('checkProviderOrchestrationGate', () => {
     mockRedisSet.mockResolvedValue('OK');
   });
 
-  // ── Gate 1: no ghlMessageId ──────────────────────────────────────────
-  it('blocks when ghlMessageId is missing', async () => {
+  // ── Gate 1a: no provider identity ──────────────────────────────────────
+  it('blocks when neither ghlMessageId nor kbMessageId provided', async () => {
     const r = await checkProviderOrchestrationGate({
       ...baseParams,
       ghlMessageId: null,
       appCache: makeAppCache(),
     });
     expect(r.allowed).toBe(false);
-    expect(r.reason).toBe('no_ghl_message_id');
+    expect(r.reason).toBe('no_provider_identity');
   });
 
-  it('blocks when ghlMessageId is blank', async () => {
+  it('blocks when ghlMessageId is blank and no kbMessageId', async () => {
     const r = await checkProviderOrchestrationGate({
       ...baseParams,
       ghlMessageId: '  ',
       appCache: makeAppCache(),
     });
     expect(r.allowed).toBe(false);
-    expect(r.reason).toBe('no_ghl_message_id');
+    expect(r.reason).toBe('no_provider_identity');
   });
 
-  // ── Gate 2: timestamp ─────────────────────────────────────────────────
-  it('blocks when timestamp is missing', async () => {
+  // ── Gate 1b: fallback identity when ghlMessageId missing but kbMessageId present ──
+  it('allows with kb_fallback identity when ghlMessageId missing', async () => {
     const r = await checkProviderOrchestrationGate({
       ...baseParams,
-      ghlTimestamp: null,
+      ghlMessageId: null,
+      kbMessageId: 'kb-msg-1',
+      source: 'webhook',
       appCache: makeAppCache(),
     });
-    expect(r.allowed).toBe(false);
-    expect(r.reason).toBe('no_timestamp');
+    expect(r.allowed).toBe(true);
+    expect(r.identity).toEqual({ kind: 'kb_fallback', value: 'kb-msg-1' });
   });
 
-  // Gate 2: source-aware max age
+  it('uses kb_fallback lock key space distinct from ghl lock keys', async () => {
+    mockAcquireLock.mockResolvedValue('acquired');
+    await checkProviderOrchestrationGate({
+      ...baseParams,
+      ghlMessageId: null,
+      kbMessageId: 'kb-msg-1',
+      source: 'webhook',
+      appCache: makeAppCache(),
+    });
+    // Should use fallback lock key, not ghl lock key
+    expect(mockAcquireLock).toHaveBeenCalledWith(
+      'lock:orch-provider-fallback:t1:kb-msg-1',
+      expect.any(String),
+      120,
+    );
+  });
+
+  // ── Gate 2: timestamp (only checked when provided) ─────────────────────
   it('webhook: allows within 5 minutes', async () => {
     const r = await checkProviderOrchestrationGate({
       ...baseParams,
@@ -98,6 +144,18 @@ describe('checkProviderOrchestrationGate', () => {
     expect(r.reason).toContain('stale_');
   });
 
+  it('allows when timestamp is missing (best-effort with identity)', async () => {
+    const r = await checkProviderOrchestrationGate({
+      ...baseParams,
+      ghlTimestamp: null,
+      source: 'webhook',
+      appCache: makeAppCache(),
+    });
+    // With valid ghlMessageId and no timestamp, should still allow (best-effort)
+    expect(r.allowed).toBe(true);
+  });
+
+  // Gate 2: source-aware max age
   it('fallback: allows within 30 minutes (previously blocked at 5 min)', async () => {
     const r = await checkProviderOrchestrationGate({
       ...baseParams,
@@ -151,6 +209,29 @@ describe('checkProviderOrchestrationGate', () => {
     expect(r.reason).toBe('already_done');
   });
 
+  it('uses ghl done key for ghl_message_id identity', async () => {
+    mockRedisExists.mockResolvedValue(0);
+    await checkProviderOrchestrationGate({
+      ...baseParams,
+      ghlMessageId: 'ghl-msg-1',
+      source: 'webhook',
+      appCache: makeAppCache(),
+    });
+    expect(mockRedisExists).toHaveBeenCalledWith('done:orch-provider:t1:ghl-msg-1');
+  });
+
+  it('uses fallback done key for kb_fallback identity', async () => {
+    mockRedisExists.mockResolvedValue(0);
+    await checkProviderOrchestrationGate({
+      ...baseParams,
+      ghlMessageId: null,
+      kbMessageId: 'kb-msg-1',
+      source: 'webhook',
+      appCache: makeAppCache(),
+    });
+    expect(mockRedisExists).toHaveBeenCalledWith('done:orch-provider-fallback:t1:kb-msg-1');
+  });
+
   it('webhook: allows through on done check Redis error', async () => {
     mockRedisExists.mockRejectedValue(new Error('Redis down'));
     const r = await checkProviderOrchestrationGate({
@@ -185,7 +266,7 @@ describe('checkProviderOrchestrationGate', () => {
     expect(r.reason).toBe('lock_held');
   });
 
-  it('returns lockToken when acquired', async () => {
+  it('returns lockToken and identity when acquired', async () => {
     mockAcquireLock.mockResolvedValue('acquired');
     const r = await checkProviderOrchestrationGate({
       ...baseParams,
@@ -194,6 +275,7 @@ describe('checkProviderOrchestrationGate', () => {
     });
     expect(r.allowed).toBe(true);
     expect(r.lockToken).toBeTruthy();
+    expect(r.identity).toEqual({ kind: 'ghl_message_id', value: 'ghl-msg-1' });
   });
 });
 
@@ -203,8 +285,8 @@ describe('markProviderOrchestrationDone', () => {
     mockRedisSet.mockResolvedValue('OK');
   });
 
-  it('sets done marker in Redis', async () => {
-    await markProviderOrchestrationDone(makeAppCache(), 't1', 'ghl-msg-1');
+  it('sets done marker in Redis for ghl_message_id identity', async () => {
+    await markProviderOrchestrationDone(makeAppCache(), 't1', { kind: 'ghl_message_id', value: 'ghl-msg-1' });
     expect(mockRedisSet).toHaveBeenCalledWith(
       'done:orch-provider:t1:ghl-msg-1',
       '1',
@@ -213,19 +295,29 @@ describe('markProviderOrchestrationDone', () => {
     );
   });
 
-  it('no-ops without ghlMessageId', async () => {
+  it('sets done marker in Redis for kb_fallback identity', async () => {
+    await markProviderOrchestrationDone(makeAppCache(), 't1', { kind: 'kb_fallback', value: 'kb-msg-1' });
+    expect(mockRedisSet).toHaveBeenCalledWith(
+      'done:orch-provider-fallback:t1:kb-msg-1',
+      '1',
+      'EX',
+      86_400,
+    );
+  });
+
+  it('no-ops without identity', async () => {
     await markProviderOrchestrationDone(makeAppCache(), 't1', null);
     expect(mockRedisSet).not.toHaveBeenCalled();
   });
 
   it('no-ops without appCache', async () => {
-    await markProviderOrchestrationDone(undefined, 't1', 'ghl-msg-1');
+    await markProviderOrchestrationDone(undefined, 't1', { kind: 'ghl_message_id', value: 'ghl-msg-1' });
     expect(mockRedisSet).not.toHaveBeenCalled();
   });
 
   it('no-ops on Redis error', async () => {
     mockRedisSet.mockRejectedValue(new Error('Redis down'));
-    await markProviderOrchestrationDone(makeAppCache(), 't1', 'ghl-msg-1');
+    await markProviderOrchestrationDone(makeAppCache(), 't1', { kind: 'ghl_message_id', value: 'ghl-msg-1' });
     // should not throw
   });
 });
@@ -236,20 +328,28 @@ describe('releaseProviderLock', () => {
     mockReleaseLock.mockResolvedValue(true);
   });
 
-  it('releases lock with matching token', async () => {
-    await releaseProviderLock(makeAppCache(), 't1', 'ghl-msg-1', 'token-1');
+  it('releases ghl lock with matching token', async () => {
+    await releaseProviderLock(makeAppCache(), 't1', { kind: 'ghl_message_id', value: 'ghl-msg-1' }, 'token-1');
     expect(mockReleaseLock).toHaveBeenCalledWith(
       'lock:orch-provider:t1:ghl-msg-1',
       'token-1',
     );
   });
 
+  it('releases fallback lock with matching token', async () => {
+    await releaseProviderLock(makeAppCache(), 't1', { kind: 'kb_fallback', value: 'kb-msg-1' }, 'token-1');
+    expect(mockReleaseLock).toHaveBeenCalledWith(
+      'lock:orch-provider-fallback:t1:kb-msg-1',
+      'token-1',
+    );
+  });
+
   it('no-ops without lockToken', async () => {
-    await releaseProviderLock(makeAppCache(), 't1', 'ghl-msg-1', undefined);
+    await releaseProviderLock(makeAppCache(), 't1', { kind: 'ghl_message_id', value: 'ghl-msg-1' }, undefined);
     expect(mockReleaseLock).not.toHaveBeenCalled();
   });
 
-  it('no-ops without ghlMessageId', async () => {
+  it('no-ops without identity', async () => {
     await releaseProviderLock(makeAppCache(), 't1', null, 'token-1');
     expect(mockReleaseLock).not.toHaveBeenCalled();
   });

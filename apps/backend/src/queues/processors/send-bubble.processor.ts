@@ -20,8 +20,9 @@ import { getSupabaseService } from '../../lib/supabase';
 import { bumpInboundDebounceMeta } from '../../lib/inbound-debounce';
 import { resolveInboundDebounceMs } from '../../lib/inbound-burst-batch';
 import { readConversationMetadataField, mergeConversationMetadataForPersist } from '../../lib/conversation-metadata-merge';
-import { markProviderOrchestrationDone } from '../../lib/schedule-orchestration-if-new';
-import { recordTerminalDecision, recordInterimDecision } from '../../lib/inbound-decision';
+import { markProviderOrchestrationDone, resolveProviderIdentity } from '../../lib/schedule-orchestration-if-new';
+import type { ProviderIdentity } from '../../lib/schedule-orchestration-if-new';
+import { recordTerminalDecision, recordInterimDecision, buildDecisionRecord } from '../../lib/inbound-decision';
 
 export interface SendBubbleJobData {
   conversationId: string;
@@ -43,6 +44,9 @@ export interface SendBubbleJobData {
   providerGhlMessageId?: string;
   /** Latest inbound KB message ID at orchestration start — for decision recording. */
   inboundMessageId?: string;
+  /** Provider identity kind — for done-marker on fallback-orchestrated messages. */
+  providerIdentityKind?: string;
+  providerIdentityValue?: string;
 }
 
 @Processor(QUEUES.SEND_BUBBLE)
@@ -69,8 +73,16 @@ export class SendBubbleProcessor extends WorkerHost {
   }
 
   async process(job: Job<SendBubbleJobData>): Promise<SendSummary> {
-    const { conversationId, tenantId, contactId, ghlLocationId, replyPlanJson, replyId, replyLatencyTrace, latestInboundMsgIdAtStart, aiJobStartedAt } =
+    const { conversationId, tenantId, contactId, ghlLocationId, replyPlanJson, replyId, replyLatencyTrace, latestInboundMsgIdAtStart, aiJobStartedAt, providerGhlMessageId, inboundMessageId, providerIdentityKind, providerIdentityValue } =
       job.data;
+
+    // Build provider identity for done-marker placement
+    const providerIdentity: ProviderIdentity | null =
+      providerIdentityKind && providerIdentityValue
+        ? { kind: providerIdentityKind as ProviderIdentity['kind'], value: providerIdentityValue }
+        : providerGhlMessageId
+          ? { kind: 'ghl_message_id', value: providerGhlMessageId }
+          : null;
 
     this.logger.log(
       `Send-bubble job started: conversationId=${conversationId}, tenantId=${tenantId}`,
@@ -267,14 +279,14 @@ export class SendBubbleProcessor extends WorkerHost {
         });
       }
       // Only mark provider done if decision write succeeded (or no inboundMsgId)
-      if (providerGhlMsgId && (decisionOk || !inboundMsgId)) {
-        await markProviderOrchestrationDone(this.appCache, tenantId, providerGhlMsgId);
+      if (providerIdentity && (decisionOk || !inboundMsgId)) {
+        await markProviderOrchestrationDone(this.appCache, tenantId, providerIdentity);
         this.logger.log(
-          `providerDoneWritten: tenantId=${tenantId} providerMsgId=${providerGhlMsgId.slice(0, 12)}`,
+          `providerDoneWritten: tenantId=${tenantId} providerIdKind=${providerIdentity.kind} providerIdValue=${providerIdentity.value.slice(0, 12)}`,
         );
-      } else if (providerGhlMsgId && !decisionOk) {
+      } else if (providerIdentity && !decisionOk) {
         this.logger.error(
-          `providerDoneWithheld_decisionWriteFailed: tenantId=${tenantId} conversationId=${conversationId} providerMsgId=${providerGhlMsgId} inboundMsgId=${inboundMsgId}`,
+          `providerDoneWithheld_decisionWriteFailed: tenantId=${tenantId} conversationId=${conversationId} providerIdValue=${providerIdentity.value} inboundMsgId=${inboundMsgId}`,
         );
       }
     } else if (summary.failed > 0) {
@@ -522,23 +534,29 @@ export class SendBubbleProcessor extends WorkerHost {
 
       const inboundMsgId = job.data.inboundMessageId;
       const providerGhlMsgId = job.data.providerGhlMessageId;
+      const aiOffIdentity: ProviderIdentity | null =
+        job.data.providerIdentityKind && job.data.providerIdentityValue
+          ? { kind: job.data.providerIdentityKind as ProviderIdentity['kind'], value: job.data.providerIdentityValue }
+          : providerGhlMsgId
+            ? { kind: 'ghl_message_id', value: providerGhlMsgId }
+            : null;
 
       if (inboundMsgId) {
         await recordTerminalDecision({
           supabase,
           logger: this.logger,
           messageId: inboundMsgId,
-          decision: {
+          decision: buildDecisionRecord({
             status: 'SKIP_AI_OFF_TAG',
             reason: 'ai_status=off (pre-send check)',
             triggerSource: 'webhook',
-            decidedAt: new Date().toISOString(),
-          },
+            identity: aiOffIdentity,
+          }),
         });
       }
 
-      if (providerGhlMsgId) {
-        await markProviderOrchestrationDone(this.appCache, tenantId, providerGhlMsgId);
+      if (aiOffIdentity) {
+        await markProviderOrchestrationDone(this.appCache, tenantId, aiOffIdentity);
       }
 
       return { allowed: false };

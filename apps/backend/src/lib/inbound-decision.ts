@@ -4,10 +4,12 @@
 
 import type { Logger } from '@nestjs/common';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import type { ProviderIdentity } from './schedule-orchestration-if-new';
 
 export type InboundDecisionStatus =
   | 'PENDING'
   | 'PROCEED'
+  | 'PROCEED_FALLBACK'
   | 'SKIP_AI_OFF_TAG'
   | 'SKIP_HANDOVER_ACTIVE'
   | 'SKIP_DUPLICATE_PROVIDER_DONE'
@@ -34,6 +36,9 @@ export interface InboundDecisionRecord {
   outboundGhlMessageId?: string;
   triggerSource: InboundDecisionTrigger;
   decidedAt: string; // ISO timestamp
+  /** When orchestration used a kb_fallback identity, record the kind + value. */
+  providerIdentityKind?: string;
+  providerIdentityValue?: string;
 }
 
 const DECISION_KEY = 'inbound_decision';
@@ -43,6 +48,7 @@ const DECISION_KEY = 'inbound_decision';
  */
 const TERMINAL_STATUSES: ReadonlySet<InboundDecisionStatus> = new Set([
   'PROCEED',
+  'PROCEED_FALLBACK',
   'SKIP_AI_OFF_TAG',
   'SKIP_HANDOVER_ACTIVE',
   'SKIP_DUPLICATE_PROVIDER_DONE',
@@ -54,6 +60,33 @@ const RECOVERY_SCHEDULED_DEDUP_MS = 5 * 60 * 1000; // 5 minutes
 
 export function isTerminalDecision(status: InboundDecisionStatus): boolean {
   return TERMINAL_STATUSES.has(status);
+}
+
+/**
+ * Build a decision record enriched with provider identity metadata.
+ * Callers should use this when they have a resolved ProviderIdentity.
+ */
+export function buildDecisionRecord(params: {
+  status: InboundDecisionStatus;
+  reason?: string;
+  triggerSource: InboundDecisionTrigger;
+  identity?: ProviderIdentity | null;
+  outboundMessageId?: string;
+  outboundGhlMessageId?: string;
+}): InboundDecisionRecord {
+  const record: InboundDecisionRecord = {
+    status: params.status,
+    reason: params.reason,
+    triggerSource: params.triggerSource,
+    decidedAt: new Date().toISOString(),
+    outboundMessageId: params.outboundMessageId,
+    outboundGhlMessageId: params.outboundGhlMessageId,
+  };
+  if (params.identity) {
+    record.providerIdentityKind = params.identity.kind;
+    record.providerIdentityValue = params.identity.value;
+  }
+  return record;
 }
 
 /**
@@ -163,6 +196,9 @@ export async function recordDuplicateDecision(params: {
 /**
  * Find CONTACT/INBOUND messages without a terminal decision and without
  * a later OUTBOUND/AI reply. Used by the scanner.
+ *
+ * Messages with PROCEED_FALLBACK terminal status are excluded (already handled
+ * via fallback orchestration).
  */
 export async function findUnrepliedInboundMessages(params: {
   supabase: SupabaseClient;
@@ -191,9 +227,6 @@ export async function findUnrepliedInboundMessages(params: {
     .limit(limit);
 
   if (queryErr || !candidates?.length) {
-    if (queryErr) {
-      // Logger not available in this pure function — caller should handle
-    }
     return [];
   }
 

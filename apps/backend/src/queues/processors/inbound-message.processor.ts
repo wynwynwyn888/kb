@@ -50,9 +50,10 @@ import { MediaTranscriptionQueueService } from '../media-transcription-queue.ser
 import { syncGhlConversationContext } from '../../lib/ghl-conversation-sync';
 import { ingestInboundMessage } from '../../lib/inbound-message-ingest';
 import { MetricsService } from '../../lib/metrics.service';
-import { checkProviderOrchestrationGate, markProviderOrchestrationDone } from '../../lib/schedule-orchestration-if-new';
+import { checkProviderOrchestrationGate, markProviderOrchestrationDone, resolveProviderIdentity } from '../../lib/schedule-orchestration-if-new';
+import type { ProviderIdentity } from '../../lib/schedule-orchestration-if-new';
 import { resolveContactIdIfPhone } from '../../lib/contact-resolve';
-import { recordTerminalDecision, recordInterimDecision, recordDuplicateDecision } from '../../lib/inbound-decision';
+import { recordTerminalDecision, recordInterimDecision, recordDuplicateDecision, buildDecisionRecord } from '../../lib/inbound-decision';
 import type { InboundDecisionStatus } from '../../lib/inbound-decision';
 
 function mapOutcomeToDecisionStatus(outcome: string): InboundDecisionStatus | null {
@@ -133,6 +134,11 @@ export interface OrchestrateDebouncedJobData {
   channelRaw?: string;
   /** GHL inbound message ID for provider-level orchestration idempotency. */
   ghlInboundMessageId?: string;
+  /** KB message ID — used as fallback provider identity when ghlInboundMessageId is missing. */
+  kbInboundMessageId?: string;
+  /** Resolved provider identity — serialized for the orchestrate job. */
+  providerIdentityKind?: string;
+  providerIdentityValue?: string;
 }
 
 @Processor(QUEUES.INBOUND_MESSAGE_PROCESSOR, { concurrency: 3 })
@@ -365,6 +371,17 @@ export class InboundMessageProcessor extends WorkerHost {
         `inboundPersistTiming: conversationId=${conversation.id} webhook_to_persist_ms=${webhook_to_persist_ms ?? 'na'}`,
       );
 
+      // Resolve the KB message ID for fallback provider identity.
+      // After the shared-ingest path, the latest inbound row is persisted;
+      // for the non-shared path we read it back.
+      let kbInboundMessageId: string | undefined;
+      try {
+        const latest = await this.fetchLatestInboundOrchestrationContext(conversation.id);
+        kbInboundMessageId = latest.id || undefined;
+      } catch {
+        // Non-critical — kbMessageId is best-effort for fallback identity
+      }
+
       if (smokeImmediate) {
         this.logger.log(`Debounce bypassed (smokeImmediate): conversationId=${conversation.id}`);
         await this.executeOrchestrationPipeline({
@@ -407,6 +424,13 @@ export class InboundMessageProcessor extends WorkerHost {
       const { debounceMs, debounceSource } = resolveInboundDebounceMs();
       const orchestrateEnqueuedAtMs = Date.now();
 
+      // Resolve provider identity for the gate.
+      // Prefer the real GHL message ID; fall back to KB message ID.
+      const providerIdentity = resolveProviderIdentity({
+        ghlMessageId: ghlInboundMessageId?.trim() || null,
+        kbMessageId: kbInboundMessageId,
+      });
+
       // Provider-level idempotency gate: prevent duplicate orchestration when
       // sync fallback and webhook both see the same GHL message.
       const providerGate = await checkProviderOrchestrationGate({
@@ -415,6 +439,7 @@ export class InboundMessageProcessor extends WorkerHost {
         tenantId: tenant.id,
         conversationId: conversation.id,
         ghlMessageId: ghlInboundMessageId?.trim() || null,
+        kbMessageId: kbInboundMessageId,
         ghlTimestamp: timestamp,
         source: 'webhook',
       });
@@ -423,13 +448,19 @@ export class InboundMessageProcessor extends WorkerHost {
           `Orchestration skipped (provider gate): conversationId=${conversation.id} reason=${providerGate.reason}`,
         );
 
-        // No ghlMessageId → trigger focused GHL sync to recover the real ID
-        if (providerGate.reason === 'no_ghl_message_id') {
+        // No GHL message ID → trigger focused GHL sync to recover the real ID
+        if (providerGate.reason === 'no_ghl_message_id' || providerGate.reason === 'no_provider_identity') {
+          if (!ghlInboundMessageId?.trim()) {
+            this.logger.warn(
+              `missing_ghl_message_id_detected: conversationId=${conversation.id} kbMessageId=${kbInboundMessageId?.slice(0, 8) ?? 'null'}`,
+            );
+          }
           await this.recoverOrchestrationViaSync(
             tenant.id,
             conversation.id,
             locationId,
             ghlContactId,
+            kbInboundMessageId,
           );
         }
 
@@ -437,34 +468,38 @@ export class InboundMessageProcessor extends WorkerHost {
         return;
       }
 
-      await this.inboundQueue.add(
-        'orchestrate',
-        {
-          tenantId: tenant.id,
-          conversationId: conversation.id,
-          locationId,
-          ghlContactId,
-          ghlConversationId,
-          debounceVersion: newVersion,
-          webhookEventId,
-          contactDisplayName,
-          contactPhone,
-          contactEmail,
-          contactFieldsFromExtendedWebhook,
-          inboundWebhookReceivedAtIso: timestamp,
-          debounceConfiguredMs: debounceMs,
-          orchestrateEnqueuedAtMs,
-          channelRaw,
-          ghlInboundMessageId: ghlInboundMessageId?.trim() || undefined,
-        } satisfies OrchestrateDebouncedJobData,
-        {
-          delay: debounceMs,
-          jobId: `deb:${conversation.id}:${newVersion}`,
-          attempts: 2,
-          backoff: { type: 'exponential', delay: 1500 },
-          removeOnComplete: true,
-        },
-      );
+      // Build the orchestrate job data with provider identity metadata
+      const jobIdentity = providerGate.identity ?? providerIdentity;
+      const orchestrateData: OrchestrateDebouncedJobData = {
+        tenantId: tenant.id,
+        conversationId: conversation.id,
+        locationId,
+        ghlContactId,
+        ghlConversationId,
+        debounceVersion: newVersion,
+        webhookEventId,
+        contactDisplayName,
+        contactPhone,
+        contactEmail,
+        contactFieldsFromExtendedWebhook,
+        inboundWebhookReceivedAtIso: timestamp,
+        debounceConfiguredMs: debounceMs,
+        orchestrateEnqueuedAtMs,
+        channelRaw,
+        ghlInboundMessageId: ghlInboundMessageId?.trim() || undefined,
+        kbInboundMessageId,
+        ...(jobIdentity
+          ? { providerIdentityKind: jobIdentity.kind, providerIdentityValue: jobIdentity.value }
+          : {}),
+      };
+
+      await this.inboundQueue.add('orchestrate', orchestrateData, {
+        delay: debounceMs,
+        jobId: `deb:${conversation.id}:${newVersion}`,
+        attempts: 2,
+        backoff: { type: 'exponential', delay: 1500 },
+        removeOnComplete: true,
+      });
 
       this.logger.log(
         `Debounce scheduled: conversationId=${conversation.id}, processAfterMs=${debounceMs}, debounceMs=${debounceMs}, debounceSource=${debounceSource}, version=${newVersion}`,
@@ -1263,6 +1298,10 @@ export class InboundMessageProcessor extends WorkerHost {
       debounceConfiguredMs: debounceConfiguredMs ?? null,
       channelRaw: job.data.channelRaw,
       ghlInboundMessageId: job.data.ghlInboundMessageId,
+      providerIdentity:
+        job.data.providerIdentityKind && job.data.providerIdentityValue
+          ? { kind: job.data.providerIdentityKind as ProviderIdentity['kind'], value: job.data.providerIdentityValue }
+          : undefined,
     });
   }
 
@@ -1290,6 +1329,8 @@ export class InboundMessageProcessor extends WorkerHost {
     debounceConfiguredMs?: number | null;
     channelRaw?: string;
     ghlInboundMessageId?: string;
+    providerIdentity?: ProviderIdentity;
+    kbInboundMessageId?: string;
   }): Promise<void> {
     const {
       tenantId,
@@ -1314,6 +1355,8 @@ export class InboundMessageProcessor extends WorkerHost {
       debounceConfiguredMs,
       channelRaw,
       ghlInboundMessageId: ctxGhlMsgId,
+      providerIdentity: ctxProviderIdentity,
+      kbInboundMessageId: ctxKbMsgId,
     } = ctx;
 
     if (
@@ -1454,19 +1497,19 @@ export class InboundMessageProcessor extends WorkerHost {
       // This ensures no "unknown no-reply" — every SKIP_HANDOVER_ACTIVE is recorded,
       // regardless of whether the holding reply is sent, queued, suppressed, or fails.
       const skipStatus = mapOutcomeToDecisionStatus(result.outcome as string);
-      if (latestMsgId && skipStatus && ctxGhlMsgId) {
+      if (latestMsgId && skipStatus) {
         await recordTerminalDecision({
           supabase: this.supabase,
           logger: this.logger,
           messageId: latestMsgId,
-          decision: {
+          decision: buildDecisionRecord({
             status: skipStatus,
             reason: result.outcome,
             triggerSource: 'webhook',
-            decidedAt: new Date().toISOString(),
-          },
+            identity: ctxProviderIdentity,
+          }),
         });
-        await markProviderOrchestrationDone(this.appCache, tenantId, ctxGhlMsgId);
+        await markProviderOrchestrationDone(this.appCache, tenantId, ctxProviderIdentity);
       }
       // Release lock so future orchestration can proceed
       await this.releaseOrchestrationLock(latestMsgId, lockToken);
@@ -1506,6 +1549,9 @@ export class InboundMessageProcessor extends WorkerHost {
           replyLatencyTrace: { pipelineWallStartMs: pipelineWallStartMs ?? Date.now() },
           providerGhlMessageId: ctxGhlMsgId || undefined,
           inboundMessageId: latestMsgId || undefined,
+          ...(ctxProviderIdentity
+            ? { providerIdentityKind: ctxProviderIdentity.kind, providerIdentityValue: ctxProviderIdentity.value }
+            : {}),
         });
 
         this.logger.log(
@@ -1519,13 +1565,18 @@ export class InboundMessageProcessor extends WorkerHost {
         void recordInterimDecision({
           supabase: this.supabase,
           messageId: latestMsgId,
-          decision: {
+          decision: buildDecisionRecord({
             status: 'PENDING',
             reason: 'enqueued for send',
             triggerSource: 'webhook',
-            decidedAt: new Date().toISOString(),
-          },
+            identity: ctxProviderIdentity,
+          }),
         });
+      }
+      if (ctxProviderIdentity?.kind === 'kb_fallback') {
+        this.logger.log(
+          `fallback_orchestration_completed: conversationId=${conversationId} kbMessageId=${ctxProviderIdentity.value.slice(0, 8)}`,
+        );
       }
     } else {
       // Non-PROCEED outcome (e.g. guard blocked) — record terminal decision and release lock
@@ -1535,16 +1586,16 @@ export class InboundMessageProcessor extends WorkerHost {
           supabase: this.supabase,
           logger: this.logger,
           messageId: latestMsgId,
-          decision: {
+          decision: buildDecisionRecord({
             status: skipStatus,
             reason: result.outcome,
             triggerSource: 'webhook',
-            decidedAt: new Date().toISOString(),
-          },
+            identity: ctxProviderIdentity,
+          }),
         });
         // Mark provider done AFTER terminal decision is recorded
         if (['SKIP_AI_OFF_TAG', 'SKIP_HANDOVER_ACTIVE', 'SKIP_DUPLICATE_PROVIDER_DONE', 'SKIP_HUMAN_TAKEOVER'].includes(skipStatus)) {
-          await markProviderOrchestrationDone(this.appCache, tenantId, ctxGhlMsgId);
+          await markProviderOrchestrationDone(this.appCache, tenantId, ctxProviderIdentity);
         }
       }
       await this.releaseOrchestrationLock(latestMsgId, lockToken);
@@ -1675,12 +1726,16 @@ export class InboundMessageProcessor extends WorkerHost {
    * Recovery: when webhook lacks ghlMessageId, run a focused GHL sync to
    * discover the real message ID and schedule orchestration through the
    * provider gate with proper identity.
+   *
+   * When ``kbMessageId`` is provided and GHL sync cannot resolve a real ID,
+   * falls back to scheduling orchestration with a KB-owned fallback identity.
    */
   private async recoverOrchestrationViaSync(
     tenantId: string,
     conversationId: string,
     ghlLocationId: string,
     ghlContactId: string,
+    kbMessageId?: string,
   ): Promise<void> {
     try {
       this.logger.log(
@@ -1744,57 +1799,80 @@ export class InboundMessageProcessor extends WorkerHost {
         }
       }
 
-      // Schedule orchestration with the recovered GHL message ID
-      const recoveryGate = await checkProviderOrchestrationGate({
-        appCache: this.appCache,
-        logger: this.logger,
-        tenantId,
-        conversationId,
-        ghlMessageId: recoveredGhlId,
-        ghlTimestamp: recoveredTs,
-        source: 'fallback',
-      });
+      // Schedule orchestration — prefer recovered GHL ID, fall back to KB identity
+      const fallbackIdentity = (!recoveredGhlId && kbMessageId)
+        ? resolveProviderIdentity({ kbMessageId }) : null;
 
-      if (!recoveryGate.allowed) {
-        this.logger.log(
-          `recovery_sync_gate_blocked: conversationId=${conversationId} reason=${recoveryGate.reason}`,
+      const orchIdentity = recoveredGhlId
+        ? resolveProviderIdentity({ ghlMessageId: recoveredGhlId })
+        : fallbackIdentity;
+
+      const finalGhlMsgId = recoveredGhlId || null;
+      const finalKbMsgId = recoveredGhlId ? undefined : (kbMessageId || undefined);
+
+      if (orchIdentity) {
+        const recoveryGate = await checkProviderOrchestrationGate({
+          appCache: this.appCache,
+          logger: this.logger,
+          tenantId,
+          conversationId,
+          ghlMessageId: finalGhlMsgId,
+          kbMessageId: finalKbMsgId,
+          ghlTimestamp: recoveredTs,
+          source: 'fallback',
+        });
+
+        if (!recoveryGate.allowed) {
+          this.logger.log(
+            `recovery_sync_gate_blocked: conversationId=${conversationId} reason=${recoveryGate.reason}`,
+          );
+          return;
+        }
+
+        // Bump debounce + schedule orchestration
+        const { data: convMetaRow } = await this.supabase
+          .from('conversations')
+          .select('metadata')
+          .eq('id', conversationId)
+          .single();
+        const currentMeta = readConversationMetadataField(convMetaRow?.metadata);
+        const { merged: debounceBump, newVersion } = bumpInboundDebounceMeta(currentMeta);
+        const merged = mergeConversationMetadataForPersist(currentMeta, debounceBump);
+        await this.supabase
+          .from('conversations')
+          .update({ metadata: merged, updated_at: new Date().toISOString() })
+          .eq('id', conversationId);
+
+        const { debounceMs } = resolveInboundDebounceMs();
+        const jobIdentity = recoveryGate.identity ?? orchIdentity;
+        await this.inboundQueue.add(
+          'orchestrate',
+          {
+            tenantId, conversationId, locationId: ghlLocationId, ghlContactId,
+            ghlConversationId: '', debounceVersion: newVersion,
+            debounceConfiguredMs: debounceMs, orchestrateEnqueuedAtMs: Date.now(),
+            ghlInboundMessageId: finalGhlMsgId || undefined,
+            kbInboundMessageId: finalKbMsgId,
+            ...(jobIdentity
+              ? { providerIdentityKind: jobIdentity.kind, providerIdentityValue: jobIdentity.value }
+              : {}),
+          } satisfies OrchestrateDebouncedJobData,
+          {
+            delay: debounceMs,
+            jobId: `deb:${conversationId}:${newVersion}`,
+            attempts: 2, backoff: { type: 'exponential', delay: 1500 }, removeOnComplete: true,
+          },
         );
-        return;
+
+        this.logger.log(
+          `recovery_sync_orch_scheduled: conversationId=${conversationId} providerMsgId=${(recoveredGhlId || kbMessageId || '').slice(0, 12)}`,
+        );
+        if (!recoveredGhlId && kbMessageId) {
+          this.logger.log(
+            `recovery_sync_unresolved_fallback_used: conversationId=${conversationId} kbMessageId=${kbMessageId.slice(0, 8)}`,
+          );
+        }
       }
-
-      // Bump debounce + schedule orchestration
-      const { data: convMetaRow } = await this.supabase
-        .from('conversations')
-        .select('metadata')
-        .eq('id', conversationId)
-        .single();
-      const currentMeta = readConversationMetadataField(convMetaRow?.metadata);
-      const { merged: debounceBump, newVersion } = bumpInboundDebounceMeta(currentMeta);
-      const merged = mergeConversationMetadataForPersist(currentMeta, debounceBump);
-      await this.supabase
-        .from('conversations')
-        .update({ metadata: merged, updated_at: new Date().toISOString() })
-        .eq('id', conversationId);
-
-      const { debounceMs } = resolveInboundDebounceMs();
-      await this.inboundQueue.add(
-        'orchestrate',
-        {
-          tenantId, conversationId, locationId: ghlLocationId, ghlContactId,
-          ghlConversationId: '', debounceVersion: newVersion,
-          debounceConfiguredMs: debounceMs, orchestrateEnqueuedAtMs: Date.now(),
-          ghlInboundMessageId: recoveredGhlId || undefined,
-        } satisfies OrchestrateDebouncedJobData,
-        {
-          delay: debounceMs,
-          jobId: `deb:${conversationId}:${newVersion}`,
-          attempts: 2, backoff: { type: 'exponential', delay: 1500 }, removeOnComplete: true,
-        },
-      );
-
-      this.logger.log(
-        `recovery_sync_orch_scheduled: conversationId=${conversationId} providerMsgId=${(recoveredGhlId || '').slice(0, 12)}`,
-      );
     } catch (err) {
       this.logger.warn(
         `recovery_sync_failed: conversationId=${conversationId} error=${err instanceof Error ? err.message : String(err)}`,

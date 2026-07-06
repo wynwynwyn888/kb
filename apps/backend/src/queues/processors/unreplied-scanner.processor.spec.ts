@@ -24,18 +24,34 @@ jestGlobal.mock('../../lib/supabase', () => ({ getSupabaseService: () => mockSup
 // Mock decision functions
 const mockRecordTerminalDecision = jestGlobal.fn(async () => true);
 const mockRecordInterimDecision = jestGlobal.fn(async () => {});
+const mockBuildDecisionRecord = jestGlobal.fn((params: any) => ({
+  status: params.status,
+  reason: params.reason,
+  triggerSource: params.triggerSource,
+  decidedAt: expect.any(String) as unknown as string,
+  ...(params.identity ? { providerIdentityKind: params.identity.kind, providerIdentityValue: params.identity.value } : {}),
+}));
 jestGlobal.mock('../../lib/inbound-decision', () => ({
   recordTerminalDecision: mockRecordTerminalDecision,
   recordInterimDecision: mockRecordInterimDecision,
   findUnrepliedInboundMessages: mockFindUnrepliedInboundMessages,
+  buildDecisionRecord: mockBuildDecisionRecord,
 }));
 
 // Mock provider gate
-const mockCheckProviderGate = jestGlobal.fn(async () => ({ allowed: true, lockToken: 'token' }));
+const mockCheckProviderGate = jestGlobal.fn(async () => ({ allowed: true, lockToken: 'token', identity: { kind: 'ghl_message_id' as const, value: 'ghl-test-1' } }));
+const mockResolveProviderIdentity = jestGlobal.fn((params: { ghlMessageId?: string | null; kbMessageId?: string | null }) => {
+  const ghlId = params.ghlMessageId?.trim() || null;
+  if (ghlId) return { kind: 'ghl_message_id', value: ghlId };
+  const kbId = params.kbMessageId?.trim() || null;
+  if (kbId) return { kind: 'kb_fallback', value: kbId };
+  return null;
+});
 jestGlobal.mock('../../lib/schedule-orchestration-if-new', () => ({
   checkProviderOrchestrationGate: mockCheckProviderGate,
   markProviderOrchestrationDone: jestGlobal.fn(),
   releaseProviderLock: jestGlobal.fn(),
+  resolveProviderIdentity: mockResolveProviderIdentity,
 }));
 
 // Mock debounce

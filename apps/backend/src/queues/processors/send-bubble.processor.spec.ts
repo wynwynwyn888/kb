@@ -188,7 +188,7 @@ describe('SendBubbleProcessor — provider done-after-send', () => {
 
     const doneCall = mockMarkProviderOrchestrationDone.mock.calls[0];
     expect(doneCall[1]).toBe('t1');
-    expect(doneCall[2]).toBe('ghl-msg-1');
+    expect(doneCall[2]).toEqual({ kind: 'ghl_message_id', value: 'ghl-msg-1' });
 
     expect(callOrder).toEqual(['decision', 'done']);
   });
@@ -256,6 +256,6 @@ describe('SendBubbleProcessor — provider done-after-send', () => {
     const doneCall = mockMarkProviderOrchestrationDone.mock.calls[0];
     expect(doneCall[0]).toBeDefined(); // appCache
     expect(doneCall[1]).toBe('tenant-abc');
-    expect(doneCall[2]).toBe('specific-ghl-id-123');
+    expect(doneCall[2]).toEqual({ kind: 'ghl_message_id', value: 'specific-ghl-id-123' });
   });
 });

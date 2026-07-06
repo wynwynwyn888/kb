@@ -21,7 +21,7 @@ import {
   recordTerminalDecision,
   recordInterimDecision,
 } from '../../lib/inbound-decision';
-import { checkProviderOrchestrationGate, markProviderOrchestrationDone } from '../../lib/schedule-orchestration-if-new';
+import { checkProviderOrchestrationGate, markProviderOrchestrationDone, resolveProviderIdentity } from '../../lib/schedule-orchestration-if-new';
 import { bumpInboundDebounceMeta } from '../../lib/inbound-debounce';
 import { resolveInboundDebounceMs } from '../../lib/inbound-burst-batch';
 import { readConversationMetadataField, mergeConversationMetadataForPersist } from '../../lib/conversation-metadata-merge';
@@ -133,8 +133,12 @@ export class UnrepliedScannerProcessor extends WorkerHost {
             },
           });
           const ghlMsgId = typeof meta['ghlMessageId'] === 'string' ? meta['ghlMessageId'] : null;
-          if (ghlMsgId && tenantId) {
-            void markProviderOrchestrationDone(this.appCache, tenantId, ghlMsgId);
+          const handoverIdentity = resolveProviderIdentity({
+            ghlMessageId: ghlMsgId,
+            kbMessageId: msg.id,
+          });
+          if (handoverIdentity && tenantId) {
+            void markProviderOrchestrationDone(this.appCache, tenantId, handoverIdentity);
           }
           this.logger.log(
             `SCANNER_HANDOVER_TERMINAL_SKIP: conversationId=${msg.conversation_id} messageId=${msg.id.slice(0, 8)}`,
@@ -146,20 +150,33 @@ export class UnrepliedScannerProcessor extends WorkerHost {
         const ghlMsgId = typeof meta['ghlMessageId'] === 'string' ? meta['ghlMessageId'] : null;
         const ghlTs = typeof meta['ghlTimestamp'] === 'string' ? meta['ghlTimestamp'] : null;
 
-        // Cannot recover without a provider message ID
-        if (!ghlMsgId) {
+        // Resolve provider identity: prefer real GHL ID, fall back to KB message ID
+        const scannerIdentity = resolveProviderIdentity({
+          ghlMessageId: ghlMsgId,
+          kbMessageId: msg.id,
+        });
+
+        // Cannot recover without any identity
+        if (!scannerIdentity) {
           skippedNoProviderId++;
           void recordInterimDecision({
             supabase: this.supabase,
             messageId: msg.id,
             decision: {
               status: 'PENDING_RECOVERY',
-              reason: 'scanner found but no ghlMessageId',
+              reason: 'scanner found but no provider identity',
               triggerSource: 'scanner',
               decidedAt: new Date().toISOString(),
             },
           });
           continue;
+        }
+
+        const usingFallback = scannerIdentity.kind === 'kb_fallback';
+        if (usingFallback) {
+          this.logger.log(
+            `scanner_fallback_identity: conversationId=${msg.conversation_id} kbMessageId=${msg.id.slice(0, 8)}`,
+          );
         }
 
         // Provider gate check (fallback = strict, requires Redis)
@@ -169,6 +186,7 @@ export class UnrepliedScannerProcessor extends WorkerHost {
           tenantId,
           conversationId: msg.conversation_id,
           ghlMessageId: ghlMsgId,
+          kbMessageId: msg.id,
           ghlTimestamp: ghlTs,
           source: 'fallback',
         });
@@ -252,6 +270,7 @@ export class UnrepliedScannerProcessor extends WorkerHost {
 
         const { debounceMs } = resolveInboundDebounceMs();
 
+        const scannerJobIdentity = gate.identity ?? scannerIdentity;
         await this.inboundQueue.add('orchestrate', {
           tenantId,
           conversationId: msg.conversation_id,
@@ -262,6 +281,10 @@ export class UnrepliedScannerProcessor extends WorkerHost {
           debounceConfiguredMs: debounceMs,
           orchestrateEnqueuedAtMs: Date.now(),
           ghlInboundMessageId: ghlMsgId || undefined,
+          kbInboundMessageId: usingFallback ? msg.id : undefined,
+          ...(scannerJobIdentity
+            ? { providerIdentityKind: scannerJobIdentity.kind, providerIdentityValue: scannerJobIdentity.value }
+            : {}),
         } satisfies OrchestrateDebouncedJobData, {
           delay: debounceMs,
           jobId: `deb:${msg.conversation_id}:${newVersion}`,

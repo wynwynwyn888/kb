@@ -87,4 +87,5 @@
 - [ ] 8.3 Apply prod additive migration in a low-traffic window; confirm existing KB reads/writes unaffected and `KB_VECTOR_RETRIEVAL_ENABLED=false`.
 - [ ] 8.4 Backfill exactly one canary tenant in prod; enable shadow only for that tenant.
 - [ ] 8.5 Monitor reply latency/error rate/queue depth/OpenAI spend; confirm replies remain 100% keyword-sourced.
+- [x] 8.5a Document production canary, NO-GO, and rollback steps in `production-canary-runbook.md`.
 - [ ] 8.6 Document rollback (disable flags, drain queue, optional column/RPC drop) and confirm NO-GO conditions are wired into monitoring.

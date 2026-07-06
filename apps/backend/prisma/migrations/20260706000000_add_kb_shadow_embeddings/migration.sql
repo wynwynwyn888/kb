@@ -12,9 +12,9 @@
 --     explicit approval.
 --
 -- ROLLBACK (manual, if ever needed):
---   DROP FUNCTION IF EXISTS match_knowledge_chunks(uuid, text, uuid[], int);
---   DROP FUNCTION IF EXISTS mark_knowledge_chunk_embedding_failed(uuid, text, text);
---   DROP FUNCTION IF EXISTS set_knowledge_chunk_embedding(uuid, text, text, text);
+--   DROP FUNCTION IF EXISTS match_knowledge_chunks(text, text, text[], int);
+--   DROP FUNCTION IF EXISTS mark_knowledge_chunk_embedding_failed(text, text, text);
+--   DROP FUNCTION IF EXISTS set_knowledge_chunk_embedding(text, text, text, text);
 --   DROP FUNCTION IF EXISTS check_pgvector_available();
 --   DROP INDEX IF EXISTS idx_knowledge_chunks_embedding_hnsw;
 --   DROP INDEX IF EXISTS idx_knowledge_chunks_embedding_ivfflat;
@@ -95,7 +95,7 @@ $$;
 -- stamps a newer hash, so an out-of-order job no-ops.
 -- ----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION set_knowledge_chunk_embedding(
-  p_chunk_id uuid,
+  p_chunk_id text,
   p_embedding text,
   p_embedding_model text,
   p_embedding_input_hash text
@@ -121,7 +121,7 @@ $$;
 -- also clamped here defensively.
 -- ----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION mark_knowledge_chunk_embedding_failed(
-  p_chunk_id uuid,
+  p_chunk_id text,
   p_error text,
   p_embedding_input_hash text
 )
@@ -143,14 +143,14 @@ $$;
 -- Query vector arrives as text and is cast inside SQL.
 -- ----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION match_knowledge_chunks(
-  p_tenant_id uuid,
+  p_tenant_id text,
   p_query_embedding text,
-  p_document_id_allowlist uuid[] DEFAULT NULL,
+  p_document_id_allowlist text[] DEFAULT NULL,
   p_limit int DEFAULT 20
 )
 RETURNS TABLE (
-  chunk_id uuid,
-  document_id uuid,
+  chunk_id text,
+  document_id text,
   title text,
   source text,
   content text,
@@ -190,30 +190,30 @@ $$;
 -- local/staging Postgres where Supabase roles may not exist.
 -- ----------------------------------------------------------------------------
 REVOKE ALL ON FUNCTION check_pgvector_available() FROM PUBLIC;
-REVOKE ALL ON FUNCTION set_knowledge_chunk_embedding(uuid, text, text, text) FROM PUBLIC;
-REVOKE ALL ON FUNCTION mark_knowledge_chunk_embedding_failed(uuid, text, text) FROM PUBLIC;
-REVOKE ALL ON FUNCTION match_knowledge_chunks(uuid, text, uuid[], int) FROM PUBLIC;
+REVOKE ALL ON FUNCTION set_knowledge_chunk_embedding(text, text, text, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION mark_knowledge_chunk_embedding_failed(text, text, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION match_knowledge_chunks(text, text, text[], int) FROM PUBLIC;
 
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
     REVOKE ALL ON FUNCTION check_pgvector_available() FROM anon;
-    REVOKE ALL ON FUNCTION set_knowledge_chunk_embedding(uuid, text, text, text) FROM anon;
-    REVOKE ALL ON FUNCTION mark_knowledge_chunk_embedding_failed(uuid, text, text) FROM anon;
-    REVOKE ALL ON FUNCTION match_knowledge_chunks(uuid, text, uuid[], int) FROM anon;
+    REVOKE ALL ON FUNCTION set_knowledge_chunk_embedding(text, text, text, text) FROM anon;
+    REVOKE ALL ON FUNCTION mark_knowledge_chunk_embedding_failed(text, text, text) FROM anon;
+    REVOKE ALL ON FUNCTION match_knowledge_chunks(text, text, text[], int) FROM anon;
   END IF;
 
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
     REVOKE ALL ON FUNCTION check_pgvector_available() FROM authenticated;
-    REVOKE ALL ON FUNCTION set_knowledge_chunk_embedding(uuid, text, text, text) FROM authenticated;
-    REVOKE ALL ON FUNCTION mark_knowledge_chunk_embedding_failed(uuid, text, text) FROM authenticated;
-    REVOKE ALL ON FUNCTION match_knowledge_chunks(uuid, text, uuid[], int) FROM authenticated;
+    REVOKE ALL ON FUNCTION set_knowledge_chunk_embedding(text, text, text, text) FROM authenticated;
+    REVOKE ALL ON FUNCTION mark_knowledge_chunk_embedding_failed(text, text, text) FROM authenticated;
+    REVOKE ALL ON FUNCTION match_knowledge_chunks(text, text, text[], int) FROM authenticated;
   END IF;
 
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'service_role') THEN
     GRANT EXECUTE ON FUNCTION check_pgvector_available() TO service_role;
-    GRANT EXECUTE ON FUNCTION set_knowledge_chunk_embedding(uuid, text, text, text) TO service_role;
-    GRANT EXECUTE ON FUNCTION mark_knowledge_chunk_embedding_failed(uuid, text, text) TO service_role;
-    GRANT EXECUTE ON FUNCTION match_knowledge_chunks(uuid, text, uuid[], int) TO service_role;
+    GRANT EXECUTE ON FUNCTION set_knowledge_chunk_embedding(text, text, text, text) TO service_role;
+    GRANT EXECUTE ON FUNCTION mark_knowledge_chunk_embedding_failed(text, text, text) TO service_role;
+    GRANT EXECUTE ON FUNCTION match_knowledge_chunks(text, text, text[], int) TO service_role;
   END IF;
 END$$;

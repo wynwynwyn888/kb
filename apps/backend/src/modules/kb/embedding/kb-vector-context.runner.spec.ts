@@ -109,8 +109,36 @@ describe('runKbVectorContext', () => {
     expect(out.ok).toBe(true);
     if (out.ok) {
       expect(out.result.retrievalMode).toBe('vector');
-      expect(out.result.chunks.map((c) => c.chunkId)).toEqual(['ch1', 'ch2']);
+      expect(out.result.chunks.map((c) => c.chunkId)).toEqual(['ch1']);
       expect(out.result.chunks[0].metadata['retrievalSource']).toBe('rag_vector_context');
+    }
+  });
+
+  it('allows lower-score candidates only when threshold is explicitly lowered', async () => {
+    const previous = process.env['KB_VECTOR_CONTEXT_MIN_SCORE'];
+    process.env['KB_VECTOR_CONTEXT_MIN_SCORE'] = '0.2';
+    try {
+      const out = await runKbVectorContext(
+        { tenantId: TENANT, conversationId: 'c1', query: 'What are your prices?', topK: 5 },
+        {
+          supabase: makeSupabaseStub({
+            rpcRows: [
+              { chunk_id: 'ch1', document_id: 'd1', title: 'Pricing', source: 'manual', content: 'Basic $29', metadata: {}, document_updated_at: null, vector_score: 0.42 },
+              { chunk_id: 'ch2', document_id: 'd1', title: 'Pricing', source: 'manual', content: 'Pro $79', metadata: {}, document_updated_at: null, vector_score: 0.26 },
+            ],
+          }),
+          embeddingClientFactory: embeddingFactory,
+          logger: silentLogger,
+        },
+      );
+
+      expect(out.ok).toBe(true);
+      if (out.ok) {
+        expect(out.result.chunks.map((c) => c.chunkId)).toEqual(['ch1', 'ch2']);
+      }
+    } finally {
+      if (previous === undefined) delete process.env['KB_VECTOR_CONTEXT_MIN_SCORE'];
+      else process.env['KB_VECTOR_CONTEXT_MIN_SCORE'] = previous;
     }
   });
 

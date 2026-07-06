@@ -16,7 +16,7 @@ import { resolveOpenAiEmbeddingCredentials, type SupabaseLikeClient } from './op
 import { vectorSearchShadow, type VectorSearchShadowCandidate } from './kb-vector-search-shadow';
 import type { BackfillSupabaseClient } from './kb-embedding-backfill';
 
-const DEFAULT_MIN_VECTOR_SCORE = 0.2;
+const DEFAULT_MIN_VECTOR_SCORE = 0.3;
 const DEFAULT_MAX_CONTEXT_CHARS = 6000;
 
 export interface KbVectorContextLogger {

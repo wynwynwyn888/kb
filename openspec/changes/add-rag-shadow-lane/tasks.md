@@ -75,7 +75,7 @@
 - [x] 7.12 Stale success no-op and stale failure no-op (no clobber of newer embedding).
 - [x] 7.13 Backfill idempotency and tenant scoping.
 - [x] 7.14 RRF merge for vector-only, keyword-only, hybrid, and duplicate chunks.
-- [ ] 7.15 Run existing backend retrieval/orchestration tests to confirm no regression.
+- [x] 7.15 Run existing backend retrieval/orchestration tests to confirm no regression.
 
 ## 8. Staging Validation and Canary Gates (no prod DB until approved)
 

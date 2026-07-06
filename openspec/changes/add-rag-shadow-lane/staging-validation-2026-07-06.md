@@ -29,6 +29,22 @@ After changing the default `KB_VECTOR_CONTEXT_MIN_SCORE` to `0.3`:
 - Unrelated/control questions: 10/10 fallback, not vector prompt-eligible.
 - Final summary: `queryCount=20`, `promptEligibleCount=10`.
 
+Post-merge revalidation after merging current `origin/main` into
+`feat/rag-shadow-lane-phase1` produced the same result:
+
+- Pricing/plans questions: 10/10 vector prompt-eligible.
+- Unrelated/control questions: 10/10 fallback, not vector prompt-eligible.
+- Final summary: `queryCount=20`, `promptEligibleCount=10`.
+
+Local validation after the merge:
+
+- `pnpm --filter @aisbp/backend exec tsc --noEmit`: passed.
+- Focused RAG/prompt/orchestration Jest suite: 16/16 suites, 195/195 tests passed.
+- `pnpm --filter @aisbp/backend run build`: passed.
+- `pnpm --filter @aisbp/backend run lint`: passed.
+- Full backend Jest suite reported 172/172 suites and 1570/1570 tests passed, then
+  lingered on an existing open-handle warning after the success summary.
+
 Positive pricing/plans examples:
 
 - `What are your prices?`

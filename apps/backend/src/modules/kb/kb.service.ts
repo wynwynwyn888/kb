@@ -1,5 +1,7 @@
 // KB (Knowledge Base) service — retrieval + document management
-// Two-stage retrieval: keyword fallback now, vector-ready interface for pgvector later.
+// Production default: keyword scoring. Legacy metadata.embedding pseudo-vectors
+// are intentionally ignored by retrieve/searchKnowledge (emergency safety fix).
+// Real pgvector RAG is a separate, fail-closed tenant-gated path in orchestration.
 // All operations are tenant-scoped.
 
 import { randomUUID } from 'node:crypto';
@@ -33,7 +35,6 @@ import {
   reconstructEditableNoteFromChunks,
 } from '../../lib/kb-rich-text-source';
 import { KB_VAULT_DELETE_HAS_DOCUMENTS_MSG, kbDuplicateVaultDisplayName } from './kb-vault-messages';
-import { cosineSimilarity, hasPseudoCompatibleEmbedding, pseudoEmbedFromText, readEmbeddingVector, PSEUDO_EMBED_DIMS } from '../../lib/kb-vector-score';
 import { QUEUES } from '../../queues/queue.constants';
 import type { KbIngestJobData } from '../../queues/processors/kb-ingest.processor';
 import { kbEmbeddingJobsEnabledForTenant } from './embedding/kb-embedding-job-flags';
@@ -85,12 +86,14 @@ export class KbService {
    * Retrieve relevant KB chunks for a tenant query.
    *
    * Strategy:
-   * - STAGE 1 (keyword): Simple n-gram + TF-like scoring on plain text content.
-   *   Activates when no pgvector embedding is available or as fallback.
-   * - STAGE 2 (vector): Interface prepared — activates when chunks have embeddings.
-   *   TODO: Swap to `pgvector` `cosine_distance` query when embedding column lands.
+   * - Keyword scoring (n-gram + TF-like + section/title/intent boosts) is the
+   *   production default and the ONLY mode reachable from this method.
+   * - Legacy 64-dim `metadata.embedding` pseudo-vectors are intentionally IGNORED
+   *   here (see emergency safety fix): they must never steer live retrieval.
+   * - Real pgvector RAG is a separate, tenant-gated path (see
+   *   `runKbVectorContext` in orchestration); it does not run through this method.
    *
-   * In both stages, only `READY` documents are considered.
+   * Only `READY` documents are considered.
    */
   async retrieve(
     query: RetrievalQuery,
@@ -123,29 +126,14 @@ export class KbService {
 
     const totalConsidered = chunks.length;
 
-    const vectorChunks = chunks.filter(c => hasPseudoCompatibleEmbedding(c.metadata));
-    if (vectorChunks.length > 0) {
-      const queryVec = pseudoEmbedFromText(queryText, PSEUDO_EMBED_DIMS);
-      const scored = vectorChunks
-        .map(c => {
-          const emb = readEmbeddingVector(c.metadata)!;
-          const score = cosineSimilarity(queryVec, emb);
-          return { chunk: c, score };
-        })
-        .sort((a, b) => b.score - a.score);
-      const top = scored.slice(0, topK).map(({ chunk, score }) => this.toRetrievalChunk(chunk, score));
-      this.logger.debug(
-        `KB retrieval completed: tenant=${tenantId}, considered=${totalConsidered}, returned=${top.length}, mode=vector_metadata`,
+    const legacyCount = this.countLegacyEmbeddings(chunks);
+    if (legacyCount > 0) {
+      this.logger.log(
+        `KB retrieval: tenant=${tenantId} mode=keyword legacyMetadataEmbeddingsIgnored=${legacyCount}`,
       );
-      return {
-        query: queryText,
-        chunks: top,
-        totalConsidered,
-        retrievalMode: 'vector',
-      };
     }
 
-    // Stage 1 — keyword fallback scoring
+    // Stage 1 - keyword scoring (production default)
     const scored = this.keywordScore(queryText, chunks, topK, query.intentHint);
     const top = scored.slice(0, topK);
 
@@ -178,26 +166,19 @@ export class KbService {
   }): Promise<KbSearchResponse> {
     const topK = Math.min(50, Math.max(1, Math.floor(params.topK ?? KB_SEARCH_DEFAULT_TOP_K)));
     const chunks = await this.loadTenantChunks(params.tenantId, undefined, params.vaultId?.trim() || undefined);
-    const vectorChunks = chunks.filter(c => hasPseudoCompatibleEmbedding(c.metadata));
-    let ranked: Array<{ chunk: ScorableChunk; score: number; bestEffort?: boolean }>;
-    let retrievalMode: 'keyword' | 'vector' = 'keyword';
-    if (vectorChunks.length > 0) {
-      const queryVec = pseudoEmbedFromText(params.query, PSEUDO_EMBED_DIMS);
-      ranked = vectorChunks
-        .map(chunk => ({
-          chunk: chunk as ScorableChunk,
-          score: cosineSimilarity(queryVec, readEmbeddingVector(chunk.metadata)!),
-          bestEffort: false,
-        }))
-        .sort((a, b) => b.score - a.score)
-        .slice(0, topK);
-      retrievalMode = 'vector';
-    } else {
-      ranked = rankChunksForKbSearch(params.query, chunks as ScorableChunk[], {
-        intentHint: params.intentHint,
-        topK,
-      });
+
+    const legacyCount = this.countLegacyEmbeddings(chunks);
+    if (legacyCount > 0) {
+      this.logger.log(
+        `KB search: tenant=${params.tenantId} mode=keyword legacyMetadataEmbeddingsIgnored=${legacyCount}`,
+      );
     }
+
+    const ranked = rankChunksForKbSearch(params.query, chunks as ScorableChunk[], {
+      intentHint: params.intentHint,
+      topK,
+    });
+    const retrievalMode: 'keyword' | 'vector' = 'keyword';
     const normalized = normalizeKbSearchScores(ranked);
     const hits: KbSearchHit[] = normalized.map(({ chunk, score, bestEffort }) => {
       const st = chunk.metadata['sectionTitle'];
@@ -1445,6 +1426,26 @@ export class KbService {
     const maxS = top[0]!.score;
     const norm = maxS > 0 ? maxS : 1;
     return top.map(({ chunk, score }) => this.toRetrievalChunk(chunk, Math.min(1, Math.max(0, score / norm))));
+  }
+
+  /**
+   * Count chunks carrying a legacy `metadata.embedding` numeric array.
+   *
+   * These are the deprecated in-process pseudo-vectors. Live retrieval/search
+   * intentionally IGNORE them (keyword scoring is the production default); this
+   * bounded count is emitted for observability only - never raw content.
+   */
+  private countLegacyEmbeddings(
+    chunks: Array<{ metadata: Record<string, unknown> }>,
+  ): number {
+    let n = 0;
+    for (const c of chunks) {
+      const raw = c.metadata?.['embedding'];
+      if (Array.isArray(raw) && raw.length > 0 && raw.every(v => typeof v === 'number')) {
+        n += 1;
+      }
+    }
+    return n;
   }
 
   private toRetrievalChunk(

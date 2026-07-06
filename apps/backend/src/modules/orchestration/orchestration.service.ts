@@ -11,6 +11,10 @@ import { OrchestrationGuards } from './orchestration-guards.service';
 import { ConversationMemoryLoader } from './conversation-memory-loader';
 import { AiRouterService } from '../ai-router/ai-router.service';
 import { KbService } from '../kb/kb.service';
+import {
+  kbVectorShadowEnabledForTenant,
+  runKbVectorShadow,
+} from '../kb/embedding/kb-vector-shadow.runner';
 import { ReplyPlannerService } from '../reply-planning/reply-planner.service';
 import { ConversationsService } from '../conversations/conversations.service';
 import type {
@@ -1262,6 +1266,16 @@ export class ConversationOrchestrationService {
         intentHint: kbIntentHint,
         documentIdAllowlist,
       });
+
+      // RAG shadow lane (diagnostic-only, default OFF, fail-closed per tenant).
+      // Fire-and-forget + never-throws: it only logs vector candidates and does
+      // NOT influence `result`, the customer-facing prompt, or the reply text.
+      if (kbVectorShadowEnabledForTenant(input.tenantId)) {
+        void runKbVectorShadow(
+          { tenantId: input.tenantId, conversationId, query: retrieveQuery, documentIdAllowlist },
+          { logger: this.logger },
+        ).catch(() => undefined);
+      }
 
       const filterIntent = opts?.kbFilterIntent ?? latestIntent;
       const filterUserMessage = (opts?.kbFilterUserMessage ?? input.incomingMessage.messageContent ?? '').trim();

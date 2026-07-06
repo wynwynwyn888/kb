@@ -7,6 +7,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
+import { PROMPT_FIELD_LIMITS } from '@aisbp/types';
 import { getSupabaseService } from '../../lib/supabase';
 import { AuthService } from '../auth/auth.service';
 import {
@@ -452,6 +453,36 @@ export class BotProfilesService {
     );
   }
 
+  /**
+   * Validate that provided prompt fields are within their max character limits.
+   * Only checks fields present on the body so partial updates never fail on
+   * unrelated pre-existing content. Limits come from the shared
+   * `PROMPT_FIELD_LIMITS` constant (single source of truth with the frontend).
+   * Note: `criticalFacts` is validated separately (trimmed) by its callers.
+   */
+  private assertPromptFieldLimits(fields: {
+    persona?: string;
+    conversationGoals?: string;
+    businessNotes?: string;
+    bookingBehaviorNotes?: string;
+    escalationBehaviorNotes?: string;
+  }): void {
+    const checks: Array<{ value: string | undefined; limit: number; label: string }> = [
+      { value: fields.persona, limit: PROMPT_FIELD_LIMITS.persona, label: 'persona' },
+      { value: fields.conversationGoals, limit: PROMPT_FIELD_LIMITS.conversationGoals, label: 'conversationGoals' },
+      { value: fields.businessNotes, limit: PROMPT_FIELD_LIMITS.businessNotes, label: 'businessNotes' },
+      { value: fields.bookingBehaviorNotes, limit: PROMPT_FIELD_LIMITS.bookingBehavior, label: 'bookingBehaviorNotes' },
+      { value: fields.escalationBehaviorNotes, limit: PROMPT_FIELD_LIMITS.escalationBehavior, label: 'escalationBehaviorNotes' },
+    ];
+    for (const { value, limit, label } of checks) {
+      if (value !== undefined && value.length > limit) {
+        throw new BadRequestException(
+          `${label} must not exceed ${limit.toLocaleString('en-US')} characters`,
+        );
+      }
+    }
+  }
+
   async createBotProfile(
     profileId: string,
     tenantId: string,
@@ -483,9 +514,12 @@ export class BotProfilesService {
     if (!name) throw new BadRequestException('name is required');
 
     const criticalFacts = (body.criticalFacts ?? '').trim();
-    if (criticalFacts.length > 1500) {
-      throw new BadRequestException('criticalFacts must not exceed 1,500 characters');
+    if (criticalFacts.length > PROMPT_FIELD_LIMITS.criticalFacts) {
+      throw new BadRequestException(
+        `criticalFacts must not exceed ${PROMPT_FIELD_LIMITS.criticalFacts.toLocaleString('en-US')} characters`,
+      );
     }
+    this.assertPromptFieldLimits(body);
 
     await this.ensureMigratedForTenant(tenantId);
 
@@ -613,9 +647,12 @@ export class BotProfilesService {
       throw new ForbiddenException('Insufficient permissions');
     }
 
-    if (body.criticalFacts !== undefined && (body.criticalFacts?.trim() ?? '').length > 1500) {
-      throw new BadRequestException('criticalFacts must not exceed 1,500 characters');
+    if (body.criticalFacts !== undefined && (body.criticalFacts?.trim() ?? '').length > PROMPT_FIELD_LIMITS.criticalFacts) {
+      throw new BadRequestException(
+        `criticalFacts must not exceed ${PROMPT_FIELD_LIMITS.criticalFacts.toLocaleString('en-US')} characters`,
+      );
     }
+    this.assertPromptFieldLimits(body);
 
     const supabase = getSupabaseService();
     const { data: existing, error: fe } = await supabase
@@ -666,8 +703,10 @@ export class BotProfilesService {
       body.criticalFacts !== undefined
         ? body.criticalFacts.trim()
         : String(existing['critical_facts'] ?? '');
-    if (nextCriticalFacts.length > 1500) {
-      throw new BadRequestException('criticalFacts must not exceed 1,500 characters');
+    if (nextCriticalFacts.length > PROMPT_FIELD_LIMITS.criticalFacts) {
+      throw new BadRequestException(
+        `criticalFacts must not exceed ${PROMPT_FIELD_LIMITS.criticalFacts.toLocaleString('en-US')} characters`,
+      );
     }
     const effectiveScopeForRow =
       body.knowledgeScopeMode !== undefined

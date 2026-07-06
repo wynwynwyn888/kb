@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
+import { PROMPT_FIELD_LIMITS } from '@aisbp/types';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   getAgencyAiConfig,
@@ -822,24 +823,24 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
   };
 
   const INSTRUCTION_TABS = useMemo(() => [
-    { key: 'criticalFacts', label: 'Critical Facts', help: 'Important tenant-specific facts that must be preserved in the AI prompt, such as pricing, guarantees, CTA, positioning, key rules, and non-negotiable sales instructions.', cap: 1500, getValue: () => criticalFacts, setValue: setCriticalFacts },
-    { key: 'persona', label: 'Persona', help: 'How the assistant should sound and behave.', cap: 1500, getValue: () => persona, setValue: setPersona },
+    { key: 'criticalFacts', label: 'Critical Facts', help: 'Important tenant-specific facts that must be preserved in the AI prompt, such as pricing, guarantees, CTA, positioning, key rules, and non-negotiable sales instructions.', cap: PROMPT_FIELD_LIMITS.criticalFacts, getValue: () => criticalFacts, setValue: setCriticalFacts },
+    { key: 'persona', label: 'Persona', help: 'How the assistant should sound and behave.', cap: PROMPT_FIELD_LIMITS.persona, getValue: () => persona, setValue: setPersona },
     { key: 'goals', label: 'Conversation Goals', help: 'What this assistant should try to achieve.', cap: 5000, getValue: () => goals, setValue: setGoals },
     { key: 'additional', label: 'Business Notes', help: 'Facts, policies, and context for this workspace.', cap: 5000, getValue: () => additional, setValue: setAdditional },
-    { key: 'bookingBehavior', label: 'Booking Behavior', help: 'When and how the assistant should guide prospects toward booking, consultation, demo, call, appointment, or the next step.', cap: 1000, getValue: () => bookingBehaviorNotes, setValue: setBookingBehaviorNotes },
-    { key: 'escalationBehavior', label: 'Escalation Behavior', help: 'When the assistant should hand over to a human or team instead of answering.', cap: 1000, getValue: () => escalationBehaviorNotes, setValue: setEscalationBehaviorNotes },
+    { key: 'bookingBehavior', label: 'Booking Behavior', help: 'When and how the assistant should guide prospects toward booking, consultation, demo, call, appointment, or the next step.', cap: PROMPT_FIELD_LIMITS.bookingBehavior, getValue: () => bookingBehaviorNotes, setValue: setBookingBehaviorNotes },
+    { key: 'escalationBehavior', label: 'Escalation Behavior', help: 'When the assistant should hand over to a human or team instead of answering.', cap: PROMPT_FIELD_LIMITS.escalationBehavior, getValue: () => escalationBehaviorNotes, setValue: setEscalationBehaviorNotes },
   ], [criticalFacts, persona, goals, additional, bookingBehaviorNotes, escalationBehaviorNotes]);
 
   const expandFieldMeta = useMemo(() => {
     const map: Record<string, { title: string; help: string; cap: number }> = {
-      persona: { title: 'Persona', help: 'How the assistant should sound and behave.', cap: 1500 },
+      persona: { title: 'Persona', help: 'How the assistant should sound and behave.', cap: PROMPT_FIELD_LIMITS.persona },
       goals: { title: 'Conversation goals', help: 'What this assistant should try to achieve.', cap: 5000 },
       additional: { title: 'Business notes', help: 'Facts, policies, and context for this workspace.', cap: 5000 },
       toneRules: { title: 'Tone Rules', help: 'How the assistant should sound and format replies. Use this for reply length, WhatsApp style, forbidden phrases, and language style.', cap: 1000 },
-      bookingBehavior: { title: 'Booking Behavior', help: 'When and how the assistant should guide prospects toward booking, consultation, demo, call, appointment, or next step.', cap: 1000 },
-      escalationBehavior: { title: 'Escalation Behavior', help: 'When the assistant should hand over to a human or team instead of answering.', cap: 1000 },
+      bookingBehavior: { title: 'Booking Behavior', help: 'When and how the assistant should guide prospects toward booking, consultation, demo, call, appointment, or next step.', cap: PROMPT_FIELD_LIMITS.bookingBehavior },
+      escalationBehavior: { title: 'Escalation Behavior', help: 'When the assistant should hand over to a human or team instead of answering.', cap: PROMPT_FIELD_LIMITS.escalationBehavior },
       knowledgeScope: { title: 'Knowledge Scope', help: 'What the assistant is allowed to answer, what it should avoid, and when it should say information is missing.', cap: 500 },
-      criticalFacts: { title: 'Critical Facts', help: 'Important tenant-specific facts that must be preserved in the AI prompt, such as pricing, guarantees, CTA, positioning, key rules, and non-negotiable sales instructions.', cap: 1500 },
+      criticalFacts: { title: 'Critical Facts', help: 'Important tenant-specific facts that must be preserved in the AI prompt, such as pricing, guarantees, CTA, positioning, key rules, and non-negotiable sales instructions.', cap: PROMPT_FIELD_LIMITS.criticalFacts },
     };
     return expandField ? (map[expandField] ?? null) : null;
   }, [expandField]);
@@ -1537,9 +1538,9 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                   <div style={sectionCard}>
                     <h3 style={sectionTitleStyle}>Critical Facts</h3>
                     <p style={{ ...mvpFieldHint, margin: '-0.25rem 0 0.5rem' }}>Important tenant-specific facts that must be preserved in the AI prompt, such as pricing, guarantees, CTA, positioning, key rules, and non-negotiable sales instructions. Max 1,500 characters.</p>
-                    <textarea style={textareaStyle} value={criticalFacts} onChange={e => { const v = e.target.value; if (v.length <= 1500) setCriticalFacts(v); }} aria-label="Critical Facts" />
+                    <textarea style={textareaStyle} value={criticalFacts} onChange={e => { const v = e.target.value; if (v.length <= PROMPT_FIELD_LIMITS.criticalFacts) setCriticalFacts(v); }} aria-label="Critical Facts" />
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginTop: 8 }}>
-                      <span style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted)' }}>{criticalFacts.length} / 1500 characters</span>
+                      <span style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted)' }}>{criticalFacts.length} / {PROMPT_FIELD_LIMITS.criticalFacts} characters</span>
                       <button
                         type="button"
                         style={expandTextBtn}
@@ -1556,7 +1557,7 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                   <div style={sectionCard}>
                     <h3 style={sectionTitleStyle}>Persona</h3>
                     <p style={{ ...mvpFieldHint, margin: '-0.25rem 0 0.5rem' }}>How the assistant should sound and behave. Max 1,500 characters.</p>
-                    <textarea style={textareaStyle} value={persona} onChange={e => { const v = e.target.value; if (v.length <= 1500) setPersona(v); }} aria-label="Persona" />
+                    <textarea style={textareaStyle} value={persona} onChange={e => { const v = e.target.value; if (v.length <= PROMPT_FIELD_LIMITS.persona) setPersona(v); }} aria-label="Persona" />
                     <div
                       style={{
                         display: 'flex',
@@ -1568,7 +1569,7 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                       }}
                     >
                       <span style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)' }}>
-                        {persona.length} / 1500 characters
+                        {persona.length} / {PROMPT_FIELD_LIMITS.persona} characters
                       </span>
                       <button
                         type="button"
@@ -1663,9 +1664,9 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                   <div style={sectionCard}>
                     <h3 style={sectionTitleStyle}>Booking Behavior</h3>
                     <p style={{ ...mvpFieldHint, margin: '-0.25rem 0 0.5rem' }}>When and how the assistant should guide prospects toward booking, consultation, demo, call, appointment, or next step. Max 1,000 characters.</p>
-                    <textarea style={textareaStyle} value={bookingBehaviorNotes} onChange={e => { const v = e.target.value; if (v.length <= 1000) setBookingBehaviorNotes(v); }} aria-label="Booking Behavior" />
+                    <textarea style={textareaStyle} value={bookingBehaviorNotes} onChange={e => { const v = e.target.value; if (v.length <= PROMPT_FIELD_LIMITS.bookingBehavior) setBookingBehaviorNotes(v); }} aria-label="Booking Behavior" />
                     <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginTop: 8 }}>
-                      <span style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)' }}>{bookingBehaviorNotes.length} / 1000 characters</span>
+                      <span style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)' }}>{bookingBehaviorNotes.length} / {PROMPT_FIELD_LIMITS.bookingBehavior} characters</span>
                       <button
                         type="button"
                         style={expandTextBtn}
@@ -1682,9 +1683,9 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                   <div style={sectionCard}>
                     <h3 style={sectionTitleStyle}>Escalation Behavior</h3>
                     <p style={{ ...mvpFieldHint, margin: '-0.25rem 0 0.5rem' }}>When the assistant should hand over to a human or team instead of answering. Max 1,000 characters.</p>
-                    <textarea style={textareaStyle} value={escalationBehaviorNotes} onChange={e => { const v = e.target.value; if (v.length <= 1000) setEscalationBehaviorNotes(v); }} aria-label="Escalation Behavior" />
+                    <textarea style={textareaStyle} value={escalationBehaviorNotes} onChange={e => { const v = e.target.value; if (v.length <= PROMPT_FIELD_LIMITS.escalationBehavior) setEscalationBehaviorNotes(v); }} aria-label="Escalation Behavior" />
                     <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginTop: 8 }}>
-                      <span style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)' }}>{escalationBehaviorNotes.length} / 1000 characters</span>
+                      <span style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)' }}>{escalationBehaviorNotes.length} / {PROMPT_FIELD_LIMITS.escalationBehavior} characters</span>
                       <button
                         type="button"
                         style={expandTextBtn}

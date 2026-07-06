@@ -648,8 +648,10 @@ model KnowledgeDocument {
   @@map("knowledge_documents")
 }
 
-// Note: embedding column will be added later when pgvector is enabled
-// For now, we store chunks without vectors
+// Note: `embedding` is a pgvector column added additively for the RAG shadow lane.
+// It is nullable and unused by live keyword retrieval. Prisma cannot represent
+// pgvector natively, so it is mapped via `Unsupported` and never read/written
+// through Prisma at runtime (vector I/O goes through service-role Postgres RPCs).
 model KnowledgeChunk {
   id          String   @id @default(uuid())
   documentId  String   @map("document_id")
@@ -657,6 +659,14 @@ model KnowledgeChunk {
   tokenCount  Int      @map("token_count")
   metadata    Json     @default("{}")
   createdAt   DateTime @default(now()) @map("created_at")
+
+  // RAG shadow-lane embedding lifecycle (additive; nullable; not used by live retrieval)
+  embedding          Unsupported("vector(1536)")?
+  embeddingModel     String?   @map("embedding_model")
+  embeddingInputHash String?   @map("embedding_input_hash")
+  embeddingStatus    String    @default("pending") @map("embedding_status")
+  embeddingUpdatedAt DateTime? @map("embedding_updated_at")
+  embeddingError     String?   @map("embedding_error") @db.Text
 
   // Relations
   document KnowledgeDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)

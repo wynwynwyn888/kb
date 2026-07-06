@@ -1,8 +1,12 @@
+import { PROMPT_FIELD_LIMITS } from '@aisbp/types';
+
 const DEFAULT_TENANT_CAP = 7500;
 const DEFAULT_AGENCY_CAP = 4200;
 
 /**
- * Stored persona/policy stays full-size in DB; generation uses capped bodies to control token burn.
+ * Legacy single-blob compaction — retained ONLY as a fallback for pure-legacy tenants that have no
+ * per-section `profileSections`. The primary runtime path uses field-level section budgets
+ * (`compactProfileSections`) so the tenant prompt is no longer squeezed into one 7,500-char blob.
  */
 export function compactPersonaPolicyForGeneration(params: {
   tenantPrompt: string;
@@ -41,18 +45,49 @@ export function compactPersonaPolicyForGeneration(params: {
   };
 }
 
-// Per-section budget caps (characters)
-const SECTION_CAPS: Record<string, number> = {
-  criticalFacts: 1500,
-  persona: 1500,
-  goals: 5000,
-  businessNotes: 5000,
+// Per-section runtime budgets (characters). Sourced from the shared PROMPT_FIELD_LIMITS so that
+// frontend save limits, backend validation, and runtime section budgets never drift. Each tenant
+// field has its OWN budget — there is no combined tenant-blob cap — so e.g. a large Business Notes
+// section can never truncate Critical Facts, and Conversation Goals is never clipped because the
+// whole tenant blob hit a single cap.
+//
+// Auxiliary sections (toneRules, knowledgeScope) are not part of PROMPT_FIELD_LIMITS but are kept
+// as small runtime sections for Preview/runtime parity.
+const AUX_SECTION_BUDGETS = {
   toneRules: 1000,
-  bookingBehavior: 1000,
-  escalationBehavior: 1000,
   knowledgeScope: 500,
-  agency: 4000,
+} as const;
+
+export const RUNTIME_TENANT_SECTION_BUDGETS: Record<string, number> = {
+  criticalFacts: PROMPT_FIELD_LIMITS.criticalFacts,
+  persona: PROMPT_FIELD_LIMITS.persona,
+  goals: PROMPT_FIELD_LIMITS.conversationGoals,
+  businessNotes: PROMPT_FIELD_LIMITS.businessNotes,
+  bookingBehavior: PROMPT_FIELD_LIMITS.bookingBehavior,
+  escalationBehavior: PROMPT_FIELD_LIMITS.escalationBehavior,
+  toneRules: AUX_SECTION_BUDGETS.toneRules,
+  knowledgeScope: AUX_SECTION_BUDGETS.knowledgeScope,
 };
+
+/**
+ * Injection order for tenant sections. Critical Facts first so locked instructions (e.g. a fixed
+ * first-message menu, banned phrasings) lead; the required order then follows.
+ */
+export const RUNTIME_TENANT_SECTION_ORDER = [
+  'criticalFacts',
+  'persona',
+  'goals',
+  'businessNotes',
+  'bookingBehavior',
+  'escalationBehavior',
+  'toneRules',
+  'knowledgeScope',
+] as const;
+
+// The Global Prompt / agency policy is a SEPARATE policy layer with its own independent budget. It
+// is injected separately (before tenant sections) and must never compete with tenant fields nor be
+// squeezed into the tenant blob. 10,000 is a safe global cap (NOT the legacy 7,500 tenant cap).
+export const GLOBAL_POLICY_RUNTIME_BUDGET = 10000;
 
 export interface ProfileSections {
   criticalFacts?: string;
@@ -63,7 +98,6 @@ export interface ProfileSections {
   bookingBehavior?: string;
   escalationBehavior?: string;
   knowledgeScope?: string;
-  agency?: string;
 }
 
 export interface CompactedSections {
@@ -73,7 +107,7 @@ export interface CompactedSections {
   approxTokens: number;
 }
 
-function truncateSection(body: string | undefined, cap: number): { text: string; truncated: boolean } {
+function truncateSection(body: string | undefined | null, cap: number): { text: string; truncated: boolean } {
   const b = (body ?? '').trim();
   if (!b) return { text: '', truncated: false };
   if (b.length <= cap) return { text: b, truncated: false };
@@ -83,8 +117,9 @@ function truncateSection(body: string | undefined, cap: number): { text: string;
 }
 
 /**
- * Per-section prompt compaction with individual budgets.
- * Only includes non-empty sections. Returns total character and token counts.
+ * Per-section prompt compaction with individual field budgets (no combined tenant-blob cap).
+ * Only includes non-empty sections, in the canonical injection order. Returns per-section text,
+ * truncation flags, and total character / token counts.
  */
 export function compactProfileSections(sections: ProfileSections): CompactedSections {
   const result: CompactedSections = {
@@ -94,7 +129,8 @@ export function compactProfileSections(sections: ProfileSections): CompactedSect
     approxTokens: 0,
   };
 
-  for (const [key, cap] of Object.entries(SECTION_CAPS)) {
+  for (const key of RUNTIME_TENANT_SECTION_ORDER) {
+    const cap = RUNTIME_TENANT_SECTION_BUDGETS[key]!;
     const value = (sections as Record<string, string | undefined>)[key];
     const t = truncateSection(value, cap);
     if (t.text) {
@@ -108,28 +144,38 @@ export function compactProfileSections(sections: ProfileSections): CompactedSect
   return result;
 }
 
-/** Build the full prompt body from compacted sections, with headers. */
+/** Build the tenant prompt body from budgeted sections, with headers, in canonical order. */
 export function buildCompactedPromptBody(compacted: CompactedSections): string {
   const labels: Record<string, string> = {
     criticalFacts: '### Critical facts',
     persona: '### Bot Persona',
     goals: '### Goals',
     businessNotes: '### Business notes',
-    toneRules: '### Tone rules',
     bookingBehavior: '### Booking behavior',
     escalationBehavior: '### Escalation behavior',
+    toneRules: '### Tone rules',
     knowledgeScope: '### Knowledge scope',
-    agency: '### Agency instructions',
   };
 
   const chunks: string[] = [];
-  for (const key of Object.keys(SECTION_CAPS)) {
+  for (const key of RUNTIME_TENANT_SECTION_ORDER) {
     const text = compacted.sections[key];
     if (text) {
       chunks.push(`${labels[key] ?? key}\n${text}`);
     }
   }
   return chunks.join('\n\n');
+}
+
+/**
+ * Budget the Global Prompt / agency policy as an independent layer.
+ * Uses its own safe cap (default {@link GLOBAL_POLICY_RUNTIME_BUDGET}), never the tenant caps.
+ */
+export function budgetGlobalPolicy(
+  policy: string | null | undefined,
+  cap: number = GLOBAL_POLICY_RUNTIME_BUDGET,
+): { text: string; truncated: boolean } {
+  return truncateSection(policy, cap);
 }
 
 /** Rough token estimate (~4 chars per token for Latin scripts). */

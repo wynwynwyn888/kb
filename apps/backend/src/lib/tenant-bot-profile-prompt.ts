@@ -3,6 +3,8 @@
  * Mirrors `TenantGoalsPanel` section headers so existing saved blobs round-trip.
  */
 
+import { createHash } from 'node:crypto';
+
 export type ParsedPromptSections = { persona: string; goals: string; additional: string };
 
 export function parsePromptSections(raw: string): ParsedPromptSections {
@@ -123,6 +125,13 @@ export function buildOrchestrationTenantPromptFromProfile(p: BotProfilePromptFie
 
   chunks.push(p.knowledgeAccessSummary.trim() || buildKnowledgeAccessSummaryLine(KNOWLEDGE_ACCESS_ALL_VAULTS, []));
 
+  // Critical facts must be delivered on every prompt path (Preview + live WhatsApp), not only the
+  // per-section-budget path. Kept first and prominent so locked instructions (e.g. a fixed
+  // first-message routing menu, banned phrasings) survive downstream compaction/truncation.
+  if ((p.criticalFacts ?? '').trim()) {
+    chunks.push(`### Critical facts\n${p.criticalFacts.trim()}`);
+  }
+
   chunks.push(
     buildThreeSectionPromptBlob(p.persona, p.conversationGoals, p.businessNotes),
   );
@@ -163,4 +172,79 @@ export function buildBookingReplyPersonaPrompt(p: BotProfilePromptFields): strin
   if (p.toneRules.trim()) parts.push(`Tone rules: ${p.toneRules.trim()}`);
   if (p.bookingBehaviorNotes.trim()) parts.push(`Booking style: ${p.bookingBehaviorNotes.trim()}`);
   return parts.filter(Boolean).join('\n\n');
+}
+
+/**
+ * Channel-agnostic profile field set used for prompt fingerprinting.
+ * Excludes any channel-specific metadata (WhatsApp contract, brand identity, greeting time
+ * block, governor caps) so Preview Bot and live WhatsApp can be compared for parity.
+ */
+export interface TenantPromptFingerprintSections {
+  criticalFacts?: string;
+  persona?: string;
+  goals?: string;
+  businessNotes?: string;
+  toneRules?: string;
+  bookingBehavior?: string;
+  escalationBehavior?: string;
+  knowledgeScope?: string;
+}
+
+/** Ordered field keys — order is part of the fingerprint contract; do not reorder casually. */
+const FINGERPRINT_FIELD_ORDER: Array<keyof TenantPromptFingerprintSections> = [
+  'criticalFacts',
+  'persona',
+  'goals',
+  'businessNotes',
+  'toneRules',
+  'bookingBehavior',
+  'escalationBehavior',
+  'knowledgeScope',
+];
+
+export interface TenantPromptFingerprint {
+  /** Short sha256 hex over normalized field values. Stable across channels for the same profile. */
+  hash: string;
+  /** Per-field character lengths (no content) — safe to log. */
+  fieldLengths: Record<string, number>;
+  includesCriticalFacts: boolean;
+  includesPersona: boolean;
+  includesGoals: boolean;
+  includesBusinessNotes: boolean;
+  includesBookingBehavior: boolean;
+  includesEscalationBehavior: boolean;
+  totalChars: number;
+}
+
+/**
+ * Deterministic fingerprint of the tenant profile prompt fields.
+ * Same input → same hash regardless of channel; used to prove Preview/WhatsApp parity and to log
+ * (debug-safe: lengths + hash only, never raw content or secrets).
+ */
+export function buildTenantPromptFingerprint(
+  sections: TenantPromptFingerprintSections | null | undefined,
+): TenantPromptFingerprint {
+  const s = sections ?? {};
+  const fieldLengths: Record<string, number> = {};
+  const parts: string[] = [];
+  let totalChars = 0;
+  for (const key of FINGERPRINT_FIELD_ORDER) {
+    const value = (s[key] ?? '').trim();
+    fieldLengths[key] = value.length;
+    totalChars += value.length;
+    // Include the key so an empty field is distinguishable from a shifted field.
+    parts.push(`${key}:${value}`);
+  }
+  const hash = createHash('sha256').update(parts.join('\n\u0001\n'), 'utf8').digest('hex').slice(0, 16);
+  return {
+    hash,
+    fieldLengths,
+    includesCriticalFacts: (fieldLengths['criticalFacts'] ?? 0) > 0,
+    includesPersona: (fieldLengths['persona'] ?? 0) > 0,
+    includesGoals: (fieldLengths['goals'] ?? 0) > 0,
+    includesBusinessNotes: (fieldLengths['businessNotes'] ?? 0) > 0,
+    includesBookingBehavior: (fieldLengths['bookingBehavior'] ?? 0) > 0,
+    includesEscalationBehavior: (fieldLengths['escalationBehavior'] ?? 0) > 0,
+    totalChars,
+  };
 }

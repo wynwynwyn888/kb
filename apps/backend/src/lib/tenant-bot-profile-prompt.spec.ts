@@ -6,6 +6,7 @@ import {
   buildBookingReplyPersonaPrompt,
   buildKnowledgeAccessSummaryLine,
   buildOrchestrationTenantPromptFromProfile,
+  buildTenantPromptFingerprint,
   buildThreeSectionPromptBlob,
   parsePromptSections,
 } from './tenant-bot-profile-prompt';
@@ -96,7 +97,7 @@ describe('tenant-bot-profile-prompt', () => {
     expect(s).toContain('Tone rules: T');
   });
 
-  it('Critical Facts NOT present in old buildOrchestrationTenantPromptFromProfile output', () => {
+  it('Critical Facts IS present in buildOrchestrationTenantPromptFromProfile output (parity fix)', () => {
     const out = buildOrchestrationTenantPromptFromProfile({
       name: 'Test',
       description: '',
@@ -110,9 +111,30 @@ describe('tenant-bot-profile-prompt', () => {
       criticalFacts: 'Prices: $50-200. Guarantee: 30 days.',
       knowledgeAccessSummary: buildKnowledgeAccessSummaryLine(KNOWLEDGE_ACCESS_ALL_VAULTS, []),
     });
-    // Old path should NOT contain critical facts
-    expect(out).not.toContain('Prices: $50-200');
-    expect(out).not.toContain('Critical facts');
+    // Critical Facts must now be delivered on the shared (non-section-budget) path too, so that
+    // Preview Bot and the live WhatsApp legacy path both include the tenant's locked facts.
+    expect(out).toContain('### Critical facts');
+    expect(out).toContain('Prices: $50-200');
+    expect(out).toContain('### Bot Persona');
+    // Critical facts should appear before the persona/goals blob so it survives downstream compaction.
+    expect(out.indexOf('### Critical facts')).toBeLessThan(out.indexOf('### Bot Persona'));
+  });
+
+  it('omits Critical facts section when criticalFacts is empty', () => {
+    const out = buildOrchestrationTenantPromptFromProfile({
+      name: 'Test',
+      description: '',
+      persona: 'Friendly',
+      conversationGoals: 'Sell',
+      businessNotes: 'Notes',
+      toneRules: '',
+      bookingBehaviorNotes: '',
+      escalationBehaviorNotes: '',
+      knowledgeScopeNotes: '',
+      criticalFacts: '',
+      knowledgeAccessSummary: buildKnowledgeAccessSummaryLine(KNOWLEDGE_ACCESS_ALL_VAULTS, []),
+    });
+    expect(out).not.toContain('### Critical facts');
     expect(out).toContain('### Bot Persona');
   });
 
@@ -123,8 +145,53 @@ describe('tenant-bot-profile-prompt', () => {
       criticalFacts: 'Test facts',
       knowledgeAccessSummary: buildKnowledgeAccessSummaryLine(KNOWLEDGE_ACCESS_ALL_VAULTS, []),
     };
-    // Just verifies the field is accepted — old path doesn't use it
     const out = buildOrchestrationTenantPromptFromProfile(fields);
     expect(typeof out).toBe('string');
+    expect(out).toContain('Test facts');
+  });
+
+  describe('buildTenantPromptFingerprint (Preview ↔ WhatsApp parity)', () => {
+    const aisbpSections = {
+      criticalFacts:
+        'First message menu:\n1) Leads going cold\n2) Staff too busy\n3) Prospects ask price\n7) Something else',
+      persona: 'Direct AISBP setter',
+      goals: 'Route to AI Automation Session',
+      businessNotes: 'B2B automation agency',
+      toneRules: 'Never say "How can I assist you?"',
+      bookingBehavior: 'Book the session',
+      escalationBehavior: 'Escalate on request',
+      knowledgeScope: 'AISBP vault only',
+    };
+
+    it('produces the same hash for the same profile fields regardless of channel', () => {
+      // Preview and WhatsApp both fingerprint the identical profileSections object shape.
+      const preview = buildTenantPromptFingerprint({ ...aisbpSections });
+      const whatsapp = buildTenantPromptFingerprint({ ...aisbpSections });
+      expect(whatsapp.hash).toBe(preview.hash);
+      expect(whatsapp.includesCriticalFacts).toBe(true);
+      expect(whatsapp.includesGoals).toBe(true);
+    });
+
+    it('changes hash when any tenant field changes (drift detection)', () => {
+      const base = buildTenantPromptFingerprint({ ...aisbpSections });
+      const changed = buildTenantPromptFingerprint({ ...aisbpSections, goals: 'Different goal' });
+      expect(changed.hash).not.toBe(base.hash);
+    });
+
+    it('flags missing Critical Facts / Goals and never leaks content', () => {
+      const fp = buildTenantPromptFingerprint({ persona: 'x' });
+      expect(fp.includesCriticalFacts).toBe(false);
+      expect(fp.includesGoals).toBe(false);
+      // Only lengths + hash are exposed — no raw content fields.
+      expect(Object.keys(fp)).toEqual(
+        expect.arrayContaining(['hash', 'fieldLengths', 'includesCriticalFacts', 'includesGoals', 'totalChars']),
+      );
+      expect(JSON.stringify(fp)).not.toContain('x');
+    });
+
+    it('treats null/undefined sections as an empty, stable fingerprint', () => {
+      expect(buildTenantPromptFingerprint(null).hash).toBe(buildTenantPromptFingerprint(undefined).hash);
+      expect(buildTenantPromptFingerprint(null).includesCriticalFacts).toBe(false);
+    });
   });
 });

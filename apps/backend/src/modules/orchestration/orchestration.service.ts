@@ -83,6 +83,7 @@ import {
   estimateApproxTokens,
   compactProfileSections,
   buildCompactedPromptBody,
+  budgetGlobalPolicy,
   type ProfileSections,
 } from '../../lib/compact-runtime-system-prompt';
 import { shouldSkipKbShortFollowUpActiveTopic } from '../../lib/short-followup-kb';
@@ -92,7 +93,8 @@ import {
   promptCompactTruncationWarnKey,
   shouldEmitPromptCompactTruncationWarn,
 } from '../../lib/prompt-compact-truncation-warn';
-import { promptFootprintDebugEnabled, isPromptSectionBudgetsEnabledForTenant } from '../../lib/production-log-flags';
+import { promptFootprintDebugEnabled } from '../../lib/production-log-flags';
+import { buildTenantPromptFingerprint } from '../../lib/tenant-bot-profile-prompt';
 import {
   isTechnicalOperatorInput,
   TECHNICAL_OPERATOR_DEFLECTION_REPLY,
@@ -1355,9 +1357,19 @@ export class ConversationOrchestrationService {
     input: OrchestrationInput,
     bookingCapability: 'collect_details_only' | 'live_slot_booking',
   ): string {
-    const useSectionBudgets =
-      isPromptSectionBudgetsEnabledForTenant(input.tenantId) &&
-      Boolean(input.promptConfig?.profileSections);
+    // Field-level section budgets are the primary runtime path. It applies whenever the active
+    // profile exposes per-section fields, which is the norm. Only pure-legacy tenants (a stored
+    // blob with no `profileSections`) fall back to the old single-blob compaction.
+    const useSectionBudgets = Boolean(input.promptConfig?.profileSections);
+    const globalPolicyRaw = (input.agencyPolicy?.systemPrompt ?? '').trim();
+    const includesGlobalPolicy = globalPolicyRaw.length > 0;
+
+    // Debug-safe prompt fingerprint (lengths + hash only) so live WhatsApp can be compared with the
+    // Preview Bot for parity. The hash is channel-agnostic (tenant fields only); global-policy and
+    // section-length signals are logged separately so they never affect cross-channel parity.
+    const fp = buildTenantPromptFingerprint(
+      input.promptConfig?.profileSections as Record<string, string | undefined> | null | undefined,
+    );
 
     const tenantTz = input.tenant?.timeZone?.trim();
     const businessTimezone = tenantTz || resolveAppTimeZone();
@@ -1374,31 +1386,64 @@ export class ConversationOrchestrationService {
     const whatsappBlock = WHATSAPP_OUTPUT_CONTRACT_BLOCK;
 
     if (useSectionBudgets && input.promptConfig?.profileSections) {
-      // Per-section prompt path (new)
+      // Primary path: Global Prompt injected separately, then per-field-budgeted tenant sections.
       const sections: ProfileSections = input.promptConfig.profileSections;
       const compacted = compactProfileSections(sections);
-      const compactedBody = buildCompactedPromptBody(compacted);
-      let base = buildBrandAssistantIdentitySystemContent(input.tenant?.name);
-      base = `${compactedBody}\n\n---\n\n${base}`;
+      const tenantBody = buildCompactedPromptBody(compacted);
+      const brand = buildBrandAssistantIdentitySystemContent(input.tenant?.name);
+
+      // Global policy is its own layer with its own budget — never squeezed into the tenant blob.
+      const global = budgetGlobalPolicy(globalPolicyRaw);
+
+      const layers: string[] = [];
+      if (global.text) layers.push(`Global policy (applies before subaccount instructions):\n${global.text}`);
+      if (tenantBody) layers.push(tenantBody);
+      layers.push(brand);
+      const base = layers.join('\n\n---\n\n');
       const assembled = `${base}\n\n${block}${caps}`;
+
+      this.logger.log(
+        `promptFingerprint channel=whatsapp tenantId=${input.tenantId} ` +
+          `profileId=${input.promptConfig?.id ?? 'none'} profileUpdatedAt=${input.promptConfig?.updatedAt ?? 'none'} ` +
+          `hash=${fp.hash} sectionBudgetsPath=true includesGlobalPolicy=${includesGlobalPolicy} ` +
+          `includesCriticalFacts=${fp.includesCriticalFacts} includesPersona=${fp.includesPersona} ` +
+          `includesGoals=${fp.includesGoals} includesBusinessNotes=${fp.includesBusinessNotes} ` +
+          `includesBookingBehavior=${fp.includesBookingBehavior} includesEscalationBehavior=${fp.includesEscalationBehavior} ` +
+          `globalPolicyLen=${global.text.length} globalPolicyTruncated=${global.truncated} ` +
+          `budgetedSectionLengths=${JSON.stringify(
+            Object.fromEntries(Object.entries(compacted.sections).map(([k, v]) => [k, v.length])),
+          )} anySectionTruncated=${Object.values(compacted.truncated).some(Boolean)} ` +
+          `totalTenantChars=${compacted.totalChars}`,
+      );
 
       if (promptFootprintDebugEnabled()) {
         this.logger.log(
           `Runtime prompt footprint (section budgets): ` +
             Object.entries(compacted.sections).map(([k, v]) => `${k}Len=${v.length}`).join(' ') + ' ' +
-            `anyTruncated=${Object.values(compacted.truncated).some(Boolean)} ` +
+            `globalPolicyLen=${global.text.length} ` +
+            `anyTruncated=${Object.values(compacted.truncated).some(Boolean) || global.truncated} ` +
             `totalTenantCharLength=${compacted.totalChars} ` +
             `runtimePromptCharLength=${assembled.length} ` +
-            `estimatedPromptTokens=${compacted.approxTokens}`,
+            `estimatedPromptTokens=${estimateApproxTokens(assembled.length)}`,
         );
       }
 
       return `${assembled}\n\n${whatsappBlock}`;
     }
 
-    // Old single-blob compaction path (unchanged)
+    // Legacy fallback (pure-legacy tenants only): single stored blob, no per-section fields.
+    this.logger.log(
+      `promptFingerprint channel=whatsapp tenantId=${input.tenantId} ` +
+        `profileId=${input.promptConfig?.id ?? 'none'} profileUpdatedAt=${input.promptConfig?.updatedAt ?? 'none'} ` +
+        `hash=${fp.hash} sectionBudgetsPath=false includesGlobalPolicy=${includesGlobalPolicy} ` +
+        `includesCriticalFacts=${fp.includesCriticalFacts} includesPersona=${fp.includesPersona} ` +
+        `includesGoals=${fp.includesGoals} includesBusinessNotes=${fp.includesBusinessNotes} ` +
+        `includesBookingBehavior=${fp.includesBookingBehavior} includesEscalationBehavior=${fp.includesEscalationBehavior} ` +
+        `totalTenantChars=${fp.totalChars}`,
+    );
+
     const tenantRaw = (input.promptConfig?.systemPrompt ?? '').trim();
-    const agencyRaw = (input.agencyPolicy?.systemPrompt ?? '').trim();
+    const agencyRaw = globalPolicyRaw;
     const compact = compactPersonaPolicyForGeneration({
       tenantPrompt: tenantRaw,
       agencyPrompt: agencyRaw,

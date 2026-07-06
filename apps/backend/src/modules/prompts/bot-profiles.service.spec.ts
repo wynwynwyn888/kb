@@ -95,6 +95,74 @@ describe('BotProfilesService', () => {
     expect(out?.businessNotes).toBe('We ship fast');
   });
 
+  it('getActivePromptForOrchestration includes saved Critical Facts + Conversation Goals (WhatsApp parity)', async () => {
+    const lockedMenu =
+      '1) Leads going cold after the first conversation\n7) Something else';
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'tenant_bot_profiles') {
+        return {
+          select: (_cols: string, opts?: { count?: string; head?: boolean }) => {
+            if (opts?.head) {
+              return { eq: () => Promise.resolve({ count: 1, error: null }) };
+            }
+            return {
+              eq: () => ({
+                eq: () => ({
+                  maybeSingle: () =>
+                    Promise.resolve({
+                      data: {
+                        id: profileId,
+                        tenant_id: tenantId,
+                        name: 'AISBP Setter',
+                        description: '',
+                        persona: 'Direct setter',
+                        conversation_goals: 'Route to AI Automation Session',
+                        business_notes: '',
+                        tone_rules: '',
+                        booking_behavior_notes: '',
+                        escalation_behavior_notes: '',
+                        knowledge_scope_notes: '',
+                        knowledge_scope_mode: 'all_workspace_knowledge',
+                        knowledge_access_mode: 'all_vaults',
+                        critical_facts: `First-message menu:\n${lockedMenu}`,
+                        is_active: true,
+                        created_at: 't',
+                        updated_at: 't',
+                      },
+                      error: null,
+                    }),
+                }),
+              }),
+            };
+          },
+        };
+      }
+      if (table === 'tenant_prompt_configs') {
+        return {
+          select: () => ({
+            eq: () => ({
+              maybeSingle: () =>
+                Promise.resolve({
+                  data: { id: 'cfg1', temperature: 0.7, model_override: null, max_tokens: 800, updated_at: 'u' },
+                  error: null,
+                }),
+            }),
+          }),
+        };
+      }
+      return {};
+    });
+    const out = await svc.getActivePromptForOrchestration(tenantId);
+    // Critical Facts must be present in the orchestration system prompt (the live WhatsApp source),
+    // not only in the flag-gated per-section path.
+    expect(out?.systemPrompt).toContain('### Critical facts');
+    expect(out?.systemPrompt).toContain('Leads going cold after the first conversation');
+    expect(out?.systemPrompt).toContain('Route to AI Automation Session');
+    // profileSections still exposes the fields for the section-budget path + fingerprinting.
+    expect(out?.profileSections?.criticalFacts).toContain('Leads going cold');
+    expect(out?.profileSections?.goals).toContain('AI Automation Session');
+  });
+
   it('cannot delete the active profile', async () => {
     mockFrom.mockImplementation((table: string) => {
       if (table === 'tenant_bot_profiles') {

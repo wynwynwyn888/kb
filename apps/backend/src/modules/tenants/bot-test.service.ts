@@ -7,6 +7,7 @@ import { KbService } from '../kb/kb.service';
 import { AgencyAiConfigService } from '../agency-ai-config/agency-ai-config.service';
 import { TenantsService } from './tenants.service';
 import { BotProfilesService } from '../prompts/bot-profiles.service';
+import { buildTenantPromptFingerprint } from '../../lib/tenant-bot-profile-prompt';
 import type { MemoryEntry } from '../orchestration/dto/memory-entry';
 import type { RetrievalChunk } from '../kb/dto/retrieval.dto';
 import { formatLiveCustomerDraftForPreview } from '../../lib/live-outbound-preview';
@@ -85,6 +86,17 @@ export class BotTestService {
     const subMax = orch?.maxTokens ?? null;
 
     const systemPrompt = buildStackedSystemPrompt(agencyPrompt, tenantPrompt);
+
+    // Debug-safe prompt fingerprint (lengths + hash only) so Preview and live WhatsApp can be
+    // compared for parity. Channel-agnostic: excludes brand/greeting/whatsapp-contract blocks.
+    const fp = buildTenantPromptFingerprint(orch?.profileSections);
+    this.logger.log(
+      `promptFingerprint channel=preview tenantId=${tenantId} profileId=${orch?.id ?? 'none'} ` +
+        `profileUpdatedAt=${orch?.updatedAt ?? 'none'} hash=${fp.hash} ` +
+        `includesCriticalFacts=${fp.includesCriticalFacts} includesGoals=${fp.includesGoals} ` +
+        `totalTenantChars=${fp.totalChars} fieldLengths=${JSON.stringify(fp.fieldLengths)} ` +
+        `agencyPromptIncluded=${Boolean(agencyPrompt?.trim())}`,
+    );
 
     const normalizedHistory = (body.history ?? [])
       .filter(

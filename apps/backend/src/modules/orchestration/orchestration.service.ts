@@ -85,6 +85,7 @@ import {
   shouldEmitPromptCompactTruncationWarn,
 } from '../../lib/prompt-compact-truncation-warn';
 import { promptFootprintDebugEnabled, isPromptSectionBudgetsEnabledForTenant } from '../../lib/production-log-flags';
+import { buildTenantPromptFingerprint } from '../../lib/tenant-bot-profile-prompt';
 import {
   isTechnicalOperatorInput,
   TECHNICAL_OPERATOR_DEFLECTION_REPLY,
@@ -1322,6 +1323,20 @@ export class ConversationOrchestrationService {
     const useSectionBudgets =
       isPromptSectionBudgetsEnabledForTenant(input.tenantId) &&
       Boolean(input.promptConfig?.profileSections);
+
+    // Debug-safe prompt fingerprint (lengths + hash only) so live WhatsApp can be compared with the
+    // Preview Bot for parity. Channel-agnostic: computed over the same tenant profile fields.
+    const fp = buildTenantPromptFingerprint(
+      input.promptConfig?.profileSections as Record<string, string | undefined> | null | undefined,
+    );
+    this.logger.log(
+      `promptFingerprint channel=whatsapp tenantId=${input.tenantId} ` +
+        `profileId=${input.promptConfig?.id ?? 'none'} profileUpdatedAt=${input.promptConfig?.updatedAt ?? 'none'} ` +
+        `hash=${fp.hash} includesCriticalFacts=${fp.includesCriticalFacts} includesGoals=${fp.includesGoals} ` +
+        `totalTenantChars=${fp.totalChars} sectionBudgetsPath=${useSectionBudgets} ` +
+        `agencyPromptIncluded=${Boolean(input.agencyPolicy?.systemPrompt?.trim())} ` +
+        `fieldLengths=${JSON.stringify(fp.fieldLengths)}`,
+    );
 
     const tenantTz = input.tenant?.timeZone?.trim();
     const businessTimezone = tenantTz || resolveAppTimeZone();

@@ -208,7 +208,11 @@ export interface TenantPromptFingerprint {
   /** Per-field character lengths (no content) — safe to log. */
   fieldLengths: Record<string, number>;
   includesCriticalFacts: boolean;
+  includesPersona: boolean;
   includesGoals: boolean;
+  includesBusinessNotes: boolean;
+  includesBookingBehavior: boolean;
+  includesEscalationBehavior: boolean;
   totalChars: number;
 }
 
@@ -236,7 +240,11 @@ export function buildTenantPromptFingerprint(
     hash,
     fieldLengths,
     includesCriticalFacts: (fieldLengths['criticalFacts'] ?? 0) > 0,
+    includesPersona: (fieldLengths['persona'] ?? 0) > 0,
     includesGoals: (fieldLengths['goals'] ?? 0) > 0,
+    includesBusinessNotes: (fieldLengths['businessNotes'] ?? 0) > 0,
+    includesBookingBehavior: (fieldLengths['bookingBehavior'] ?? 0) > 0,
+    includesEscalationBehavior: (fieldLengths['escalationBehavior'] ?? 0) > 0,
     totalChars,
   };
 }

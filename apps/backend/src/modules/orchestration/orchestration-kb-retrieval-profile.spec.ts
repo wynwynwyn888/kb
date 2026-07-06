@@ -7,6 +7,16 @@ import { ConversationOrchestrationService } from './orchestration.service';
 import type { OrchestrationInput } from './dto';
 import type { ConversationIntent } from '../conversation-policy/conversation-intent';
 
+jestGlobal.mock('../kb/embedding/kb-vector-context.runner', () => ({
+  kbVectorContextEnabledForTenant: jestGlobal.fn(() => false),
+  runKbVectorContext: jestGlobal.fn(),
+}));
+
+const vectorContextModule = jestGlobal.requireMock('../kb/embedding/kb-vector-context.runner') as {
+  kbVectorContextEnabledForTenant: jestGlobal.Mock;
+  runKbVectorContext: jestGlobal.Mock;
+};
+
 function makeOrchestrationInput(): OrchestrationInput {
   return {
     tenantId: 'tenant-live',
@@ -55,6 +65,8 @@ describe('ConversationOrchestrationService — KB retrieval vs assistant profile
 
   beforeEach(() => {
     jestGlobal.clearAllMocks();
+    vectorContextModule.kbVectorContextEnabledForTenant.mockReturnValue(false);
+    vectorContextModule.runKbVectorContext.mockReset();
     const kbService = { retrieve: kbRetrieve };
     const botProfiles = { getKbDocumentAllowlistForActiveProfile: getKbAllowlist };
     svc = new ConversationOrchestrationService(
@@ -164,5 +176,113 @@ describe('ConversationOrchestrationService — KB retrieval vs assistant profile
         documentIdAllowlist: undefined,
       }),
     );
+  });
+
+  it('uses vector context as KB memory only when staging vector context runner succeeds', async () => {
+    getKbAllowlist.mockResolvedValue({
+      kind: 'all',
+      kbVaultAccessMode: 'all_vaults',
+      noActiveProfile: false,
+      selectedVaultCount: 0,
+      allowedDocumentCount: null,
+    });
+    vectorContextModule.kbVectorContextEnabledForTenant.mockReturnValue(true);
+    vectorContextModule.runKbVectorContext.mockResolvedValue({
+      ok: true,
+      topChunkIds: ['rag-1'],
+      result: {
+        query: 'What are your prices?',
+        chunks: [
+          {
+            chunkId: 'rag-1',
+            documentId: 'doc-rag',
+            title: 'Pricing',
+            source: 'manual',
+            content: 'Our Basic plan is $29 per month.',
+            relevanceScore: 0.42,
+            metadata: { retrievalSource: 'rag_vector_context' },
+          },
+        ],
+        totalConsidered: 3,
+        retrievalMode: 'vector',
+      },
+    });
+
+    const retrieveKbContext = (
+      svc as unknown as {
+        retrieveKbContext: (
+          input: OrchestrationInput,
+          conversationId: string,
+          intent: ConversationIntent,
+          opts?: { retrieveQuery?: string; kbFilterIntent?: ConversationIntent; kbFilterUserMessage?: string },
+        ) => Promise<{ chunks: unknown[]; meta: { retrievalMode: string; documentIds?: string[] } }>;
+      }
+    ).retrieveKbContext.bind(svc);
+
+    const out = await retrieveKbContext(makeOrchestrationInput(), 'conv-live', 'PRICE', {
+      retrieveQuery: 'What are your prices?',
+      kbFilterIntent: 'PRICE',
+      kbFilterUserMessage: 'What are your prices?',
+    });
+
+    expect(kbRetrieve).toHaveBeenCalledTimes(1);
+    expect(vectorContextModule.runKbVectorContext).toHaveBeenCalledTimes(1);
+    expect(out.chunks).toEqual([
+      expect.objectContaining({ chunkId: 'rag-1', metadata: { retrievalSource: 'rag_vector_context' } }),
+    ]);
+    expect(out.meta.retrievalMode).toBe('vector');
+    expect(out.meta.documentIds).toEqual(['doc-rag']);
+  });
+
+  it('falls back to keyword result when vector context runner fails', async () => {
+    getKbAllowlist.mockResolvedValue({
+      kind: 'all',
+      kbVaultAccessMode: 'all_vaults',
+      noActiveProfile: false,
+      selectedVaultCount: 0,
+      allowedDocumentCount: null,
+    });
+    kbRetrieve.mockResolvedValueOnce({
+      query: 'What are your hours?',
+      chunks: [
+        {
+          chunkId: 'kw-1',
+          documentId: 'doc-kw',
+          title: 'Hours',
+          source: 'manual',
+          content: 'We are open 9am to 5pm.',
+          relevanceScore: 0.9,
+          metadata: {},
+        },
+      ],
+      totalConsidered: 1,
+      retrievalMode: 'keyword' as const,
+    });
+    vectorContextModule.kbVectorContextEnabledForTenant.mockReturnValue(true);
+    vectorContextModule.runKbVectorContext.mockResolvedValue({
+      ok: false,
+      reason: 'weak_or_empty_vector_candidates',
+    });
+
+    const retrieveKbContext = (
+      svc as unknown as {
+        retrieveKbContext: (
+          input: OrchestrationInput,
+          conversationId: string,
+          intent: ConversationIntent,
+          opts?: { retrieveQuery?: string; kbFilterIntent?: ConversationIntent; kbFilterUserMessage?: string },
+        ) => Promise<{ chunks: unknown[]; meta: { retrievalMode: string; documentIds?: string[] } }>;
+      }
+    ).retrieveKbContext.bind(svc);
+
+    const out = await retrieveKbContext(makeOrchestrationInput(), 'conv-live', 'BUSINESS_HOURS', {
+      retrieveQuery: 'What are your hours?',
+      kbFilterIntent: 'BUSINESS_HOURS',
+      kbFilterUserMessage: 'What are your hours?',
+    });
+
+    expect(out.chunks).toEqual([expect.objectContaining({ chunkId: 'kw-1' })]);
+    expect(out.meta.retrievalMode).toBe('keyword');
+    expect(out.meta.documentIds).toEqual(['doc-kw']);
   });
 });

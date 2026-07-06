@@ -15,6 +15,10 @@ import {
   kbVectorShadowEnabledForTenant,
   runKbVectorShadow,
 } from '../kb/embedding/kb-vector-shadow.runner';
+import {
+  kbVectorContextEnabledForTenant,
+  runKbVectorContext,
+} from '../kb/embedding/kb-vector-context.runner';
 import { ReplyPlannerService } from '../reply-planning/reply-planner.service';
 import { ConversationsService } from '../conversations/conversations.service';
 import type {
@@ -1258,7 +1262,7 @@ export class ConversationOrchestrationService {
           )}`,
       );
 
-      const result = await this.kbService.retrieve({
+      let result = await this.kbService.retrieve({
         tenantId: input.tenantId,
         conversationId,
         query: retrieveQuery,
@@ -1277,15 +1281,33 @@ export class ConversationOrchestrationService {
         ).catch(() => undefined);
       }
 
+      let usedVectorContext = false;
+      if (kbVectorContextEnabledForTenant(input.tenantId)) {
+        const vectorContext = await runKbVectorContext(
+          { tenantId: input.tenantId, conversationId, query: retrieveQuery, documentIdAllowlist, topK: 5 },
+          { logger: this.logger },
+        );
+        if (vectorContext.ok) {
+          result = vectorContext.result;
+          usedVectorContext = true;
+        } else {
+          this.logger.log(
+            `kbVectorContextFallback tenant=${input.tenantId} conversation=${conversationId} reason=${vectorContext.reason}`,
+          );
+        }
+      }
+
       const filterIntent = opts?.kbFilterIntent ?? latestIntent;
       const filterUserMessage = (opts?.kbFilterUserMessage ?? input.incomingMessage.messageContent ?? '').trim();
 
-      const { chunks: filteredChunks, rejections } = filterKbChunksForPolicy(
-        filterIntent,
-        filterUserMessage,
-        result.chunks,
-        { menuKbAnchor: opts?.menuKbAnchor },
-      );
+      const { chunks: filteredChunks, rejections } = usedVectorContext
+        ? { chunks: result.chunks, rejections: [] }
+        : filterKbChunksForPolicy(
+            filterIntent,
+            filterUserMessage,
+            result.chunks,
+            { menuKbAnchor: opts?.menuKbAnchor },
+          );
       for (const r of rejections) {
         this.logger.log(
           `KB rejected: reason=${r.reason}, latestMessage_class=${r.queryClass}, kbTitle=${r.kbTitleShort}`,

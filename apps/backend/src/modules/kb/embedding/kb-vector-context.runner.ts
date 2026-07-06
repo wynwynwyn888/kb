@@ -1,8 +1,9 @@
-// Staging-only RAG vector context runner.
+// RAG vector context runner.
 //
 // SAFETY CONTRACT:
 // - Default OFF.
 // - Runs only in staging-like environments and explicit tenant allowlist.
+// - Production-like envs require a separate exact canary acknowledgement.
 // - Returns retrieval chunks for prompt context only when vector search succeeds
 //   with sufficiently strong candidates.
 // - Never throws; callers fall back to keyword retrieval on any failure.
@@ -18,6 +19,7 @@ import type { BackfillSupabaseClient } from './kb-embedding-backfill';
 
 const DEFAULT_MIN_VECTOR_SCORE = 0.3;
 const DEFAULT_MAX_CONTEXT_CHARS = 6000;
+export const KB_VECTOR_CONTEXT_PROD_CANARY_ACK = 'YES_ENABLE_KB_VECTOR_CONTEXT_PROD_CANARY';
 
 export interface KbVectorContextLogger {
   log: (message: string) => void;
@@ -46,8 +48,8 @@ export type KbVectorContextOutcome =
   | { ok: true; result: RetrievalResult; topChunkIds: string[] }
   | { ok: false; reason: string };
 
-function isStagingLikeEnv(): boolean {
-  const values = [
+function runtimeEnvValues(): string[] {
+  return [
     process.env['NODE_ENV'],
     process.env['APP_ENV'],
     process.env['RAILWAY_ENVIRONMENT'],
@@ -55,11 +57,25 @@ function isStagingLikeEnv(): boolean {
   ]
     .map((v) => String(v ?? '').trim().toLowerCase())
     .filter(Boolean);
-  return values.some((v) => v === 'staging' || v === 'stage');
+}
+
+function isStagingLikeEnv(): boolean {
+  return runtimeEnvValues().some((v) => v === 'staging' || v === 'stage');
+}
+
+function isProductionLikeEnv(): boolean {
+  return runtimeEnvValues().some((v) => v === 'production' || v === 'prod');
+}
+
+function vectorContextRuntimeAllowed(): boolean {
+  if (isProductionLikeEnv()) {
+    return process.env['KB_VECTOR_CONTEXT_PROD_CANARY_ACK'] === KB_VECTOR_CONTEXT_PROD_CANARY_ACK;
+  }
+  return isStagingLikeEnv();
 }
 
 export function kbVectorContextEnabledForTenant(tenantId: string): boolean {
-  if (!isStagingLikeEnv()) return false;
+  if (!vectorContextRuntimeAllowed()) return false;
   if (String(process.env['KB_VECTOR_CONTEXT_ENABLED'] ?? '').trim().toLowerCase() !== 'true') {
     return false;
   }
@@ -71,6 +87,10 @@ export function kbVectorContextEnabledForTenant(tenantId: string): boolean {
   return ids.includes(tenantId);
 }
 
+function contextMode(): string {
+  return isProductionLikeEnv() ? 'prod_canary_vector_context' : 'staging_vector_context';
+}
+
 function readMinVectorScore(): number {
   const n = Number(process.env['KB_VECTOR_CONTEXT_MIN_SCORE']);
   if (!Number.isFinite(n)) return DEFAULT_MIN_VECTOR_SCORE;
@@ -80,7 +100,7 @@ function readMinVectorScore(): number {
 function safeLine(params: KbVectorContextParams, extra: Record<string, unknown>): string {
   return JSON.stringify({
     event: 'kb_vector_context',
-    mode: 'staging_vector_context',
+    mode: contextMode(),
     tenantId: params.tenantId,
     conversationId: params.conversationId ?? 'n/a',
     queryPreview: safeTextPreviewForLog(params.query, { hashSalt: 'kbVectorContextQuery' }),

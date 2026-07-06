@@ -70,8 +70,40 @@ describe('kbVectorContextEnabledForTenant', () => {
 
   it('is OFF outside staging even when flags are true', () => {
     withEnv(
-      { NODE_ENV: 'production', KB_VECTOR_CONTEXT_ENABLED: 'true', KB_VECTOR_CONTEXT_TENANT_IDS: TENANT },
+      {
+        NODE_ENV: 'production',
+        KB_VECTOR_CONTEXT_ENABLED: 'true',
+        KB_VECTOR_CONTEXT_TENANT_IDS: TENANT,
+        KB_VECTOR_CONTEXT_PROD_CANARY_ACK: undefined,
+      },
       () => expect(kbVectorContextEnabledForTenant(TENANT)).toBe(false),
+    );
+  });
+
+  it('is OFF in production when canary acknowledgement is wrong', () => {
+    withEnv(
+      {
+        NODE_ENV: 'production',
+        KB_VECTOR_CONTEXT_ENABLED: 'true',
+        KB_VECTOR_CONTEXT_TENANT_IDS: TENANT,
+        KB_VECTOR_CONTEXT_PROD_CANARY_ACK: 'yes',
+      },
+      () => expect(kbVectorContextEnabledForTenant(TENANT)).toBe(false),
+    );
+  });
+
+  it('can be enabled for a production canary only with exact acknowledgement and allowlist', () => {
+    withEnv(
+      {
+        NODE_ENV: 'production',
+        KB_VECTOR_CONTEXT_ENABLED: 'true',
+        KB_VECTOR_CONTEXT_TENANT_IDS: TENANT,
+        KB_VECTOR_CONTEXT_PROD_CANARY_ACK: 'YES_ENABLE_KB_VECTOR_CONTEXT_PROD_CANARY',
+      },
+      () => {
+        expect(kbVectorContextEnabledForTenant(TENANT)).toBe(true);
+        expect(kbVectorContextEnabledForTenant('other-tenant')).toBe(false);
+      },
     );
   });
 

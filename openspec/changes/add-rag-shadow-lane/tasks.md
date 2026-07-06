@@ -81,6 +81,7 @@
 
 - [x] 8.0 Add a staging/local-only RAG context evaluation harness (`scripts/evaluate-kb-rag-context.ts` + pure helpers in `kb-rag-eval.ts`): env guard refuses prod, forces the vector-context flags for one tenant, compares `runKbVectorContext` vs keyword `KbService.retrieve`, supports a kill-switch check mode, and logs ids/scores/previews only.
 - [x] 8.0a Add staging-only automatic embedding maintenance for KB writes: `KB_INGEST` now embeds pending/failed chunks for one document when `KB_EMBEDDING_JOBS_ENABLED=true` and the tenant is allowlisted.
+- [x] 8.0b Add production-canary code guards for vector context and embedding jobs: production-like envs require the normal flag, tenant allowlist, and an exact canary acknowledgement env var before they can run.
 - [ ] 8.1 Complete the staging/local validation checklist (migration idempotency, index used, backfill no-op rerun, RPC isolation, safe logs, latency parity, kill switch, cost).
 - [ ] 8.2 Obtain explicit approval before any production additive migration.
 - [ ] 8.3 Apply prod additive migration in a low-traffic window; confirm existing KB reads/writes unaffected and `KB_VECTOR_RETRIEVAL_ENABLED=false`.

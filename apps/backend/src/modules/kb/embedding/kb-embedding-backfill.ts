@@ -248,6 +248,7 @@ export async function runKbEmbeddingBackfill(
           continue;
         }
         const storeResult = await storeEmbedding(supabase, {
+          tenantId: options.tenantId,
           chunkId: row.chunk.id,
           embedding: result.embedding,
           embeddingModel: 'text-embedding-3-small',
@@ -258,6 +259,7 @@ export async function runKbEmbeddingBackfill(
     } catch (error) {
       for (const row of prepared) {
         const failed = await markFailed(supabase, {
+          tenantId: options.tenantId,
           chunkId: row.chunk.id,
           error,
           embeddingInputHash: row.hash,

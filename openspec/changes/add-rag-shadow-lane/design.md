@@ -1,6 +1,6 @@
 ## Context
 
-KB retrieval for customer replies currently runs keyword-only in `KbService.retrieve` (`apps/backend/src/modules/kb/kb.service.ts`), called from `OrchestrationService.retrieveKbContext` (~`orchestration.service.ts:1257`). A legacy 64-dim `metadata.embedding` pseudo-vector branch also exists in `retrieve()` and `searchKnowledge()`; it is not real semantic retrieval and must be left untouched during this phase.
+KB retrieval for customer replies currently runs keyword-only in `KbService.retrieve` (`apps/backend/src/modules/kb/kb.service.ts`), called from `OrchestrationService.retrieveKbContext` (~`orchestration.service.ts:1257`). PR #47 (merge `76bd511`) **removed** the live 64-dim `metadata.embedding` pseudo-vector branch from `retrieve()`/`searchKnowledge()`; those methods now always return `retrievalMode='keyword'` and legacy `metadata.embedding` arrays are only counted/logged for observability. This change MUST preserve that keyword-only live retrieval and MUST NOT reintroduce pseudo-vector scoring.
 
 The full RAG change (`add-rag-vector-retrieval`) would let embeddings influence replies. Before taking that risk, we need real-traffic evidence and safety proof. This design specifies a **shadow lane**: it computes vector + hybrid retrieval and logs how it compares to the keyword result the reply actually used, without touching the reply.
 
@@ -22,7 +22,7 @@ Key existing facts this design relies on:
 **Non-Goals:**
 - Using vector/hybrid results in generated replies (owned by `add-rag-vector-retrieval`).
 - Flipping or reading `KB_VECTOR_RETRIEVAL_ENABLED`.
-- Removing or modifying the legacy pseudo-vector branch in live `retrieve()`/`searchKnowledge()`.
+- Reintroducing the live pseudo-vector branch that PR #47 removed from `retrieve()`/`searchKnowledge()`; keyword-only live retrieval is preserved.
 - Production migration/backfill in this change without explicit, separate approval.
 - Full-text/keyword scaling work.
 
@@ -44,8 +44,8 @@ Add nullable `embedding vector(1536)` and lifecycle columns; four RPCs with `REV
 - **Alternative considered:** Prisma raw queries for vector ops — rejected because runtime KB access is Supabase JS and `loadTenantChunks` already avoids complex PostgREST joins; a typed RPC is safer and testable.
 
 ### Decision 4: Stale-embedding guard on both success and failure RPCs
-The write path stamps `embedding_input_hash` atomically with content changes. `set_knowledge_chunk_embedding` **and** `mark_knowledge_chunk_embedding_failed` compare the job's captured hash to the row's stored `embedding_input_hash` and no-op on mismatch (no SQL-side hashing).
-- **Why:** prevents an out-of-order job from writing a stale vector, and prevents a stale *failing* job from nulling a newer valid embedding.
+The write path stamps `embedding_input_hash` atomically with content changes. `set_knowledge_chunk_embedding` **and** `mark_knowledge_chunk_embedding_failed` compare the job's captured hash to the row's stored `embedding_input_hash` and no-op on mismatch (no SQL-side hashing), and both stamp/preserve the captured hash. Both write RPCs are **tenant-scoped** (`p_tenant_id` verified against the chunk's owning document) because `service_role` bypasses RLS, so a bare chunk id must never be sufficient to write across tenants (migration `20260708000000_kb_shadow_embeddings_tenant_scoped_rpc`).
+- **Why:** prevents an out-of-order job from writing a stale vector, prevents a stale *failing* job from nulling a newer valid embedding, and prevents cross-tenant writes through the trusted service-role RPCs.
 
 ### Decision 5: Shadow ignores the legacy pseudo-vector path
 Shadow retrieval reads only the real `knowledge_chunks.embedding` column via `match_knowledge_chunks`. It never reads `metadata.embedding` and never calls `pseudoEmbedFromText`/`readEmbeddingVector`.

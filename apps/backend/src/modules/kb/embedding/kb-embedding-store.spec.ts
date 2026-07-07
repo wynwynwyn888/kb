@@ -31,6 +31,7 @@ describe('kb-embedding-store', () => {
       const supabase = makeSupabaseStub();
 
       const result = await storeKnowledgeChunkEmbedding(supabase, {
+        tenantId: 'tenant-1',
         chunkId: 'chunk-1',
         embedding: embedding(),
         embeddingModel: 'text-embedding-3-small',
@@ -41,6 +42,7 @@ describe('kb-embedding-store', () => {
       expect(supabase.calls).toHaveLength(1);
       expect(supabase.calls[0].fn).toBe('set_knowledge_chunk_embedding');
       expect(supabase.calls[0].args).toMatchObject({
+        p_tenant_id: 'tenant-1',
         p_chunk_id: 'chunk-1',
         p_embedding_model: 'text-embedding-3-small',
         p_embedding_input_hash: 'hash-1',
@@ -53,6 +55,7 @@ describe('kb-embedding-store', () => {
       const supabase = makeSupabaseStub();
 
       const result = await storeKnowledgeChunkEmbedding(supabase, {
+        tenantId: 'tenant-1',
         chunkId: 'chunk-1',
         embedding: embedding(3),
         embeddingModel: 'text-embedding-3-small',
@@ -73,6 +76,7 @@ describe('kb-embedding-store', () => {
       ]);
 
       const result = await storeKnowledgeChunkEmbedding(supabase, {
+        tenantId: 'tenant-1',
         chunkId: 'chunk-1',
         embedding: embedding(),
         embeddingModel: 'text-embedding-3-small',
@@ -89,6 +93,7 @@ describe('kb-embedding-store', () => {
     it('does not leak vector values through invalid embedding errors', async () => {
       const supabase = makeSupabaseStub();
       const result = await storeKnowledgeChunkEmbedding(supabase, {
+        tenantId: 'tenant-1',
         chunkId: 'chunk-1',
         embedding: [0.123456789, Number.NaN],
         embeddingModel: 'text-embedding-3-small',
@@ -107,6 +112,7 @@ describe('kb-embedding-store', () => {
       const supabase = makeSupabaseStub();
 
       const result = await markKnowledgeChunkEmbeddingFailed(supabase, {
+        tenantId: 'tenant-1',
         chunkId: 'chunk-1',
         error: new Error('OpenAI API responded with status 429'),
         embeddingInputHash: 'hash-1',
@@ -117,6 +123,7 @@ describe('kb-embedding-store', () => {
         {
           fn: 'mark_knowledge_chunk_embedding_failed',
           args: {
+            p_tenant_id: 'tenant-1',
             p_chunk_id: 'chunk-1',
             p_error: 'OpenAI API responded with status 429',
             p_embedding_input_hash: 'hash-1',
@@ -131,6 +138,7 @@ describe('kb-embedding-store', () => {
       ]);
 
       const result = await markKnowledgeChunkEmbeddingFailed(supabase, {
+        tenantId: 'tenant-1',
         chunkId: 'chunk-1',
         error: 'embedding failed',
         embeddingInputHash: 'hash-1',
@@ -148,6 +156,7 @@ describe('kb-embedding-store', () => {
       const denseVector = `[${Array.from({ length: 80 }, () => '0.123456789').join(',')}]`;
 
       await markKnowledgeChunkEmbeddingFailed(supabase, {
+        tenantId: 'tenant-1',
         chunkId: 'chunk-1',
         error: `failed with sk-proj-secret123456 ${denseVector} ${'x'.repeat(700)}`,
         embeddingInputHash: 'hash-1',

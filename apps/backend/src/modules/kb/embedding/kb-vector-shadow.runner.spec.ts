@@ -196,4 +196,91 @@ describe('runKbVectorShadow (log-only, never throws)', () => {
     );
     expect(out).toEqual({ ok: true, count: 0, topChunkIds: [] });
   });
+
+  it('logs hybrid/RRF comparison against keyword candidates (no_reply_impact)', async () => {
+    const logs: string[] = [];
+    const out = await runKbVectorShadow(
+      {
+        tenantId: TENANT,
+        conversationId: 'c1',
+        query: 'What are your prices?',
+        intentHint: 'PRICING',
+        keywordCandidates: [
+          { chunkId: 'ch2', score: 0.8 },
+          { chunkId: 'kwOnly', score: 0.3 },
+        ],
+      },
+      {
+        supabase: makeSupabaseStub({
+          rpcRows: [
+            { chunk_id: 'ch1', document_id: 'd1', title: 'Pricing', source: 'manual', content: 'Basic $29', metadata: {}, document_updated_at: null, vector_score: 0.42 },
+            { chunk_id: 'ch2', document_id: 'd1', title: 'Pricing', source: 'manual', content: 'Pro $79', metadata: {}, document_updated_at: null, vector_score: 0.26 },
+          ],
+        }),
+        embeddingClientFactory: embeddingFactory,
+        logger: { log: (m) => logs.push(m), warn: (m) => logs.push(m) },
+      },
+    );
+    expect(out.ok).toBe(true);
+    const line = logs.find((l) => l.includes('hybridTop'));
+    expect(line).toBeTruthy();
+    const parsed = JSON.parse(line as string);
+    expect(parsed.no_reply_impact).toBe(true);
+    expect(parsed.rrfK).toBe(60);
+    expect(parsed.keywordCount).toBe(2);
+    expect(parsed.vectorCount).toBe(2);
+    expect(parsed.overlapCount).toBe(1); // ch2 in both
+    // ch1 is vector-only; kwOnly is keyword-only.
+    expect(JSON.parse(parsed.vectorOnlyChunkIds)).toEqual(['ch1']);
+    expect(JSON.parse(parsed.keywordOnlyChunkIds)).toEqual(['kwOnly']);
+    // Hybrid list fuses both paths.
+    const hybridIds = JSON.parse(parsed.hybridTop).map((h: { chunkId: string }) => h.chunkId).sort();
+    expect(hybridIds).toEqual(['ch1', 'ch2', 'kwOnly'].sort());
+  });
+
+  it('reuses the injected query-embedding cache and never caches empty embeddings', async () => {
+    let embedCalls = 0;
+    const countingFactory = () => ({
+      embedTexts: async (texts: string[]) => {
+        embedCalls += 1;
+        return texts.map(() => ({ embedding: new Array(1536).fill(0.01) }));
+      },
+    });
+    const store = new Map<string, number[]>();
+    const cache = {
+      get: (k: string) => store.get(k),
+      set: (k: string, v: number[]) => void store.set(k, v),
+    };
+    const deps = {
+      supabase: makeSupabaseStub({ rpcRows: [] }),
+      embeddingClientFactory: countingFactory,
+      queryEmbeddingCache: cache,
+      logger: silentLogger,
+    };
+
+    await runKbVectorShadow({ tenantId: TENANT, query: 'same query' }, deps);
+    await runKbVectorShadow({ tenantId: TENANT, query: 'same query' }, deps);
+    // Second identical query must hit the cache -> only one embed call.
+    expect(embedCalls).toBe(1);
+    expect(store.size).toBe(1);
+  });
+
+  it('does not cache empty embeddings (error not memoized)', async () => {
+    const store = new Map<string, number[]>();
+    const cache = {
+      get: (k: string) => store.get(k),
+      set: (k: string, v: number[]) => void store.set(k, v),
+    };
+    const out = await runKbVectorShadow(
+      { tenantId: TENANT, query: 'q' },
+      {
+        supabase: makeSupabaseStub({ rpcRows: [] }),
+        embeddingClientFactory: () => ({ embedTexts: async () => [{ embedding: [] }] }),
+        queryEmbeddingCache: cache,
+        logger: silentLogger,
+      },
+    );
+    expect(out).toEqual({ ok: false, reason: 'query_embedding_empty' });
+    expect(store.size).toBe(0);
+  });
 });

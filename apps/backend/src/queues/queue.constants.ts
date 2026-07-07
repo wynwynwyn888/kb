@@ -34,6 +34,10 @@ export const QUEUES = {
 
   // Unreplied inbound scanner (background safety net)
   UNREPLIED_SCANNER: 'unreplied-scanner',
+
+  // RAG shadow lane: log-only vector retrieval comparison (fire-and-forget,
+  // fail-closed, default OFF). NEVER influences reply content/latency/errors.
+  KB_VECTOR_SHADOW: 'kb-vector-shadow',
 } as const;
 
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];
@@ -128,6 +132,16 @@ export const queueConfig: Record<QueueName, {
     },
   },
   [QUEUES.UNREPLIED_SCANNER]: {
+    defaultJobOptions: {
+      attempts: 1,
+      backoff: { type: 'fixed', delay: 0 },
+      removeOnComplete: true,
+      removeOnFail: true,
+    },
+  },
+  [QUEUES.KB_VECTOR_SHADOW]: {
+    // Log-only diagnostic lane. Never retried (a stale shadow comparison has no
+    // value) and job records are discarded so the queue never grows unbounded.
     defaultJobOptions: {
       attempts: 1,
       backoff: { type: 'fixed', delay: 0 },

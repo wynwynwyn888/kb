@@ -142,6 +142,8 @@ export class ConversationResetService implements OnModuleInit {
     tenantId: string;
     source: BotResetSource;
     resetCommand?: string;
+    /** Prefer the actual inbound command row timestamp so memory reset ordering matches persisted chat history. */
+    resetAtIso?: string;
   }): Promise<{
     memoryResetAt: string;
     resetVersion: number;
@@ -163,7 +165,7 @@ export class ConversationResetService implements OnModuleInit {
         ? { ...(conv.metadata as Record<string, unknown>) }
         : {};
     const prevPolicy = parseAisbpPolicyState(prevMeta);
-    const resetAt = new Date().toISOString();
+    const resetAt = params.resetAtIso?.trim() || new Date().toISOString();
     const nextPolicy = policyStateAfterBotReset(prevPolicy, resetAt);
     let merged = mergePolicyIntoConversationMetadata(prevMeta, nextPolicy);
     merged = stripAisbpBookingFromMetadata(merged);

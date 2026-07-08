@@ -748,6 +748,7 @@ describe('InboundMessageProcessor', () => {
         tenantId: 'tenant-1',
         source: 'chat_command',
         resetCommand: '/new',
+        resetAtIso: '2026-01-01T00:00:02.000Z',
       }),
     );
     expect(mockResetService.clearHandoverAfterAllowedReset).toHaveBeenCalledWith(CONV_ID, 'tenant-1');

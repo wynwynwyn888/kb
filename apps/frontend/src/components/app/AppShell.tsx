@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import type { CSSProperties, ReactNode } from 'react';
-import { Suspense, useEffect, useMemo, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import { WorkspaceSwitcher } from '@/components/app/WorkspaceSwitcher';
 import { BrandLogo } from '@/components/app/BrandLogo';
@@ -165,14 +165,6 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [groupOpen, setGroupOpen] = useState<Record<string, boolean>>({});
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const isMobile = useMediaQuery(MOBILE_NAV_BP);
-  const groupActiveByLabel = useMemo(() => {
-    const m: Record<string, boolean> = {};
-    for (const n of tenantNavNodes) {
-      if (n.kind === 'group') m[n.label] = n.match(pathname);
-    }
-    return m;
-  }, [tenantNavNodes, pathname]);
-
   useEffect(() => {
     if (!isMobile) setMobileNavOpen(false);
   }, [isMobile]);
@@ -317,7 +309,12 @@ export function AppShell({ children }: { children: ReactNode }) {
                     <div key={node.label} style={{ display: 'flex', flexDirection: 'column', gap: '0.15rem' }}>
                       <button
                         type="button"
-                        onClick={() => setGroupOpen(s => ({ ...s, [node.label]: !(s[node.label] ?? groupActiveByLabel[node.label] ?? false) }))}
+                        onClick={() => {
+                          setGroupOpen(s => ({ ...s, [node.label]: true }));
+                          if (pathname !== node.overviewHref) {
+                            router.push(node.overviewHref);
+                          }
+                        }}
                         style={tenantNavGroupButtonStyle(groupActive)}
                         aria-expanded={isOpen}
                         aria-controls={`tenant-nav-group-${node.label}`}

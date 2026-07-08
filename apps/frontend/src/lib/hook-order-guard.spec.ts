@@ -7,16 +7,16 @@ function read(rel: string): string {
 }
 
 describe('Rules of Hooks — no hooks after auth/layout early returns', () => {
-  it('AppShell calls useState and useMemo before loading/user early return', () => {
+  it('AppShell calls hooks before loading/user early return', () => {
     const s = read('src/components/app/AppShell.tsx');
     const early = s.indexOf('if (loading || !user || !token)');
     const useStateIdx = s.indexOf('const [groupOpen, setGroupOpen]');
-    const useMemoIdx = s.indexOf('const groupActiveByLabel = useMemo');
+    const useEffectIdx = s.indexOf('useEffect(() => {');
     expect(early).toBeGreaterThan(-1);
     expect(useStateIdx).toBeGreaterThan(-1);
-    expect(useMemoIdx).toBeGreaterThan(-1);
+    expect(useEffectIdx).toBeGreaterThan(-1);
     expect(useStateIdx).toBeLessThan(early);
-    expect(useMemoIdx).toBeLessThan(early);
+    expect(useEffectIdx).toBeLessThan(early);
   });
 
   it('TenantWorkspaceGate calls useEffect before incomplete-URL early return', () => {

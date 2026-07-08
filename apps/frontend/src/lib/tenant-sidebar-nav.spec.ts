@@ -8,6 +8,7 @@ describe('tenant sidebar nav', () => {
     const aiAgent = nodes.find(n => n.kind === 'group' && n.label === 'AI Agent');
     if (!aiAgent || aiAgent.kind !== 'group') throw new Error('AI Agent group missing');
     expect(aiAgent.children.map(c => c.label)).toEqual(['Profiles', 'Instructions']);
+    expect(aiAgent.overviewHref).toBe(`/app/tenant/${tid}/assistant`);
   });
 
   it('shows Automation as top-level group with Tagging/Follow-up/Human Escalation', () => {
@@ -16,6 +17,7 @@ describe('tenant sidebar nav', () => {
     const automation = nodes.find(n => n.kind === 'group' && n.label === 'Automation');
     if (!automation || automation.kind !== 'group') throw new Error('Automation group missing');
     expect(automation.children.map(c => c.label)).toEqual(['Tagging', 'Follow-up', 'Human Escalation']);
+    expect(automation.overviewHref).toBe(`/app/tenant/${tid}/automation`);
     expect(automation.children[0]?.href).toBe(`/app/tenant/${tid}/automation/tagging`);
   });
 

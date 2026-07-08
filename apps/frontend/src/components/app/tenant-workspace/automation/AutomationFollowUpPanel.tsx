@@ -189,7 +189,7 @@ export function AutomationFollowUpPanel() {
       </SectionCard>
 
       <SectionCard
-        title="Follow-up assistant"
+        title="Follow-up AI Agent"
         subtitle="Configure what to send when a contact stops replying."
         accent="muted"
       >
@@ -207,7 +207,7 @@ export function AutomationFollowUpPanel() {
                 checked={followUp.enabled}
                 onChange={e => setFollowUp({ ...followUp, enabled: e.target.checked })}
               />
-              <span style={{ fontWeight: 600 }}>Enable follow-up assistant</span>
+              <span style={{ fontWeight: 600 }}>Enable follow-up AI Agent</span>
             </label>
 
             <label style={{ display: 'block', fontSize: '0.8rem', marginBottom: '0.85rem' }}>

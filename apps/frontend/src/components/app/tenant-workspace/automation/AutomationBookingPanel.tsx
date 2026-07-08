@@ -679,7 +679,7 @@ export function AutomationBookingPanel() {
       {loadErr ? <ErrorBanner message={loadErr} /> : null}
 
       {bookingLoading || !booking ? (
-        <SectionCard title="Booking assistant" subtitle="Loading…" accent="muted">
+        <SectionCard title="Booking AI Agent" subtitle="Loading…" accent="muted">
           <LoadingBlock />
         </SectionCard>
       ) : (
@@ -690,7 +690,7 @@ export function AutomationBookingPanel() {
             accent="muted"
           >
             <p style={{ margin: 0, fontSize: '0.86rem', color: 'var(--aisbp-text-secondary)', lineHeight: 1.55 }}>
-              The active assistant uses these settings when replying.
+              The active AI Agent uses these settings when replying.
             </p>
           </SectionCard>
 
@@ -1069,7 +1069,7 @@ export function AutomationBookingPanel() {
                 checked={booking.enabled}
                 onChange={e => setBooking({ ...booking, enabled: e.target.checked })}
               />
-              <span style={{ fontWeight: 600 }}>Enable booking assistant</span>
+              <span style={{ fontWeight: 600 }}>Enable booking AI Agent</span>
             </label>
 
             <label style={{ ...mvpLabelStyle, display: 'block', marginBottom: '0.85rem' }}>

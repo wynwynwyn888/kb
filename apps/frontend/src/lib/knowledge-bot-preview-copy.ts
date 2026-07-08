@@ -2,4 +2,4 @@
 export const KNOWLEDGE_BOT_PREVIEW_SUMMARY = 'Preview bot reply';
 
 export const KNOWLEDGE_BOT_PREVIEW_DESCRIPTION =
-  'Uses your workspace prompt and the active assistant profile (including which vaults it may search). Live customer replies follow Bot Instructions — not the vault selected on this page.';
+  'Uses your workspace prompt and the active AI Agent profile (including which vaults it may search). Live customer replies follow AI Agent Instructions — not the vault selected on this page.';

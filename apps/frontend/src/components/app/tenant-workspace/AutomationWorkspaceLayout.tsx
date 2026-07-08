@@ -94,11 +94,11 @@ export function AutomationWorkspaceLayout({
             maxWidth: '42rem',
           }}
         >
-          Automation currently applies across this workspace. All assistant profiles in this workspace use the same tagging,
+          Automation currently applies across this workspace. All AI Agent profiles in this workspace use the same tagging,
           booking, follow-up, and handover rules.
         </p>
         <p style={{ fontSize: '0.82rem', color: 'var(--aisbp-muted, #64748b)', margin: '0.5rem 0 0' }}>
-          <strong style={{ color: 'var(--aisbp-text-secondary, #334155)' }}>Active assistant:</strong>{' '}
+          <strong style={{ color: 'var(--aisbp-text-secondary, #334155)' }}>Active AI Agent:</strong>{' '}
           {activeProfileName ?? '—'}
         </p>
         {/* TODO: When profile-scoped automation is implemented, replace workspace-level copy and wire automation settings through assistant_profile_id with tenant fallback. */}

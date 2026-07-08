@@ -11,6 +11,7 @@ import { buildTenantPromptFingerprint } from '../../lib/tenant-bot-profile-promp
 import type { MemoryEntry } from '../orchestration/dto/memory-entry';
 import type { RetrievalChunk } from '../kb/dto/retrieval.dto';
 import { formatLiveCustomerDraftForPreview } from '../../lib/live-outbound-preview';
+import { classifyConversationIntent } from '../conversation-policy/conversation-intent';
 
 function buildStackedSystemPrompt(
   agencyPrompt: string | null | undefined,
@@ -27,6 +28,15 @@ function buildStackedSystemPrompt(
 }
 
 const BOT_TEST_MAX_HISTORY_MESSAGES = 12;
+const RECENT_ASSISTANT_BOOKING_URL_RE =
+  /https?:\/\/\S*(?:book|booking|appointment|calendar|schedule|calendly|meet|session)\S*/i;
+
+function recentAssistantHistoryHasBookingUrl(memory: MemoryEntry[]): boolean {
+  return memory
+    .filter(m => m.role === 'assistant')
+    .slice(-6)
+    .some(m => RECENT_ASSISTANT_BOOKING_URL_RE.test(m.content ?? ''));
+}
 
 @Injectable()
 export class BotTestService {
@@ -141,6 +151,14 @@ export class BotTestService {
       memory: hist,
       kbContext: kbChunks,
       tenantGenerationModelOverride: modelUsed,
+      policyContext: {
+        latestIntent: classifyConversationIntent(msg),
+        resolvedSelection: null,
+        conversationStateSummary: hist.length > 0 ? 'preview_continuation' : 'preview_fresh',
+        menuSelectionActive: false,
+        priorAssistantMessageCount: hist.filter(h => h.role === 'assistant').length,
+        recentAssistantBookingUrlSent: recentAssistantHistoryHasBookingUrl(hist),
+      },
       ...(Number.isFinite(subTemp) ? { temperature: subTemp } : {}),
       ...(subMax != null && subMax > 0 ? { maxTokens: subMax } : {}),
     };

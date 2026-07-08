@@ -22,7 +22,9 @@ import { deriveConversationIdentity } from '../../lib/conversation-identity';
 import { resolveGhlInboundChannel } from '../../lib/ghl-channel-routing';
 import {
   filterInboundRowsToBurstWindow,
+  inboundBurstLookbackMs,
   resolveInboundDebounceMs,
+  type InboundRowForBurst,
 } from '../../lib/inbound-burst-batch';
 import { excludeChatResetInboundRows, matchChatResetCommand } from '../../lib/chat-reset-command';
 import { computeOrchestrateQueueWaitMs } from '../../lib/orchestrate-queue-timing';
@@ -69,6 +71,19 @@ function mapOutcomeToDecisionStatus(outcome: string): InboundDecisionStatus | nu
       return 'SKIP_HUMAN_TAKEOVER';
     default: return null;
   }
+}
+
+function buildBurstRowsOldestFirst(
+  rowsNewestFirst: InboundRowForBurst[],
+): Array<{ content: string; created_at: string }> {
+  if (!rowsNewestFirst.length) return [];
+  const newest = new Date(rowsNewestFirst[0]!.created_at).getTime();
+  const cutoff = newest - inboundBurstLookbackMs();
+  return [...rowsNewestFirst]
+    .reverse()
+    .filter(r => new Date(r.created_at).getTime() >= cutoff)
+    .map(r => ({ content: String(r.content ?? '').trim(), created_at: r.created_at }))
+    .filter(r => r.content.length > 0);
 }
 
 export interface InboundMessageJobData {
@@ -1211,7 +1226,8 @@ export class InboundMessageProcessor extends WorkerHost {
       pipelineWallStartMs,
       orchestrateEnqueuedAtMs,
     );
-    const { orchestrationBatch, resetDetectionBatch } = await this.fetchRecentInboundBatches(conversationId);
+    const { orchestrationBatch, resetDetectionBatch, resetDetectionRows } =
+      await this.fetchRecentInboundBatches(conversationId);
     const latestInbound = await this.fetchLatestInboundOrchestrationContext(conversationId);
     const latestText = orchestrationBatch.length ? orchestrationBatch[orchestrationBatch.length - 1]! : '';
 
@@ -1254,6 +1270,7 @@ export class InboundMessageProcessor extends WorkerHost {
       inboundWebhookTimestampIso: job.data.inboundWebhookReceivedAtIso ?? new Date().toISOString(),
       recentInboundBatch: orchestrationBatch,
       resetDetectionBatch,
+      resetDetectionRows,
       contactDisplayName,
       contactPhone,
       contactEmail,
@@ -1281,6 +1298,8 @@ export class InboundMessageProcessor extends WorkerHost {
     recentInboundBatch?: string[];
     /** Raw burst-window lines (oldest→newest), including `/new`, so trailing reset commands still run */
     resetDetectionBatch?: string[];
+    /** Raw burst-window rows (oldest→newest), including `/new`, for reset timestamp anchoring. */
+    resetDetectionRows?: Array<{ content: string; created_at: string }>;
     contactDisplayName?: string;
     contactPhone?: string;
     contactEmail?: string;
@@ -1305,6 +1324,7 @@ export class InboundMessageProcessor extends WorkerHost {
       inboundWebhookTimestampIso,
       recentInboundBatch,
       resetDetectionBatch,
+      resetDetectionRows,
       contactDisplayName,
       contactPhone,
       contactEmail,
@@ -1325,6 +1345,7 @@ export class InboundMessageProcessor extends WorkerHost {
         latestInboundText,
         recentInboundBatch,
         resetDetectionBatch,
+        resetDetectionRows,
       })
     ) {
       this.logger.log(
@@ -1565,9 +1586,15 @@ export class InboundMessageProcessor extends WorkerHost {
     latestInboundText: string;
     recentInboundBatch?: string[];
     resetDetectionBatch?: string[];
+    resetDetectionRows?: Array<{ content: string; created_at: string }>;
   }): Promise<boolean> {
-    const latestTrimmed =
-      params.resetDetectionBatch && params.resetDetectionBatch.length > 0
+    const latestResetRow =
+      params.resetDetectionRows && params.resetDetectionRows.length > 0
+        ? params.resetDetectionRows[params.resetDetectionRows.length - 1]
+        : null;
+    const latestTrimmed = latestResetRow
+      ? String(latestResetRow.content ?? '').trim()
+      : params.resetDetectionBatch && params.resetDetectionBatch.length > 0
         ? String(params.resetDetectionBatch[params.resetDetectionBatch.length - 1] ?? '').trim()
         : params.recentInboundBatch && params.recentInboundBatch.length > 0
           ? String(params.recentInboundBatch[params.recentInboundBatch.length - 1] ?? '').trim()
@@ -1612,6 +1639,7 @@ export class InboundMessageProcessor extends WorkerHost {
       tenantId: params.tenantId,
       source: 'chat_command',
       resetCommand: cmd,
+      ...(latestResetRow?.created_at ? { resetAtIso: latestResetRow.created_at } : {}),
     });
 
     await this.conversationResetService.clearHandoverAfterAllowedReset(params.conversationId, params.tenantId);
@@ -1639,6 +1667,7 @@ export class InboundMessageProcessor extends WorkerHost {
   private async fetchRecentInboundBatches(conversationId: string): Promise<{
     orchestrationBatch: string[];
     resetDetectionBatch: string[];
+    resetDetectionRows: Array<{ content: string; created_at: string }>;
   }> {
     const { data, error } = await this.supabase
       .from('messages')
@@ -1649,13 +1678,14 @@ export class InboundMessageProcessor extends WorkerHost {
       .order('created_at', { ascending: false })
       .limit(50);
     if (error || !data?.length) {
-      return { orchestrationBatch: [], resetDetectionBatch: [] };
+      return { orchestrationBatch: [], resetDetectionBatch: [], resetDetectionRows: [] };
     }
     const rows = data as { created_at: string; content?: string | null }[];
     const resetDetectionBatch = filterInboundRowsToBurstWindow(rows);
+    const resetDetectionRows = buildBurstRowsOldestFirst(rows);
     const withoutResetCmd = excludeChatResetInboundRows(rows);
     const orchestrationBatch = filterInboundRowsToBurstWindow(withoutResetCmd);
-    return { orchestrationBatch, resetDetectionBatch };
+    return { orchestrationBatch, resetDetectionBatch, resetDetectionRows };
   }
 
   /**

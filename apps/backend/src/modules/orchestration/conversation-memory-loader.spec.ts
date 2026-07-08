@@ -6,6 +6,7 @@ import {
 } from './conversation-memory-loader';
 
 const mockLimit = jest.fn();
+const mockGt = jest.fn();
 let mockRows: Array<Record<string, unknown>> = [];
 
 jest.mock('../../lib/supabase', () => ({
@@ -13,6 +14,15 @@ jest.mock('../../lib/supabase', () => ({
     from: () => ({
       select: () => ({
         eq: () => ({
+          gt: mockGt.mockImplementation(() => ({
+            order: () => ({
+              limit: mockLimit.mockImplementation(() =>
+                Promise.resolve({
+                  data: mockRows,
+                  error: null,
+                })),
+            }),
+          })),
           order: () => ({
             limit: mockLimit.mockImplementation(() =>
               Promise.resolve({
@@ -90,5 +100,43 @@ describe('ConversationMemoryLoader', () => {
     ]);
     expect(mem.entries[1]?.role).toBe('assistant');
     expect(mem.turnCount).toBe(2);
+  });
+
+  it('scopes memory after /new and removes reset command/confirmation rows from prompt history', async () => {
+    const now = Date.now();
+    const resetAt = new Date(now - 20_000).toISOString();
+    mockRows = [
+      {
+        id: 'm5',
+        direction: 'INBOUND',
+        sender: 'CONTACT',
+        content: 'Hi',
+        contentType: 'TEXT',
+        created_at: new Date(now - 5_000).toISOString(),
+      },
+      {
+        id: 'm4',
+        direction: 'OUTBOUND',
+        sender: 'AI',
+        content: 'Started a fresh chat for this conversation.\n\nYou can test from here.',
+        contentType: 'TEXT',
+        created_at: new Date(now - 10_000).toISOString(),
+      },
+      {
+        id: 'm3',
+        direction: 'INBOUND',
+        sender: 'CONTACT',
+        content: '/new',
+        contentType: 'TEXT',
+        created_at: resetAt,
+      },
+    ];
+
+    const loader = new ConversationMemoryLoader();
+    const mem = await loader.loadMemory('conv_reset', { memoryResetAfterIso: resetAt });
+
+    expect(mockGt).toHaveBeenCalledWith('created_at', resetAt);
+    expect(mem.entries.map(e => e.content)).toEqual(['Hi']);
+    expect(mem.turnCount).toBe(1);
   });
 });

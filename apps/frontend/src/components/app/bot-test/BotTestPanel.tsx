@@ -10,6 +10,7 @@ const SURFACE_CHAT = 'var(--aisbp-surface-muted, rgba(248, 250, 252, 0.65))';
 const BORDER_SOFT = 'var(--aisbp-border, rgba(226, 232, 240, 0.9))';
 
 const BOT_TEST_MAX_HISTORY_MESSAGES = 12;
+const BOT_TEST_RESET_COMMAND_RE = /^\/(?:new|reset|startover)$/i;
 
 const shellDefault: React.CSSProperties = {
   display: 'flex',
@@ -142,6 +143,15 @@ export function BotTestPanel(props: {
     e.preventDefault();
     const t = input.trim();
     if (!t || !token) return;
+
+    if (BOT_TEST_RESET_COMMAND_RE.test(t)) {
+      setMsgs([]);
+      setInput('');
+      setPanelBanner(null);
+      setSending(false);
+      return;
+    }
+
     const userLine = t;
     const prior = msgs
       .filter(m => (m.role === 'user' || m.role === 'assistant') && !m.error && m.content.trim())
@@ -264,7 +274,9 @@ export function BotTestPanel(props: {
         dangerouslySetInnerHTML={{
           __html: `@keyframes botTestTyping{0%,100%{opacity:0.35}50%{opacity:1}}
 .aisbp-bot-test-input::placeholder{color:var(--aisbp-muted,#94a3b8);opacity:1}
-.aisbp-bot-test-input::-webkit-input-placeholder{color:var(--aisbp-muted,#94a3b8)}`,
+.aisbp-bot-test-input::-webkit-input-placeholder{color:var(--aisbp-muted,#94a3b8)}
+.aisbp-bot-test-input{color:var(--aisbp-text,#0f172a)}
+@media (prefers-color-scheme: dark){.aisbp-bot-test-input{color:var(--aisbp-text,#f8fafc)}}`,
         }}
       />
       <div
@@ -488,7 +500,6 @@ export function BotTestPanel(props: {
                 fontSize: '0.875rem',
                 padding: '10px 4px',
                 outline: 'none',
-                color: '#0f172a',
               }}
             />
             <button

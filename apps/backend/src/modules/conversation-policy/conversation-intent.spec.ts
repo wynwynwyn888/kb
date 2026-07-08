@@ -39,6 +39,9 @@ describe('classifyConversationIntent', () => {
     expect(classifyConversationIntent('speak to staff')).toBe('HUMAN_HANDOVER');
     expect(classifyConversationIntent('can I talk to human')).toBe('HUMAN_HANDOVER');
     expect(classifyConversationIntent('can i talk to human pls')).toBe('HUMAN_HANDOVER');
+    expect(classifyConversationIntent('ok, can i request human')).toBe('HUMAN_HANDOVER');
+    expect(classifyConversationIntent('i need a human')).toBe('HUMAN_HANDOVER');
+    expect(classifyConversationIntent('want manager')).toBe('HUMAN_HANDOVER');
     expect(classifyConversationIntent('connect me to team')).toBe('HUMAN_HANDOVER');
     expect(classifyConversationIntent('get someone to contact me')).toBe('HUMAN_HANDOVER');
   });

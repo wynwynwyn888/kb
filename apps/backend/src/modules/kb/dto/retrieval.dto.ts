@@ -101,6 +101,10 @@ export interface RetrievalMeta {
   topScores?: number[];
   /** Distinct document ids for chunks passed to the model. */
   documentIds?: string[];
+  /** Focused subqueries used when a customer asked multiple things in one message. */
+  kbSubqueries?: string[];
+  /** Intent labels used for the retrieval plans. */
+  kbIntentHints?: string[];
   /** Set when retrieval was skipped upstream (diagnostics only). */
   kbSkippedReason?: string;
 }

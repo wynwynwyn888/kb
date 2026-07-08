@@ -185,6 +185,104 @@ describe('ConversationOrchestrationService — KB retrieval vs assistant profile
     );
   });
 
+  it('retrieves focused KB facts for compound customer questions before policy filtering', async () => {
+    getKbAllowlist.mockResolvedValue({
+      kind: 'all',
+      kbVaultAccessMode: 'all_vaults',
+      noActiveProfile: false,
+      selectedVaultCount: 0,
+      allowedDocumentCount: null,
+    });
+    kbRetrieve.mockImplementation(({ query }: { query: string }) => {
+      if (query === 'what are your opening hours?') {
+        return Promise.resolve({
+          query,
+          chunks: [
+            {
+              chunkId: 'hours-faq',
+              documentId: 'doc-hours',
+              title: 'FAQ: what are your opening hours?',
+              source: 'faq',
+              content: 'we are open 24/7',
+              relevanceScore: 0.95,
+              metadata: {},
+            },
+          ],
+          totalConsidered: 1,
+          retrievalMode: 'keyword' as const,
+        });
+      }
+      if (query === 'where are you located?') {
+        return Promise.resolve({
+          query,
+          chunks: [
+            {
+              chunkId: 'location-faq',
+              documentId: 'doc-location',
+              title: 'FAQ: where are you located?',
+              source: 'faq',
+              content:
+                'we are serving singapore clients islandwide, there is no location constraint for us.',
+              relevanceScore: 0.94,
+              metadata: {},
+            },
+          ],
+          totalConsidered: 1,
+          retrievalMode: 'keyword' as const,
+        });
+      }
+      return Promise.resolve({
+        query,
+        chunks: [
+          {
+            chunkId: 'generic-playbook',
+            documentId: 'doc-playbook',
+            title: 'Objection Handling Playbook',
+            source: 'manual',
+            content: 'Keep replies natural and useful.',
+            relevanceScore: 0.4,
+            metadata: {},
+          },
+        ],
+        totalConsidered: 1,
+        retrievalMode: 'keyword' as const,
+      });
+    });
+
+    const retrieveKbContext = (
+      svc as unknown as {
+        retrieveKbContext: (
+          input: OrchestrationInput,
+          conversationId: string,
+          intent: ConversationIntent,
+          opts?: { retrieveQuery?: string; kbFilterIntent?: ConversationIntent; kbFilterUserMessage?: string },
+        ) => Promise<{ chunks: Array<{ chunkId: string }>; meta: { kbQuery?: string; kbSubqueries?: string[]; documentIds?: string[] } | null }>;
+      }
+    ).retrieveKbContext.bind(svc);
+
+    const compoundQuestion =
+      'if your bot is down, what is your support hours, and where is your office';
+    const out = await retrieveKbContext(makeOrchestrationInput(), 'conv-live', 'LOCATION', {
+      retrieveQuery: `${compoundQuestion}\n\n${compoundQuestion}`,
+      kbFilterIntent: 'LOCATION',
+      kbFilterUserMessage: compoundQuestion,
+    });
+
+    expect(kbRetrieve).toHaveBeenCalledTimes(3);
+    expect(kbRetrieve.mock.calls.map(call => call[0].query)).toEqual([
+      compoundQuestion,
+      'what are your opening hours?',
+      'where are you located?',
+    ]);
+    expect(out.chunks.map(chunk => chunk.chunkId)).toEqual(['hours-faq', 'location-faq']);
+    expect(out.meta?.kbQuery).toBe(compoundQuestion);
+    expect(out.meta?.kbSubqueries).toEqual([
+      'what are your opening hours?',
+      'where are you located?',
+    ]);
+    expect(out.meta?.documentIds).toEqual(['doc-hours', 'doc-location']);
+  });
+
   it('uses vector context as KB memory only when staging vector context runner succeeds', async () => {
     getKbAllowlist.mockResolvedValue({
       kind: 'all',

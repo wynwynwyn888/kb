@@ -24,14 +24,14 @@ export type ConversationIntent =
 const RE_HANDOVER_NOUN =
   /\b(human|humans|person|people|real\s*person|agent|staff|team|representative|rep|manager|owner|someone)\b/i;
 const RE_HANDOVER_VERB =
-  /\b(speak|talk|call|phone|contact|connect|transfer|escalat(e|ion)|handover|get|reach|help|assist)\b/i;
+  /\b(speak|talk|call|phone|contact|connect|transfer|escalat(e|ion)|handover|get|reach|help|assist|request|need|want)\b/i;
 const RE_HANDOVER_REQUEST =
   /\b(can\s+i|could\s+you|please|i\s+want|i\s+need|let\s+me|connect\s+me|put\s+me)\b/i;
 const RE_HANDOVER_DIRECT_REQUEST =
   /\b(human\s+agent\s+please|manager\s+please|real\s*person\s+please|someone\s+please)\b/i;
 /** Deterministic phrases — avoids requiring "please" / "can I" (e.g. "talk to human"). */
 const RE_HANDOVER_PHRASE_PRIORITIZED =
-  /\b(?:(?:talk|speak)\s+to\s+(?:a\s+)?(?:human|staff|person|someone)|can\s+i\s+(?:talk|speak)\s+to\s+(?:a\s+)?(?:human|staff|person)|could\s+i\s+(?:talk|speak)\s+to\s+(?:a\s+)?(?:human|staff|person)|connect\s+me\s+to\s+(?:the\s+)?(?:team|staff|human|someone)|get\s+someone\s+to\s+contact\s+me)\b/i;
+  /\b(?:(?:talk|speak)\s+to\s+(?:a\s+)?(?:human|staff|person|someone)|can\s+i\s+(?:talk|speak|request)\s+(?:to\s+)?(?:a\s+)?(?:human|staff|person|someone|agent|manager)|could\s+i\s+(?:talk|speak|request)\s+(?:to\s+)?(?:a\s+)?(?:human|staff|person|someone|agent|manager)|(?:request|need|want)\s+(?:a\s+)?(?:human|staff|person|someone|agent|manager)|connect\s+me\s+to\s+(?:the\s+)?(?:team|staff|human|someone)|get\s+someone\s+to\s+contact\s+me)\b/i;
 const RE_HUMAN_ONLY_SERVICE_CONTEXT =
   /\b(for\s+human|for\s+humans|human\s+(facial|shampoo|skin|food)|treat\s+humans|safe\s+for\s+humans)\b/i;
 const RE_COMPLAINT = /\b(complaint|complain|terrible|awful|horrible|angry|furious|disgusting|worst|sue|refund\s*now)\b/i;

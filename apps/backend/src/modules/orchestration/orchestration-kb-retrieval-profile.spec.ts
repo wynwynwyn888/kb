@@ -62,8 +62,11 @@ describe('ConversationOrchestrationService — KB retrieval vs assistant profile
   const getKbAllowlist = jestGlobal.fn();
 
   let svc: ConversationOrchestrationService;
+  const originalEnv = { ...process.env };
 
   beforeEach(() => {
+    process.env = { ...originalEnv };
+    delete process.env['KB_REPLY_PATH_RAG_TIMEOUT_MS'];
     jestGlobal.clearAllMocks();
     vectorContextModule.kbVectorContextEnabledForTenant.mockReturnValue(false);
     vectorContextModule.runKbVectorContext.mockReset();
@@ -84,6 +87,10 @@ describe('ConversationOrchestrationService — KB retrieval vs assistant profile
       {} as never,
       {} as never,
     );
+  });
+
+  afterAll(() => {
+    process.env = originalEnv;
   });
 
   it('retrieveKbContext calls getKbDocumentAllowlistForActiveProfile then passes allowlist into kbService.retrieve (vault A only → doc ids from A, never B)', async () => {
@@ -284,5 +291,66 @@ describe('ConversationOrchestrationService — KB retrieval vs assistant profile
     expect(out.chunks).toEqual([expect.objectContaining({ chunkId: 'kw-1' })]);
     expect(out.meta.retrievalMode).toBe('keyword');
     expect(out.meta.documentIds).toEqual(['doc-kw']);
+  });
+
+  it('fails open with empty KB context when keyword retrieval throws', async () => {
+    getKbAllowlist.mockResolvedValue({
+      kind: 'all',
+      kbVaultAccessMode: 'all_vaults',
+      noActiveProfile: false,
+      selectedVaultCount: 0,
+      allowedDocumentCount: null,
+    });
+    kbRetrieve.mockRejectedValueOnce(new Error('search backend unavailable'));
+
+    const retrieveKbContext = (
+      svc as unknown as {
+        retrieveKbContext: (
+          input: OrchestrationInput,
+          conversationId: string,
+          intent: ConversationIntent,
+          opts?: { retrieveQuery?: string; kbFilterIntent?: ConversationIntent; kbFilterUserMessage?: string },
+        ) => Promise<{ chunks: unknown[]; meta: { kbSkippedReason?: string; chunksReturned: number } | null }>;
+      }
+    ).retrieveKbContext.bind(svc);
+
+    const out = await retrieveKbContext(makeOrchestrationInput(), 'conv-live', 'PRICE', {
+      retrieveQuery: 'What are your prices?',
+      kbFilterIntent: 'PRICE',
+      kbFilterUserMessage: 'What are your prices?',
+    });
+
+    expect(out.chunks).toEqual([]);
+    expect(out.meta?.chunksReturned).toBe(0);
+    expect(out.meta?.kbSkippedReason).toBe('retrieval_error');
+  });
+
+  it('fails open with empty KB context when retrieval exceeds the reply-path budget', async () => {
+    process.env['KB_REPLY_PATH_RAG_TIMEOUT_MS'] = '250';
+    getKbAllowlist.mockImplementationOnce(() => new Promise(() => undefined));
+
+    const retrieveKbContext = (
+      svc as unknown as {
+        retrieveKbContext: (
+          input: OrchestrationInput,
+          conversationId: string,
+          intent: ConversationIntent,
+          opts?: { retrieveQuery?: string; kbFilterIntent?: ConversationIntent; kbFilterUserMessage?: string },
+        ) => Promise<{ chunks: unknown[]; meta: { kbSkippedReason?: string; chunksReturned: number } | null }>;
+      }
+    ).retrieveKbContext.bind(svc);
+
+    const startedAt = Date.now();
+    const out = await retrieveKbContext(makeOrchestrationInput(), 'conv-live', 'PRICE', {
+      retrieveQuery: 'What are your prices?',
+      kbFilterIntent: 'PRICE',
+      kbFilterUserMessage: 'What are your prices?',
+    });
+
+    expect(Date.now() - startedAt).toBeLessThan(1000);
+    expect(out.chunks).toEqual([]);
+    expect(out.meta?.chunksReturned).toBe(0);
+    expect(out.meta?.kbSkippedReason).toBe('timeout_250ms');
+    expect(kbRetrieve).not.toHaveBeenCalled();
   });
 });

@@ -101,6 +101,42 @@ import {
   TECHNICAL_OPERATOR_DEFLECTION_REPLY,
 } from '../../lib/technical-operator-input';
 
+const DEFAULT_REPLY_PATH_RAG_TIMEOUT_MS = 1200;
+const MIN_REPLY_PATH_RAG_TIMEOUT_MS = 250;
+const MAX_REPLY_PATH_RAG_TIMEOUT_MS = 3000;
+
+class KbRetrievalTimeoutError extends Error {
+  constructor(readonly timeoutMs: number) {
+    super(`KB retrieval timed out after ${timeoutMs}ms`);
+    this.name = 'KbRetrievalTimeoutError';
+  }
+}
+
+function replyPathRagTimeoutMs(): number {
+  const raw = Number(process.env['KB_REPLY_PATH_RAG_TIMEOUT_MS']);
+  if (!Number.isFinite(raw)) return DEFAULT_REPLY_PATH_RAG_TIMEOUT_MS;
+  return Math.max(
+    MIN_REPLY_PATH_RAG_TIMEOUT_MS,
+    Math.min(MAX_REPLY_PATH_RAG_TIMEOUT_MS, Math.round(raw)),
+  );
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new KbRetrievalTimeoutError(timeoutMs)), timeoutMs);
+    promise.then(
+      value => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      error => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
 @Injectable()
 export class ConversationOrchestrationService {
   private readonly logger = new Logger(ConversationOrchestrationService.name);
@@ -1221,150 +1257,182 @@ export class ConversationOrchestrationService {
       kbFilterUserMessage?: string;
     },
   ): Promise<{ chunks: RetrievalChunk[]; meta: RetrievalMeta | null }> {
+    const retrieveQuery =
+      (opts?.retrieveQuery ?? input.incomingMessage.messageContent ?? '').trim() ||
+      (input.incomingMessage.messageContent ?? '').trim();
+    const timeoutMs = replyPathRagTimeoutMs();
     try {
-      const retrieveQuery =
-        (opts?.retrieveQuery ?? input.incomingMessage.messageContent ?? '').trim() ||
-        (input.incomingMessage.messageContent ?? '').trim();
-
-      const kbFilter = await this.botProfiles.getKbDocumentAllowlistForActiveProfile(input.tenantId);
-      let documentIdAllowlist: string[] | null | undefined = undefined;
-      if (kbFilter.kind === 'allowlist') {
-        documentIdAllowlist = kbFilter.documentIds;
-        this.logger.debug(
-          `kbRetrievalVaultAccess tenant=${input.tenantId} conversation=${conversationId} ` +
-            `kbVaultAccessMode=${kbFilter.kbVaultAccessMode} selectedVaultCount=${kbFilter.selectedVaultCount} ` +
-            `allowedDocumentCount=${kbFilter.allowedDocumentCount}`,
-        );
-      } else if (kbFilter.kind === 'none') {
-        documentIdAllowlist = [];
-        if (kbFilter.reason === 'profileKnowledgeVaultsEmpty') {
-          this.logger.warn(
-            `profileKnowledgeVaultsEmpty tenant=${input.tenantId} conversation=${conversationId} ` +
-              `kbVaultAccessMode=selected_vaults selectedVaultCount=0 allowedDocumentCount=0`,
-          );
-        } else {
-          this.logger.warn(
-            `KB retrieval skipped tenant=${input.tenantId} conversation=${conversationId} ` +
-              `reason=${kbFilter.reason} kbVaultAccessMode=selected_vaults ` +
-              `selectedVaultCount=${kbFilter.selectedVaultCount} allowedDocumentCount=0`,
-          );
-        }
-      } else {
-        this.logger.debug(
-          `kbRetrievalVaultAccess tenant=${input.tenantId} conversation=${conversationId} ` +
-            `kbVaultAccessMode=${kbFilter.kbVaultAccessMode} noActiveProfile=${kbFilter.noActiveProfile} ` +
-            `selectedVaultCount=0 allowedDocumentCount=null`,
-        );
-      }
-
-      const kbIntentHint =
-        latestIntent !== 'UNKNOWN' ? latestIntent : inferKbRetrievalIntentHint(retrieveQuery) ?? undefined;
-
-      this.logger.debug(
-        `kbRetrieveIntentHint tenant=${input.tenantId} conversation=${conversationId} ` +
-          `classifiedIntent=${latestIntent} intentHint=${kbIntentHint ?? 'none'} ` +
-          `retrieveQueryPreview=${JSON.stringify(
-            safeTextPreviewForLog(retrieveQuery, { hashSalt: 'retrieveQueryPreview' }),
-          )}`,
+      return await withTimeout(
+        this.retrieveKbContextWithinBudget(input, conversationId, latestIntent, {
+          ...opts,
+          retrieveQuery,
+        }),
+        timeoutMs,
       );
-
-      let result = await this.kbService.retrieve({
-        tenantId: input.tenantId,
-        conversationId,
-        query: retrieveQuery,
-        topK: 5,
-        intentHint: kbIntentHint,
-        documentIdAllowlist,
-      });
-
-      // RAG shadow lane (diagnostic-only, default OFF, fail-closed per tenant).
-      // Enqueue a fire-and-forget job onto the dedicated KB_VECTOR_SHADOW queue.
-      // ALL OpenAI/RPC work happens in that worker, NEVER inline on this reply
-      // request. The enqueue is non-awaited and its failure is swallowed, so it
-      // can never inject/reorder/replace/delay/error the reply. Flag-off => no
-      // enqueue and a byte-identical `result`.
-      if (kbVectorShadowEnabledForTenant(input.tenantId) && this.kbVectorShadowQueue) {
-        const keywordCandidates = result.chunks.map((c) => ({
-          chunkId: c.chunkId,
-          score: c.relevanceScore,
-        }));
-        void this.kbVectorShadowQueue
-          .add('kb-vector-shadow', {
-            tenantId: input.tenantId,
-            conversationId,
-            query: retrieveQuery,
-            intentHint: kbIntentHint,
-            documentIdAllowlist: documentIdAllowlist ?? null,
-            keywordCandidates,
-          })
-          .catch(() => undefined);
-      }
-
-      let usedVectorContext = false;
-      if (kbVectorContextEnabledForTenant(input.tenantId)) {
-        const vectorContext = await runKbVectorContext(
-          { tenantId: input.tenantId, conversationId, query: retrieveQuery, documentIdAllowlist, topK: 5 },
-          { logger: this.logger },
-        );
-        if (vectorContext.ok) {
-          result = vectorContext.result;
-          usedVectorContext = true;
-        } else {
-          this.logger.log(
-            `kbVectorContextFallback tenant=${input.tenantId} conversation=${conversationId} reason=${vectorContext.reason}`,
-          );
-        }
-      }
-
-      const filterIntent = opts?.kbFilterIntent ?? latestIntent;
-      const filterUserMessage = (opts?.kbFilterUserMessage ?? input.incomingMessage.messageContent ?? '').trim();
-
-      const { chunks: filteredChunks, rejections } = usedVectorContext
-        ? { chunks: result.chunks, rejections: [] }
-        : filterKbChunksForPolicy(
-            filterIntent,
-            filterUserMessage,
-            result.chunks,
-            { menuKbAnchor: opts?.menuKbAnchor },
-          );
-      for (const r of rejections) {
-        this.logger.log(
-          `KB rejected: reason=${r.reason}, latestMessage_class=${r.queryClass}, kbTitle=${r.kbTitleShort}`,
-        );
-      }
-
-      const retrievedSectionTitles = filteredChunks.map(c => {
-        const st = c.metadata['sectionTitle'];
-        return typeof st === 'string' && st.trim() ? st.trim() : '';
-      });
-      const topScores = filteredChunks.map(c => c.relevanceScore);
-      const documentIds = [...new Set(filteredChunks.map(c => c.documentId))];
-
-      const meta: RetrievalMeta = {
-        chunksReturned: filteredChunks.length,
-        chunksConsidered: result.totalConsidered,
-        retrievalMode: result.retrievalMode,
-        topScore: filteredChunks[0]?.relevanceScore ?? result.chunks[0]?.relevanceScore ?? null,
-        kbQuery: retrieveQuery,
-        retrievedSectionTitles,
-        topScores,
-        documentIds,
-      };
-
-      this.logger.log(
-        `KB context retrieved: kbQuery=${JSON.stringify(
-          safeTextPreviewForLog(retrieveQuery, { hashSalt: 'kbQuery' }),
-        )} selectedContextCount=${filteredChunks.length} retrievedChunkCount=${filteredChunks.length} ` +
-          `retrievedSectionTitles=${JSON.stringify(retrievedSectionTitles)} topScores=${JSON.stringify(topScores)} ` +
-          `retrievedDocumentIds=${JSON.stringify(documentIds)}`,
-      );
-
-      return { chunks: filteredChunks, meta };
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'unknown';
-      this.logger.warn(`KB retrieval failed for conversation=${conversationId}: ${msg}`);
-      return { chunks: [], meta: null };
+      const kbSkippedReason =
+        error instanceof KbRetrievalTimeoutError ? `timeout_${timeoutMs}ms` : 'retrieval_error';
+      this.logger.warn(
+        `KB retrieval fail-open for conversation=${conversationId}: reason=${kbSkippedReason} error=${msg}`,
+      );
+      return {
+        chunks: [],
+        meta: {
+          chunksReturned: 0,
+          chunksConsidered: 0,
+          retrievalMode: 'hybrid',
+          topScore: null,
+          kbQuery: retrieveQuery.slice(0, 240),
+          kbSkippedReason,
+        },
+      };
     }
+  }
+
+  private async retrieveKbContextWithinBudget(
+    input: OrchestrationInput,
+    conversationId: string,
+    latestIntent: ConversationIntent,
+    opts: {
+      retrieveQuery: string;
+      menuKbAnchor?: string;
+      kbFilterIntent?: ConversationIntent;
+      kbFilterUserMessage?: string;
+    },
+  ): Promise<{ chunks: RetrievalChunk[]; meta: RetrievalMeta | null }> {
+    const retrieveQuery = opts.retrieveQuery;
+    const kbFilter = await this.botProfiles.getKbDocumentAllowlistForActiveProfile(input.tenantId);
+    let documentIdAllowlist: string[] | null | undefined = undefined;
+    if (kbFilter.kind === 'allowlist') {
+      documentIdAllowlist = kbFilter.documentIds;
+      this.logger.debug(
+        `kbRetrievalVaultAccess tenant=${input.tenantId} conversation=${conversationId} ` +
+          `kbVaultAccessMode=${kbFilter.kbVaultAccessMode} selectedVaultCount=${kbFilter.selectedVaultCount} ` +
+          `allowedDocumentCount=${kbFilter.allowedDocumentCount}`,
+      );
+    } else if (kbFilter.kind === 'none') {
+      documentIdAllowlist = [];
+      if (kbFilter.reason === 'profileKnowledgeVaultsEmpty') {
+        this.logger.warn(
+          `profileKnowledgeVaultsEmpty tenant=${input.tenantId} conversation=${conversationId} ` +
+            `kbVaultAccessMode=selected_vaults selectedVaultCount=0 allowedDocumentCount=0`,
+        );
+      } else {
+        this.logger.warn(
+          `KB retrieval skipped tenant=${input.tenantId} conversation=${conversationId} ` +
+            `reason=${kbFilter.reason} kbVaultAccessMode=selected_vaults ` +
+            `selectedVaultCount=${kbFilter.selectedVaultCount} allowedDocumentCount=0`,
+        );
+      }
+    } else {
+      this.logger.debug(
+        `kbRetrievalVaultAccess tenant=${input.tenantId} conversation=${conversationId} ` +
+          `kbVaultAccessMode=${kbFilter.kbVaultAccessMode} noActiveProfile=${kbFilter.noActiveProfile} ` +
+          `selectedVaultCount=0 allowedDocumentCount=null`,
+      );
+    }
+
+    const kbIntentHint =
+      latestIntent !== 'UNKNOWN' ? latestIntent : inferKbRetrievalIntentHint(retrieveQuery) ?? undefined;
+
+    this.logger.debug(
+      `kbRetrieveIntentHint tenant=${input.tenantId} conversation=${conversationId} ` +
+        `classifiedIntent=${latestIntent} intentHint=${kbIntentHint ?? 'none'} ` +
+        `retrieveQueryPreview=${JSON.stringify(
+          safeTextPreviewForLog(retrieveQuery, { hashSalt: 'retrieveQueryPreview' }),
+        )}`,
+    );
+
+    let result = await this.kbService.retrieve({
+      tenantId: input.tenantId,
+      conversationId,
+      query: retrieveQuery,
+      topK: 5,
+      intentHint: kbIntentHint,
+      documentIdAllowlist,
+    });
+
+    // RAG shadow lane (diagnostic-only, default OFF, fail-closed per tenant).
+    // Enqueue a fire-and-forget job onto the dedicated KB_VECTOR_SHADOW queue.
+    // ALL OpenAI/RPC work happens in that worker, NEVER inline on this reply
+    // request. The enqueue is non-awaited and its failure is swallowed, so it
+    // can never inject/reorder/replace/delay/error the reply. Flag-off => no
+    // enqueue and a byte-identical `result`.
+    if (kbVectorShadowEnabledForTenant(input.tenantId) && this.kbVectorShadowQueue) {
+      const keywordCandidates = result.chunks.map((c) => ({
+        chunkId: c.chunkId,
+        score: c.relevanceScore,
+      }));
+      void this.kbVectorShadowQueue
+        .add('kb-vector-shadow', {
+          tenantId: input.tenantId,
+          conversationId,
+          query: retrieveQuery,
+          intentHint: kbIntentHint,
+          documentIdAllowlist: documentIdAllowlist ?? null,
+          keywordCandidates,
+        })
+        .catch(() => undefined);
+    }
+
+    let usedVectorContext = false;
+    if (kbVectorContextEnabledForTenant(input.tenantId)) {
+      const vectorContext = await runKbVectorContext(
+        { tenantId: input.tenantId, conversationId, query: retrieveQuery, documentIdAllowlist, topK: 5 },
+        { logger: this.logger },
+      );
+      if (vectorContext.ok) {
+        result = vectorContext.result;
+        usedVectorContext = true;
+      } else {
+        this.logger.log(
+          `kbVectorContextFallback tenant=${input.tenantId} conversation=${conversationId} reason=${vectorContext.reason}`,
+        );
+      }
+    }
+
+    const filterIntent = opts?.kbFilterIntent ?? latestIntent;
+    const filterUserMessage = (opts?.kbFilterUserMessage ?? input.incomingMessage.messageContent ?? '').trim();
+
+    const { chunks: filteredChunks, rejections } = usedVectorContext
+      ? { chunks: result.chunks, rejections: [] }
+      : filterKbChunksForPolicy(filterIntent, filterUserMessage, result.chunks, {
+          menuKbAnchor: opts?.menuKbAnchor,
+        });
+    for (const r of rejections) {
+      this.logger.log(
+        `KB rejected: reason=${r.reason}, latestMessage_class=${r.queryClass}, kbTitle=${r.kbTitleShort}`,
+      );
+    }
+
+    const retrievedSectionTitles = filteredChunks.map(c => {
+      const st = c.metadata['sectionTitle'];
+      return typeof st === 'string' && st.trim() ? st.trim() : '';
+    });
+    const topScores = filteredChunks.map(c => c.relevanceScore);
+    const documentIds = [...new Set(filteredChunks.map(c => c.documentId))];
+
+    const meta: RetrievalMeta = {
+      chunksReturned: filteredChunks.length,
+      chunksConsidered: result.totalConsidered,
+      retrievalMode: result.retrievalMode,
+      topScore: filteredChunks[0]?.relevanceScore ?? result.chunks[0]?.relevanceScore ?? null,
+      kbQuery: retrieveQuery,
+      retrievedSectionTitles,
+      topScores,
+      documentIds,
+    };
+
+    this.logger.log(
+      `KB context retrieved: kbQuery=${JSON.stringify(
+        safeTextPreviewForLog(retrieveQuery, { hashSalt: 'kbQuery' }),
+      )} selectedContextCount=${filteredChunks.length} retrievedChunkCount=${filteredChunks.length} ` +
+        `retrievedSectionTitles=${JSON.stringify(retrievedSectionTitles)} topScores=${JSON.stringify(topScores)} ` +
+        `retrievedDocumentIds=${JSON.stringify(documentIds)}`,
+    );
+
+    return { chunks: filteredChunks, meta };
   }
 
   /**

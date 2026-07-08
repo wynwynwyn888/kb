@@ -554,7 +554,7 @@ export class GenerationService {
       ];
       if (pc.latestIntent === 'GREETING' && priorAssistantMessageCount > 0) {
         parts.push(
-          'Continuation greeting rule: this is not the first message in the conversation. Do not repeat first-message routing scripts, welcome menus, intake checklists, or "please share your name" unless the customer explicitly asks to restart. Reply briefly in context and continue from the existing conversation.',
+          'Continuation greeting rule: this is not the first message in the conversation. Do not repeat first-message routing scripts, welcome menus, intake checklists, or "please share your name" unless the customer explicitly asks to restart. Treat the greeting as a light acknowledgement inside the existing conversation. Use the last 3-5 visible turns, especially the most recent substantive customer message and the previous assistant reply. Do not repeat the same diagnostic question, do not ask where leads are leaking again if that was already asked, and never use the fixed phrase "Yes — coming back to this, the key question is where leads are leaking now". Reply briefly in context and move the conversation forward naturally.',
         );
       }
       if (priorAssistantMessageCount >= 2) {

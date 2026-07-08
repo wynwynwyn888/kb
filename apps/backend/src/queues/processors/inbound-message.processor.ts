@@ -87,6 +87,34 @@ function buildBurstRowsOldestFirst(
     .filter(r => r.content.length > 0);
 }
 
+function normalizeBurstContent(content: string | null | undefined): string {
+  return String(content ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+function collapseNearbyDuplicateInboundRows<T extends InboundRowForBurst>(
+  rowsNewestFirst: T[],
+  windowMs = 10_000,
+): T[] {
+  const outOldestFirst: T[] = [];
+  for (const row of [...rowsNewestFirst].reverse()) {
+    const prev = outOldestFirst[outOldestFirst.length - 1];
+    if (prev) {
+      const prevMs = Date.parse(prev.created_at);
+      const rowMs = Date.parse(row.created_at);
+      const sameContent = normalizeBurstContent(prev.content) === normalizeBurstContent(row.content);
+      const closeTogether =
+        Number.isFinite(prevMs) &&
+        Number.isFinite(rowMs) &&
+        Math.abs(rowMs - prevMs) <= windowMs;
+      if (sameContent && closeTogether) {
+        continue;
+      }
+    }
+    outOldestFirst.push(row);
+  }
+  return outOldestFirst.reverse();
+}
+
 export interface InboundMessageJobData {
   locationId: string;
   ghlConversationId: string;
@@ -1695,7 +1723,9 @@ export class InboundMessageProcessor extends WorkerHost {
     if (error || !data?.length) {
       return { orchestrationBatch: [], resetDetectionBatch: [], resetDetectionRows: [] };
     }
-    const rows = data as { id?: string | null; created_at: string; content?: string | null }[];
+    const rows = collapseNearbyDuplicateInboundRows(
+      data as { id?: string | null; created_at: string; content?: string | null }[],
+    );
     const resetDetectionBatch = filterInboundRowsToBurstWindow(rows);
     const resetDetectionRows = buildBurstRowsOldestFirst(rows);
     const resetAfterMs = opts?.memoryResetAfterIso ? Date.parse(opts.memoryResetAfterIso) : NaN;

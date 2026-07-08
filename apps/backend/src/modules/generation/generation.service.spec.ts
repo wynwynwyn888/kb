@@ -456,6 +456,94 @@ describe('GenerationService', () => {
       expect(hasEcho).toBe(true);
     });
 
+    it('treats a greeting after prior assistant replies as continuation, not first-message routing', () => {
+      const messages = (service as never)['buildMessages'](
+        makeParams({
+          incomingMessage: 'hi',
+          memory: [
+            { role: 'user', content: 'hi' },
+            {
+              role: 'assistant',
+              content: 'Good afternoon!\n\nCould you please share your name?\n\n1) Leads going cold\n2) Staff too busy',
+            },
+            { role: 'user', content: '1 2' },
+            { role: 'assistant', content: 'Got it. These are common challenges.' },
+            { role: 'user', content: 'hi' },
+          ],
+          policyContext: {
+            latestIntent: 'GREETING' as never,
+            resolvedSelection: null,
+            conversationStateSummary: 'idle',
+          },
+        }),
+      );
+      const policyMsg = messages.find(
+        (m: { role: string; content: string }) =>
+          m.role === 'system' &&
+          typeof m.content === 'string' &&
+          m.content.includes('Continuation greeting rule'),
+      );
+      expect(policyMsg?.content as string).toContain('not the first message');
+      expect(policyMsg?.content as string).toContain('Do not repeat first-message routing scripts');
+    });
+
+    it('adds cadence guidance after several assistant replies to avoid endless questions', () => {
+      const messages = (service as never)['buildMessages'](
+        makeParams({
+          incomingMessage: 'Can this work for a beauty salon?',
+          memory: [
+            { role: 'user', content: 'I am not sure if I need this' },
+            { role: 'assistant', content: 'I understand. What specific challenges do you face?' },
+            { role: 'user', content: 'What industries can this work for?' },
+            { role: 'assistant', content: 'It can work across several industries. What industry are you in?' },
+          ],
+          policyContext: {
+            latestIntent: 'UNKNOWN' as never,
+            resolvedSelection: null,
+            conversationStateSummary: 'idle',
+          },
+        }),
+      );
+      const policyMsg = messages.find(
+        (m: { role: string; content: string }) =>
+          m.role === 'system' &&
+          typeof m.content === 'string' &&
+          m.content.includes('Conversation cadence rule'),
+      );
+      expect(policyMsg?.content as string).toContain('Answer the latest question directly first');
+      expect(policyMsg?.content as string).toContain('Do not end every reply with another open-ended qualifying question');
+      expect(policyMsg?.content as string).toContain('softly guide toward booking');
+    });
+
+    it('suppresses repeated booking URLs unless the customer asks for the link', () => {
+      const messages = (service as never)['buildMessages'](
+        makeParams({
+          incomingMessage: 'What if the AI gives wrong answers?',
+          memory: [
+            { role: 'user', content: 'I have sales follow-up issues' },
+            {
+              role: 'assistant',
+              content: 'You can book a session here: https://aisalesbot.pro/booking',
+            },
+            { role: 'user', content: 'Can this work for a beauty salon?' },
+            { role: 'assistant', content: 'Yes, it can help beauty salons with replies and bookings.' },
+          ],
+          policyContext: {
+            latestIntent: 'UNKNOWN' as never,
+            resolvedSelection: null,
+            conversationStateSummary: 'idle',
+          },
+        }),
+      );
+      const policyMsg = messages.find(
+        (m: { role: string; content: string }) =>
+          m.role === 'system' &&
+          typeof m.content === 'string' &&
+          m.content.includes('booking/scheduling URL was already sent recently'),
+      );
+      expect(policyMsg?.content as string).toContain('Do not include the URL again');
+    });
+
     it('truncates memory to last 20 entries', () => {
       const longMem = Array.from({ length: 25 }, (_, i) => ({
         role: i % 2 === 0 ? 'user' as const : 'assistant' as const,

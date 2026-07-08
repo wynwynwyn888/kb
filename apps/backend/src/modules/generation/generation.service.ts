@@ -39,6 +39,10 @@ export interface GenerateDraftPolicyContext {
   suppressColourRecommendations?: boolean;
   bookingCapability?: string;
   handoverCapability?: string;
+  /** Assistant replies already visible before this turn, after current inbound dedupe. */
+  priorAssistantMessageCount?: number;
+  /** Recent assistant history already contains a booking/scheduling URL. */
+  recentAssistantBookingUrlSent?: boolean;
 }
 
 export interface GenerateDraftParams {
@@ -99,6 +103,22 @@ type ProviderRow = {
   endpoint: string | null;
   settings: Record<string, unknown>;
 };
+
+const BOOKING_URL_RE =
+  /https?:\/\/\S*(?:book|booking|appointment|calendar|schedule|calendly|meet|session)\S*/i;
+const BOOKING_ASK_RE =
+  /\b(book|booking|appointment|schedule|calendar|link|url|session|call|consultation|demo)\b/i;
+
+function recentAssistantHistoryHasBookingUrl(memory: MemoryEntry[]): boolean {
+  return memory
+    .filter(m => m.role === 'assistant')
+    .slice(-6)
+    .some(m => BOOKING_URL_RE.test(m.content ?? ''));
+}
+
+function customerIsAskingForBookingNextStep(text: string): boolean {
+  return BOOKING_ASK_RE.test(text.trim());
+}
 
 @Injectable()
 export class GenerationService {
@@ -475,6 +495,7 @@ export class GenerationService {
 
     const mem = params.memory.slice(-20);
     const incoming = stripGhlImagePlaceholderFromInboundBody(params.incomingMessage?.trim() ?? '');
+    const inboundTrim = incoming;
     let memForHistory = mem;
     if (incoming) {
       const batchN = params.inboundBatchUserLineCount;
@@ -492,6 +513,13 @@ export class GenerationService {
         }
       }
     }
+
+    const priorAssistantMessageCount =
+      params.policyContext?.priorAssistantMessageCount ??
+      memForHistory.filter(entry => entry.role === 'assistant').length;
+    const recentAssistantBookingUrlSent =
+      params.policyContext?.recentAssistantBookingUrlSent ??
+      recentAssistantHistoryHasBookingUrl(memForHistory);
     for (const entry of memForHistory) {
       messages.push({
         role: entry.role === 'user' ? 'user' : 'assistant',
@@ -524,6 +552,31 @@ export class GenerationService {
             'Address each separate ask in order; do not only follow the final line. If the user chose an option (A/B/C), continue that flow for the option line only.'
           : 'Use KB only if relevant to the latest customer message. If the user selected an option, continue that flow.',
       ];
+      if (pc.latestIntent === 'GREETING' && priorAssistantMessageCount > 0) {
+        parts.push(
+          'Continuation greeting rule: this is not the first message in the conversation. Do not repeat first-message routing scripts, welcome menus, intake checklists, or "please share your name" unless the customer explicitly asks to restart. Reply briefly in context and continue from the existing conversation.',
+        );
+      }
+      if (priorAssistantMessageCount >= 2) {
+        const bookingAsked = customerIsAskingForBookingNextStep(inboundTrim);
+        parts.push(
+          'Conversation cadence rule: the customer has already received multiple assistant replies. Answer the latest question directly first. Do not end every reply with another open-ended qualifying question. Use at most one natural next step.',
+        );
+        if (pc.latestIntent !== 'BOOKING') {
+          parts.push(
+            'If the customer seems interested after the answer, softly guide toward booking, consultation, appointment, demo, or the tenant-defined next step instead of continuing endless discovery questions.',
+          );
+        }
+        if (recentAssistantBookingUrlSent && !bookingAsked) {
+          parts.push(
+            'A booking/scheduling URL was already sent recently. Do not include the URL again unless the customer asks for the link or is clearly trying to book now.',
+          );
+        } else if (!bookingAsked) {
+          parts.push(
+            'Do not include a booking/scheduling URL in this reply unless the customer asks for the link or is clearly ready to book now.',
+          );
+        }
+      }
       if (pc.resolvedSelection) {
         parts.push(
           `The user chose option ${pc.resolvedSelection.selectedLabel} (${pc.resolvedSelection.selectedText}).`,
@@ -567,7 +620,6 @@ export class GenerationService {
       });
     }
 
-    const inboundTrim = stripGhlImagePlaceholderFromInboundBody(params.incomingMessage?.trim() ?? '');
     if (inboundTrim && userRequestsFormattingPreference(inboundTrim)) {
       messages.push({
         role: 'system',

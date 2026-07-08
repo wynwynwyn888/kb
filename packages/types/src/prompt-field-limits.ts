@@ -7,6 +7,7 @@ export const PROMPT_FIELD_LIMITS = {
   persona: 3000,
   conversationGoals: 5000,
   businessNotes: 5000,
+  salesPlaybook: 3000,
   bookingBehavior: 2000,
   escalationBehavior: 2000,
 } as const;

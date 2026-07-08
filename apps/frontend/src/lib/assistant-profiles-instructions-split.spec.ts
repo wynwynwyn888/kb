@@ -28,9 +28,9 @@ describe('assistant profiles vs instructions surfaces', () => {
     const t = read('src/components/app/tenant-workspace/TenantGoalsPanel.tsx');
     expect(t).toContain('data-action="set-active"');
     expect(t).toContain('data-variant="primary"');
-    expect(t).toContain('Delete assistant profile?');
+    expect(t).toContain('Delete AI Agent profile?');
     expect(t).toContain('Type “delete” to confirm');
-    expect(t).toContain('Create assistant profile');
+    expect(t).toContain('Create AI Agent profile');
     expect(t).toContain('aria-label="Create profile"');
   });
 
@@ -41,7 +41,7 @@ describe('assistant profiles vs instructions surfaces', () => {
     expect(t).toContain('Persona');
     expect(t).toContain('Conversation goals');
     expect(t).toContain('Business notes');
-    expect(t).toContain('Knowledge used by this assistant');
+    expect(t).toContain('Sales Playbook');
+    expect(t).toContain('Knowledge used by this AI Agent');
   });
 });
-

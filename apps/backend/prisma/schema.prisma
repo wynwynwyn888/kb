@@ -541,6 +541,7 @@ model TenantBotProfile {
   persona                   String   @default("") @db.Text
   conversationGoals         String   @default("") @map("conversation_goals") @db.Text
   businessNotes             String   @default("") @map("business_notes") @db.Text
+  salesPlaybook             String   @default("") @map("sales_playbook") @db.Text
   toneRules                 String   @default("") @map("tone_rules") @db.Text
   bookingBehaviorNotes      String   @default("") @map("booking_behavior_notes") @db.Text
   escalationBehaviorNotes   String   @default("") @map("escalation_behavior_notes") @db.Text

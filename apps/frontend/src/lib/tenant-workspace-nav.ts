@@ -106,7 +106,7 @@ export function buildTenantSidebarNav(
     },
     {
       kind: 'group',
-      label: 'Assistant',
+      label: 'AI Agent',
       icon: 'bot',
       overviewHref: assistantBase,
       match: p => assistantSubtreeMatch(base, p),

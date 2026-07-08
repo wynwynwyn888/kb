@@ -71,7 +71,7 @@ export function TenantAssistantOverview() {
       const list = await listTenantBotProfiles(token, tenantId);
       setProfiles(Array.isArray(list) ? list : []);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Could not load assistant profiles');
+      setErr(e instanceof Error ? e.message : 'Could not load AI Agent profiles');
     } finally {
       setLoading(false);
     }
@@ -142,7 +142,7 @@ export function TenantAssistantOverview() {
 
   return (
     <div style={{ maxWidth: 960, margin: '0 auto' }}>
-      <PageHeader title="Assistant" eyebrow="Overview" />
+      <PageHeader title="AI Agent" eyebrow="Overview" />
       <p
         style={{
           fontSize: '0.875rem',
@@ -152,7 +152,7 @@ export function TenantAssistantOverview() {
           lineHeight: 1.55,
         }}
       >
-        This assistant uses its own instructions and selected knowledge vaults. Automation rules currently apply at workspace
+        This AI Agent uses its own instructions and selected knowledge vaults. Automation rules currently apply at workspace
         level. CRM tags, calendars, and contact data are synced from the workspace connection.
       </p>
 
@@ -161,16 +161,16 @@ export function TenantAssistantOverview() {
           <ErrorBanner message={err} />
         </div>
       ) : null}
-      {loading ? <LoadingBlock message="Loading assistant…" /> : null}
+      {loading ? <LoadingBlock message="Loading AI Agent…" /> : null}
 
       {!loading && !err ? (
         <>
-          <SectionCard title="Active profile" subtitle="Status for the currently active assistant profile.">
+          <SectionCard title="Active profile" subtitle="Status for the currently active AI Agent profile.">
             {active ? (
               <>
                 <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
                   <span style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--aisbp-text-heading, #0f172a)' }}>
-                    {active.name.trim() || 'Untitled assistant'}
+                    {active.name.trim() || 'Untitled AI Agent'}
                   </span>
                   <StatusPill label={activeProfileStatus.label} tone={activeProfileStatus.tone} />
                 </div>
@@ -186,7 +186,7 @@ export function TenantAssistantOverview() {
                   Last updated {formatProfileUpdatedAt(active.updatedAt)}
                 </p>
 
-                <div style={gridWrap} aria-label="Assistant status">
+                <div style={gridWrap} aria-label="AI Agent status">
                   <div style={{ ...statCard, gridColumn: 'span 3' }}>
                     <p style={statLabel}>Selected knowledge vaults</p>
                     <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '0.45rem' }}>
@@ -246,7 +246,7 @@ export function TenantAssistantOverview() {
               </>
             ) : (
               <p style={{ fontSize: '0.9rem', color: 'var(--aisbp-muted, #64748b)', margin: 0 }}>
-                No active assistant profile yet. Create or activate one under Profiles.
+                No active AI Agent profile yet. Create or activate one under Profiles.
               </p>
             )}
           </SectionCard>

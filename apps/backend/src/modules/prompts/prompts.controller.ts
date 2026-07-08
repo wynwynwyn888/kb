@@ -87,14 +87,14 @@ export class PromptsController {
   }
 
   @Get('tenant/:tenantId/bot-profiles')
-  @ApiOperation({ summary: 'List Assistant / Bot profiles for a workspace' })
+  @ApiOperation({ summary: 'List AI Agent profiles for a workspace' })
   async listBotProfiles(@Param('tenantId') tenantId: string, @CurrentUser() user: SessionUser) {
     if (!tenantId?.trim()) throw new BadRequestException('tenantId is required');
     return this.botProfilesService.listBotProfiles(user.id, tenantId.trim());
   }
 
   @Post('tenant/:tenantId/bot-profiles')
-  @ApiOperation({ summary: 'Create a new Assistant / Bot profile' })
+  @ApiOperation({ summary: 'Create a new AI Agent profile' })
   async createBotProfile(
     @Param('tenantId') tenantId: string,
     @Body()
@@ -104,6 +104,7 @@ export class PromptsController {
       persona?: string;
       conversationGoals?: string;
       businessNotes?: string;
+      salesPlaybook?: string;
       toneRules?: string;
       bookingBehaviorNotes?: string;
       escalationBehaviorNotes?: string;
@@ -123,7 +124,7 @@ export class PromptsController {
   }
 
   @Patch('tenant/:tenantId/bot-profiles/:profileId')
-  @ApiOperation({ summary: 'Update an Assistant / Bot profile' })
+  @ApiOperation({ summary: 'Update an AI Agent profile' })
   async updateBotProfile(
     @Param('tenantId') tenantId: string,
     @Param('profileId') profileId: string,
@@ -134,6 +135,7 @@ export class PromptsController {
       persona?: string;
       conversationGoals?: string;
       businessNotes?: string;
+      salesPlaybook?: string;
       toneRules?: string;
       bookingBehaviorNotes?: string;
       escalationBehaviorNotes?: string;
@@ -154,7 +156,7 @@ export class PromptsController {
   }
 
   @Post('tenant/:tenantId/bot-profiles/:profileId/activate')
-  @ApiOperation({ summary: 'Set an Assistant / Bot profile as the active one' })
+  @ApiOperation({ summary: 'Set an AI Agent profile as the active one' })
   async activateBotProfile(
     @Param('tenantId') tenantId: string,
     @Param('profileId') profileId: string,
@@ -167,7 +169,7 @@ export class PromptsController {
   }
 
   @Post('tenant/:tenantId/bot-profiles/:profileId/duplicate')
-  @ApiOperation({ summary: 'Duplicate an Assistant / Bot profile' })
+  @ApiOperation({ summary: 'Duplicate an AI Agent profile' })
   async duplicateBotProfile(
     @Param('tenantId') tenantId: string,
     @Param('profileId') profileId: string,
@@ -181,7 +183,7 @@ export class PromptsController {
 
   @Delete('tenant/:tenantId/bot-profiles/:profileId')
   @HttpCode(204)
-  @ApiOperation({ summary: 'Delete a non-active Assistant / Bot profile' })
+  @ApiOperation({ summary: 'Delete a non-active AI Agent profile' })
   async deleteBotProfile(
     @Param('tenantId') tenantId: string,
     @Param('profileId') profileId: string,

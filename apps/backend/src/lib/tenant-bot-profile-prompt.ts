@@ -5,28 +5,35 @@
 
 import { createHash } from 'node:crypto';
 
-export type ParsedPromptSections = { persona: string; goals: string; additional: string };
+export type ParsedPromptSections = {
+  persona: string;
+  goals: string;
+  additional: string;
+  salesPlaybook?: string;
+};
 
 export function parsePromptSections(raw: string): ParsedPromptSections {
   const t = (raw || '').trimEnd();
-  if (!t) return { persona: '', goals: '', additional: '' };
+  if (!t) return { persona: '', goals: '', additional: '', salesPlaybook: '' };
 
   const lines = t.split(/\r?\n/);
   const headerPersona = '### Bot Persona';
   const headerGoals = '### Goals';
   const headerAdditional = '### Additional information';
+  const headerSalesPlaybook = '### Sales playbook';
 
   const hasOurPersonaHeader = lines.some(l => l.trim() === headerPersona);
   if (!hasOurPersonaHeader) {
-    return { persona: '', goals: t.trim(), additional: '' };
+    return { persona: '', goals: t.trim(), additional: '', salesPlaybook: '' };
   }
 
-  type Section = 'none' | 'persona' | 'goals' | 'additional';
+  type Section = 'none' | 'persona' | 'goals' | 'additional' | 'salesPlaybook';
   let section: Section = 'none';
-  const buckets: Record<'persona' | 'goals' | 'additional', string[]> = {
+  const buckets: Record<'persona' | 'goals' | 'additional' | 'salesPlaybook', string[]> = {
     persona: [],
     goals: [],
     additional: [],
+    salesPlaybook: [],
   };
 
   for (const line of lines) {
@@ -43,6 +50,10 @@ export function parsePromptSections(raw: string): ParsedPromptSections {
       section = 'additional';
       continue;
     }
+    if (trimmed === headerSalesPlaybook) {
+      section = 'salesPlaybook';
+      continue;
+    }
     if (section === 'none') continue;
     buckets[section].push(line);
   }
@@ -50,11 +61,12 @@ export function parsePromptSections(raw: string): ParsedPromptSections {
   const persona = buckets.persona.join('\n').trim();
   const goals = buckets.goals.join('\n').trim();
   const additional = buckets.additional.join('\n').trim();
+  const salesPlaybook = buckets.salesPlaybook.join('\n').trim();
 
-  if (!persona && !goals && !additional) {
-    return { persona: '', goals: t.trim(), additional: '' };
+  if (!persona && !goals && !additional && !salesPlaybook) {
+    return { persona: '', goals: t.trim(), additional: '', salesPlaybook: '' };
   }
-  return { persona, goals, additional };
+  return { persona, goals, additional, salesPlaybook };
 }
 
 /** Legacy three-block blob stored in `tenant_prompt_configs.system_prompt`. */
@@ -62,6 +74,7 @@ export function buildThreeSectionPromptBlob(
   persona: string,
   conversationGoals: string,
   businessNotes: string,
+  salesPlaybook = '',
 ): string {
   return [
     '### Bot Persona',
@@ -72,6 +85,9 @@ export function buildThreeSectionPromptBlob(
     '',
     '### Additional information',
     businessNotes.trim(),
+    '',
+    '### Sales playbook',
+    salesPlaybook.trim(),
   ].join('\n');
 }
 
@@ -89,6 +105,7 @@ export interface BotProfilePromptFields {
   persona: string;
   conversationGoals: string;
   businessNotes: string;
+  salesPlaybook?: string;
   toneRules: string;
   bookingBehaviorNotes: string;
   escalationBehaviorNotes: string;
@@ -133,7 +150,7 @@ export function buildOrchestrationTenantPromptFromProfile(p: BotProfilePromptFie
   }
 
   chunks.push(
-    buildThreeSectionPromptBlob(p.persona, p.conversationGoals, p.businessNotes),
+    buildThreeSectionPromptBlob(p.persona, p.conversationGoals, p.businessNotes, p.salesPlaybook ?? ''),
   );
 
   if (p.toneRules.trim()) {
@@ -184,6 +201,7 @@ export interface TenantPromptFingerprintSections {
   persona?: string;
   goals?: string;
   businessNotes?: string;
+  salesPlaybook?: string;
   toneRules?: string;
   bookingBehavior?: string;
   escalationBehavior?: string;
@@ -196,6 +214,7 @@ const FINGERPRINT_FIELD_ORDER: Array<keyof TenantPromptFingerprintSections> = [
   'persona',
   'goals',
   'businessNotes',
+  'salesPlaybook',
   'toneRules',
   'bookingBehavior',
   'escalationBehavior',
@@ -211,6 +230,7 @@ export interface TenantPromptFingerprint {
   includesPersona: boolean;
   includesGoals: boolean;
   includesBusinessNotes: boolean;
+  includesSalesPlaybook: boolean;
   includesBookingBehavior: boolean;
   includesEscalationBehavior: boolean;
   totalChars: number;
@@ -243,6 +263,7 @@ export function buildTenantPromptFingerprint(
     includesPersona: (fieldLengths['persona'] ?? 0) > 0,
     includesGoals: (fieldLengths['goals'] ?? 0) > 0,
     includesBusinessNotes: (fieldLengths['businessNotes'] ?? 0) > 0,
+    includesSalesPlaybook: (fieldLengths['salesPlaybook'] ?? 0) > 0,
     includesBookingBehavior: (fieldLengths['bookingBehavior'] ?? 0) > 0,
     includesEscalationBehavior: (fieldLengths['escalationBehavior'] ?? 0) > 0,
     totalChars,

@@ -258,4 +258,5 @@ describe('SendBubbleProcessor — provider done-after-send', () => {
     expect(doneCall[1]).toBe('tenant-abc');
     expect(doneCall[2]).toBe('specific-ghl-id-123');
   });
+
 });

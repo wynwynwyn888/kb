@@ -106,6 +106,14 @@ export class UnrepliedScannerProcessor extends WorkerHost {
         // Respect AI off metadata
         if ((convMeta?.['ai_status'] ?? meta['ai_status']) === 'off') {
           skippedAiOff++;
+          await this.recordTerminalSkipAndProviderDone({
+            tenantId,
+            messageId: msg.id,
+            conversationId: msg.conversation_id,
+            metadata: meta,
+            status: 'SKIP_AI_OFF_TAG',
+            reason: 'ai_status=off (scanner terminal skip)',
+          });
           continue;
         }
 
@@ -118,27 +126,14 @@ export class UnrepliedScannerProcessor extends WorkerHost {
           .maybeSingle();
         if (handover) {
           skippedGate++;
-          // Write terminal decision + provider done marker so this message
-          // is never "unknown no-reply". The scanner must not send outbound
-          // or bypass the handover guard, but it MUST record the skip.
-          void recordTerminalDecision({
-            supabase: this.supabase,
-            logger: this.logger,
+          await this.recordTerminalSkipAndProviderDone({
+            tenantId,
             messageId: msg.id,
-            decision: {
-              status: 'SKIP_HANDOVER_ACTIVE',
-              reason: 'HANDOVER_ACTIVE_SCANNER_TERMINAL_SKIP',
-              triggerSource: 'scanner',
-              decidedAt: new Date().toISOString(),
-            },
+            conversationId: msg.conversation_id,
+            metadata: meta,
+            status: 'SKIP_HANDOVER_ACTIVE',
+            reason: 'HANDOVER_ACTIVE_SCANNER_TERMINAL_SKIP',
           });
-          const ghlMsgId = typeof meta['ghlMessageId'] === 'string' ? meta['ghlMessageId'] : null;
-          if (ghlMsgId && tenantId) {
-            void markProviderOrchestrationDone(this.appCache, tenantId, ghlMsgId);
-          }
-          this.logger.log(
-            `SCANNER_HANDOVER_TERMINAL_SKIP: conversationId=${msg.conversation_id} messageId=${msg.id.slice(0, 8)}`,
-          );
           continue;
         }
 
@@ -302,5 +297,37 @@ export class UnrepliedScannerProcessor extends WorkerHost {
 
   private isEnabled(): boolean {
     return process.env['UNREPLIED_SCANNER_ENABLED'] === 'true';
+  }
+
+  private async recordTerminalSkipAndProviderDone(input: {
+    tenantId: string;
+    messageId: string;
+    conversationId: string;
+    metadata: Record<string, unknown>;
+    status: 'SKIP_AI_OFF_TAG' | 'SKIP_HANDOVER_ACTIVE';
+    reason: string;
+  }): Promise<void> {
+    const decisionOk = await recordTerminalDecision({
+      supabase: this.supabase,
+      logger: this.logger,
+      messageId: input.messageId,
+      decision: {
+        status: input.status,
+        reason: input.reason,
+        triggerSource: 'scanner',
+        decidedAt: new Date().toISOString(),
+      },
+    });
+
+    const ghlMsgId = typeof input.metadata['ghlMessageId'] === 'string'
+      ? input.metadata['ghlMessageId']
+      : null;
+    if (decisionOk && ghlMsgId && input.tenantId) {
+      await markProviderOrchestrationDone(this.appCache, input.tenantId, ghlMsgId);
+    }
+
+    this.logger.log(
+      `SCANNER_TERMINAL_SKIP: status=${input.status} conversationId=${input.conversationId} messageId=${input.messageId.slice(0, 8)} providerDone=${Boolean(decisionOk && ghlMsgId)}`,
+    );
   }
 }

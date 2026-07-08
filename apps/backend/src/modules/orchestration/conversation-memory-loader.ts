@@ -6,9 +6,7 @@ import { formatPostgrestError } from '../../lib/format-postgrest-error';
 import { getSupabaseService } from '../../lib/supabase';
 import type { ConversationMemory, MemoryEntry } from './dto';
 
-const MAX_TURNS = 20; // last 20 user turns to load
-/** Upper bound on rows fetched before slicing to turns (inbound + outbound pairs). */
-const MAX_MESSAGE_ROWS = MAX_TURNS * 8;
+export const CONVERSATION_MEMORY_MESSAGE_LIMIT = 30;
 /** Gap after which conversation memory starts a fresh session (no prior turns in prompt). */
 export const CONVERSATION_MEMORY_SESSION_GAP_MS = 24 * 60 * 60 * 1000;
 
@@ -18,7 +16,7 @@ export class ConversationMemoryLoader {
   private readonly supabase = getSupabaseService();
 
   /**
-   * Load last MAX_TURNS user turns from the conversation, ordered oldest→newest.
+   * Load the latest conversation transcript from the DB, ordered oldest→newest.
    * Returns normalized MemoryEntry[] for AI context building.
    *
    * When `memoryResetAfterIso` is set (from `metadata.aisbp_policy.memoryResetAt`), only messages
@@ -29,8 +27,6 @@ export class ConversationMemoryLoader {
     conversationId: string,
     opts?: { memoryResetAfterIso?: string | null },
   ): Promise<ConversationMemory> {
-    // Load messages ordered oldest→newest (ascending created_at)
-    // Limit to last MAX_TURNS inbound user messages plus their AI responses
     const resetAfter = opts?.memoryResetAfterIso?.trim() ?? '';
 
     let query = this.supabase
@@ -38,7 +34,7 @@ export class ConversationMemoryLoader {
       .select('id, direction, sender, content, contentType, created_at')
       .eq('conversation_id', conversationId)
       .order('created_at', { ascending: false })
-      .limit(MAX_MESSAGE_ROWS);
+      .limit(CONVERSATION_MEMORY_MESSAGE_LIMIT);
 
     if (resetAfter) {
       query = query.gt('created_at', resetAfter);
@@ -86,11 +82,7 @@ export class ConversationMemoryLoader {
       return curMs - prevMs <= CONVERSATION_MEMORY_SESSION_GAP_MS;
     });
 
-    // Filter to last N user turns and their responses
-    const userMessages = scoped.filter(m => m.direction === 'INBOUND');
-    const recentUserMessages = userMessages.slice(-MAX_TURNS);
-
-    if (recentUserMessages.length === 0) {
+    if (scoped.length === 0) {
       return {
         conversationId,
         entries: [],
@@ -99,16 +91,7 @@ export class ConversationMemoryLoader {
       };
     }
 
-    // Get the index range to include responses after each user turn
-    const lastUserIndex = scoped.findIndex(
-      m => m.id === recentUserMessages[recentUserMessages.length - 1]!.id,
-    );
-    const slice = scoped.slice(
-      scoped.findIndex(m => m.id === recentUserMessages[0]!.id),
-      lastUserIndex + 1,
-    );
-
-    const entries: MemoryEntry[] = slice.map(m => this.normalizeMessage(m));
+    const entries: MemoryEntry[] = scoped.map(m => this.normalizeMessage(m));
 
     const sessionStartedAt =
       entries.length > 0 ? entries[0]!.timestamp : null;

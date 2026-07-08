@@ -1,5 +1,5 @@
 // GHL Conversation Context Sync — Pre-reply sync of GHL messages into KB
-// Feature flag: GHL_PRE_REPLY_CONTEXT_SYNC=true
+// Enabled by default; set GHL_PRE_REPLY_CONTEXT_SYNC=false to disable.
 // Spec: kb-pre-reply-sync-spec.md v3
 
 import { Logger } from '@nestjs/common';
@@ -8,6 +8,8 @@ import { decrypt } from './encryption';
 import { ingestInboundMessage } from './inbound-message-ingest';
 
 const logger = new Logger('GhlConversationSync');
+const DEFAULT_SYNC_MESSAGE_LIMIT = 30;
+const DEFAULT_SYNC_HTTP_TIMEOUT_MS = 1500;
 
 interface SyncResult {
   synced: number;
@@ -45,8 +47,7 @@ export async function syncGhlConversationContext(params: {
     return result;
   }
 
-  // Tenant allowlist check
-  if (!isTenantAllowedForSync(tenantId)) {
+  if (!isContextSyncEnabledForTenant(tenantId)) {
     return result;
   }
 
@@ -273,7 +274,7 @@ async function searchNativeConversationId(
   try {
     const url = `${baseUrl}/conversations/search?locationId=${locationIdEnc}&contactId=${contactIdEnc}&limit=1`;
     const ac = new AbortController();
-    const timer = setTimeout(() => ac.abort(), 5000);
+    const timer = setTimeout(() => ac.abort(), resolveSyncHttpTimeoutMs());
     const res = await fetch(url, { headers: hdrs, signal: ac.signal });
     clearTimeout(timer);
     if (!res.ok) {
@@ -297,10 +298,10 @@ async function fetchGhlMessages(
   baseUrl: string, hdrs: Record<string, string>, nativeId: string,
 ): Promise<Array<{ id: string; body: string; direction: string; source: string; dateAdded: string; status: string }> | null> {
   try {
-    const syncLimit = parseInt(process.env['GHL_SYNC_MESSAGE_LIMIT'] ?? '50', 10) || 50;
+    const syncLimit = resolveSyncMessageLimit();
     const url = `${baseUrl}/conversations/${encodeURIComponent(nativeId)}/messages?limit=${syncLimit}`;
     const ac = new AbortController();
-    const timer = setTimeout(() => ac.abort(), 5000);
+    const timer = setTimeout(() => ac.abort(), resolveSyncHttpTimeoutMs());
     const res = await fetch(url, { headers: hdrs, signal: ac.signal });
     clearTimeout(timer);
     if (!res.ok) {
@@ -342,17 +343,15 @@ async function isKbOwnReply(supabase: SupabaseClient, ghlMessageId: string): Pro
   return !!data;
 }
 
-function isTenantAllowedForSync(tenantId: string): boolean {
-  const allowlist = (process.env['GHL_PRE_REPLY_CONTEXT_SYNC_TENANTS'] ?? '').trim();
-  if (!allowlist) {
-    // No allowlist set — require explicit global enable flag for safety
-    if (process.env['GHL_PRE_REPLY_CONTEXT_SYNC_ALL'] !== 'true') {
-      logger.log(`context_sync_tenant_not_allowed: no allowlist and GHL_PRE_REPLY_CONTEXT_SYNC_ALL not true tenantId=${tenantId}`);
-      return false;
-    }
-    logger.log(`context_sync_global_enabled: all tenants tenantId=${tenantId}`);
-    return true;
+function isContextSyncEnabledForTenant(tenantId: string): boolean {
+  if (process.env['GHL_PRE_REPLY_CONTEXT_SYNC'] === 'false') {
+    logger.log(`context_sync_disabled: tenantId=${tenantId}`);
+    return false;
   }
+
+  const allowlist = (process.env['GHL_PRE_REPLY_CONTEXT_SYNC_TENANTS'] ?? '').trim();
+  if (!allowlist) return true;
+
   const ids = allowlist.split(',').map(s => s.trim()).filter(Boolean);
   const allowed = ids.includes(tenantId);
   if (allowed) {
@@ -361,6 +360,20 @@ function isTenantAllowedForSync(tenantId: string): boolean {
     logger.log(`context_sync_tenant_not_allowed: tenantId=${tenantId}`);
   }
   return allowed;
+}
+
+function resolveSyncMessageLimit(): number {
+  const raw = process.env['GHL_SYNC_MESSAGE_LIMIT']?.trim();
+  const parsed = raw ? Number.parseInt(raw, 10) : DEFAULT_SYNC_MESSAGE_LIMIT;
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_SYNC_MESSAGE_LIMIT;
+  return Math.min(100, Math.max(1, parsed));
+}
+
+function resolveSyncHttpTimeoutMs(): number {
+  const raw = process.env['GHL_CONTEXT_SYNC_HTTP_TIMEOUT_MS']?.trim();
+  const parsed = raw ? Number.parseInt(raw, 10) : DEFAULT_SYNC_HTTP_TIMEOUT_MS;
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_SYNC_HTTP_TIMEOUT_MS;
+  return Math.min(5000, Math.max(500, parsed));
 }
 
 async function getLastSyncedId(supabase: SupabaseClient, conversationId: string): Promise<string | null> {

@@ -32,9 +32,10 @@ jestGlobal.mock('../../lib/inbound-decision', () => ({
 
 // Mock provider gate
 const mockCheckProviderGate = jestGlobal.fn(async () => ({ allowed: true, lockToken: 'token' }));
+const mockMarkProviderOrchestrationDone = jestGlobal.fn(async () => {});
 jestGlobal.mock('../../lib/schedule-orchestration-if-new', () => ({
   checkProviderOrchestrationGate: mockCheckProviderGate,
-  markProviderOrchestrationDone: jestGlobal.fn(),
+  markProviderOrchestrationDone: mockMarkProviderOrchestrationDone,
   releaseProviderLock: jestGlobal.fn(),
 }));
 
@@ -101,6 +102,7 @@ describe('UnrepliedScannerProcessor — send context', () => {
     jestGlobal.clearAllMocks();
     process.env['UNREPLIED_SCANNER_ENABLED'] = 'true';
     mockCheckProviderGate.mockResolvedValue({ allowed: true, lockToken: 'token' });
+    mockMarkProviderOrchestrationDone.mockResolvedValue(undefined);
     mockInboundAdd.mockResolvedValue(undefined);
 
     // Default supabase mock: conversation found, no handover
@@ -307,8 +309,9 @@ describe('UnrepliedScannerProcessor — send context', () => {
   });
 
   // ── Test 5: AI off candidate is skipped ──────────────────────────────
-  it('skips candidates with ai_status=off', async () => {
-    mockFindUnrepliedInboundMessages.mockResolvedValue([makeCandidate()]);
+  it('records SKIP_AI_OFF_TAG for candidates with ai_status=off', async () => {
+    const candidate = makeCandidate({ metadata: { ghlMessageId: 'ghl-ai-off-1', ghlTimestamp: new Date().toISOString() } });
+    mockFindUnrepliedInboundMessages.mockResolvedValue([candidate]);
 
     mockSupabase.from.mockImplementation((table: string) => {
       if (table === 'conversations') {
@@ -347,19 +350,27 @@ describe('UnrepliedScannerProcessor — send context', () => {
     await processor.process(makeScannerJob());
 
     expect(mockInboundAdd).not.toHaveBeenCalled();
+    expect(mockRecordTerminalDecision).toHaveBeenCalledWith(
+      expect.objectContaining({
+        messageId: candidate.id,
+        decision: expect.objectContaining({
+          status: 'SKIP_AI_OFF_TAG',
+          reason: 'ai_status=off (scanner terminal skip)',
+        }),
+      }),
+    );
+    expect(mockMarkProviderOrchestrationDone).toHaveBeenCalledWith(
+      expect.anything(),
+      't1',
+      'ghl-ai-off-1',
+    );
   });
 
   // ── Test 6: Handover active candidate gets terminal SKIP without outbound ──
   it('records SKIP_HANDOVER_ACTIVE for candidates with active handover (no outbound)', async () => {
-    const candidate = makeCandidate({ ghlMessageId: 'ghl_ho_test' });
+    const candidate = makeCandidate({ metadata: { ghlMessageId: 'ghl_ho_test', ghlTimestamp: new Date().toISOString() } });
     mockFindUnrepliedInboundMessages.mockResolvedValue([candidate]);
     mockRecordTerminalDecision.mockClear();
-    const mockMarkDone = jestGlobal.fn();
-    jestGlobal.mock('../../lib/schedule-orchestration-if-new', () => ({
-      checkProviderOrchestrationGate: mockCheckProviderGate,
-      markProviderOrchestrationDone: mockMarkDone,
-      releaseProviderLock: jestGlobal.fn(),
-    }));
 
     mockSupabase.from.mockImplementation((table: string) => {
       if (table === 'conversations') {

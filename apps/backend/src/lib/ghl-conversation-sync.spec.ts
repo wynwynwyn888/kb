@@ -103,11 +103,15 @@ describe('syncGhlConversationContext', () => {
       upgraded: false,
       messageId: `msg-${params.ghlMessageId ?? 'no-id'}`,
     }));
-    process.env['GHL_PRE_REPLY_CONTEXT_SYNC_ALL'] = 'true';
+    delete process.env['GHL_PRE_REPLY_CONTEXT_SYNC'];
+    delete process.env['GHL_PRE_REPLY_CONTEXT_SYNC_TENANTS'];
+    delete process.env['GHL_SYNC_MESSAGE_LIMIT'];
   });
 
   afterEach(() => {
-    delete process.env['GHL_PRE_REPLY_CONTEXT_SYNC_ALL'];
+    delete process.env['GHL_PRE_REPLY_CONTEXT_SYNC'];
+    delete process.env['GHL_PRE_REPLY_CONTEXT_SYNC_TENANTS'];
+    delete process.env['GHL_SYNC_MESSAGE_LIMIT'];
   });
 
   // ── Test 2: Short-circuit returns empty but with no recovered GHL ID ──
@@ -212,6 +216,23 @@ describe('syncGhlConversationContext', () => {
     expect(result.insertedContactInboundIds).toHaveLength(1);
     expect(result.latestRecoveredGhlMessageId).toBe(ghlMsgId);
     expect(result.latestRecoveredContactInboundAt).toBe(msgTs);
+    expect(String(mockFetch.mock.calls[1]?.[0])).toContain('limit=30');
+  });
+
+  it('can be disabled explicitly with GHL_PRE_REPLY_CONTEXT_SYNC=false', async () => {
+    process.env['GHL_PRE_REPLY_CONTEXT_SYNC'] = 'false';
+
+    const result = await syncGhlConversationContext({
+      supabase: makeSupabaseMock() as any,
+      tenantId: 't1',
+      ghlLocationId: 'loc1',
+      conversationId: 'conv1',
+      contactId: 'c1',
+    });
+
+    expect(result.synced).toBe(0);
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(mockIngestInboundMessage).not.toHaveBeenCalled();
   });
 
   // ── Test 3: Upgraded INBOUND/CONTACT message → populated insertedContactInboundIds ──

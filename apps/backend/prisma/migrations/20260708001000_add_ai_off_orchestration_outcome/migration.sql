@@ -1,0 +1,1 @@
+ALTER TYPE "OrchestrationOutcome" ADD VALUE IF NOT EXISTS 'SKIP_AI_OFF_TAG';

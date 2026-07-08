@@ -81,7 +81,9 @@ Shadow retrieval SHALL use only real pgvector embeddings and SHALL NOT reuse the
 #### Scenario: Live retrieval is untouched
 
 - **WHEN** this change is implemented
-- **THEN** the legacy pseudo-vector branch in live `retrieve()` and `searchKnowledge()` SHALL remain unchanged
+- **THEN** the live pseudo-vector branch removed by PR #47 (merge `76bd511`) SHALL NOT be reintroduced into `retrieve()` or `searchKnowledge()`
+- **AND** live `retrieve()` and `searchKnowledge()` SHALL keep returning `retrievalMode='keyword'`
+- **AND** legacy 64-dimensional `metadata.embedding` arrays SHALL only be counted/logged for observability and SHALL NOT be used for production retrieval
 - **AND** live keyword retrieval SHALL remain the sole source of customer replies
 
 ### Requirement: Additive Vector Storage and Lifecycle
@@ -115,6 +117,12 @@ The system SHALL perform pgvector operations through Postgres RPCs executable on
 - **THEN** execution SHALL be revoked from `anon` and `authenticated`
 - **AND** execution SHALL be granted only to `service_role`
 - **AND** functions that trust `p_tenant_id` SHALL NOT be callable by untrusted roles
+
+#### Scenario: Write RPCs are tenant-scoped
+
+- **WHEN** `set_knowledge_chunk_embedding` or `mark_knowledge_chunk_embedding_failed` runs
+- **THEN** it SHALL accept `p_tenant_id` and only affect a chunk whose owning document belongs to that tenant
+- **AND** because `service_role` bypasses RLS, a chunk id alone SHALL NOT be sufficient to write across tenants
 
 #### Scenario: Vector values cross the boundary as text
 
@@ -158,7 +166,7 @@ The system SHALL prevent out-of-order embedding jobs from writing stale state.
 
 - **WHEN** `mark_knowledge_chunk_embedding_failed` runs
 - **THEN** it SHALL no-op if the chunk's stored `embedding_input_hash` differs from the job's captured input hash
-- **AND** otherwise it SHALL set `failed` status, store a sanitized short error, and update the timestamp
+- **AND** otherwise it SHALL set `failed` status, store a sanitized short error, stamp/preserve the captured input hash, and update the timestamp
 - **AND** a stale failing job SHALL NOT clear a newer valid embedding
 
 ### Requirement: Embedding Generation

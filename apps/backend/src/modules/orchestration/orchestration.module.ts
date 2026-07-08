@@ -2,6 +2,8 @@
 // Loads context, runs guards, loads memory, retrieves KB, routes to AI, plans reply.
 
 import { Module } from '@nestjs/common';
+import { BullModule } from '@nestjs/bullmq';
+import { QUEUES } from '../../queues/queue.constants';
 import { ConversationOrchestrationService } from './orchestration.service';
 import { OrchestrationGuards } from './orchestration-guards.service';
 import { AiRouterModule } from '../ai-router/ai-router.module';
@@ -30,6 +32,9 @@ import { ConversationMemoryModule } from './conversation-memory.module';
     PromptsModule,
     HumanEscalationModule,
     FollowUpEngineModule,
+    // Producer-side registration so the orchestration service can enqueue the
+    // fire-and-forget RAG shadow job. The consumer/worker lives in QueuesModule.
+    BullModule.registerQueue({ name: QUEUES.KB_VECTOR_SHADOW }),
   ],
   providers: [ConversationOrchestrationService, OrchestrationGuards],
   exports: [ConversationOrchestrationService],

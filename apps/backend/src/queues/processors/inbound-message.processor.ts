@@ -52,7 +52,7 @@ import { ingestInboundMessage } from '../../lib/inbound-message-ingest';
 import { MetricsService } from '../../lib/metrics.service';
 import { checkProviderOrchestrationGate, markProviderOrchestrationDone } from '../../lib/schedule-orchestration-if-new';
 import { resolveContactIdIfPhone } from '../../lib/contact-resolve';
-import { recordTerminalDecision, recordInterimDecision, recordDuplicateDecision } from '../../lib/inbound-decision';
+import { recordTerminalDecision, recordInterimDecision } from '../../lib/inbound-decision';
 import type { InboundDecisionStatus } from '../../lib/inbound-decision';
 
 function mapOutcomeToDecisionStatus(outcome: string): InboundDecisionStatus | null {
@@ -1396,8 +1396,10 @@ export class InboundMessageProcessor extends WorkerHost {
     const agencyPolicy = await this.orchestrationService.loadAgencyPolicy(tenantId);
     const conversationRecord = await this.orchestrationService.loadConversation(conversationId);
 
-    // Pre-reply GHL context sync (feature-flagged, default OFF)
-    if (process.env['GHL_PRE_REPLY_CONTEXT_SYNC'] === 'true') {
+    // Pre-reply GHL context sync: hydrate KB with recent GHL workflow/inbox
+    // messages before prompt memory loads. Best-effort only — sync must never
+    // be the reason KB misses a customer reply.
+    if (process.env['GHL_PRE_REPLY_CONTEXT_SYNC'] !== 'false') {
       try {
         this.metrics?.emit({ tenantId, conversationId, eventType: 'ghl_sync_started', eventSource: 'inbound-processor' });
         const syncResult = await syncGhlConversationContext({
@@ -1450,11 +1452,11 @@ export class InboundMessageProcessor extends WorkerHost {
     const result = await this.orchestrationService.orchestrate(orchestrationInput);
 
     if (result.outcome === 'SKIP_HANDOVER_ACTIVE') {
-      // Write terminal decision + provider done marker BEFORE firing holding reply.
-      // This ensures no "unknown no-reply" — every SKIP_HANDOVER_ACTIVE is recorded,
-      // regardless of whether the holding reply is sent, queued, suppressed, or fails.
+      // Active handover is an intentional silent skip. Record the terminal
+      // decision even if the provider id is missing so this never becomes an
+      // unknown no-reply.
       const skipStatus = mapOutcomeToDecisionStatus(result.outcome as string);
-      if (latestMsgId && skipStatus && ctxGhlMsgId) {
+      if (latestMsgId && skipStatus) {
         await recordTerminalDecision({
           supabase: this.supabase,
           logger: this.logger,
@@ -1466,21 +1468,11 @@ export class InboundMessageProcessor extends WorkerHost {
             decidedAt: new Date().toISOString(),
           },
         });
+      }
+      if (ctxGhlMsgId) {
         await markProviderOrchestrationDone(this.appCache, tenantId, ctxGhlMsgId);
       }
-      // Release lock so future orchestration can proceed
-      await this.releaseOrchestrationLock(latestMsgId, lockToken);
-      await this.humanEscalationHolding.tryEnqueueHoldingReply({
-        tenantId,
-        conversationId,
-        locationId,
-        ghlContactId,
-        latestInboundText,
-        contactDisplayName: contactDisplayName?.trim() || null,
-        contactPhone: contactPhone?.trim() || null,
-        botMode: tenantContext?.botMode ?? null,
-        pipelineWallStartMs: pipelineWallStartMs ?? null,
-      });
+      await this.releaseOrchestrationLock(tenantId, latestMsgId, lockToken);
     } else if (result.outcome === 'PROCEED' && result.replyPlan && result.replyPlan.bubbles.length > 0) {
       const replyId = randomUUID();
       if (result.replyPlan) result.replyPlan.replyId = replyId;
@@ -1543,11 +1535,11 @@ export class InboundMessageProcessor extends WorkerHost {
           },
         });
         // Mark provider done AFTER terminal decision is recorded
-        if (['SKIP_AI_OFF_TAG', 'SKIP_HANDOVER_ACTIVE', 'SKIP_DUPLICATE_PROVIDER_DONE', 'SKIP_HUMAN_TAKEOVER'].includes(skipStatus)) {
+        if (ctxGhlMsgId && ['SKIP_AI_OFF_TAG', 'SKIP_HANDOVER_ACTIVE', 'SKIP_DUPLICATE_PROVIDER_DONE', 'SKIP_HUMAN_TAKEOVER'].includes(skipStatus)) {
           await markProviderOrchestrationDone(this.appCache, tenantId, ctxGhlMsgId);
         }
       }
-      await this.releaseOrchestrationLock(latestMsgId, lockToken);
+      await this.releaseOrchestrationLock(tenantId, latestMsgId, lockToken);
     }
 
     this.logger.log(
@@ -1907,9 +1899,9 @@ export class InboundMessageProcessor extends WorkerHost {
     return null;
   }
 
-  private async releaseOrchestrationLock(messageId: string, ownerToken: string): Promise<void> {
+  private async releaseOrchestrationLock(tenantId: string, messageId: string, ownerToken: string): Promise<void> {
     if (!messageId || messageId === 'empty-claim' || !ownerToken || !this.appCache) return;
-    const lockKey = `lock:orch:${messageId}`;
+    const lockKey = `lock:orch:${tenantId}:${messageId}`;
     await this.appCache.releaseLock(lockKey, ownerToken);
   }
 

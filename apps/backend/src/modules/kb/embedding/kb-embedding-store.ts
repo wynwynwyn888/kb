@@ -14,6 +14,7 @@ export interface SupabaseRpcLikeClient {
 }
 
 export interface StoreKnowledgeChunkEmbeddingParams {
+  tenantId: string;
   chunkId: string;
   embedding: number[];
   embeddingModel: string;
@@ -21,6 +22,7 @@ export interface StoreKnowledgeChunkEmbeddingParams {
 }
 
 export interface MarkKnowledgeChunkEmbeddingFailedParams {
+  tenantId: string;
   chunkId: string;
   error: unknown;
   embeddingInputHash: string;
@@ -76,6 +78,7 @@ export async function storeKnowledgeChunkEmbedding(
   }
 
   const res = await supabase.rpc('set_knowledge_chunk_embedding', {
+    p_tenant_id: params.tenantId,
     p_chunk_id: params.chunkId,
     p_embedding: embeddingText,
     p_embedding_model: params.embeddingModel,
@@ -94,6 +97,7 @@ export async function markKnowledgeChunkEmbeddingFailed(
   params: MarkKnowledgeChunkEmbeddingFailedParams,
 ): Promise<KbEmbeddingStoreResult> {
   const res = await supabase.rpc('mark_knowledge_chunk_embedding_failed', {
+    p_tenant_id: params.tenantId,
     p_chunk_id: params.chunkId,
     p_error: sanitizeEmbeddingFailureReason(params.error),
     p_embedding_input_hash: params.embeddingInputHash,

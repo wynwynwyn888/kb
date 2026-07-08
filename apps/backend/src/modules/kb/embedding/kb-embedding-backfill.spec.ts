@@ -222,6 +222,7 @@ describe('kb-embedding-backfill', () => {
     expect(summary.failed).toBe(0);
     expect(embeddedInputs[0][0]).toHaveLength(8000);
     expect(stored[0]).toMatchObject({
+      tenantId: 'tenant-1',
       chunkId: 'chunk-1',
       embeddingModel: 'text-embedding-3-small',
     });
@@ -279,7 +280,7 @@ describe('kb-embedding-backfill', () => {
 
     expect(summary).toMatchObject({ ok: true, embedded: 0, failed: 2 });
     expect(failed).toHaveLength(2);
-    expect(failed[0]).toMatchObject({ chunkId: 'chunk-1' });
-    expect(failed[1]).toMatchObject({ chunkId: 'chunk-2' });
+    expect(failed[0]).toMatchObject({ tenantId: 'tenant-1', chunkId: 'chunk-1' });
+    expect(failed[1]).toMatchObject({ tenantId: 'tenant-1', chunkId: 'chunk-2' });
   });
 });

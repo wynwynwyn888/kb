@@ -608,7 +608,7 @@ describe('InboundMessageProcessor', () => {
     });
   });
 
-  it('orchestrate: SKIP_HANDOVER_ACTIVE triggers holding reply service (no normal send plan)', async () => {
+  it('orchestrate: SKIP_HANDOVER_ACTIVE is an intentional silent skip (no outbound)', async () => {
     orchestrate.mockResolvedValueOnce({
       success: false,
       outcome: 'SKIP_HANDOVER_ACTIVE',
@@ -666,16 +666,33 @@ describe('InboundMessageProcessor', () => {
       }),
     );
 
-    expect(mockHumanEscalationHolding.tryEnqueueHoldingReply).toHaveBeenCalledWith(
-      expect.objectContaining({
-        tenantId: 'tenant-1',
-        conversationId: CONV_ID,
-        locationId: 'loc_1',
-        ghlContactId: 'ct_1',
-        latestInboundText: 'Hello?',
-      }),
-    );
+    expect(mockHumanEscalationHolding.tryEnqueueHoldingReply).not.toHaveBeenCalled();
     expect(mockSendBubbleQueueAdd).not.toHaveBeenCalled();
+  });
+
+  it('releaseOrchestrationLock releases the same tenant-scoped key acquired by tryClaimInboundForOrchestration', async () => {
+    const releaseLock = jestGlobal.fn(async () => {});
+    const withCache = new InboundMessageProcessor(
+      mockOrchestration as never,
+      mockResetService as never,
+      mockInboundAutoTagging as never,
+      mockAudioTranscription as never,
+      mockGhlVoiceRecordingFetch as never,
+      mockGhlVoiceMessageDiscovery as never,
+      mockGhlVoiceConversationDiscovery as never,
+      mockFollowUpEngine as never,
+      mockHumanEscalationHolding as never,
+      { add: mockSendBubbleQueueAdd } as never,
+      { add: mockInboundQueueAdd } as never,
+      undefined,
+      { releaseLock } as never,
+    );
+
+    await (withCache as unknown as {
+      releaseOrchestrationLock: (tenantId: string, messageId: string, ownerToken: string) => Promise<void>;
+    }).releaseOrchestrationLock('tenant-1', 'msg-1', 'token-1');
+
+    expect(releaseLock).toHaveBeenCalledWith('lock:orch:tenant-1:msg-1', 'token-1');
   });
 
   it('orchestrate: exact /new triggers reset service and skips AI orchestration', async () => {

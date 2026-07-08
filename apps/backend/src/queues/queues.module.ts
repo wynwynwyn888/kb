@@ -15,6 +15,7 @@ import { PostOutboundSyncProcessor } from './processors/post-outbound-sync.proce
 import { ActiveRecoveryWatchdogProcessor } from './processors/active-recovery-watchdog.processor';
 import { UnrepliedScannerProcessor } from './processors/unreplied-scanner.processor';
 import { MediaTranscriptionProcessor } from './processors/media-transcription.processor';
+import { KbVectorShadowProcessor } from './processors/kb-vector-shadow.processor';
 import { MediaTranscriptionQueueService } from './media-transcription-queue.service';
 
 // Feature modules
@@ -68,6 +69,7 @@ import { AppCacheModule } from '../lib/app-cache.module';
     PostOutboundSyncProcessor,
     ActiveRecoveryWatchdogProcessor,
     UnrepliedScannerProcessor,
+    KbVectorShadowProcessor,
   ],
   exports: [BullModule, MediaTranscriptionQueueService],
 })

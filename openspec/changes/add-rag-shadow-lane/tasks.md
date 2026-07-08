@@ -8,11 +8,11 @@
 - [x] 1.4 Add partial cosine vector index for non-null embeddings; prefer HNSW, else IVFFlat with ANALYZE/lists/probes guidance.
 - [x] 1.5 Update Prisma `KnowledgeChunk` with `Unsupported("vector(1536)")?` and lifecycle fields.
 - [x] 1.6 Add RPC `check_pgvector_available`.
-- [x] 1.7 Add RPC `set_knowledge_chunk_embedding` (text vector param, SQL cast, stale input-hash guard via stored-column compare).
-- [x] 1.8 Add RPC `mark_knowledge_chunk_embedding_failed` (stale input-hash guard so it cannot clobber a newer embedding).
+- [x] 1.7 Add RPC `set_knowledge_chunk_embedding` (tenant-scoped `p_tenant_id`, text vector param, SQL cast, stale input-hash guard via stored-column compare, stamp captured hash on success).
+- [x] 1.8 Add RPC `mark_knowledge_chunk_embedding_failed` (tenant-scoped `p_tenant_id`, stale input-hash guard, stamp/preserve captured hash so a stale failing job cannot clobber a newer embedding).
 - [x] 1.9 Add RPC `match_knowledge_chunks` (text vector param, SQL cast, tenant + READY + non-null embedding + parenthesized allowlist).
-- [x] 1.10 Revoke execute from `anon`/`authenticated`; grant only to `service_role` for all four RPCs.
-- [ ] 1.11 Apply and verify the migration on staging/local only; confirm idempotent rerun.
+- [x] 1.10 Revoke execute from `anon`/`authenticated`; grant only to `service_role` for all RPCs (incl. tenant-scoped write signatures).
+- [x] 1.11 Add follow-up migration `20260708000000_kb_shadow_embeddings_tenant_scoped_rpc` replacing the chunk-id-only write RPCs with tenant-scoped signatures (Codex blocker: `service_role` bypasses RLS). Apply/verify on staging/local only.
 
 ## 2. Embedding Pipeline (no reply-path impact)
 
@@ -24,7 +24,7 @@
 - [x] 2.6 Implement a real embedding processor (dedicated processor or a real KB embedding job path; do not leave it acknowledgement-only).
 - [x] 2.7 Batch embedding inputs per OpenAI request with bounded concurrency.
 - [x] 2.8 Add transient retry/backoff for 429/5xx/network; treat missing docs/chunks as benign no-ops.
-- [x] 2.9 Store via `set_knowledge_chunk_embedding`; mark permanent failures via `mark_knowledge_chunk_embedding_failed`.
+- [x] 2.9 Store via tenant-scoped `set_knowledge_chunk_embedding` (pass `p_tenant_id`); mark permanent failures via tenant-scoped `mark_knowledge_chunk_embedding_failed`.
 - [x] 2.10 Add safe structured logs for embedding jobs (no raw content/secrets).
 
 ## 3. Staging Backfill (tenant-limited, idempotent)
@@ -37,38 +37,43 @@
 
 ## 4. Shadow Queue and Retrieval (log-only)
 
-- [ ] 4.1 Add `KB_VECTOR_SHADOW` queue name + config in `queue.constants.ts`.
-- [ ] 4.2 Register the shadow queue and processor in `queues.module.ts`.
+- [x] 4.1 Add `KB_VECTOR_SHADOW` queue name + config in `queue.constants.ts`.
+- [x] 4.2 Register the shadow queue and processor in `queues.module.ts` (producer registered in `orchestration.module.ts`).
 - [x] 4.3 Implement `vectorSearchShadow()` wrapper around `match_knowledge_chunks` (empty allowlist short-circuits without RPC; ignores legacy `metadata.embedding`).
 - [x] 4.4 Implement RRF (k=60) + keyword-vs-vector comparison helper (`kb-hybrid-merge.ts`).
-- [ ] 4.5 Implement the shadow processor: resolve key, embed query (with LRU cache max 100, no error caching), run vector + hybrid, compute comparison, log only.
+- [x] 4.5 Implement the shadow processor (`kb-vector-shadow.processor.ts`): resolve key, embed query (with LRU cache max 100, no error caching), run vector + hybrid, compute comparison, log only.
 - [x] 4.6 Guarantee the processor returns void, mutates nothing, and swallows all errors with a structured fallback reason.
 
-> Note: 4.1/4.2 are intentionally not implemented in this safe slice. The current shadow path uses an inline fire-and-forget runner (`kb-vector-shadow.runner.ts` invoked from `orchestration.service.ts`) instead of a dedicated BullMQ queue. The runner embeds and logs vector candidates safely, but does not yet do LRU caching or hybrid/RRF comparison inside the shadow path.
+> Reconciliation (Codex blocker #2): the earlier inline fire-and-forget runner
+> invoked directly from `orchestration.service.ts` has been REPLACED by a
+> dedicated BullMQ `KB_VECTOR_SHADOW` queue + processor. All OpenAI/RPC work now
+> happens in the worker, never inline on the reply request. `runKbVectorShadow`
+> is retained as the log-only engine invoked by the processor and now performs
+> LRU query-embedding caching (max 100) and hybrid/RRF comparison.
 
 ## 5. Reply-Path Enqueue (single guarded touch)
 
 - [x] 5.1 Add flags `KB_VECTOR_SHADOW_ENABLED` (default false) and `KB_VECTOR_SHADOW_TENANT_IDS` (fail-closed if empty/unset); do not read/write `KB_VECTOR_RETRIEVAL_ENABLED`.
-- [x] 5.2 In `orchestration.service.ts`, after the existing keyword `retrieve()` result, if the flag is on and the tenant is allowlisted, start the inline shadow runner via `void runKbVectorShadow(...).catch(()=>{})`; never await.
-- [ ] 5.3 Include tenant ID, conversation ID, the effective KB retrieval query (for the query embedding), intent hint, `documentIdAllowlist`, and keyword chunk IDs/scores in the payload; exclude the unrelated raw conversation transcript and secrets; logs use safe previews only.
-- [ ] 5.4 Verify no other reply-path code changes; leave legacy pseudo-vector branch in `retrieve()`/`searchKnowledge()` untouched.
+- [x] 5.2 In `orchestration.service.ts`, after the existing keyword `retrieve()` result, if the flag is on and the tenant is allowlisted, enqueue a `KB_VECTOR_SHADOW` job via `void queue.add(...).catch(() => undefined)`; never await, never inline.
+- [x] 5.3 Include tenant ID, conversation ID, the effective KB retrieval query (for the query embedding), intent hint, `documentIdAllowlist`, and keyword chunk IDs/scores in the payload; exclude the unrelated raw conversation transcript and secrets; logs use safe previews only.
+- [x] 5.4 Verify no other reply-path code changes; keyword-only live retrieval (per PR #47) untouched.
 
 ## 6. Observability
 
-- [ ] 6.1 Emit shadow comparison log fields (keyword vs vector/hybrid candidates, scores, RRF ranks, overlap, latency breakdown, fallback reason, "no reply impact").
+- [x] 6.1 Emit shadow comparison log fields (keyword vs vector/hybrid candidates, scores, RRF ranks, overlap, latency breakdown, fallback reason, "no reply impact").
 - [x] 6.2 Use `safeTextPreviewForLog` for query-derived text; never log raw chunk content/secrets.
 - [x] 6.3 Do not add a new metrics backend dependency.
 
 ## 7. Tests (before enabling any flag)
 
-- [ ] 7.1 Flag off → zero shadow enqueues and identical `retrieveKbContext` result.
-- [ ] 7.2 Shadow enqueue failure cannot propagate to the reply path.
-- [ ] 7.3 Shadow candidates are never injected into reply context.
+- [x] 7.1 Flag off → zero shadow enqueues and identical `retrieveKbContext` result.
+- [x] 7.2 Shadow enqueue failure cannot propagate to the reply path.
+- [x] 7.3 Shadow candidates are never injected into reply context.
 - [x] 7.4 Tenant allowlist fails closed when empty/unset.
-- [ ] 7.5 `match_knowledge_chunks` tenant + READY + allowlist filtering; cross-tenant probe returns nothing.
+- [ ] 7.5 `match_knowledge_chunks` tenant + READY + allowlist filtering; cross-tenant probe returns nothing (staging DB integration).
 - [x] 7.6 Empty allowlist short-circuits without calling RPC.
-- [ ] 7.7 Allowlist `OR` cannot bypass tenant/status filters.
-- [ ] 7.8 Vector RPCs not executable by `anon`/`authenticated`.
+- [ ] 7.7 Allowlist `OR` cannot bypass tenant/status filters (staging DB integration; enforced by parenthesized SQL).
+- [ ] 7.8 Vector RPCs not executable by `anon`/`authenticated` (staging DB integration; enforced by migration grants).
 - [x] 7.9 pgvector text param casts correctly inside RPC.
 - [x] 7.10 Embedding input truncation; timeout/rate-limit handling.
 - [x] 7.11 Key resolver returns safely on missing/unusable key.

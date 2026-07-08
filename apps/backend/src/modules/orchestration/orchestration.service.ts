@@ -3,7 +3,9 @@
 // calls AI router, produces structured result for downstream layers.
 // Does NOT send outbound message — that is a later layer's responsibility.
 
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
 import { randomUUID } from 'crypto';
 import { formatPostgrestError } from '../../lib/format-postgrest-error';
 import { getSupabaseService } from '../../lib/supabase';
@@ -11,10 +13,9 @@ import { OrchestrationGuards } from './orchestration-guards.service';
 import { ConversationMemoryLoader } from './conversation-memory-loader';
 import { AiRouterService } from '../ai-router/ai-router.service';
 import { KbService } from '../kb/kb.service';
-import {
-  kbVectorShadowEnabledForTenant,
-  runKbVectorShadow,
-} from '../kb/embedding/kb-vector-shadow.runner';
+import { QUEUES } from '../../queues/queue.constants';
+import type { KbVectorShadowJobData } from '../../queues/processors/kb-vector-shadow.processor';
+import { kbVectorShadowEnabledForTenant } from '../kb/embedding/kb-vector-shadow.runner';
 import {
   kbVectorContextEnabledForTenant,
   runKbVectorContext,
@@ -119,6 +120,9 @@ export class ConversationOrchestrationService {
     private readonly humanEscalationRuntime: HumanEscalationRuntimeService,
     private readonly humanEscalationSettings: HumanEscalationSettingsService,
     private readonly followUpEngine: FollowUpEngineService,
+    @Optional()
+    @InjectQueue(QUEUES.KB_VECTOR_SHADOW)
+    private readonly kbVectorShadowQueue?: Queue<KbVectorShadowJobData>,
   ) {}
 
   /**
@@ -1274,13 +1278,26 @@ export class ConversationOrchestrationService {
       });
 
       // RAG shadow lane (diagnostic-only, default OFF, fail-closed per tenant).
-      // Fire-and-forget + never-throws: it only logs vector candidates and does
-      // NOT influence `result`, the customer-facing prompt, or the reply text.
-      if (kbVectorShadowEnabledForTenant(input.tenantId)) {
-        void runKbVectorShadow(
-          { tenantId: input.tenantId, conversationId, query: retrieveQuery, documentIdAllowlist },
-          { logger: this.logger },
-        ).catch(() => undefined);
+      // Enqueue a fire-and-forget job onto the dedicated KB_VECTOR_SHADOW queue.
+      // ALL OpenAI/RPC work happens in that worker, NEVER inline on this reply
+      // request. The enqueue is non-awaited and its failure is swallowed, so it
+      // can never inject/reorder/replace/delay/error the reply. Flag-off => no
+      // enqueue and a byte-identical `result`.
+      if (kbVectorShadowEnabledForTenant(input.tenantId) && this.kbVectorShadowQueue) {
+        const keywordCandidates = result.chunks.map((c) => ({
+          chunkId: c.chunkId,
+          score: c.relevanceScore,
+        }));
+        void this.kbVectorShadowQueue
+          .add('kb-vector-shadow', {
+            tenantId: input.tenantId,
+            conversationId,
+            query: retrieveQuery,
+            intentHint: kbIntentHint,
+            documentIdAllowlist: documentIdAllowlist ?? null,
+            keywordCandidates,
+          })
+          .catch(() => undefined);
       }
 
       let usedVectorContext = false;

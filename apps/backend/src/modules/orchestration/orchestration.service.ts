@@ -31,7 +31,7 @@ import type {
 } from './dto';
 import type { RoutingResponse } from './dto';
 import type { ReplyDecision } from '../reply-planning/dto';
-import type { RetrievalChunk, RetrievalMeta } from '../kb/dto/retrieval.dto';
+import type { RetrievalChunk, RetrievalMeta, RetrievalResult } from '../kb/dto/retrieval.dto';
 import { safeLog } from '../../lib/encryption';
 import { resolveBotMode, type BotOperatingMode } from '../../lib/bot-mode';
 import { filterKbChunksForPolicy } from '../../lib/kb-relevance';
@@ -100,6 +100,7 @@ import {
   isTechnicalOperatorInput,
   TECHNICAL_OPERATOR_DEFLECTION_REPLY,
 } from '../../lib/technical-operator-input';
+import { buildKbRetrievalPlans } from '../../lib/kb-compound-retrieval';
 
 const DEFAULT_REPLY_PATH_RAG_TIMEOUT_MS = 1200;
 const MIN_REPLY_PATH_RAG_TIMEOUT_MS = 250;
@@ -1333,58 +1334,80 @@ export class ConversationOrchestrationService {
       );
     }
 
+    const retrievalPlans = buildKbRetrievalPlans(retrieveQuery, latestIntent);
+    const primaryPlan = retrievalPlans[0] ?? {
+      query: retrieveQuery,
+      intent: latestIntent,
+      source: 'primary' as const,
+    };
     const kbIntentHint =
-      latestIntent !== 'UNKNOWN' ? latestIntent : inferKbRetrievalIntentHint(retrieveQuery) ?? undefined;
+      primaryPlan.intent !== 'UNKNOWN'
+        ? primaryPlan.intent
+        : inferKbRetrievalIntentHint(primaryPlan.query) ?? undefined;
 
     this.logger.debug(
       `kbRetrieveIntentHint tenant=${input.tenantId} conversation=${conversationId} ` +
         `classifiedIntent=${latestIntent} intentHint=${kbIntentHint ?? 'none'} ` +
         `retrieveQueryPreview=${JSON.stringify(
-          safeTextPreviewForLog(retrieveQuery, { hashSalt: 'retrieveQueryPreview' }),
+          safeTextPreviewForLog(primaryPlan.query, { hashSalt: 'retrieveQueryPreview' }),
         )}`,
     );
 
-    let result = await this.kbService.retrieve({
-      tenantId: input.tenantId,
-      conversationId,
-      query: retrieveQuery,
-      topK: 5,
-      intentHint: kbIntentHint,
-      documentIdAllowlist,
-    });
+    const retrievedByPlan: Array<{
+      plan: typeof primaryPlan;
+      result: RetrievalResult;
+      usedVectorContext: boolean;
+    }> = [];
 
-    // RAG shadow lane (diagnostic-only, default OFF, fail-closed per tenant).
-    // Enqueue a fire-and-forget job onto the dedicated KB_VECTOR_SHADOW queue.
-    // ALL OpenAI/RPC work happens in that worker, NEVER inline on this reply
-    // request. The enqueue is non-awaited and its failure is swallowed, so it
-    // can never inject/reorder/replace/delay/error the reply. Flag-off => no
-    // enqueue and a byte-identical `result`.
-    if (kbVectorShadowEnabledForTenant(input.tenantId) && this.kbVectorShadowQueue) {
-      const keywordCandidates = result.chunks.map((c) => ({
-        chunkId: c.chunkId,
-        score: c.relevanceScore,
-      }));
-      void this.kbVectorShadowQueue
-        .add('kb-vector-shadow', {
-          tenantId: input.tenantId,
-          conversationId,
-          query: retrieveQuery,
-          intentHint: kbIntentHint,
-          documentIdAllowlist: documentIdAllowlist ?? null,
-          keywordCandidates,
-        })
-        .catch(() => undefined);
+    for (const plan of retrievalPlans.length ? retrievalPlans : [primaryPlan]) {
+      const intentHint =
+        plan.intent !== 'UNKNOWN' ? plan.intent : inferKbRetrievalIntentHint(plan.query) ?? undefined;
+      let result = await this.kbService.retrieve({
+        tenantId: input.tenantId,
+        conversationId,
+        query: plan.query,
+        topK: plan.source === 'primary' ? 5 : 3,
+        intentHint,
+        documentIdAllowlist,
+      });
+
+      // RAG shadow lane (diagnostic-only, default OFF, fail-closed per tenant).
+      // Enqueue a fire-and-forget job onto the dedicated KB_VECTOR_SHADOW queue.
+      // ALL OpenAI/RPC work happens in that worker, NEVER inline on this reply
+      // request. The enqueue is non-awaited and its failure is swallowed, so it
+      // can never inject/reorder/replace/delay/error the reply. Flag-off => no
+      // enqueue and a byte-identical `result`.
+      if (kbVectorShadowEnabledForTenant(input.tenantId) && this.kbVectorShadowQueue) {
+        const keywordCandidates = result.chunks.map((c) => ({
+          chunkId: c.chunkId,
+          score: c.relevanceScore,
+        }));
+        void this.kbVectorShadowQueue
+          .add('kb-vector-shadow', {
+            tenantId: input.tenantId,
+            conversationId,
+            query: plan.query,
+            intentHint,
+            documentIdAllowlist: documentIdAllowlist ?? null,
+            keywordCandidates,
+          })
+          .catch(() => undefined);
+      }
+
+      retrievedByPlan.push({ plan, result, usedVectorContext: false });
     }
 
-    let usedVectorContext = false;
-    if (kbVectorContextEnabledForTenant(input.tenantId)) {
+    if (retrievedByPlan.length === 1 && kbVectorContextEnabledForTenant(input.tenantId)) {
       const vectorContext = await runKbVectorContext(
-        { tenantId: input.tenantId, conversationId, query: retrieveQuery, documentIdAllowlist, topK: 5 },
+        { tenantId: input.tenantId, conversationId, query: primaryPlan.query, documentIdAllowlist, topK: 5 },
         { logger: this.logger },
       );
       if (vectorContext.ok) {
-        result = vectorContext.result;
-        usedVectorContext = true;
+        retrievedByPlan[0] = {
+          plan: primaryPlan,
+          result: vectorContext.result,
+          usedVectorContext: true,
+        };
       } else {
         this.logger.log(
           `kbVectorContextFallback tenant=${input.tenantId} conversation=${conversationId} reason=${vectorContext.reason}`,
@@ -1395,16 +1418,35 @@ export class ConversationOrchestrationService {
     const filterIntent = opts?.kbFilterIntent ?? latestIntent;
     const filterUserMessage = (opts?.kbFilterUserMessage ?? input.incomingMessage.messageContent ?? '').trim();
 
-    const { chunks: filteredChunks, rejections } = usedVectorContext
-      ? { chunks: result.chunks, rejections: [] }
-      : filterKbChunksForPolicy(filterIntent, filterUserMessage, result.chunks, {
-          menuKbAnchor: opts?.menuKbAnchor,
-        });
-    for (const r of rejections) {
-      this.logger.log(
-        `KB rejected: reason=${r.reason}, latestMessage_class=${r.queryClass}, kbTitle=${r.kbTitleShort}`,
-      );
+    const mergedChunks = new Map<string, RetrievalChunk>();
+    let chunksConsidered = 0;
+    let rawTopScore: number | null = null;
+    const retrievalModes = new Set<RetrievalResult['retrievalMode']>();
+    for (const { plan, result, usedVectorContext } of retrievedByPlan) {
+      chunksConsidered += result.totalConsidered;
+      rawTopScore ??= result.chunks[0]?.relevanceScore ?? null;
+      retrievalModes.add(result.retrievalMode);
+      const planFilterIntent = plan.source === 'primary' ? filterIntent : plan.intent;
+      const planFilterUserMessage = plan.source === 'primary' ? filterUserMessage : plan.query;
+      const { chunks, rejections } = usedVectorContext
+        ? { chunks: result.chunks, rejections: [] }
+        : filterKbChunksForPolicy(planFilterIntent, planFilterUserMessage, result.chunks, {
+            menuKbAnchor: opts?.menuKbAnchor,
+          });
+
+      for (const r of rejections) {
+        this.logger.log(
+          `KB rejected: reason=${r.reason}, latestMessage_class=${r.queryClass}, kbTitle=${r.kbTitleShort}`,
+        );
+      }
+      for (const chunk of chunks) {
+        const existing = mergedChunks.get(chunk.chunkId);
+        if (!existing || chunk.relevanceScore > existing.relevanceScore) {
+          mergedChunks.set(chunk.chunkId, chunk);
+        }
+      }
     }
+    const filteredChunks = [...mergedChunks.values()].slice(0, 10);
 
     const retrievedSectionTitles = filteredChunks.map(c => {
       const st = c.metadata['sectionTitle'];
@@ -1412,24 +1454,32 @@ export class ConversationOrchestrationService {
     });
     const topScores = filteredChunks.map(c => c.relevanceScore);
     const documentIds = [...new Set(filteredChunks.map(c => c.documentId))];
+    const retrievalMode =
+      retrievalModes.size === 1 ? [...retrievalModes][0] ?? 'keyword' : 'hybrid';
+    const kbSubqueries = retrievalPlans
+      .filter(plan => plan.source === 'focused')
+      .map(plan => plan.query);
+    const kbIntentHints = [...new Set(retrievalPlans.map(plan => plan.intent))];
 
     const meta: RetrievalMeta = {
       chunksReturned: filteredChunks.length,
-      chunksConsidered: result.totalConsidered,
-      retrievalMode: result.retrievalMode,
-      topScore: filteredChunks[0]?.relevanceScore ?? result.chunks[0]?.relevanceScore ?? null,
-      kbQuery: retrieveQuery,
+      chunksConsidered,
+      retrievalMode,
+      topScore: filteredChunks[0]?.relevanceScore ?? rawTopScore,
+      kbQuery: primaryPlan.query,
       retrievedSectionTitles,
       topScores,
       documentIds,
+      kbSubqueries: kbSubqueries.length ? kbSubqueries : undefined,
+      kbIntentHints,
     };
 
     this.logger.log(
       `KB context retrieved: kbQuery=${JSON.stringify(
-        safeTextPreviewForLog(retrieveQuery, { hashSalt: 'kbQuery' }),
-      )} selectedContextCount=${filteredChunks.length} retrievedChunkCount=${filteredChunks.length} ` +
+        safeTextPreviewForLog(primaryPlan.query, { hashSalt: 'kbQuery' }),
+      )} retrievalPlanCount=${retrievalPlans.length || 1} selectedContextCount=${filteredChunks.length} retrievedChunkCount=${filteredChunks.length} ` +
         `retrievedSectionTitles=${JSON.stringify(retrievedSectionTitles)} topScores=${JSON.stringify(topScores)} ` +
-        `retrievedDocumentIds=${JSON.stringify(documentIds)}`,
+        `retrievedDocumentIds=${JSON.stringify(documentIds)} kbSubqueries=${JSON.stringify(kbSubqueries)}`,
     );
 
     return { chunks: filteredChunks, meta };

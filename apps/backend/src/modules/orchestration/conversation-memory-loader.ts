@@ -5,10 +5,25 @@ import { Injectable, Logger } from '@nestjs/common';
 import { formatPostgrestError } from '../../lib/format-postgrest-error';
 import { getSupabaseService } from '../../lib/supabase';
 import type { ConversationMemory, MemoryEntry } from './dto';
+import { matchChatResetCommand } from '../../lib/chat-reset-command';
 
 export const CONVERSATION_MEMORY_MESSAGE_LIMIT = 30;
 /** Gap after which conversation memory starts a fresh session (no prior turns in prompt). */
 export const CONVERSATION_MEMORY_SESSION_GAP_MS = 24 * 60 * 60 * 1000;
+const CHAT_RESET_CONFIRMATION_RE =
+  /started a fresh chat for this conversation\.\s*you can test from here\./i;
+
+function isPromptMemoryAdministrativeRow(row: { direction?: string; sender?: string; content?: string | null }): boolean {
+  const content = String(row.content ?? '').trim();
+  if (!content) return true;
+  if (row.direction === 'INBOUND' && row.sender === 'CONTACT' && matchChatResetCommand(content)) {
+    return true;
+  }
+  if (row.direction === 'OUTBOUND' && row.sender === 'AI' && CHAT_RESET_CONFIRMATION_RE.test(content)) {
+    return true;
+  }
+  return false;
+}
 
 @Injectable()
 export class ConversationMemoryLoader {
@@ -32,13 +47,13 @@ export class ConversationMemoryLoader {
     let query = this.supabase
       .from('messages')
       .select('id, direction, sender, content, contentType, created_at')
-      .eq('conversation_id', conversationId)
-      .order('created_at', { ascending: false })
-      .limit(CONVERSATION_MEMORY_MESSAGE_LIMIT);
+      .eq('conversation_id', conversationId);
 
     if (resetAfter) {
       query = query.gt('created_at', resetAfter);
     }
+
+    query = query.order('created_at', { ascending: false }).limit(CONVERSATION_MEMORY_MESSAGE_LIMIT);
 
     const { data: rawRows, error } = await query;
 
@@ -54,7 +69,7 @@ export class ConversationMemoryLoader {
       };
     }
 
-    const data = [...rawRows].reverse();
+    const data = [...rawRows].reverse().filter(row => !isPromptMemoryAdministrativeRow(row));
 
     if (data.length > 0) {
       const lastRow = data[data.length - 1] as { created_at?: string };

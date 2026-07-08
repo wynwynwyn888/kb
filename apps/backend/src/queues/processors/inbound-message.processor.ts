@@ -27,6 +27,7 @@ import {
   type InboundRowForBurst,
 } from '../../lib/inbound-burst-batch';
 import { excludeChatResetInboundRows, matchChatResetCommand } from '../../lib/chat-reset-command';
+import { parseAisbpPolicyState } from '../../modules/conversation-policy/conversation-policy-state';
 import { computeOrchestrateQueueWaitMs } from '../../lib/orchestrate-queue-timing';
 import { safeTextPreviewForLog } from '../../lib/safe-text-preview-for-log';
 import { AppCacheService } from '../../lib/app-cache.service';
@@ -1226,9 +1227,17 @@ export class InboundMessageProcessor extends WorkerHost {
       pipelineWallStartMs,
       orchestrateEnqueuedAtMs,
     );
-    const { orchestrationBatch, resetDetectionBatch, resetDetectionRows } =
-      await this.fetchRecentInboundBatches(conversationId);
     const latestInbound = await this.fetchLatestInboundOrchestrationContext(conversationId);
+    const policyForBatch = parseAisbpPolicyState(
+      convRow.metadata && typeof convRow.metadata === 'object' && !Array.isArray(convRow.metadata)
+        ? (convRow.metadata as Record<string, unknown>)
+        : undefined,
+    );
+    const { orchestrationBatch, resetDetectionBatch, resetDetectionRows } =
+      await this.fetchRecentInboundBatches(conversationId, {
+        memoryResetAfterIso: policyForBatch.memoryResetAt ?? null,
+        alwaysIncludeMessageId: latestInbound.id ?? null,
+      });
     const latestText = orchestrationBatch.length ? orchestrationBatch[orchestrationBatch.length - 1]! : '';
 
     this.logger.log(
@@ -1664,14 +1673,20 @@ export class InboundMessageProcessor extends WorkerHost {
     return true;
   }
 
-  private async fetchRecentInboundBatches(conversationId: string): Promise<{
+  private async fetchRecentInboundBatches(
+    conversationId: string,
+    opts?: {
+      memoryResetAfterIso?: string | null;
+      alwaysIncludeMessageId?: string | null;
+    },
+  ): Promise<{
     orchestrationBatch: string[];
     resetDetectionBatch: string[];
     resetDetectionRows: Array<{ content: string; created_at: string }>;
   }> {
     const { data, error } = await this.supabase
       .from('messages')
-      .select('content, created_at')
+      .select('id, content, created_at')
       .eq('conversation_id', conversationId)
       .eq('direction', 'INBOUND')
       .eq('sender', 'CONTACT')
@@ -1680,10 +1695,19 @@ export class InboundMessageProcessor extends WorkerHost {
     if (error || !data?.length) {
       return { orchestrationBatch: [], resetDetectionBatch: [], resetDetectionRows: [] };
     }
-    const rows = data as { created_at: string; content?: string | null }[];
+    const rows = data as { id?: string | null; created_at: string; content?: string | null }[];
     const resetDetectionBatch = filterInboundRowsToBurstWindow(rows);
     const resetDetectionRows = buildBurstRowsOldestFirst(rows);
-    const withoutResetCmd = excludeChatResetInboundRows(rows);
+    const resetAfterMs = opts?.memoryResetAfterIso ? Date.parse(opts.memoryResetAfterIso) : NaN;
+    const alwaysIncludeMessageId = opts?.alwaysIncludeMessageId?.trim() || null;
+    const rowsForOrchestration = Number.isFinite(resetAfterMs)
+      ? rows.filter(r => {
+          if (alwaysIncludeMessageId && r.id === alwaysIncludeMessageId) return true;
+          const rowMs = Date.parse(r.created_at);
+          return Number.isFinite(rowMs) && rowMs > resetAfterMs;
+        })
+      : rows;
+    const withoutResetCmd = excludeChatResetInboundRows(rowsForOrchestration);
     const orchestrationBatch = filterInboundRowsToBurstWindow(withoutResetCmd);
     return { orchestrationBatch, resetDetectionBatch, resetDetectionRows };
   }

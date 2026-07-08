@@ -10,6 +10,7 @@ import { matchChatResetCommand } from '../../lib/chat-reset-command';
 export const CONVERSATION_MEMORY_MESSAGE_LIMIT = 30;
 /** Gap after which conversation memory starts a fresh session (no prior turns in prompt). */
 export const CONVERSATION_MEMORY_SESSION_GAP_MS = 24 * 60 * 60 * 1000;
+const PROMPT_DUPLICATE_WINDOW_MS = 10_000;
 const CHAT_RESET_CONFIRMATION_RE =
   /started a fresh chat for this conversation\.\s*you can test from here\./i;
 
@@ -23,6 +24,39 @@ function isPromptMemoryAdministrativeRow(row: { direction?: string; sender?: str
     return true;
   }
   return false;
+}
+
+function normalizePromptContent(content: string | null | undefined): string {
+  return String(content ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+function collapsePromptDuplicateRows<T extends {
+  direction?: string;
+  sender?: string;
+  content?: string | null;
+  created_at?: string;
+}>(rowsOldestFirst: T[]): T[] {
+  const out: T[] = [];
+  for (const row of rowsOldestFirst) {
+    const prev = out[out.length - 1];
+    if (prev) {
+      const prevMs = prev.created_at ? Date.parse(String(prev.created_at)) : NaN;
+      const rowMs = row.created_at ? Date.parse(String(row.created_at)) : NaN;
+      const sameTurn =
+        prev.direction === row.direction &&
+        prev.sender === row.sender &&
+        normalizePromptContent(prev.content) === normalizePromptContent(row.content);
+      const closeTogether =
+        Number.isFinite(prevMs) &&
+        Number.isFinite(rowMs) &&
+        Math.abs(rowMs - prevMs) <= PROMPT_DUPLICATE_WINDOW_MS;
+      if (sameTurn && closeTogether) {
+        continue;
+      }
+    }
+    out.push(row);
+  }
+  return out;
 }
 
 @Injectable()
@@ -46,7 +80,7 @@ export class ConversationMemoryLoader {
 
     let query = this.supabase
       .from('messages')
-      .select('id, direction, sender, content, contentType, created_at')
+      .select('id, direction, sender, content, contentType, created_at, metadata')
       .eq('conversation_id', conversationId);
 
     if (resetAfter) {
@@ -69,7 +103,9 @@ export class ConversationMemoryLoader {
       };
     }
 
-    const data = [...rawRows].reverse().filter(row => !isPromptMemoryAdministrativeRow(row));
+    const data = collapsePromptDuplicateRows(
+      [...rawRows].reverse().filter(row => !isPromptMemoryAdministrativeRow(row)),
+    );
 
     if (data.length > 0) {
       const lastRow = data[data.length - 1] as { created_at?: string };

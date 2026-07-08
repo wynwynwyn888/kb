@@ -485,6 +485,9 @@ describe('GenerationService', () => {
       );
       expect(policyMsg?.content as string).toContain('not the first message');
       expect(policyMsg?.content as string).toContain('Do not repeat first-message routing scripts');
+      expect(policyMsg?.content as string).toContain('Use the last 3-5 visible turns');
+      expect(policyMsg?.content as string).toContain('never use the fixed phrase');
+      expect(policyMsg?.content as string).toContain('Yes — coming back to this');
     });
 
     it('adds cadence guidance after several assistant replies to avoid endless questions', () => {

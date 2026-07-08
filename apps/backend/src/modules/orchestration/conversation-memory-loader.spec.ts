@@ -139,4 +139,51 @@ describe('ConversationMemoryLoader', () => {
     expect(mem.entries.map(e => e.content)).toEqual(['Hi']);
     expect(mem.turnCount).toBe(1);
   });
+
+  it('collapses nearby duplicate prompt rows from webhook plus GHL sync', async () => {
+    const now = Date.now();
+    mockRows = [
+      {
+        id: 'm4',
+        direction: 'OUTBOUND',
+        sender: 'AI',
+        content: 'Hello there',
+        contentType: 'TEXT',
+        created_at: new Date(now - 1_000).toISOString(),
+      },
+      {
+        id: 'm3',
+        direction: 'INBOUND',
+        sender: 'CONTACT',
+        content: 'hi',
+        contentType: 'TEXT',
+        created_at: new Date(now - 2_000).toISOString(),
+        metadata: { ingestSource: 'webhook' },
+      },
+      {
+        id: 'm2',
+        direction: 'INBOUND',
+        sender: 'CONTACT',
+        content: 'hi',
+        contentType: 'TEXT',
+        created_at: new Date(now - 4_000).toISOString(),
+        metadata: { ingestSource: 'ghl-sync' },
+      },
+      {
+        id: 'm1',
+        direction: 'INBOUND',
+        sender: 'CONTACT',
+        content: 'hi',
+        contentType: 'TEXT',
+        created_at: new Date(now - 30_000).toISOString(),
+        metadata: { ingestSource: 'webhook' },
+      },
+    ];
+
+    const loader = new ConversationMemoryLoader();
+    const mem = await loader.loadMemory('conv_dupes');
+
+    expect(mem.entries.map(e => e.content)).toEqual(['hi', 'hi', 'Hello there']);
+    expect(mem.turnCount).toBe(2);
+  });
 });

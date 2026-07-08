@@ -71,6 +71,10 @@ export interface ReplyPlanPolicyContext {
   suppressColourRecommendations?: boolean;
   bookingCapability?: 'collect_details_only' | 'live_slot_booking' | string;
   handoverCapability?: string;
+  /** Assistant replies already visible before this turn. Used to avoid restarting first-message flows. */
+  priorAssistantMessageCount?: number;
+  /** Recent assistant history already contains a booking/scheduling URL. */
+  recentAssistantBookingUrlSent?: boolean;
   /** Prior assistant menu excerpt for deterministic letter picks (no KB). */
   optionMenuSourceExcerpt?: string;
   /** Business notes + tenant prompt body — ground-truth for explicit pricing when KB is empty. */
@@ -469,6 +473,12 @@ export class ReplyPlannerService {
                 : {}),
               ...(policyContext.handoverCapability
                 ? { handoverCapability: policyContext.handoverCapability }
+                : {}),
+              ...(policyContext.priorAssistantMessageCount != null
+                ? { priorAssistantMessageCount: policyContext.priorAssistantMessageCount }
+                : {}),
+              ...(policyContext.recentAssistantBookingUrlSent === true
+                ? { recentAssistantBookingUrlSent: true }
                 : {}),
               ...(policyContext.optionMenuSourceExcerpt?.trim()
                 ? { optionMenuSourceExcerpt: policyContext.optionMenuSourceExcerpt.trim() }

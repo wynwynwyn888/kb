@@ -105,6 +105,8 @@ import { buildKbRetrievalPlans } from '../../lib/kb-compound-retrieval';
 const DEFAULT_REPLY_PATH_RAG_TIMEOUT_MS = 1200;
 const MIN_REPLY_PATH_RAG_TIMEOUT_MS = 250;
 const MAX_REPLY_PATH_RAG_TIMEOUT_MS = 3000;
+const RECENT_ASSISTANT_BOOKING_URL_RE =
+  /https?:\/\/\S*(?:book|booking|appointment|calendar|schedule|calendly|meet|session)\S*/i;
 
 class KbRetrievalTimeoutError extends Error {
   constructor(readonly timeoutMs: number) {
@@ -136,6 +138,13 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
       },
     );
   });
+}
+
+function recentAssistantHistoryHasBookingUrl(memory: MemoryEntry[]): boolean {
+  return memory
+    .filter(m => m.role === 'assistant')
+    .slice(-6)
+    .some(m => RECENT_ASSISTANT_BOOKING_URL_RE.test(m.content ?? ''));
 }
 
 @Injectable()
@@ -861,6 +870,8 @@ export class ConversationOrchestrationService {
             handoverCapability: input.tenant?.ghlLocationId?.trim()
               ? 'tag_and_notify'
               : 'collect_details_only',
+            priorAssistantMessageCount: memory.entries.filter(m => m.role === 'assistant').length,
+            recentAssistantBookingUrlSent: recentAssistantHistoryHasBookingUrl(memory.entries),
             ...(optionMenuSourceExcerpt ? { optionMenuSourceExcerpt } : {}),
             tenantPricingCorpus: [
               input.promptConfig?.businessNotes?.trim(),

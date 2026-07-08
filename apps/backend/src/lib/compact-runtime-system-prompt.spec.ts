@@ -17,19 +17,21 @@ describe('runtime section budgets sourced from PROMPT_FIELD_LIMITS (no drift)', 
     expect(RUNTIME_TENANT_SECTION_BUDGETS.persona).toBe(PROMPT_FIELD_LIMITS.persona);
     expect(RUNTIME_TENANT_SECTION_BUDGETS.goals).toBe(PROMPT_FIELD_LIMITS.conversationGoals);
     expect(RUNTIME_TENANT_SECTION_BUDGETS.businessNotes).toBe(PROMPT_FIELD_LIMITS.businessNotes);
+    expect(RUNTIME_TENANT_SECTION_BUDGETS.salesPlaybook).toBe(PROMPT_FIELD_LIMITS.salesPlaybook);
     expect(RUNTIME_TENANT_SECTION_BUDGETS.bookingBehavior).toBe(PROMPT_FIELD_LIMITS.bookingBehavior);
     expect(RUNTIME_TENANT_SECTION_BUDGETS.escalationBehavior).toBe(PROMPT_FIELD_LIMITS.escalationBehavior);
   });
 
-  it('total tenant section budget is 19,500 for the six core fields', () => {
+  it('total tenant section budget is 22,500 for the seven core fields', () => {
     const core =
       RUNTIME_TENANT_SECTION_BUDGETS.criticalFacts +
       RUNTIME_TENANT_SECTION_BUDGETS.persona +
       RUNTIME_TENANT_SECTION_BUDGETS.goals +
       RUNTIME_TENANT_SECTION_BUDGETS.businessNotes +
+      RUNTIME_TENANT_SECTION_BUDGETS.salesPlaybook +
       RUNTIME_TENANT_SECTION_BUDGETS.bookingBehavior +
       RUNTIME_TENANT_SECTION_BUDGETS.escalationBehavior;
-    expect(core).toBe(19500);
+    expect(core).toBe(22500);
   });
 
   it('global policy budget is a separate, larger cap (10,000, not the legacy 7,500 tenant cap)', () => {
@@ -37,9 +39,9 @@ describe('runtime section budgets sourced from PROMPT_FIELD_LIMITS (no drift)', 
     expect(GLOBAL_POLICY_RUNTIME_BUDGET).not.toBe(7500);
   });
 
-  it('injection order is Critical Facts → Persona → Goals → Business Notes → Booking → Escalation', () => {
-    expect(RUNTIME_TENANT_SECTION_ORDER.slice(0, 6)).toEqual([
-      'criticalFacts', 'persona', 'goals', 'businessNotes', 'bookingBehavior', 'escalationBehavior',
+  it('injection order is Critical Facts → Persona → Goals → Business Notes → Sales Playbook → Booking → Escalation', () => {
+    expect(RUNTIME_TENANT_SECTION_ORDER.slice(0, 7)).toEqual([
+      'criticalFacts', 'persona', 'goals', 'businessNotes', 'salesPlaybook', 'bookingBehavior', 'escalationBehavior',
     ]);
   });
 });
@@ -75,6 +77,12 @@ describe('compactProfileSections', () => {
     expect(result.truncated.businessNotes).toBe(true);
   });
 
+  it('salesPlaybook truncated only above 3,000', () => {
+    const result = compactProfileSections({ salesPlaybook: 'S'.repeat(3500) });
+    expect(result.sections.salesPlaybook!.length).toBeLessThanOrEqual(3010);
+    expect(result.truncated.salesPlaybook).toBe(true);
+  });
+
   it('bookingBehavior and escalationBehavior each have a 2,000 budget', () => {
     const result = compactProfileSections({
       bookingBehavior: 'K'.repeat(2000),
@@ -103,6 +111,7 @@ describe('compactProfileSections', () => {
       persona: 'b'.repeat(3000),
       goals: 'c'.repeat(5000),
       businessNotes: 'd'.repeat(5000),
+      salesPlaybook: 's'.repeat(3000),
       bookingBehavior: 'e'.repeat(2000),
       escalationBehavior: 'f'.repeat(2000),
     });
@@ -110,6 +119,7 @@ describe('compactProfileSections', () => {
     expect(result.sections.persona!.length).toBe(3000);
     expect(result.sections.goals!.length).toBe(5000);
     expect(result.sections.businessNotes!.length).toBe(5000);
+    expect(result.sections.salesPlaybook!.length).toBe(3000);
     expect(result.sections.bookingBehavior!.length).toBe(2000);
     expect(result.sections.escalationBehavior!.length).toBe(2000);
     expect(result.totalChars).toBeGreaterThan(7500);
@@ -136,11 +146,12 @@ describe('buildCompactedPromptBody', () => {
       persona: 'Friendly assistant',
       goals: 'Help customers book appointments',
       businessNotes: 'Hours 9-5',
+      salesPlaybook: 'Qualify before CTA',
       bookingBehavior: 'Confirm the slot',
       escalationBehavior: 'Hand to human if angry',
     });
     const body = buildCompactedPromptBody(compacted);
-    const order = ['### Critical facts', '### Bot Persona', '### Goals', '### Business notes', '### Booking behavior', '### Escalation behavior'];
+    const order = ['### Critical facts', '### Bot Persona', '### Goals', '### Business notes', '### Sales playbook', '### Booking behavior', '### Escalation behavior'];
     let last = -1;
     for (const h of order) {
       const idx = body.indexOf(h);

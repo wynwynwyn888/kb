@@ -49,6 +49,7 @@ describe('BotProfilesService', () => {
                         persona: 'Friendly expert',
                         conversation_goals: 'Convert leads',
                         business_notes: 'We ship fast',
+                        sales_playbook: 'Ask one qualifying question before booking',
                         tone_rules: 'Professional',
                         booking_behavior_notes: '',
                         escalation_behavior_notes: '',
@@ -90,9 +91,11 @@ describe('BotProfilesService', () => {
     });
     const out = await svc.getActivePromptForOrchestration(tenantId);
     expect(out?.systemPrompt).toContain('Friendly expert');
+    expect(out?.systemPrompt).toContain('Ask one qualifying question before booking');
     expect(out?.systemPrompt).toContain('Professional');
     expect(out?.systemPrompt).toContain('Knowledge access: All knowledge vaults');
     expect(out?.businessNotes).toBe('We ship fast');
+    expect(out?.profileSections?.salesPlaybook).toBe('Ask one qualifying question before booking');
   });
 
   it('getActivePromptForOrchestration includes saved Critical Facts + Conversation Goals (WhatsApp parity)', async () => {

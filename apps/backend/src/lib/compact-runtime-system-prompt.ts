@@ -63,6 +63,7 @@ export const RUNTIME_TENANT_SECTION_BUDGETS: Record<string, number> = {
   persona: PROMPT_FIELD_LIMITS.persona,
   goals: PROMPT_FIELD_LIMITS.conversationGoals,
   businessNotes: PROMPT_FIELD_LIMITS.businessNotes,
+  salesPlaybook: PROMPT_FIELD_LIMITS.salesPlaybook,
   bookingBehavior: PROMPT_FIELD_LIMITS.bookingBehavior,
   escalationBehavior: PROMPT_FIELD_LIMITS.escalationBehavior,
   toneRules: AUX_SECTION_BUDGETS.toneRules,
@@ -78,6 +79,7 @@ export const RUNTIME_TENANT_SECTION_ORDER = [
   'persona',
   'goals',
   'businessNotes',
+  'salesPlaybook',
   'bookingBehavior',
   'escalationBehavior',
   'toneRules',
@@ -94,6 +96,7 @@ export interface ProfileSections {
   persona?: string;
   goals?: string;
   businessNotes?: string;
+  salesPlaybook?: string;
   toneRules?: string;
   bookingBehavior?: string;
   escalationBehavior?: string;
@@ -151,6 +154,7 @@ export function buildCompactedPromptBody(compacted: CompactedSections): string {
     persona: '### Bot Persona',
     goals: '### Goals',
     businessNotes: '### Business notes',
+    salesPlaybook: '### Sales playbook',
     bookingBehavior: '### Booking behavior',
     escalationBehavior: '### Escalation behavior',
     toneRules: '### Tone rules',

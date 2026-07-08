@@ -310,6 +310,7 @@ type FormBaseline = {
   persona: string;
   goals: string;
   additional: string;
+  salesPlaybook: string;
   toneRules: string;
   bookingBehaviorNotes: string;
   escalationBehaviorNotes: string;
@@ -334,6 +335,7 @@ function rowToBaseline(row: TenantBotProfileRow): FormBaseline {
     persona: row.persona ?? '',
     goals: row.conversationGoals ?? '',
     additional: row.businessNotes ?? '',
+    salesPlaybook: row.salesPlaybook ?? '',
     toneRules: row.toneRules ?? '',
     bookingBehaviorNotes: row.bookingBehaviorNotes ?? '',
     escalationBehaviorNotes: row.escalationBehaviorNotes ?? '',
@@ -354,12 +356,13 @@ function activeProfileLooksEmpty(row: TenantBotProfileRow): boolean {
     !(row.persona?.trim()) &&
     !(row.conversationGoals?.trim()) &&
     !(row.businessNotes?.trim()) &&
+    !(row.salesPlaybook?.trim()) &&
     !(row.description?.trim());
   return noName && noBody;
 }
 
 export type TenantGoalsPanelProps = {
-  /** Deep-link from Assistant nav: scroll the profile list or instruction editors into view. */
+  /** Deep-link from AI Agent nav: scroll the profile list or instruction editors into view. */
   initialFocus?: 'profiles' | 'instructions' | 'all';
   /**
    * Controls which surface to render.
@@ -384,6 +387,7 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
   const [persona, setPersona] = useState('');
   const [goals, setGoals] = useState('');
   const [additional, setAdditional] = useState('');
+  const [salesPlaybook, setSalesPlaybook] = useState('');
   const [toneRules, setToneRules] = useState('');
   const [bookingBehaviorNotes, setBookingBehaviorNotes] = useState('');
   const [escalationBehaviorNotes, setEscalationBehaviorNotes] = useState('');
@@ -400,7 +404,7 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState('');
   const [ok, setOk] = useState('');
-  const [expandField, setExpandField] = useState<null | 'persona' | 'goals' | 'additional' | 'toneRules' | 'bookingBehavior' | 'escalationBehavior' | 'knowledgeScope' | 'criticalFacts'>(null);
+  const [expandField, setExpandField] = useState<null | 'persona' | 'goals' | 'additional' | 'salesPlaybook' | 'toneRules' | 'bookingBehavior' | 'escalationBehavior' | 'knowledgeScope' | 'criticalFacts'>(null);
   const [expandDraft, setExpandDraft] = useState('');
   const [activeTab, setActiveTab] = useState('criticalFacts');
 
@@ -425,6 +429,7 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
       persona,
       goals,
       additional,
+      salesPlaybook,
       toneRules,
       bookingBehaviorNotes,
       escalationBehaviorNotes,
@@ -442,6 +447,7 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
     persona,
     goals,
     additional,
+    salesPlaybook,
     toneRules,
     bookingBehaviorNotes,
     escalationBehaviorNotes,
@@ -482,6 +488,7 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
     setPersona(row.persona ?? '');
     setGoals(row.conversationGoals ?? '');
     setAdditional(row.businessNotes ?? '');
+    setSalesPlaybook(row.salesPlaybook ?? '');
     setToneRules(row.toneRules ?? '');
     setBookingBehaviorNotes(row.bookingBehaviorNotes ?? '');
     setEscalationBehaviorNotes(row.escalationBehaviorNotes ?? '');
@@ -600,11 +607,12 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
       const tok = p.allowMaxTokensOverride ? clamp(maxTokens, p.maxTokensMin, p.maxTokensMax) : maxTokens;
       const mo = modelOverride.trim();
       await updateTenantBotProfile(token, subaccountId, selectedProfileId, {
-        name: profileName.trim() || 'Assistant profile',
+        name: profileName.trim() || 'AI Agent profile',
         description,
         persona,
         conversationGoals: goals,
         businessNotes: additional,
+        salesPlaybook,
         toneRules,
         bookingBehaviorNotes,
         escalationBehaviorNotes,
@@ -663,6 +671,7 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
         persona: '',
         conversationGoals: '',
         businessNotes: '',
+        salesPlaybook: '',
         toneRules: '',
         bookingBehaviorNotes: '',
         escalationBehaviorNotes: '',
@@ -738,7 +747,7 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
         setSelectedProfileId(profileId);
         applyRowToForm(row);
       }
-      setOk('Active assistant profile updated.');
+      setOk('Active AI Agent profile updated.');
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Could not set active profile');
     }
@@ -824,22 +833,24 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
 
   const INSTRUCTION_TABS = useMemo(() => [
     { key: 'criticalFacts', label: 'Critical Facts', help: 'Important tenant-specific facts that must be preserved in the AI prompt, such as pricing, guarantees, CTA, positioning, key rules, and non-negotiable sales instructions.', cap: PROMPT_FIELD_LIMITS.criticalFacts, getValue: () => criticalFacts, setValue: setCriticalFacts },
-    { key: 'persona', label: 'Persona', help: 'How the assistant should sound and behave.', cap: PROMPT_FIELD_LIMITS.persona, getValue: () => persona, setValue: setPersona },
-    { key: 'goals', label: 'Conversation Goals', help: 'What this assistant should try to achieve.', cap: 5000, getValue: () => goals, setValue: setGoals },
-    { key: 'additional', label: 'Business Notes', help: 'Facts, policies, and context for this workspace.', cap: 5000, getValue: () => additional, setValue: setAdditional },
-    { key: 'bookingBehavior', label: 'Booking Behavior', help: 'When and how the assistant should guide prospects toward booking, consultation, demo, call, appointment, or the next step.', cap: PROMPT_FIELD_LIMITS.bookingBehavior, getValue: () => bookingBehaviorNotes, setValue: setBookingBehaviorNotes },
-    { key: 'escalationBehavior', label: 'Escalation Behavior', help: 'When the assistant should hand over to a human or team instead of answering.', cap: PROMPT_FIELD_LIMITS.escalationBehavior, getValue: () => escalationBehaviorNotes, setValue: setEscalationBehaviorNotes },
-  ], [criticalFacts, persona, goals, additional, bookingBehaviorNotes, escalationBehaviorNotes]);
+    { key: 'persona', label: 'Persona', help: 'How the AI Agent should sound and behave.', cap: PROMPT_FIELD_LIMITS.persona, getValue: () => persona, setValue: setPersona },
+    { key: 'goals', label: 'Conversation Goals', help: 'What this AI Agent should try to achieve.', cap: PROMPT_FIELD_LIMITS.conversationGoals, getValue: () => goals, setValue: setGoals },
+    { key: 'additional', label: 'Business Notes', help: 'Facts, policies, and context for this workspace.', cap: PROMPT_FIELD_LIMITS.businessNotes, getValue: () => additional, setValue: setAdditional },
+    { key: 'salesPlaybook', label: 'Sales Playbook', help: 'How this AI Agent should qualify interest, handle objections, guide the sales flow, and move naturally toward the next step.', cap: PROMPT_FIELD_LIMITS.salesPlaybook, getValue: () => salesPlaybook, setValue: setSalesPlaybook },
+    { key: 'bookingBehavior', label: 'Booking Behavior', help: 'When and how this AI Agent should guide prospects toward booking, consultation, demo, call, appointment, or the next step.', cap: PROMPT_FIELD_LIMITS.bookingBehavior, getValue: () => bookingBehaviorNotes, setValue: setBookingBehaviorNotes },
+    { key: 'escalationBehavior', label: 'Escalation Behavior', help: 'When this AI Agent should hand over to a human or team instead of answering.', cap: PROMPT_FIELD_LIMITS.escalationBehavior, getValue: () => escalationBehaviorNotes, setValue: setEscalationBehaviorNotes },
+  ], [criticalFacts, persona, goals, additional, salesPlaybook, bookingBehaviorNotes, escalationBehaviorNotes]);
 
   const expandFieldMeta = useMemo(() => {
     const map: Record<string, { title: string; help: string; cap: number }> = {
-      persona: { title: 'Persona', help: 'How the assistant should sound and behave.', cap: PROMPT_FIELD_LIMITS.persona },
-      goals: { title: 'Conversation goals', help: 'What this assistant should try to achieve.', cap: 5000 },
-      additional: { title: 'Business notes', help: 'Facts, policies, and context for this workspace.', cap: 5000 },
-      toneRules: { title: 'Tone Rules', help: 'How the assistant should sound and format replies. Use this for reply length, WhatsApp style, forbidden phrases, and language style.', cap: 1000 },
-      bookingBehavior: { title: 'Booking Behavior', help: 'When and how the assistant should guide prospects toward booking, consultation, demo, call, appointment, or next step.', cap: PROMPT_FIELD_LIMITS.bookingBehavior },
-      escalationBehavior: { title: 'Escalation Behavior', help: 'When the assistant should hand over to a human or team instead of answering.', cap: PROMPT_FIELD_LIMITS.escalationBehavior },
-      knowledgeScope: { title: 'Knowledge Scope', help: 'What the assistant is allowed to answer, what it should avoid, and when it should say information is missing.', cap: 500 },
+      persona: { title: 'Persona', help: 'How the AI Agent should sound and behave.', cap: PROMPT_FIELD_LIMITS.persona },
+      goals: { title: 'Conversation goals', help: 'What this AI Agent should try to achieve.', cap: PROMPT_FIELD_LIMITS.conversationGoals },
+      additional: { title: 'Business notes', help: 'Facts, policies, and context for this workspace.', cap: PROMPT_FIELD_LIMITS.businessNotes },
+      salesPlaybook: { title: 'Sales Playbook', help: 'How this AI Agent should qualify interest, handle objections, guide the sales flow, and move naturally toward the next step.', cap: PROMPT_FIELD_LIMITS.salesPlaybook },
+      toneRules: { title: 'Tone Rules', help: 'How the AI Agent should sound and format replies. Use this for reply length, WhatsApp style, forbidden phrases, and language style.', cap: 1000 },
+      bookingBehavior: { title: 'Booking Behavior', help: 'When and how this AI Agent should guide prospects toward booking, consultation, demo, call, appointment, or next step.', cap: PROMPT_FIELD_LIMITS.bookingBehavior },
+      escalationBehavior: { title: 'Escalation Behavior', help: 'When this AI Agent should hand over to a human or team instead of answering.', cap: PROMPT_FIELD_LIMITS.escalationBehavior },
+      knowledgeScope: { title: 'Knowledge Scope', help: 'What the AI Agent is allowed to answer, what it should avoid, and when it should say information is missing.', cap: 500 },
       criticalFacts: { title: 'Critical Facts', help: 'Important tenant-specific facts that must be preserved in the AI prompt, such as pricing, guarantees, CTA, positioning, key rules, and non-negotiable sales instructions.', cap: PROMPT_FIELD_LIMITS.criticalFacts },
     };
     return expandField ? (map[expandField] ?? null) : null;
@@ -866,14 +877,14 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
       <PageHeader
         title={
           mode === 'profiles'
-            ? 'Assistant Profiles'
+            ? 'AI Agent Profiles'
             : mode === 'instructions'
-              ? 'Assistant Instructions'
+              ? 'AI Agent Instructions'
               : initialFocus === 'profiles'
-                ? 'Assistant · Profiles'
+                ? 'AI Agent · Profiles'
                 : initialFocus === 'instructions'
-                  ? 'Assistant · Instructions'
-                  : 'Assistant'
+                  ? 'AI Agent · Instructions'
+                  : 'AI Agent'
         }
         eyebrow="Client workspace"
       />
@@ -939,7 +950,7 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                     letterSpacing: '-0.02em',
                   }}
                 >
-                  {activeProfile.name.trim() || 'Untitled assistant'}
+                  {activeProfile.name.trim() || 'Untitled AI Agent'}
                 </span>
                 <ActiveBadge large />
               </div>
@@ -986,14 +997,14 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                     lineHeight: 1.45,
                   }}
                 >
-                  Add persona and goals so this active assistant is ready for customers.
+                  Add persona and goals so this active AI Agent is ready for customers.
                 </p>
               ) : null}
             </div>
           ) : (
             <div style={{ ...sectionCard, marginBottom: '0.75rem' }}>
               <p style={{ margin: '0 0 0.35rem', fontWeight: 700, color: 'var(--aisbp-text-heading, #0f172a)' }}>
-                No active assistant
+                No active AI Agent
               </p>
               <p style={{ fontSize: '0.85rem', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 0.65rem' }}>
                 Set a profile active below, or create a new one.
@@ -1008,7 +1019,7 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
             <>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '0.75rem', margin: '0.25rem 0 0.85rem' }}>
                 <h2 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 800, color: 'var(--aisbp-text-heading, #0f172a)' }}>
-                  Assistant profiles
+                  AI Agent profiles
                 </h2>
                 <button type="button" onClick={openCreateModal} style={secondaryBtnStyle}>
                   Create new profile
@@ -1080,8 +1091,8 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                           cursor: p.isActive || profiles.length <= 1 ? 'not-allowed' : 'pointer',
                         }}
                         disabled={p.isActive || profiles.length <= 1}
-                        title={p.isActive ? 'You cannot delete the active assistant profile. Set another profile active first.' : undefined}
-                        aria-label={p.isActive ? 'Cannot delete active assistant profile' : 'Delete profile'}
+                        title={p.isActive ? 'You cannot delete the active AI Agent profile. Set another profile active first.' : undefined}
+                        aria-label={p.isActive ? 'Cannot delete active AI Agent profile' : 'Delete profile'}
                         data-action="delete-profile"
                       >
                         Delete
@@ -1117,7 +1128,7 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                 <form onSubmit={onSavePrompt}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.75rem', alignItems: 'center', marginBottom: '0.75rem' }}>
                     <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--aisbp-muted)' }}>
-                      Editing: <strong style={{ color: 'var(--aisbp-text-secondary)' }}>{activeProfile?.name?.trim() || 'Active assistant'}</strong>
+                      Editing: <strong style={{ color: 'var(--aisbp-text-secondary)' }}>{activeProfile?.name?.trim() || 'Active AI Agent'}</strong>
                     </p>
                     <Link href={`/app/tenant/${subaccountId}/assistant/profiles`} style={{ fontSize: '0.85rem', fontWeight: 650, color: '#2563eb', textDecoration: 'none' }}>
                       Switch profile →
@@ -1246,7 +1257,7 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                   </div>
 
                   <div style={sectionCard}>
-                    <h3 style={sectionTitleStyle}>Knowledge used by this assistant</h3>
+                    <h3 style={sectionTitleStyle}>Knowledge used by this AI Agent</h3>
                     <p style={{ fontSize: '0.82rem', color: 'var(--aisbp-text-secondary, #334155)', margin: '0.35rem 0 0.75rem', lineHeight: 1.45 }}>
                       Vaults are groups of FAQs, notes, and files. Configure vault content under Knowledge.
                     </p>
@@ -1277,7 +1288,7 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                         <span>
                           <strong style={{ fontWeight: 700 }}>Selected vaults</strong>
                           <span style={{ display: 'block', fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)', marginTop: '0.15rem' }}>
-                            Only the vaults you check below are searched for this assistant.
+                            Only the vaults you check below are searched for this AI Agent.
                           </span>
                         </span>
                       </label>
@@ -1378,7 +1389,7 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                       margin: 0,
                     }}
                   >
-                    Assistant profiles
+                    AI Agent profiles
                   </h2>
                   <button type="button" onClick={openCreateModal} style={{ ...secondaryBtnStyle, padding: '0.32rem 0.6rem', fontSize: '0.76rem' }}>
                     Create new
@@ -1556,7 +1567,7 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
 
                   <div style={sectionCard}>
                     <h3 style={sectionTitleStyle}>Persona</h3>
-                    <p style={{ ...mvpFieldHint, margin: '-0.25rem 0 0.5rem' }}>How the assistant should sound and behave. Max 1,500 characters.</p>
+                    <p style={{ ...mvpFieldHint, margin: '-0.25rem 0 0.5rem' }}>How the AI Agent should sound and behave. Max {PROMPT_FIELD_LIMITS.persona.toLocaleString('en-US')} characters.</p>
                     <textarea style={textareaStyle} value={persona} onChange={e => { const v = e.target.value; if (v.length <= PROMPT_FIELD_LIMITS.persona) setPersona(v); }} aria-label="Persona" />
                     <div
                       style={{
@@ -1585,8 +1596,8 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                   </div>
                   <div style={sectionCard}>
                     <h3 style={sectionTitleStyle}>Conversation goals</h3>
-                    <p style={{ ...mvpFieldHint, margin: '-0.25rem 0 0.5rem' }}>What this assistant should try to achieve. Max 5,000 characters.</p>
-                    <textarea style={textareaStyle} value={goals} onChange={e => { const v = e.target.value; if (v.length <= 5000) setGoals(v); }} aria-label="Conversation goals" />
+                    <p style={{ ...mvpFieldHint, margin: '-0.25rem 0 0.5rem' }}>What this AI Agent should try to achieve. Max {PROMPT_FIELD_LIMITS.conversationGoals.toLocaleString('en-US')} characters.</p>
+                    <textarea style={textareaStyle} value={goals} onChange={e => { const v = e.target.value; if (v.length <= PROMPT_FIELD_LIMITS.conversationGoals) setGoals(v); }} aria-label="Conversation goals" />
                     <div
                       style={{
                         display: 'flex',
@@ -1598,7 +1609,7 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                       }}
                     >
                       <span style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)' }}>
-                        {goals.length} / 5000 characters
+                        {goals.length} / {PROMPT_FIELD_LIMITS.conversationGoals} characters
                       </span>
                       <button
                         type="button"
@@ -1614,8 +1625,8 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                   </div>
                   <div style={sectionCard}>
                     <h3 style={sectionTitleStyle}>Business notes</h3>
-                    <p style={{ ...mvpFieldHint, margin: '-0.25rem 0 0.5rem' }}>Facts, policies, and context for this workspace. Max 5,000 characters.</p>
-                    <textarea style={textareaStyle} value={additional} onChange={e => { const v = e.target.value; if (v.length <= 5000) setAdditional(v); }} aria-label="Business notes" />
+                    <p style={{ ...mvpFieldHint, margin: '-0.25rem 0 0.5rem' }}>Facts, policies, and context for this workspace. Max {PROMPT_FIELD_LIMITS.businessNotes.toLocaleString('en-US')} characters.</p>
+                    <textarea style={textareaStyle} value={additional} onChange={e => { const v = e.target.value; if (v.length <= PROMPT_FIELD_LIMITS.businessNotes) setAdditional(v); }} aria-label="Business notes" />
                     <div
                       style={{
                         display: 'flex',
@@ -1627,7 +1638,7 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                       }}
                     >
                       <span style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)' }}>
-                        {additional.length} / 5000 characters
+                        {additional.length} / {PROMPT_FIELD_LIMITS.businessNotes} characters
                       </span>
                       <button
                         type="button"
@@ -1643,8 +1654,38 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                   </div>
 
                   <div style={sectionCard}>
+                    <h3 style={sectionTitleStyle}>Sales Playbook</h3>
+                    <p style={{ ...mvpFieldHint, margin: '-0.25rem 0 0.5rem' }}>How this AI Agent should qualify interest, handle objections, guide the sales flow, and move naturally toward the next step. Max {PROMPT_FIELD_LIMITS.salesPlaybook.toLocaleString('en-US')} characters.</p>
+                    <textarea style={textareaStyle} value={salesPlaybook} onChange={e => { const v = e.target.value; if (v.length <= PROMPT_FIELD_LIMITS.salesPlaybook) setSalesPlaybook(v); }} aria-label="Sales Playbook" />
+                    <div
+                      style={{
+                        display: 'flex',
+                        flexWrap: 'wrap',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        gap: 8,
+                        marginTop: 8,
+                      }}
+                    >
+                      <span style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)' }}>
+                        {salesPlaybook.length} / {PROMPT_FIELD_LIMITS.salesPlaybook} characters
+                      </span>
+                      <button
+                        type="button"
+                        style={expandTextBtn}
+                        onClick={() => {
+                          setExpandDraft(salesPlaybook);
+                          setExpandField('salesPlaybook');
+                        }}
+                      >
+                        Expand
+                      </button>
+                    </div>
+                  </div>
+
+                  <div style={sectionCard}>
                     <h3 style={sectionTitleStyle}>Tone Rules</h3>
-                    <p style={{ ...mvpFieldHint, margin: '-0.25rem 0 0.5rem' }}>How the assistant should sound and format replies. Use this for reply length, WhatsApp style, forbidden phrases, and language style. Max 1,000 characters.</p>
+                    <p style={{ ...mvpFieldHint, margin: '-0.25rem 0 0.5rem' }}>How the AI Agent should sound and format replies. Use this for reply length, WhatsApp style, forbidden phrases, and language style. Max 1,000 characters.</p>
                     <textarea style={textareaStyle} value={toneRules} onChange={e => { const v = e.target.value; if (v.length <= 1000) setToneRules(v); }} aria-label="Tone Rules" />
                     <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginTop: 8 }}>
                       <span style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)' }}>{toneRules.length} / 1000 characters</span>
@@ -1663,7 +1704,7 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
 
                   <div style={sectionCard}>
                     <h3 style={sectionTitleStyle}>Booking Behavior</h3>
-                    <p style={{ ...mvpFieldHint, margin: '-0.25rem 0 0.5rem' }}>When and how the assistant should guide prospects toward booking, consultation, demo, call, appointment, or next step. Max 1,000 characters.</p>
+                    <p style={{ ...mvpFieldHint, margin: '-0.25rem 0 0.5rem' }}>When and how the AI Agent should guide prospects toward booking, consultation, demo, call, appointment, or next step. Max {PROMPT_FIELD_LIMITS.bookingBehavior.toLocaleString('en-US')} characters.</p>
                     <textarea style={textareaStyle} value={bookingBehaviorNotes} onChange={e => { const v = e.target.value; if (v.length <= PROMPT_FIELD_LIMITS.bookingBehavior) setBookingBehaviorNotes(v); }} aria-label="Booking Behavior" />
                     <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginTop: 8 }}>
                       <span style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)' }}>{bookingBehaviorNotes.length} / {PROMPT_FIELD_LIMITS.bookingBehavior} characters</span>
@@ -1682,7 +1723,7 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
 
                   <div style={sectionCard}>
                     <h3 style={sectionTitleStyle}>Escalation Behavior</h3>
-                    <p style={{ ...mvpFieldHint, margin: '-0.25rem 0 0.5rem' }}>When the assistant should hand over to a human or team instead of answering. Max 1,000 characters.</p>
+                    <p style={{ ...mvpFieldHint, margin: '-0.25rem 0 0.5rem' }}>When the AI Agent should hand over to a human or team instead of answering. Max {PROMPT_FIELD_LIMITS.escalationBehavior.toLocaleString('en-US')} characters.</p>
                     <textarea style={textareaStyle} value={escalationBehaviorNotes} onChange={e => { const v = e.target.value; if (v.length <= PROMPT_FIELD_LIMITS.escalationBehavior) setEscalationBehaviorNotes(v); }} aria-label="Escalation Behavior" />
                     <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginTop: 8 }}>
                       <span style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)' }}>{escalationBehaviorNotes.length} / {PROMPT_FIELD_LIMITS.escalationBehavior} characters</span>
@@ -1701,7 +1742,7 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
 
                   <div style={sectionCard}>
                     <h3 style={sectionTitleStyle}>Knowledge Scope</h3>
-                    <p style={{ ...mvpFieldHint, margin: '-0.25rem 0 0.5rem' }}>What the assistant is allowed to answer, what it should avoid, and when it should say information is missing. Max 500 characters.</p>
+                    <p style={{ ...mvpFieldHint, margin: '-0.25rem 0 0.5rem' }}>What the AI Agent is allowed to answer, what it should avoid, and when it should say information is missing. Max 500 characters.</p>
                     <textarea style={textareaStyle} value={knowledgeScopeNotes} onChange={e => { const v = e.target.value; if (v.length <= 500) setKnowledgeScopeNotes(v); }} aria-label="Knowledge Scope" />
                     <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginTop: 8 }}>
                       <span style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)' }}>{knowledgeScopeNotes.length} / 500 characters</span>
@@ -1719,7 +1760,7 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                   </div>
 
                   <div style={sectionCard}>
-                    <h3 style={sectionTitleStyle}>Knowledge used by this assistant</h3>
+                    <h3 style={sectionTitleStyle}>Knowledge used by this AI Agent</h3>
                     <p
                       style={{
                         fontSize: '0.82rem',
@@ -1775,7 +1816,7 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                         <span>
                           <strong style={{ fontWeight: 700 }}>Selected vaults</strong>
                           <span style={{ display: 'block', fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)', marginTop: '0.15rem' }}>
-                            Only the vaults you check below are searched for this assistant.
+                            Only the vaults you check below are searched for this AI Agent.
                           </span>
                         </span>
                       </label>
@@ -2110,6 +2151,7 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                   if (expandField === 'persona') setPersona(expandDraft);
                   else if (expandField === 'goals') setGoals(expandDraft);
                   else if (expandField === 'additional') setAdditional(expandDraft);
+                  else if (expandField === 'salesPlaybook') setSalesPlaybook(expandDraft);
                   else if (expandField === 'toneRules') setToneRules(expandDraft);
                   else if (expandField === 'bookingBehavior') setBookingBehaviorNotes(expandDraft);
                   else if (expandField === 'escalationBehavior') setEscalationBehaviorNotes(expandDraft);
@@ -2137,7 +2179,7 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
           <div style={modalPanel} role="dialog" aria-modal="true" onClick={e => e.stopPropagation()}>
             <div style={{ padding: '1rem 1.15rem', borderBottom: '1px solid var(--aisbp-modal-divider, #f1f5f9)' }}>
               <h2 style={{ fontSize: '1.05rem', fontWeight: 800, margin: 0, color: 'var(--aisbp-text-heading, #0f172a)' }}>
-                Create assistant profile
+                Create AI Agent profile
               </h2>
               <p style={{ margin: '0.35rem 0 0', fontSize: '0.85rem', color: 'var(--aisbp-muted, #64748b)', lineHeight: 1.45 }}>
                 Profiles contain instructions and a knowledge vault selection. Automation remains workspace-scoped.
@@ -2204,11 +2246,11 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
           <div style={modalPanel} role="dialog" aria-modal="true" onClick={e => e.stopPropagation()}>
             <div style={{ padding: '1rem 1.15rem', borderBottom: '1px solid var(--aisbp-modal-divider, #f1f5f9)' }}>
               <h2 style={{ fontSize: '1.05rem', fontWeight: 800, margin: 0, color: 'var(--aisbp-text-heading, #0f172a)' }}>
-                Delete assistant profile?
+                Delete AI Agent profile?
               </h2>
               {deleteModalProfile.isActive ? (
                 <p style={{ margin: '0.45rem 0 0', fontSize: '0.85rem', color: 'var(--aisbp-pill-bad-fg, #b91c1c)', lineHeight: 1.45 }}>
-                  You cannot delete the active assistant profile. Set another profile active first.
+                  You cannot delete the active AI Agent profile. Set another profile active first.
                 </p>
               ) : (
                 <p style={{ margin: '0.45rem 0 0', fontSize: '0.85rem', color: 'var(--aisbp-muted, #64748b)', lineHeight: 1.45 }}>
@@ -2288,7 +2330,7 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                   Test AI
                 </h2>
                 <p style={{ margin: '0.25rem 0 0', fontSize: '0.8125rem', color: 'var(--aisbp-muted, #64748b)', lineHeight: 1.45 }}>
-                  Send a sample customer message to preview how this assistant would respond. This will not send anything to customers.
+                  Send a sample customer message to preview how this AI Agent would respond. This will not send anything to customers.
                 </p>
               </div>
               <button

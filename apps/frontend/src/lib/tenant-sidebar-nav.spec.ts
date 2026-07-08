@@ -2,12 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { buildTenantSidebarNav } from './tenant-workspace-nav';
 
 describe('tenant sidebar nav', () => {
-  it('shows Assistant children: Profiles, Instructions only', () => {
+  it('shows AI Agent children: Profiles, Instructions only', () => {
     const tid = 't_nav';
     const nodes = buildTenantSidebarNav(tid, { showAdvanced: true, showLogs: true });
-    const assistant = nodes.find(n => n.kind === 'group' && n.label === 'Assistant');
-    if (!assistant || assistant.kind !== 'group') throw new Error('Assistant group missing');
-    expect(assistant.children.map(c => c.label)).toEqual(['Profiles', 'Instructions']);
+    const aiAgent = nodes.find(n => n.kind === 'group' && n.label === 'AI Agent');
+    if (!aiAgent || aiAgent.kind !== 'group') throw new Error('AI Agent group missing');
+    expect(aiAgent.children.map(c => c.label)).toEqual(['Profiles', 'Instructions']);
   });
 
   it('shows Automation as top-level group with Tagging/Follow-up/Human Escalation', () => {
@@ -31,4 +31,3 @@ describe('tenant sidebar nav', () => {
     expect(nodes.some(n => n.kind === 'leaf' && n.label === 'Logs')).toBe(false);
   });
 });
-

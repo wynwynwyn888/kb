@@ -9,12 +9,13 @@ const EXPECTED_MAJOR_SECTION_ORDER = [
   'persona',
   'conversation_goals',
   'business_notes',
+  'sales_playbook',
   'knowledge_vaults',
   'advanced',
 ] as const;
 
 describe('Bot Instructions editor section order', () => {
-  it('lists Persona before Knowledge used by this assistant', () => {
+  it('lists Persona before Knowledge used by this AI Agent', () => {
     const pi = EXPECTED_MAJOR_SECTION_ORDER.indexOf('persona');
     const ki = EXPECTED_MAJOR_SECTION_ORDER.indexOf('knowledge_vaults');
     expect(pi).toBeGreaterThanOrEqual(0);
@@ -24,6 +25,15 @@ describe('Bot Instructions editor section order', () => {
 
   it('places Business notes before Knowledge', () => {
     expect(EXPECTED_MAJOR_SECTION_ORDER.indexOf('business_notes')).toBeLessThan(
+      EXPECTED_MAJOR_SECTION_ORDER.indexOf('knowledge_vaults'),
+    );
+  });
+
+  it('places Sales Playbook after Business Notes and before Knowledge', () => {
+    expect(EXPECTED_MAJOR_SECTION_ORDER.indexOf('business_notes')).toBeLessThan(
+      EXPECTED_MAJOR_SECTION_ORDER.indexOf('sales_playbook'),
+    );
+    expect(EXPECTED_MAJOR_SECTION_ORDER.indexOf('sales_playbook')).toBeLessThan(
       EXPECTED_MAJOR_SECTION_ORDER.indexOf('knowledge_vaults'),
     );
   });

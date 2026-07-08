@@ -1475,6 +1475,7 @@ export interface TenantBotProfileRow {
   persona: string;
   conversationGoals: string;
   businessNotes: string;
+  salesPlaybook: string;
   toneRules: string;
   bookingBehaviorNotes: string;
   escalationBehaviorNotes: string;
@@ -1541,6 +1542,7 @@ export async function createTenantBotProfile(
     persona?: string;
     conversationGoals?: string;
     businessNotes?: string;
+    salesPlaybook?: string;
     toneRules?: string;
     bookingBehaviorNotes?: string;
     escalationBehaviorNotes?: string;
@@ -1572,6 +1574,7 @@ export async function updateTenantBotProfile(
     persona: string;
     conversationGoals: string;
     businessNotes: string;
+    salesPlaybook: string;
     toneRules: string;
     bookingBehaviorNotes: string;
     escalationBehaviorNotes: string;

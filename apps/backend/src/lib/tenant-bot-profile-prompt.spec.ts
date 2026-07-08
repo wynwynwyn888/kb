@@ -13,11 +13,24 @@ import {
 
 describe('tenant-bot-profile-prompt', () => {
   it('parsePromptSections splits AISBP headers', () => {
-    const raw = ['### Bot Persona', 'Hi', '', '### Goals', 'Do X', '', '### Additional information', 'Note'].join('\n');
+    const raw = [
+      '### Bot Persona',
+      'Hi',
+      '',
+      '### Goals',
+      'Do X',
+      '',
+      '### Additional information',
+      'Note',
+      '',
+      '### Sales playbook',
+      'Qualify then guide',
+    ].join('\n');
     const p = parsePromptSections(raw);
     expect(p.persona).toBe('Hi');
     expect(p.goals).toBe('Do X');
     expect(p.additional).toBe('Note');
+    expect(p.salesPlaybook).toBe('Qualify then guide');
   });
 
   it('buildKnowledgeAccessSummaryLine formats all vaults', () => {
@@ -38,6 +51,7 @@ describe('tenant-bot-profile-prompt', () => {
       persona: 'Warm',
       conversationGoals: 'Book',
       businessNotes: 'Hours 9-5',
+      salesPlaybook: 'Handle price objections softly',
       toneRules: 'No slang',
       bookingBehaviorNotes: 'Confirm slot',
       escalationBehaviorNotes: 'Hand to human if angry',
@@ -52,14 +66,17 @@ describe('tenant-bot-profile-prompt', () => {
     expect(out).toContain('### Tone rules');
     expect(out).toContain('No slang');
     expect(out).toContain('### Booking behavior');
+    expect(out).toContain('### Sales playbook');
+    expect(out).toContain('Handle price objections softly');
   });
 
   it('buildThreeSectionPromptBlob is stable for legacy storage', () => {
-    const b = buildThreeSectionPromptBlob('a', 'b', 'c');
+    const b = buildThreeSectionPromptBlob('a', 'b', 'c', 'd');
     const p = parsePromptSections(b);
     expect(p.persona).toBe('a');
     expect(p.goals).toBe('b');
     expect(p.additional).toBe('c');
+    expect(p.salesPlaybook).toBe('d');
   });
 
   it('buildBookingNluProfileAppendix is compact', () => {
@@ -157,6 +174,7 @@ describe('tenant-bot-profile-prompt', () => {
       persona: 'Direct AISBP setter',
       goals: 'Route to AI Automation Session',
       businessNotes: 'B2B automation agency',
+      salesPlaybook: 'Qualify, diagnose, then guide to booking',
       toneRules: 'Never say "How can I assist you?"',
       bookingBehavior: 'Book the session',
       escalationBehavior: 'Escalate on request',
@@ -170,6 +188,7 @@ describe('tenant-bot-profile-prompt', () => {
       expect(whatsapp.hash).toBe(preview.hash);
       expect(whatsapp.includesCriticalFacts).toBe(true);
       expect(whatsapp.includesGoals).toBe(true);
+      expect(whatsapp.includesSalesPlaybook).toBe(true);
     });
 
     it('changes hash when any tenant field changes (drift detection)', () => {

@@ -58,6 +58,7 @@ export interface TenantBotProfileDto {
   persona: string;
   conversationGoals: string;
   businessNotes: string;
+  salesPlaybook: string;
   toneRules: string;
   bookingBehaviorNotes: string;
   escalationBehaviorNotes: string;
@@ -140,6 +141,7 @@ export class BotProfilesService {
       persona: (row['persona'] as string) ?? '',
       conversationGoals: (row['conversation_goals'] as string) ?? '',
       businessNotes: (row['business_notes'] as string) ?? '',
+      salesPlaybook: (row['sales_playbook'] as string) ?? '',
       toneRules: (row['tone_rules'] as string) ?? '',
       bookingBehaviorNotes: (row['booking_behavior_notes'] as string) ?? '',
       escalationBehaviorNotes: (row['escalation_behavior_notes'] as string) ?? '',
@@ -218,6 +220,7 @@ export class BotProfilesService {
       persona: String(row['persona'] ?? ''),
       conversationGoals: String(row['conversation_goals'] ?? ''),
       businessNotes: String(row['business_notes'] ?? ''),
+      salesPlaybook: String(row['sales_playbook'] ?? ''),
       toneRules: String(row['tone_rules'] ?? ''),
       bookingBehaviorNotes: String(row['booking_behavior_notes'] ?? ''),
       escalationBehaviorNotes: String(row['escalation_behavior_notes'] ?? ''),
@@ -307,6 +310,7 @@ export class BotProfilesService {
         persona: parsed.persona,
         conversation_goals: parsed.goals,
         business_notes: parsed.additional,
+        sales_playbook: parsed.salesPlaybook ?? '',
         tone_rules: '',
         booking_behavior_notes: '',
         escalation_behavior_notes: '',
@@ -325,7 +329,12 @@ export class BotProfilesService {
         .from('tenant_prompt_configs')
         .update({
           bot_profile_id: pid,
-          system_prompt: buildThreeSectionPromptBlob(parsed.persona, parsed.goals, parsed.additional),
+          system_prompt: buildThreeSectionPromptBlob(
+            parsed.persona,
+            parsed.goals,
+            parsed.additional,
+            parsed.salesPlaybook ?? '',
+          ),
           updated_at: now,
         })
         .eq('id', cfg['id'] as string);
@@ -365,6 +374,7 @@ export class BotProfilesService {
       persona: '',
       conversation_goals: '',
       business_notes: '',
+      sales_playbook: '',
       tone_rules: '',
       booking_behavior_notes: '',
       escalation_behavior_notes: '',
@@ -464,6 +474,7 @@ export class BotProfilesService {
     persona?: string;
     conversationGoals?: string;
     businessNotes?: string;
+    salesPlaybook?: string;
     bookingBehaviorNotes?: string;
     escalationBehaviorNotes?: string;
   }): void {
@@ -471,6 +482,7 @@ export class BotProfilesService {
       { value: fields.persona, limit: PROMPT_FIELD_LIMITS.persona, label: 'persona' },
       { value: fields.conversationGoals, limit: PROMPT_FIELD_LIMITS.conversationGoals, label: 'conversationGoals' },
       { value: fields.businessNotes, limit: PROMPT_FIELD_LIMITS.businessNotes, label: 'businessNotes' },
+      { value: fields.salesPlaybook, limit: PROMPT_FIELD_LIMITS.salesPlaybook, label: 'salesPlaybook' },
       { value: fields.bookingBehaviorNotes, limit: PROMPT_FIELD_LIMITS.bookingBehavior, label: 'bookingBehaviorNotes' },
       { value: fields.escalationBehaviorNotes, limit: PROMPT_FIELD_LIMITS.escalationBehavior, label: 'escalationBehaviorNotes' },
     ];
@@ -492,6 +504,7 @@ export class BotProfilesService {
       persona?: string;
       conversationGoals?: string;
       businessNotes?: string;
+      salesPlaybook?: string;
       toneRules?: string;
       bookingBehaviorNotes?: string;
       escalationBehaviorNotes?: string;
@@ -530,7 +543,8 @@ export class BotProfilesService {
     const persona = body.persona ?? '';
     const goals = body.conversationGoals ?? '';
     const notes = body.businessNotes ?? '';
-    const blob = buildThreeSectionPromptBlob(persona, goals, notes);
+    const salesPlaybook = body.salesPlaybook ?? '';
+    const blob = buildThreeSectionPromptBlob(persona, goals, notes, salesPlaybook);
 
     const accessMode =
       body.knowledgeAccessMode?.trim() === KNOWLEDGE_ACCESS_SELECTED_VAULTS
@@ -555,6 +569,7 @@ export class BotProfilesService {
       persona,
       conversation_goals: goals,
       business_notes: notes,
+      sales_playbook: salesPlaybook,
       tone_rules: body.toneRules ?? '',
       booking_behavior_notes: body.bookingBehaviorNotes ?? '',
       escalation_behavior_notes: body.escalationBehaviorNotes ?? '',
@@ -630,6 +645,7 @@ export class BotProfilesService {
       persona: string;
       conversationGoals: string;
       businessNotes: string;
+      salesPlaybook: string;
       toneRules: string;
       bookingBehaviorNotes: string;
       escalationBehaviorNotes: string;
@@ -674,6 +690,8 @@ export class BotProfilesService {
         : String(existing['conversation_goals'] ?? '');
     const nextBiz =
       body.businessNotes !== undefined ? body.businessNotes : String(existing['business_notes'] ?? '');
+    const nextSalesPlaybook =
+      body.salesPlaybook !== undefined ? body.salesPlaybook : String(existing['sales_playbook'] ?? '');
     const nextTone = body.toneRules !== undefined ? body.toneRules : String(existing['tone_rules'] ?? '');
     const nextBook =
       body.bookingBehaviorNotes !== undefined
@@ -723,6 +741,7 @@ export class BotProfilesService {
         persona: nextPersona,
         conversation_goals: nextGoals,
         business_notes: nextBiz,
+        sales_playbook: nextSalesPlaybook,
         tone_rules: nextTone,
         booking_behavior_notes: nextBook,
         escalation_behavior_notes: nextEsc,
@@ -741,7 +760,7 @@ export class BotProfilesService {
       throw new BadRequestException(`Failed to update profile: ${ue.message}`);
     }
 
-    const blob = buildThreeSectionPromptBlob(nextPersona, nextGoals, nextBiz);
+    const blob = buildThreeSectionPromptBlob(nextPersona, nextGoals, nextBiz, nextSalesPlaybook);
     const updPrompt: Record<string, unknown> = {
       system_prompt: blob,
       name: nextName,
@@ -836,6 +855,7 @@ export class BotProfilesService {
       persona: src.persona,
       conversationGoals: src.conversationGoals,
       businessNotes: src.businessNotes,
+      salesPlaybook: src.salesPlaybook,
       toneRules: src.toneRules,
       bookingBehaviorNotes: src.bookingBehaviorNotes,
       escalationBehaviorNotes: src.escalationBehaviorNotes,
@@ -999,6 +1019,7 @@ export class BotProfilesService {
           persona: promptFields.persona || undefined,
           goals: promptFields.conversationGoals || undefined,
           businessNotes: promptFields.businessNotes || undefined,
+          salesPlaybook: promptFields.salesPlaybook || undefined,
           toneRules: promptFields.toneRules || undefined,
           bookingBehavior: promptFields.bookingBehaviorNotes || undefined,
           escalationBehavior: promptFields.escalationBehaviorNotes || undefined,

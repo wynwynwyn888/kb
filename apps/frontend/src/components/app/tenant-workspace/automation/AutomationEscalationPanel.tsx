@@ -87,9 +87,9 @@ export function AutomationEscalationPanel() {
     try {
       await resumeHandover(token, conversationId);
       setActiveHandovers(prev => prev.filter(h => h.conversationId !== conversationId));
-      setBanner('Escalation ended — the assistant will reply again for that conversation.');
+      setBanner('Escalation ended — the AI Agent will reply again for that conversation.');
     } catch (e) {
-      setBanner(e instanceof Error ? e.message : 'Could not resume assistant');
+      setBanner(e instanceof Error ? e.message : 'Could not resume AI Agent');
     } finally {
       setBusy(null);
     }
@@ -105,7 +105,7 @@ export function AutomationEscalationPanel() {
         await resumeHandover(token, h.conversationId);
       }
       setActiveHandovers([]);
-      setBanner(`Ended escalation for ${count} conversation(s). The assistant can reply again.`);
+      setBanner(`Ended escalation for ${count} conversation(s). The AI Agent can reply again.`);
     } catch (e) {
       setBanner(e instanceof Error ? e.message : 'Could not resume all conversations');
       await loadHandovers();
@@ -156,19 +156,19 @@ export function AutomationEscalationPanel() {
     <>
       <SectionCard
         title="Workspace scope"
-        subtitle="Human escalation applies to this workspace. When a customer asks for a person—or the assistant replies with a team follow-up promise—AISalesBot Pro stops automated replies for that conversation."
+        subtitle="Human escalation applies to this workspace. When a customer asks for a person—or the AI Agent replies with a team follow-up promise—AISalesBot Pro stops automated replies for that conversation."
         accent="muted"
       >
         <p style={{ fontSize: '0.9rem', color: 'var(--aisbp-text-secondary)', lineHeight: 1.55, margin: 0 }}>
-          Uncheck <strong>Enable human escalation</strong> to stop new escalations. Use <strong>Resume assistant</strong>{' '}
+          Uncheck <strong>Enable human escalation</strong> to stop new escalations. Use <strong>Resume AI Agent</strong>{' '}
           below to cancel an escalation that is already active.
         </p>
       </SectionCard>
 
       <SectionCard title="Human escalation" subtitle="Team notification via CRM" accent="default">
         <p style={{ fontSize: '0.9rem', color: 'var(--aisbp-text-secondary)', lineHeight: 1.55, margin: '0 0 1rem' }}>
-          Human escalation stops the assistant for that conversation and notifies your team when the customer asks for a
-          person, or when the assistant’s reply promises that someone from the team will follow up.
+          Human escalation stops the AI Agent for that conversation and notifies your team when the customer asks for a
+          person, or when the AI Agent’s reply promises that someone from the team will follow up.
         </p>
 
         {settings ? (
@@ -202,7 +202,7 @@ export function AutomationEscalationPanel() {
                   style={{ marginTop: '0.2rem' }}
                 />
                 <span>
-                  When saving disabled settings, also resume the assistant for all {activeHandovers.length}{' '}
+                  When saving disabled settings, also resume the AI Agent for all {activeHandovers.length}{' '}
                   conversation(s) currently in escalation
                 </span>
               </label>
@@ -251,19 +251,19 @@ export function AutomationEscalationPanel() {
 
       <SectionCard
         title="Cancel active escalation"
-        subtitle="End human handover and let the assistant reply again"
+        subtitle="End human handover and let the AI Agent reply again"
         accent={hasActive ? 'warn' : 'muted'}
       >
         {handoversLoading ? <LoadingBlock message="Loading active escalations…" /> : null}
         {!handoversLoading && !hasActive ? (
           <p style={{ fontSize: '0.88rem', color: 'var(--aisbp-text-secondary)', margin: 0 }}>
-            No conversations are waiting for a human. The assistant is replying normally.
+            No conversations are waiting for a human. The AI Agent is replying normally.
           </p>
         ) : null}
         {!handoversLoading && hasActive ? (
           <>
             <p style={{ fontSize: '0.88rem', color: 'var(--aisbp-text-secondary)', margin: '0 0 0.75rem' }}>
-              These conversations are paused for the assistant. Resume when your team is done.
+              These conversations are paused for the AI Agent. Resume when your team is done.
             </p>
             <button
               type="button"
@@ -271,7 +271,7 @@ export function AutomationEscalationPanel() {
               disabled={Boolean(busy)}
               onClick={() => void resumeAllActive()}
             >
-              {busy === 'resume-all' ? 'Resuming…' : `Resume assistant for all (${activeHandovers.length})`}
+              {busy === 'resume-all' ? 'Resuming…' : `Resume AI Agent for all (${activeHandovers.length})`}
             </button>
             <ul style={{ listStyle: 'none', padding: 0, margin: 0, display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
               {activeHandovers.map(h => (
@@ -330,7 +330,7 @@ function HandoverRow({
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.65rem', alignItems: 'center', justifyContent: 'space-between' }}>
       <HandoverMeta handover={handover} />
       <button type="button" style={btn('primary', Boolean(busy))} disabled={Boolean(busy)} onClick={onResume}>
-        {resuming ? 'Resuming…' : 'Resume assistant'}
+        {resuming ? 'Resuming…' : 'Resume AI Agent'}
       </button>
     </div>
   );

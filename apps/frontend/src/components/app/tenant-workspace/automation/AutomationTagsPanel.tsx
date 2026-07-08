@@ -415,7 +415,7 @@ export function AutomationTagsPanel() {
 
       <SectionCard
         title="Automatic tagging"
-        subtitle="Enable or disable automatic tagging for the active assistant profile. Tag rules reference synced CRM tags from the workspace connection."
+        subtitle="Enable or disable automatic tagging for the active AI Agent profile. Tag rules reference synced CRM tags from the workspace connection."
         accent="default"
       >
         <p style={{ fontSize: '0.84rem', color: 'var(--aisbp-muted)', lineHeight: 1.55, margin: '0 0 0.85rem' }}>

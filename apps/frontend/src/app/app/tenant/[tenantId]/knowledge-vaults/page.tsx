@@ -590,8 +590,8 @@ function DocumentVaultLine({
       </div>
       <p style={{ fontSize: '0.75rem', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 0.5rem', lineHeight: 1.4 }}>
         {inVaultView
-          ? 'Pick another vault to move this item into. Live replies still use the vaults chosen on Bot Instructions → Assistant Profile.'
-          : 'Choose which vault this item belongs to. Assistant profiles can search all vaults or only selected ones.'}
+          ? 'Pick another vault to move this item into. Live replies still use the vaults chosen on AI Agent Instructions.'
+          : 'Choose which vault this item belongs to. AI Agent profiles can search all vaults or only selected ones.'}
       </p>
       <select
         id={`kb-vault-${doc.id}`}
@@ -2104,9 +2104,9 @@ export default function SubaccountKnowledgePage() {
               lineHeight: 1.55,
             }}
           >
-            Create and manage reusable content for your assistants. To try replies with the live assistant profile, use{' '}
+            Create and manage reusable content for your AI Agents. To try replies with the live AI Agent profile, use{' '}
             <Link href={`/app/tenant/${subId}/assistant/instructions`} style={{ color: PRIMARY, fontWeight: 600 }}>
-              Assistant → Instructions
+              AI Agent → Instructions
             </Link>
             .
           </p>
@@ -2154,9 +2154,9 @@ export default function SubaccountKnowledgePage() {
                     }}
                   >
                     Each vault is its own container for FAQs, notes, and files. Select a vault to add or edit knowledge
-                    here. Which vaults the live assistant uses is configured under{' '}
+                    here. Which vaults the live AI Agent uses is configured under{' '}
                     <Link href={`/app/tenant/${subId}/assistant/instructions`} style={{ color: PRIMARY, fontWeight: 600 }}>
-                      Assistant → Instructions
+                      AI Agent → Instructions
                     </Link>{' '}
                     (profile vault access) — not by this vault list selection alone.
                   </p>

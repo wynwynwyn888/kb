@@ -45,20 +45,44 @@ describe('checkProviderOrchestrationGate', () => {
   });
 
   // ── Gate 1: no ghlMessageId ──────────────────────────────────────────
-  it('blocks when ghlMessageId is missing', async () => {
+  it('webhook: allows when ghlMessageId is missing', async () => {
     const r = await checkProviderOrchestrationGate({
       ...baseParams,
       ghlMessageId: null,
+      source: 'webhook',
+      appCache: makeAppCache(),
+    });
+    expect(r.allowed).toBe(true);
+    expect(r.reason).toBe('no_ghl_message_id_webhook_allowed');
+  });
+
+  it('fallback: blocks when ghlMessageId is missing', async () => {
+    const r = await checkProviderOrchestrationGate({
+      ...baseParams,
+      ghlMessageId: null,
+      source: 'fallback',
       appCache: makeAppCache(),
     });
     expect(r.allowed).toBe(false);
     expect(r.reason).toBe('no_ghl_message_id');
   });
 
-  it('blocks when ghlMessageId is blank', async () => {
+  it('webhook: allows when ghlMessageId is blank', async () => {
     const r = await checkProviderOrchestrationGate({
       ...baseParams,
       ghlMessageId: '  ',
+      source: 'webhook',
+      appCache: makeAppCache(),
+    });
+    expect(r.allowed).toBe(true);
+    expect(r.reason).toBe('no_ghl_message_id_webhook_allowed');
+  });
+
+  it('fallback: blocks when ghlMessageId is blank', async () => {
+    const r = await checkProviderOrchestrationGate({
+      ...baseParams,
+      ghlMessageId: '  ',
+      source: 'fallback',
       appCache: makeAppCache(),
     });
     expect(r.allowed).toBe(false);

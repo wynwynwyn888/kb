@@ -53,8 +53,16 @@ export async function checkProviderOrchestrationGate(
   // Gate 1: require stable GHL message ID
   const msgId = ghlMessageId?.trim() || null;
   if (!msgId) {
-    // Both paths require ghlMessageId for provider-level safety.
-    // Webhook without it relies on sync fallback to discover the real ID.
+    // Primary webhooks are already persisted/deduped by webhook_events. Allow
+    // them through so first-message leads still get a reply when the workflow
+    // payload lacks provider message/conversation ids.
+    if (!isFallback) {
+      return { allowed: true, reason: 'no_ghl_message_id_webhook_allowed' };
+    }
+
+    // Fallback paths (sync/scanner/watchdog) still require a stable provider id
+    // to avoid duplicate replies when they rediscover messages already handled
+    // by the primary webhook path.
     return { allowed: false, reason: 'no_ghl_message_id' };
   }
 

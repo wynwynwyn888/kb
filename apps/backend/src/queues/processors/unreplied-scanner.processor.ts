@@ -31,11 +31,10 @@ import type { OrchestrateDebouncedJobData } from '../processors/inbound-message.
 const SCAN_INTERVAL_MS = 90_000; // 90 seconds
 const SCAN_LOOKBACK_MINUTES = 30;
 const SCAN_LIMIT = 50;
+const SCANNER_JOB_ID = 'unreplied-scanner';
 
 interface ScannerJobData {
   startedAt: string;
-  /** Monotonic version counter to avoid removeOnComplete race with same jobId. */
-  scanVersion?: number;
 }
 
 @Processor(QUEUES.UNREPLIED_SCANNER)
@@ -56,13 +55,13 @@ export class UnrepliedScannerProcessor extends WorkerHost {
   @OnWorkerEvent('ready')
   async onReady() {
     if (!this.isEnabled()) return;
-    this.logger.log('unreplied_scanner_ready: scheduling first scan');
+    this.logger.log('unreplied_scanner_ready: scheduling repeatable scan');
     await this.scannerQueue.add('scan', {
       startedAt: new Date().toISOString(),
-      scanVersion: 0,
     } satisfies ScannerJobData, {
       delay: 10_000,
-      jobId: 'unreplied-scanner_v0',
+      jobId: SCANNER_JOB_ID,
+      repeat: { every: SCAN_INTERVAL_MS },
       removeOnComplete: true,
       attempts: 1,
     });
@@ -277,17 +276,9 @@ export class UnrepliedScannerProcessor extends WorkerHost {
       );
     }
 
-    // Self-reschedule with versioned jobId to avoid removeOnComplete race
-    const nextVersion = (job.data.scanVersion ?? 0) + 1;
-    await this.scannerQueue.add('scan', {
-      startedAt: new Date().toISOString(),
-      scanVersion: nextVersion,
-    } satisfies ScannerJobData, {
-      delay: SCAN_INTERVAL_MS,
-      jobId: `unreplied-scanner_v${nextVersion}`,
-      removeOnComplete: true,
-      attempts: 1,
-    });
+    // Repeat cadence is owned by BullMQ. Do not self-reschedule here; if more
+    // than one delayed scanner job already exists from an older deploy, those
+    // jobs will drain without multiplying.
   }
 
   @OnWorkerEvent('failed')

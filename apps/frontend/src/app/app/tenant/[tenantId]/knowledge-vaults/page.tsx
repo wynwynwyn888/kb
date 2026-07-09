@@ -996,6 +996,7 @@ function NoteKnowledgeCard({
     setSaveOk('');
     setLoadingModal(true);
     try {
+      if (isWebsite) throw new Error('Website documents show generated knowledge cards');
       const src = await getKbRichNoteSource(token, subId, doc.id);
       setEditTitle(src.title);
       setEditBody(src.content.trim() || preview);
@@ -1352,7 +1353,7 @@ function NoteKnowledgeCard({
             />
           </label>
           <label style={{ display: 'block', marginTop: '0.85rem' }}>
-            <span style={mvpLabelStyle}>Full content</span>
+            <span style={mvpLabelStyle}>{isWebsite ? 'Knowledge cards used by AI' : 'Full content'}</span>
             <textarea
               value={editBody}
               onChange={e => setEditBody(e.target.value)}

@@ -34,6 +34,11 @@ import {
   KB_RICH_TEXT_SOURCE_METADATA_KEY,
   reconstructEditableNoteFromChunks,
 } from '../../lib/kb-rich-text-source';
+import {
+  buildWebsiteKnowledgeCards,
+  websiteKnowledgeCardToChunkSpec,
+  WEBSITE_KNOWLEDGE_CARD_VERSION,
+} from '../../lib/website-knowledge-cards';
 import { KB_VAULT_DELETE_HAS_DOCUMENTS_MSG, kbDuplicateVaultDisplayName } from './kb-vault-messages';
 import { QUEUES } from '../../queues/queue.constants';
 import type { KbIngestJobData } from '../../queues/processors/kb-ingest.processor';
@@ -1128,6 +1133,9 @@ export class KbService {
       crawledAt: now,
       contentChecksum: checksum,
       contentType: page.contentType,
+      rawSourceKind: 'website_crawl_source',
+      ragIngestion: 'website_knowledge_cards',
+      websiteCardVersion: WEBSITE_KNOWLEDGE_CARD_VERSION,
       [KB_RICH_TEXT_SOURCE_METADATA_KEY]: `Source URL: ${sourceUrl}\n\n${page.text}`,
     };
     const existing = await this.supabase
@@ -1180,12 +1188,56 @@ export class KbService {
       if (error) throw new Error(`Website doc update: ${error.message}`);
     }
 
-    const specs = buildRichTextChunkSpecs({
-      fullText: `Source URL: ${sourceUrl}\n\n${page.text}`,
-      documentTitle: safeTitle,
-      documentUpdatedAtIso: now,
+    const cardBuild = buildWebsiteKnowledgeCards({
+      sourceUrl,
+      pageTitle: safeTitle,
+      text: page.text,
+      lastCrawledAt: now,
     });
+    const specs = cardBuild.cards.map((card, index) => {
+      const spec = websiteKnowledgeCardToChunkSpec(card);
+      spec.metadata['sectionIndex'] = index;
+      return spec;
+    });
+    if (specs.length === 0) {
+      const { error } = await this.supabase
+        .from('knowledge_documents')
+        .update({
+          status: 'FAILED',
+          metadata: {
+            ...metadata,
+            websiteCardGeneration: {
+              approved: 0,
+              rejected: cardBuild.rejected,
+              cleanedLineCount: cardBuild.cleanedLineCount,
+              failedReason: 'No customer-useful website knowledge cards were generated',
+            },
+          },
+          updated_at: now,
+        })
+        .eq('id', documentId)
+        .eq('tenant_id', tenantId);
+      if (error) throw new Error(`Website card generation update: ${error.message}`);
+      throw new Error('No customer-useful website knowledge cards were generated from this page');
+    }
     await this.insertChunkSpecsForDocument(documentId, specs, 'website');
+    const { error: metaUpdateError } = await this.supabase
+      .from('knowledge_documents')
+      .update({
+        status: 'READY',
+        metadata: {
+          ...metadata,
+          websiteCardGeneration: {
+            approved: specs.length,
+            rejected: cardBuild.rejected,
+            cleanedLineCount: cardBuild.cleanedLineCount,
+          },
+        },
+        updated_at: now,
+      })
+      .eq('id', documentId)
+      .eq('tenant_id', tenantId);
+    if (metaUpdateError) throw new Error(`Website card generation metadata: ${metaUpdateError.message}`);
     this.enqueueKbEmbeddingRefresh(tenantId, documentId, created ? 'create' : 'update');
     return { id: documentId, created };
   }

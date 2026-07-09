@@ -17,9 +17,6 @@ import {
 } from './option-resolver';
 import {
   buildOptionsFromKbSectionTitles,
-  MENU_PROMPT_NO_KB,
-  selectedCategoryNoKbReply,
-  SELECTION_UNCLEAR_REPLY,
 } from './policy-menu-copy';
 
 export type PolicyReplyKind =
@@ -249,15 +246,14 @@ export class ConversationPolicyEngineService {
             menuSelectionActive: true,
           };
         }
-        // Selection without KB — generic, business-agnostic copy.
         return {
           latestIntent: intent,
           resolvedSelection: sel,
           kbChunks: [],
-          policyForcedReply: selectedCategoryNoKbReply(sel.selectedText),
-          policyReplyKind: 'menu_category_selected_no_kb',
+          policyForcedReply: null,
+          policyReplyKind: 'none',
           nextPolicyState: next,
-          conversationStateSummary: `pick=${sel.selectedLabel}`,
+          conversationStateSummary: `pick=${sel.selectedLabel}_no_kb_live_generation`,
           menuSelectionActive: true,
         };
       }
@@ -270,12 +266,12 @@ export class ConversationPolicyEngineService {
         latestIntent: intent,
         resolvedSelection: null,
         kbChunks: [],
-        policyForcedReply: SELECTION_UNCLEAR_REPLY,
-        policyReplyKind: 'selection_clarification',
+        policyForcedReply: null,
+        policyReplyKind: 'none',
         nextPolicyState: { ...state, updatedAt: new Date().toISOString() },
         conversationStateSummary: state.awaiting
-          ? `awaiting=${state.awaiting} unresolved`
-          : 'selection_without_options',
+          ? `awaiting=${state.awaiting} unresolved_live_generation`
+          : 'selection_without_options_live_generation',
         menuSelectionActive: Boolean(state.awaiting),
       };
     }
@@ -301,14 +297,13 @@ export class ConversationPolicyEngineService {
         };
       }
 
-      // No KB chunks for menu intent → ask the user to clarify (NO hardcoded categories).
-      this.logger.log('Policy reply chosen: menu_no_kb_clarification');
+      this.logger.log('Policy reply skipped: menu_no_kb_live_generation');
       return {
         latestIntent: intent,
         resolvedSelection: null,
         kbChunks: [],
-        policyForcedReply: MENU_PROMPT_NO_KB,
-        policyReplyKind: 'menu_no_kb_clarification',
+        policyForcedReply: null,
+        policyReplyKind: 'none',
         nextPolicyState: {
           v: 1,
           activeTopic: 'menu',
@@ -321,7 +316,7 @@ export class ConversationPolicyEngineService {
           expiresAt: null,
           updatedAt: new Date().toISOString(),
         },
-        conversationStateSummary: 'menu_no_kb',
+        conversationStateSummary: 'menu_no_kb_live_generation',
         menuSelectionActive: false,
       };
     }

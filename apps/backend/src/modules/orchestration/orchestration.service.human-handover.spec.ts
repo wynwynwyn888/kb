@@ -128,9 +128,8 @@ describe('ConversationOrchestrationService — HUMAN_HANDOVER short circuit', ()
 
     expect(humanEscalationRuntime.onHumanHandoverIntent).toHaveBeenCalled();
     expect(res.success).toBe(true);
-    expect(res.replyPlan?.planStatus).toBe('PLANNED');
-    expect(res.replyPlan?.bubbles ?? []).toHaveLength(1);
-    expect(res.replyPlan?.bubbles?.[0]?.text).toContain('team member');
+    expect(res.replyPlan?.planStatus).toBe('SKIP_NO_REPLY');
+    expect(res.replyPlan?.bubbles ?? []).toHaveLength(0);
     expect(aiRouter.route).not.toHaveBeenCalled();
     expect(replyPlanner.planReply).not.toHaveBeenCalled();
 
@@ -214,7 +213,8 @@ describe('ConversationOrchestrationService — HUMAN_HANDOVER short circuit', ()
 
     const res = await svc.orchestrate(makeInput('Please connect me to a human'));
 
-    expect(res.replyPlan?.bubbles?.[0]?.text).toContain('team member');
+    expect(res.replyPlan?.planStatus).toBe('SKIP_NO_REPLY');
+    expect(res.replyPlan?.bubbles ?? []).toHaveLength(0);
     expect(res.replyPlan?.handoverRecommended).toBe(false);
     expect(aiRouter.route).not.toHaveBeenCalled();
     expect(bookingFlow.maybeHandleConversationBookingTurn).not.toHaveBeenCalled();

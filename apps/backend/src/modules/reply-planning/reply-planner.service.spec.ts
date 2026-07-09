@@ -133,84 +133,6 @@ describe('ReplyPlannerService', () => {
     });
   });
 
-  describe('buildPlaceholderDraft', () => {
-    it('returns KB-first content when chunks present (no source label in draft)', () => {
-      const draft = (service as never)['buildPlaceholderDraft'](
-        { responseMode: 'standard', draftReply: null, confidence: 0.5, reasoning: '', recommendedModel: 'gpt-4o', handoverRecommended: false, tagsSuggested: [], bookingIntentDetected: false },
-        [{ chunkId: 'c1', documentId: 'd1', content: 'Our hours are 9am-5pm', title: 'Business Hours', source: 'website', relevanceScore: 0.9, metadata: {} }],
-        []
-      );
-      expect(draft).toContain('Our hours are 9am-5pm');
-      expect(draft).not.toMatch(/Source\s*:/i);
-      expect(draft).not.toContain('Business Hours');
-    });
-
-    it('polishes weekday/weekend FAQ lines in KB fallback', () => {
-      const draft = (service as never)['buildPlaceholderDraft'](
-        {
-          responseMode: 'standard',
-          draftReply: null,
-          confidence: 0.5,
-          reasoning: '',
-          recommendedModel: 'gpt-4o',
-          handoverRecommended: false,
-          tagsSuggested: [],
-          bookingIntentDetected: false,
-        },
-        [
-          {
-            chunkId: 'c1',
-            documentId: 'd1',
-            content: 'Weekdays 9am-11pm\nWeekends 9am-12am',
-            title: 'FAQ: Hours',
-            source: 'faq',
-            relevanceScore: 0.95,
-            metadata: {},
-          },
-        ],
-        [],
-      );
-      expect(draft).toMatch(/We're open from/i);
-      expect(draft.toLowerCase()).toContain('weekday');
-    });
-
-    it('returns mode-based ack for fast mode with no KB', () => {
-      const draft = (service as never)['buildPlaceholderDraft'](
-        { responseMode: 'fast', draftReply: null, confidence: 0.5, reasoning: '', recommendedModel: 'gpt-4o', handoverRecommended: false, tagsSuggested: [], bookingIntentDetected: false },
-        [],
-        []
-      );
-      expect(draft).toContain('Got it');
-    });
-
-    it('returns generic message when nothing available', () => {
-      const draft = (service as never)['buildPlaceholderDraft'](
-        { responseMode: 'standard', draftReply: null, confidence: 0.5, reasoning: '', recommendedModel: 'gpt-4o', handoverRecommended: false, tagsSuggested: [], bookingIntentDetected: false },
-        [],
-        []
-      );
-      expect(draft.length).toBeGreaterThan(0);
-    });
-
-    it('uses generic menu clarification when no KB and user asks about menu (no hardcoded categories)', () => {
-      const draft = (service as never)['buildPlaceholderDraft'](
-        { responseMode: 'standard', draftReply: null, confidence: 0.5, reasoning: '', recommendedModel: 'gpt-4o', handoverRecommended: false, tagsSuggested: [], bookingIntentDetected: false },
-        [],
-        [
-          {
-            role: 'user' as const,
-            sender: 'user',
-            messageType: 'text' as const,
-            content: 'your menu?',
-            timestamp: new Date().toISOString(),
-          },
-        ],
-      );
-      expect(draft).toMatch(/help|offerings|details/i);
-      expect(draft).not.toMatch(/starters|mains|desserts|vegan/i);
-    });
-  });
-
   describe('planReply', () => {
     it('returns HANDOVER plan when handoverRecommended=true', async () => {
       const result = await service.planReply({
@@ -254,11 +176,10 @@ describe('ReplyPlannerService', () => {
         systemPrompt: 'You are a helpful assistant.',
         channel: 'WHATSAPP',
       });
-      expect(result.planStatus).toBe('PLANNED');
-      expect(result.bubbles.length).toBeGreaterThan(0);
+      expect(result.planStatus).toBe('SKIP_NO_REPLY');
+      expect(result.bubbles).toEqual([]);
       expect(result.draftProvenance).toBe('placeholder_fallback');
       expect(result.draftFallbackReason).toBe('no_provider');
-      expect(result.bubbles[0]!.text).toContain("don't have those details");
     });
 
     it('marks live_generation when generateDraft returns usable content', async () => {
@@ -285,7 +206,7 @@ describe('ReplyPlannerService', () => {
       expect(result.draftFallbackReason).toBeUndefined();
     });
 
-    it('rewrites risky no-KB business claims to uncertainty response', async () => {
+    it('blocks risky no-KB business claims instead of substituting fallback copy', async () => {
       mockGen.generateDraft.mockResolvedValueOnce({
         content: 'Absolutely! We welcome all breeds, including Chihuahuas.',
       });
@@ -307,12 +228,11 @@ describe('ReplyPlannerService', () => {
         systemPrompt: 'You are a helpful assistant.',
         channel: 'WHATSAPP',
       });
-      const joined = result.bubbles.map(b => b.text).join('\n\n').toLowerCase();
-      expect(joined).not.toContain('welcome all breeds');
-      expect(joined).toContain("don’t have");
+      expect(result.planStatus).toBe('SKIP_NO_REPLY');
+      expect(result.bubbles).toEqual([]);
     });
 
-    it('H: policy forced no-KB menu clarification stays one bubble and skips generation', async () => {
+    it('H: empty policy forced reply skips without sending fallback copy', async () => {
       const result = await service.planReply({
         tenantId: 't1',
         conversationId: 'c1',
@@ -339,14 +259,8 @@ describe('ReplyPlannerService', () => {
           menuSelectionActive: false,
         },
       });
-      expect(mockGen.generateDraft).not.toHaveBeenCalled();
-      expect(result.draftProvenance).toBe('policy_reply');
-      expect(result.bubbles).toHaveLength(1);
-      expect(result.bubbles[0]!.text).toMatch(/Happy to help/i);
-      expect(result.bubbles[0]!.text.toLowerCase()).not.toMatch(
-        /connect you (with|to) the team|speak with the team/,
-      );
-      expect(result.bubbles[0]!.text).not.toMatch(/Starters|Mains|Desserts|Vegan/);
+      expect(result.planStatus).toBe('SKIP_NO_REPLY');
+      expect(result.bubbles).toEqual([]);
     });
   });
 

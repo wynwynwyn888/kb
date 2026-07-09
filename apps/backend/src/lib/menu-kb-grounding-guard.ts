@@ -1,10 +1,6 @@
 import type { ConversationIntent } from '../modules/conversation-policy/conversation-intent';
 import type { RetrievalChunk } from '../modules/kb/dto/retrieval.dto';
 import { tokenizeMeaningful } from './kb-relevance';
-import {
-  MENU_PROMPT_NO_KB,
-  selectedCategoryNoKbReply,
-} from '../modules/conversation-policy/policy-menu-copy';
 
 /** Marketing / sensory menu prose unlikely to appear verbatim in grounded KB answers. */
 const FLUFF_SIGNAL =
@@ -74,17 +70,17 @@ export type MenuKbGroundingParams = {
 };
 
 function isCanonicalMenuClarification(d: string): boolean {
-  return d.trim() === MENU_PROMPT_NO_KB.trim();
+  return d.trim().length === 0;
 }
 
 /**
  * Post-generation: replace invented menu copy when MENU flow cannot be supported by KB.
  *
- * Universal: when the draft is ungrounded we either (a) reuse the resolved selection label and
- * say "I don't have those details" generically, or (b) fall back to the universal MENU_PROMPT_NO_KB.
+ * Universal: when the draft is ungrounded, block it. The caller will skip outbound rather than
+ * sending canned copy.
  */
 export function applyMenuKbGroundingGuard(params: MenuKbGroundingParams): string {
-  const { latestIntent, menuSelectionActive, draftText, kbChunks, categoryLabel } = params;
+  const { latestIntent, menuSelectionActive, draftText, kbChunks } = params;
   const menuish =
     latestIntent === 'MENU' || latestIntent === 'SHORT_SELECTION' || menuSelectionActive;
   if (!menuish) return draftText;
@@ -92,7 +88,5 @@ export function applyMenuKbGroundingGuard(params: MenuKbGroundingParams): string
 
   if (!menuDraftLooksUngrounded(draftText, kbChunks)) return draftText;
 
-  const cat = (categoryLabel ?? '').trim();
-  if (cat) return selectedCategoryNoKbReply(cat);
-  return MENU_PROMPT_NO_KB;
+  return '';
 }

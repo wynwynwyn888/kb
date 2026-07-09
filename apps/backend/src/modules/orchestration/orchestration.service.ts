@@ -62,7 +62,6 @@ import { summarizeInboundTextBatch } from '../../lib/inbound-batch-intent';
 import { detectRepeatedCustomerUserLines } from '../../lib/repeated-customer-message';
 import {
   buildGovernorCapabilityAppendix,
-  COMPLAINT_ESCALATION_REPLY,
   detectComplaintServiceIssue,
   isUnsupportedSalonScopeQuery,
 } from '../../lib/outbound-safety-governor';
@@ -98,7 +97,6 @@ import { promptFootprintDebugEnabled } from '../../lib/production-log-flags';
 import { buildTenantPromptFingerprint } from '../../lib/tenant-bot-profile-prompt';
 import {
   isTechnicalOperatorInput,
-  TECHNICAL_OPERATOR_DEFLECTION_REPLY,
 } from '../../lib/technical-operator-input';
 import { buildKbRetrievalPlans } from '../../lib/kb-compound-retrieval';
 
@@ -274,12 +272,12 @@ export class ConversationOrchestrationService {
           })}`,
         );
         const deflectionPlan: ReplyDecision = {
-          planStatus: 'PLANNED',
+          planStatus: 'SKIP_NO_REPLY',
           responseMode: 'standard',
           handoverRecommended: false,
           confidence: 0.95,
-          rationale: 'technical_operator_input:unrelated_topic',
-          bubbles: [{ index: 0, text: TECHNICAL_OPERATOR_DEFLECTION_REPLY }],
+          rationale: 'technical_operator_input:unrelated_topic_suppressed',
+          bubbles: [],
           suggestedActions: [],
           draftProvenance: 'policy_reply',
         };
@@ -467,12 +465,12 @@ export class ConversationOrchestrationService {
         await this.persistConversationPolicyMetadata(conversationId, complaintPolicyState);
 
         const complaintReplyPlan: ReplyDecision = {
-          planStatus: 'PLANNED',
+          planStatus: 'SKIP_NO_REPLY',
           responseMode: complaintHandoverPaused ? 'handover' : 'standard',
           handoverRecommended: complaintHandoverPaused,
           confidence: 0.95,
-          rationale: `complaint_service_issue:${complaintDet.reason}`,
-          bubbles: [{ index: 0, text: COMPLAINT_ESCALATION_REPLY }],
+          rationale: `complaint_service_issue:${complaintDet.reason}:customer_reply_suppressed`,
+          bubbles: [],
           suggestedActions: [
             {
               type: 'TAG_CONTACT',
@@ -556,19 +554,15 @@ export class ConversationOrchestrationService {
           );
         }
 
-        const humanHandoverAck = humanEscalationActive
-          ? "Of course. I'll arrange for a team member to assist you shortly."
-          : "Thanks for reaching out. I can't connect you with a team member through this channel right now, but I'm here to help.";
-
         const humanReplyPlan: ReplyDecision = {
-          planStatus: 'PLANNED',
+          planStatus: 'SKIP_NO_REPLY',
           responseMode: 'handover',
           handoverRecommended: humanEscalationActive,
           confidence: 0.95,
           rationale: humanEscalationActive
             ? 'human_request:HUMAN_HANDOVER'
-            : 'human_request:HUMAN_HANDOVER_ack_only',
-          bubbles: [{ index: 0, text: humanHandoverAck }],
+            : 'human_request:HUMAN_HANDOVER_ack_suppressed',
+          bubbles: [],
           suggestedActions: [],
           draftProvenance: humanEscalationActive ? 'human_escalation' : 'policy_reply',
         };

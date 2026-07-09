@@ -7,7 +7,7 @@ import type { ConversationIntent } from '../modules/conversation-policy/conversa
 import { detectMenuIntentInMessage } from './kb-relevance';
 
 export const SAFE_PENDING_BOOKING_REPLY =
-  "I've noted those details. Our team will confirm the appointment availability with you before anything is locked in.";
+  '';
 
 /**
  * Claims that imply the calendar slot is already committed for the customer.
@@ -170,8 +170,7 @@ export function shouldRewriteUnrequestedMenuRepetition(params: {
 }
 
 export const UNREQUESTED_MENU_FALLBACK_REPLY =
-  'Thanks for the detail — for oily roots with dry ends, we usually focus on balancing/cleansing at the scalp while adding moisture and repair from mid-lengths through ends (without weighing hair down). ' +
-  'If you can share how quickly your roots get oily after washing and whether your ends feel brittle or mainly dry, I can narrow the best next step.';
+  '';
 
 /**
  * No-KB business-claim guard:
@@ -180,31 +179,24 @@ export const UNREQUESTED_MENU_FALLBACK_REPLY =
  * Returns a safe uncertainty reply when a risky claim is detected.
  */
 export const SAFE_UNSUPPORTED_BUSINESS_CLAIM_REPLY =
-  "I don’t have that specific detail confirmed here. Could you share a little more so I can guide you safely?";
+  '';
 
 export const NO_KB_FALLBACK_MENU_SERVICE_LIST =
-  "I don’t have the full service list confirmed here. Could you share what you’re looking for so I can guide you better?";
+  '';
 
 export const NO_KB_FALLBACK_BROAD_SERVICE =
-  "I don’t have the full service list confirmed here. Could you share what you’re looking for so I can guide you better?";
+  '';
 
 export const NO_KB_FALLBACK_BREED_OR_SPECIES_SERVICE =
-  "I can help with grooming enquiries, but I don’t have breed-specific details confirmed here. Could you share a bit more about what you need?";
+  '';
 
 export const NO_KB_FALLBACK_PRICE =
-  'Pricing depends on the setup.\n\n' +
-  'Usually it comes down to:\n\n' +
-  '• Channels you want to connect\n' +
-  '• How many workflows are needed\n' +
-  '• Whether CRM, follow-up, and booking are included\n' +
-  '• How much customization is required\n\n' +
-  'A simple WhatsApp reply flow is different from a full CRM-connected setup.\n\n' +
-  '*Best next step:* join the webinar first, or book a quick call if you already have a use case.';
+  '';
 
-export const NO_KB_FALLBACK_HOURS = "I don’t have the confirmed opening hours here.";
+export const NO_KB_FALLBACK_HOURS = '';
 
 export const NO_KB_FALLBACK_AVAILABILITY =
-  "I don’t have live availability here. Could you share your preferred date and time?";
+  '';
 
 const BUSINESS_ASSERTION = /\b(we|our\s+(team|clinic|shop|salon)|yes,?\s+we)\b/i;
 /** Welcomes / acceptance claims that do not literally include "we …" but are still unsafe without KB. */
@@ -225,6 +217,8 @@ export type UnsupportedClaimRewriteLog = {
   kbChunksLength: number;
   patternGroup?: string;
 };
+
+const BLOCK_UNSUPPORTED_CLAIM_REPLY = '';
 
 export type UnsupportedClaimSupportCheckLog = {
   tenantId: string;
@@ -380,7 +374,7 @@ function pickIntentAwareNoKbFallback(
     CLAIM_BREED_SPECIES.test(replyText) &&
     CLAIM_ACCEPT_OFFER.test(replyText)
   ) {
-    return NO_KB_FALLBACK_BREED_OR_SPECIES_SERVICE;
+    return BLOCK_UNSUPPORTED_CLAIM_REPLY;
   }
 
   const ml = probe.toLowerCase();
@@ -390,36 +384,36 @@ function pickIntentAwareNoKbFallback(
     CLAIM_BREED_SPECIES.test(replyText) &&
     CLAIM_ACCEPT_OFFER.test(replyText)
   ) {
-    return NO_KB_FALLBACK_BREED_OR_SPECIES_SERVICE;
+    return BLOCK_UNSUPPORTED_CLAIM_REPLY;
   }
 
   if (userAskedBroadServiceBrowseQuery(probe, intent)) {
-    return NO_KB_FALLBACK_BROAD_SERVICE;
+    return BLOCK_UNSUPPORTED_CLAIM_REPLY;
   }
 
   if (intent === 'PRICE' || /\b(how\s+much|price|pricing|cost|fee|charge)\b/i.test(ml)) {
-    return NO_KB_FALLBACK_PRICE;
+    return BLOCK_UNSUPPORTED_CLAIM_REPLY;
   }
 
   if (
     intent === 'BUSINESS_HOURS' ||
     (/\b(open|opening|close|closing|hours?)\b/i.test(ml) && !detectMenuIntentInMessage(probe))
   ) {
-    return NO_KB_FALLBACK_HOURS;
+    return BLOCK_UNSUPPORTED_CLAIM_REPLY;
   }
 
   if (
     intent === 'BOOKING' ||
     /\b(slot|slots|availability|available\s+(?:slot|appointment|time)|next\s+available)\b/i.test(ml)
   ) {
-    return NO_KB_FALLBACK_AVAILABILITY;
+    return BLOCK_UNSUPPORTED_CLAIM_REPLY;
   }
 
   if (intent === 'MENU' || detectMenuIntentInMessage(probe)) {
-    return NO_KB_FALLBACK_MENU_SERVICE_LIST;
+    return BLOCK_UNSUPPORTED_CLAIM_REPLY;
   }
 
-  return SAFE_UNSUPPORTED_BUSINESS_CLAIM_REPLY;
+  return BLOCK_UNSUPPORTED_CLAIM_REPLY;
 }
 
 export function rewriteUnsupportedBusinessClaimsWhenNoKb(params: {
@@ -451,7 +445,7 @@ export function rewriteUnsupportedBusinessClaimsWhenNoKb(params: {
   ) {
     return {
       rewritten: true,
-      text: NO_KB_FALLBACK_BREED_OR_SPECIES_SERVICE,
+      text: BLOCK_UNSUPPORTED_CLAIM_REPLY,
       reason: 'no_kb_breed_service_hallucination',
       log: {
         reason: 'no_kb_breed_service_hallucination',
@@ -489,7 +483,7 @@ export function rewriteUnsupportedBusinessClaimsWhenNoKb(params: {
 
     return {
       rewritten: true,
-      text: NO_KB_FALLBACK_PRICE,
+      text: BLOCK_UNSUPPORTED_CLAIM_REPLY,
       reason: 'no_kb_price_ungrounded',
       log: {
         reason: 'no_kb_price_ungrounded',
@@ -537,13 +531,7 @@ export function rewriteUnsupportedBusinessClaimsWhenNoKb(params: {
 }
 
 export const COMPLAINT_ESCALATION_REPLY =
-  "Thanks for telling us — I'm sorry you're dealing with that.\n\n" +
-  'To help the team review this properly, please share:\n' +
-  '- A clear photo of the area you are concerned about\n' +
-  '- Your appointment date and stylist name (if you recall)\n' +
-  '- What looks uneven or wrong to you\n' +
-  '- The best way to reach you (messaging or call)\n\n' +
-  "I'll pass this to the team for review.";
+  '';
 
 export function buildGovernorCapabilityAppendix(params: {
   bookingCapability: string;

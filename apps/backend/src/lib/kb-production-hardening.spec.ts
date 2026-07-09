@@ -98,7 +98,7 @@ describe('KB production hardening', () => {
     expect(facing).toBe('');
   });
 
-  it('6: complaint internal text excluded; COMPLAINT fallback is safe customer copy', () => {
+  it('6: complaint internal text excluded; COMPLAINT fallback is suppressed', () => {
     const note =
       'Complaint context: escalate to manager within 15 minutes.\n\n' +
       'We are open 10am to 10pm for guests who need help.';
@@ -108,7 +108,7 @@ describe('KB production hardening', () => {
     expect(facing).not.toMatch(/Complaint context/i);
     const fb = composeFactsOnlyFallbackFromKb('COMPLAINT', [chunk('1', facing || 'hours 10am')]);
     expect(fb).not.toMatch(/Complaint context|escalate to manager/i);
-    expect(fb.length).toBeGreaterThan(20);
+    expect(fb).toBe('');
   });
 
   it('7: conflicting operating hours across chunks are detected and logged', () => {

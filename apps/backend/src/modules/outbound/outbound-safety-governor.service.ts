@@ -7,8 +7,6 @@ import { formatPostgrestError } from '../../lib/format-postgrest-error';
 import { getSupabaseService } from '../../lib/supabase';
 import { KbService } from '../kb/kb.service';
 import {
-  SAFE_PENDING_BOOKING_REPLY,
-  UNREQUESTED_MENU_FALLBACK_REPLY,
   isTrustedExecutedBookSlotSource,
   rewriteUnsupportedBusinessClaimsWhenNoKb,
   shouldRewriteUnrequestedMenuRepetition,
@@ -165,8 +163,9 @@ export class OutboundSafetyGovernorService {
 
     return {
       ...plan,
-      bubbles: [{ index: 0, text: guarded.text }],
-      rationale: `${plan.rationale}; outboundSafetyRewrite=${guarded.reason ?? 'no_kb_claim'}`,
+      planStatus: 'SKIP_NO_REPLY',
+      bubbles: [],
+      rationale: `${plan.rationale}; outboundSafetyBlocked=${guarded.reason ?? 'no_kb_claim'}`,
     };
   }
 
@@ -190,8 +189,9 @@ export class OutboundSafetyGovernorService {
 
     return {
       ...plan,
-      bubbles: [{ index: 0, text: SAFE_PENDING_BOOKING_REPLY }],
-      rationale: `${plan.rationale}; outboundSafetyRewrite=booking_confirmation_without_booking_action`,
+      planStatus: 'SKIP_NO_REPLY',
+      bubbles: [],
+      rationale: `${plan.rationale}; outboundSafetyBlocked=booking_confirmation_without_booking_action`,
     };
   }
 
@@ -221,8 +221,9 @@ export class OutboundSafetyGovernorService {
 
     return {
       ...plan,
-      bubbles: [{ index: 0, text: UNREQUESTED_MENU_FALLBACK_REPLY }],
-      rationale: `${plan.rationale}; outboundSafetyRewrite=unrequested_menu_repetition`,
+      planStatus: 'SKIP_NO_REPLY',
+      bubbles: [],
+      rationale: `${plan.rationale}; outboundSafetyBlocked=unrequested_menu_repetition`,
     };
   }
 }

@@ -46,12 +46,7 @@ export function outOfDomainBookingClarificationReply(
   tenantDisplayName: string,
   userPhraseSnippet: string,
 ): string {
-  const name = tenantDisplayName.trim() || 'us';
-  const phrase = userPhraseSnippet.trim() || 'that';
-  return (
-    `Happy to help with bookings at ${name}. Could you tell me a little more about "${phrase}" — ` +
-    `what service or visit are you trying to book, and for when?`
-  );
+  return '';
 }
 
 export function bookingAskPreferredDateTimeReply(guestCount: number | null): string {

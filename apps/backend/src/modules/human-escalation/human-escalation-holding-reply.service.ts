@@ -137,17 +137,13 @@ export class HumanEscalationHoldingReplyService {
     }
 
     if (isTechnicalOperatorInput(latestInboundText)) {
-      await this.enqueueDeterministicHoldingReply({
-        tenantId,
-        conversationId,
-        locationId,
-        ghlContactId,
-        botMode,
-        pipelineWallStartMs,
-        holdingReplyType: 'default',
-        replyText: this.handoverReply.getFallback('default'),
-        logReason: 'technical_operator_input',
-      });
+      this.logger.log(
+        `humanEscalationHoldingReplySuppressed ${JSON.stringify({
+          conversationId,
+          tenantId,
+          reason: 'technical_operator_input',
+        })}`,
+      );
       return;
     }
 
@@ -294,6 +290,18 @@ export class HumanEscalationHoldingReplyService {
           tenantId,
           reason: 'suggestive_mode',
           logReason,
+        })}`,
+      );
+      return;
+    }
+
+    if (!replyText.trim()) {
+      this.logger.log(
+        `humanEscalationHoldingReplySuppressed ${JSON.stringify({
+          conversationId,
+          tenantId,
+          reason: `empty_reply:${logReason}`,
+          holdingReplyType,
         })}`,
       );
       return;

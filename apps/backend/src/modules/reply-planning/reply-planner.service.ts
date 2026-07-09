@@ -1,5 +1,5 @@
 // Reply Planner Service — produces structured ReplyDecision from orchestration context.
-// Uses live LLM generation when a provider is configured; falls back to deterministic drafting.
+// Uses live LLM generation when a provider is configured.
 //
 // FORMATTING OWNERSHIP (live outbound): `formatIntoBubbles` below is the canonical formatter
 // for text shape on the real queue → GHL send path (orchestration enqueues `ReplyDecision`
@@ -25,14 +25,12 @@ import {
   bulletizeAdjacentShortPhraseLines,
   tryReadabilityTwoBubbleDrafts,
 } from '../../lib/whatsapp-readability-post';
-import { polishKbSnippetForCustomer } from '../../lib/kb-faq-customer-text';
 import { applyBusinessHoursGroundingGuard } from '../../lib/business-hours-grounding-guard';
 import { applyMenuKbGroundingGuard } from '../../lib/menu-kb-grounding-guard';
 import { sanitizeOutboundInternalKbLeak } from '../../lib/outbound-internal-kb-sanitizer';
 import { containsDisallowedSingaporeReplyLanguage } from '../../lib/reply-language-guard';
 
 import { applyOutboundPolicyGuard } from '../../lib/outbound-policy-guard';
-import { detectMenuIntentInMessage } from '../../lib/kb-relevance';
 import { rewriteUnsupportedBusinessClaimsWhenNoKb } from '../../lib/outbound-safety-governor';
 import { stripProactiveHandoverCtaIfNeeded } from '../../lib/proactive-handover-cta-guard';
 import { containsBotHumanEscalationLanguage } from '../../lib/bot-human-escalation-language';
@@ -93,7 +91,7 @@ export class ReplyPlannerService {
    * Strategy:
    * - If handover → HANDOVER plan, no bubbles
    * - Otherwise attempt live generation via GenerationService
-   * - Fall back to deterministic drafting if generation is unavailable or fails
+   * - If generation cannot produce a safe customer reply, skip instead of sending canned copy
    */
   /**
    * Pure option-letter reply: no LLM, no menu grounding rewrite (we already trust the option line).
@@ -215,6 +213,12 @@ export class ReplyPlannerService {
         draftText: afterMenu,
       });
       const afterKbLeak = sanitizeOutboundInternalKbLeak(afterHours, policyContext!.latestIntent, kbChunks);
+      if (!afterKbLeak.trim()) {
+        return this.buildSkipNoReplyPlan({
+          routing,
+          rationale: `policy_reply_blocked:${policyContext!.policyReplyKind}`,
+        });
+      }
       const proactiveForced = this.prepareProactiveHandoverOutboundText({
         replyText: afterKbLeak,
         latestIntent: policyContext!.latestIntent,
@@ -223,6 +227,12 @@ export class ReplyPlannerService {
         tenantId,
         conversationId,
       });
+      if (!proactiveForced.text.trim()) {
+        return this.buildSkipNoReplyPlan({
+          routing,
+          rationale: `policy_reply_blocked_after_cta_strip:${policyContext!.policyReplyKind}`,
+        });
+      }
       const bubbles = this.formatIntoBubbles(proactiveForced.text);
       this.logLiveWhitespaceDebug({
         rawDraft: proactiveForced.text,
@@ -295,6 +305,15 @@ export class ReplyPlannerService {
       tenantPricingCorpus: policyContext?.tenantPricingCorpus ?? '',
     });
     const finalDraft = noKbClaimGuard.rewritten ? noKbClaimGuard.text : afterKbLeak;
+    if (!finalDraft.trim()) {
+      return this.buildSkipNoReplyPlan({
+        routing,
+        rationale: noKbClaimGuard.rewritten
+          ? `outboundSafetyBlocked=${noKbClaimGuard.reason ?? 'no_kb_claim'}`
+          : `draft_blocked:${draft.fallbackReason ?? draft.provenance}`,
+        draft,
+      });
+    }
     if (noKbClaimGuard.supportCheckLog) {
       this.logger.log(`unsupportedClaimSupportCheck ${JSON.stringify(noKbClaimGuard.supportCheckLog)}`);
     }
@@ -314,6 +333,13 @@ export class ReplyPlannerService {
       tenantId,
       conversationId,
     });
+    if (!proactiveLive.text.trim()) {
+      return this.buildSkipNoReplyPlan({
+        routing,
+        rationale: 'draft_blocked_after_cta_strip',
+        draft,
+      });
+    }
     const bubbles = this.formatIntoBubbles(proactiveLive.text);
     this.logLiveWhitespaceDebug({
       rawDraft: proactiveLive.text,
@@ -394,8 +420,48 @@ export class ReplyPlannerService {
     };
   }
 
+  private buildSkipNoReplyPlan(params: {
+    routing: RoutingResponse;
+    rationale: string;
+    draft?: {
+      provenance?: 'live_generation' | 'placeholder_fallback' | 'policy_reply';
+      fallbackReason?: 'no_agency' | 'no_provider' | 'generation_failed';
+      agencyActiveProvider?: string;
+      configuredModel?: string;
+      routingRecommendedModel?: string;
+      generationProvider?: 'MINIMAX' | 'OPENAI';
+      generationModel?: string;
+      generationModelActuallyUsed?: string;
+      usedOpenAiFallback?: boolean;
+      fallbackUsed?: boolean;
+    };
+  }): ReplyDecision {
+    const { routing, rationale, draft } = params;
+    return {
+      planStatus: 'SKIP_NO_REPLY',
+      responseMode: routing.responseMode,
+      handoverRecommended: routing.handoverRecommended,
+      confidence: routing.confidence,
+      rationale,
+      bubbles: [],
+      suggestedActions: this.suggestActions(routing, []),
+      ...(draft?.provenance ? { draftProvenance: draft.provenance } : {}),
+      ...(draft?.fallbackReason ? { draftFallbackReason: draft.fallbackReason } : {}),
+      ...(draft?.agencyActiveProvider ? { agencyActiveProvider: draft.agencyActiveProvider } : {}),
+      ...(draft?.configuredModel ? { configuredModel: draft.configuredModel } : {}),
+      ...(draft?.routingRecommendedModel ? { routingRecommendedModel: draft.routingRecommendedModel } : {}),
+      ...(draft?.generationProvider ? { generationProvider: draft.generationProvider } : {}),
+      ...(draft?.generationModel ? { generationModel: draft.generationModel } : {}),
+      ...(draft?.generationModelActuallyUsed
+        ? { generationModelActuallyUsed: draft.generationModelActuallyUsed }
+        : {}),
+      ...(draft?.usedOpenAiFallback ? { usedOpenAiFallback: draft.usedOpenAiFallback } : {}),
+      ...(draft?.fallbackUsed != null ? { fallbackUsed: draft.fallbackUsed } : {}),
+    };
+  }
+
   /**
-   * Build a draft: try live generation first, fall back to deterministic placeholder.
+   * Build a draft: try live generation first; return an empty skipped draft if live generation fails.
    */
   private async buildDraft(
     tenantId: string,
@@ -533,54 +599,14 @@ export class ReplyPlannerService {
       liveDraft.skipReason ??
       (liveDraft.content !== null && outboundText.length === 0 ? 'generation_failed' : undefined);
 
-    const text = this.buildPlaceholderDraft(routing, kbChunks, memory);
     return {
-      text,
+      text: '',
       provenance: 'placeholder_fallback',
       fallbackReason,
       agencyActiveProvider: liveDraft.agencyActiveProvider,
       configuredModel: liveDraft.configuredModel,
       routingRecommendedModel: liveDraft.routingRecommendedModel ?? routing.recommendedModel,
     };
-  }
-
-  /**
-   * Deterministic fallback: KB-first, then mode-based ack, then memory, then generic.
-   */
-  private buildPlaceholderDraft(
-    routing: RoutingResponse,
-    kbChunks: RetrievalChunk[],
-    memory: MemoryEntry[],
-  ): string {
-    // Build from KB context
-    if (kbChunks.length > 0) {
-      const top = kbChunks[0]!;
-      const curated = top.metadata?.['menuCurated'] === true;
-      const limit = curated ? 900 : 480;
-      const snippet = top.content.slice(0, limit).trim();
-      const ellipsed =
-        `${snippet}${snippet.length === top.content.length ? '' : '...'}`;
-      return polishKbSnippetForCustomer(ellipsed);
-    }
-
-    // Fallback: short acknowledgment based on response mode
-    if (routing.responseMode === 'fast') {
-      return 'Got it! Let me look into that for you.';
-    }
-
-    const lastUserMessage = memory.filter(m => m.role === 'user').at(-1);
-    const lastMsg = lastUserMessage?.content?.trim() ?? '';
-
-    if (detectMenuIntentInMessage(lastMsg)) {
-      // Generic, business-agnostic — never invent categories.
-      return 'Happy to help — what would you like to know about our offerings?';
-    }
-
-    if (lastMsg.length > 0) {
-      return "I can help with that, but I don't have those details here yet. Could you tell me what you'd like to know specifically?";
-    }
-
-    return 'Thanks for reaching out. How can I help?';
   }
 
   /**

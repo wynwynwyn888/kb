@@ -12,13 +12,10 @@ export type HandoverActiveAiResult = {
 };
 
 const FALLBACKS: Record<HandoverActiveReplyType, string> = {
-  waiting_time:
-    "I’m sorry for the wait. Your request has already been sent to the team. I don’t have their exact response time here, but they’ll attend to you as soon as they’re available.",
-  extra_context:
-    "Thank you. I’ll pass this to the team so they have the full context when they take over.",
-  frustration:
-    "I understand this is frustrating. I’ve already flagged this for the team, and they’ll attend to you as soon as they’re available.",
-  default: "Your request has already been sent to the team. They’ll attend to you as soon as they’re available.",
+  waiting_time: '',
+  extra_context: '',
+  frustration: '',
+  default: '',
 };
 
 const MAX_WORDS = 35;
@@ -362,4 +359,3 @@ export class HumanEscalationHandoverReplyService {
     };
   }
 }
-

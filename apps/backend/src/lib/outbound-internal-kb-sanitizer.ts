@@ -1,5 +1,4 @@
 import type { ConversationIntent } from '../modules/conversation-policy/conversation-intent';
-import { MENU_PROMPT_NO_KB } from '../modules/conversation-policy/policy-menu-copy';
 import type { RetrievalChunk } from '../modules/kb/dto/retrieval.dto';
 import { polishKbSnippetForCustomer } from './kb-faq-customer-text';
 import { segmentKbContent } from './kb-chunk-interpretation';
@@ -71,14 +70,10 @@ export function composeFactsOnlyFallbackFromKb(
     if (addr.length) return addr.join('\n').slice(0, 600);
   }
   if (latestIntent === 'MENU' || latestIntent === 'SHORT_SELECTION') {
-    // Universal fallback — never names categories the tenant may not have.
-    return MENU_PROMPT_NO_KB;
+    return '';
   }
   if (latestIntent === 'COMPLAINT') {
-    return (
-      "I'm sorry you've had a frustrating experience. I want to help get this sorted. " +
-      'Could you share a bit more about what happened? I can also connect you with a manager if you prefer.'
-    );
+    return '';
   }
   const hours = collectSegmentTexts(kbChunks, 'operating_hours');
   if (hours.length) {
@@ -86,7 +81,7 @@ export function composeFactsOnlyFallbackFromKb(
     const p = polishKbSnippetForCustomer(raw);
     if (p) return p;
   }
-  return 'How can I help you today?';
+  return '';
 }
 
 /**
@@ -111,9 +106,9 @@ export function sanitizeOutboundInternalKbLeak(
       return t;
     }
     if (menuish) {
-      return MENU_PROMPT_NO_KB;
+      return '';
     }
-    return t.length >= 12 ? t : 'How can I help you today?';
+    return t.length >= 12 ? t : '';
   }
 
   if (menuish && RAW_MENU_DUMP.test(t) && t.length > 2200) {
@@ -126,7 +121,7 @@ export function sanitizeOutboundInternalKbLeak(
 
   const originalTrimmed = text.trim();
   if (!t.trim() && originalTrimmed && !blocked) {
-    return originalTrimmed.length >= 12 ? originalTrimmed : 'How can I help you today?';
+    return originalTrimmed.length >= 12 ? originalTrimmed : '';
   }
 
   return t;

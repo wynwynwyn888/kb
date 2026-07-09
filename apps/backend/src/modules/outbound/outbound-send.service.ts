@@ -112,7 +112,21 @@ export class OutboundSendService {
     const sanitizedBubbles = replyPlan.bubbles.map(b => ({
       index: b.index,
       text: sanitizeOutboundCustomerText(b.text),
-    }));
+    })).filter(b => b.text.trim().length > 0);
+    if (sanitizedBubbles.length === 0) {
+      this.logger.warn(
+        `Outbound send skipped: conversationId=${conversationId}, status=${replyPlan.planStatus}, reason=all_bubbles_blocked_by_sanitizer`,
+      );
+      return {
+        conversationId,
+        tenantId,
+        totalBubbles: 0,
+        succeeded: 0,
+        failed: 0,
+        bubbleResults: [],
+        quotaDebited: 0,
+      };
+    }
     const conversationRow = await this.loadConversationForOutbound(conversationId);
     const conversationChannel = conversationRow?.channel ?? null;
     const outboundGhlChannel = resolveOutboundChannelForSend({
@@ -1074,4 +1088,3 @@ export class OutboundSendService {
     }
   }
 }
-

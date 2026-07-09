@@ -7,11 +7,11 @@
 import type { RetrievalChunk } from '../kb/dto/retrieval.dto';
 
 export const SELECTION_UNCLEAR_REPLY =
-  'Sorry, I missed which option you meant. Could you reply with the letter or number from the previous list?';
+  '';
 
 /** Used only when option memory is missing AND no KB sections are available. */
 export const MENU_PROMPT_NO_KB =
-  "Happy to help. Could you tell me a bit more about what you're looking for?";
+  '';
 
 const LETTER_LABELS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'] as const;
 
@@ -74,17 +74,13 @@ export function buildOptionsFromKbSectionTitles(
     lines.push(`${label}) ${display}`);
   });
 
-  const head = opts.headPrompt?.trim() || 'Happy to help — which would you like to know more about?';
+  const head = opts.headPrompt?.trim() || 'Which would you like to know more about?';
   const reply = `${head}\n\n${lines.join('\n')}\n\nReply with the letter and I'll share the details.`;
 
   return { options, reply, rawSectionTitles: titles };
 }
 
-/**
- * Fallback "I don't have the details for X yet" copy when the user picked a category but we can't
- * find a matching KB chunk. Generic and tenant-neutral.
- */
+/** Legacy compatibility shim; no-KB selections are no longer answered with canned copy. */
 export function selectedCategoryNoKbReply(label: string): string {
-  const cat = (label.trim() || 'that').replace(/\s+/g, ' ');
-  return `Sure — ${cat}.\n\nI don't have the full ${cat} details handy. Would you like me to share more about it?`;
+  return '';
 }

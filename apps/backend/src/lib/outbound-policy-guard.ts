@@ -1,5 +1,4 @@
 import type { ConversationIntent } from '../modules/conversation-policy/conversation-intent';
-import { MENU_PROMPT_NO_KB } from '../modules/conversation-policy/policy-menu-copy';
 
 const HOURS_ANSWER_SIGNAL =
   /\b(weekday|weekend|weekdays|weekends|9\s*(am|pm)|1[01]\s*(am|pm)|open\s*(from|at)|we'?re\s+open)\b/i;
@@ -17,8 +16,7 @@ type GuardParams = {
  * Last-line defense: menu/selection flows must not ship opening-hours boilerplate.
  *
  * Universal: when a draft for a MENU/SHORT_SELECTION clearly returned hours copy and contains no
- * menu/services vocabulary, we replace it with a tenant-neutral clarification — never with
- * hardcoded "Starters/Mains/Desserts/Vegan options" because this platform serves any vertical.
+ * menu/services vocabulary, block it. The caller will skip outbound rather than sending canned copy.
  */
 export function applyOutboundPolicyGuard(params: GuardParams): string {
   const { latestIntent, menuSelectionActive, draftText } = params;
@@ -31,7 +29,7 @@ export function applyOutboundPolicyGuard(params: GuardParams): string {
     (menuSelectionActive ?? false);
 
   if (menuishIntent && HOURS_ANSWER_SIGNAL.test(t) && !MENU_VOCAB.test(t)) {
-    return MENU_PROMPT_NO_KB;
+    return '';
   }
 
   return draftText;

@@ -110,18 +110,7 @@ describe('HumanEscalationHoldingReplyService', () => {
       botMode: 'autopilot',
     });
     expect(handoverReply.classifyAndCompose).not.toHaveBeenCalled();
-    expect(sendBubbleAdd).toHaveBeenCalledWith(
-      'send-bubble',
-      expect.objectContaining({
-        replyPlanJson: expect.stringContaining('sent to the team'),
-      }),
-    );
-    expect(sendBubbleAdd).toHaveBeenCalledWith(
-      'send-bubble',
-      expect.objectContaining({
-        replyPlanJson: expect.not.stringContaining('docker'),
-      }),
-    );
+    expect(sendBubbleAdd).not.toHaveBeenCalled();
   });
 
   it('"sure thanks" suppresses holding reply (acknowledgement_only)', async () => {

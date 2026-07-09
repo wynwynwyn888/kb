@@ -58,7 +58,7 @@ const SERVER_OPS_JARGON_PATTERNS: RegExp[] = [
 const SHELL_PROMPT_LINE = /^\s*[$#>]\s+\S/m;
 
 export const TECHNICAL_OPERATOR_DEFLECTION_REPLY =
-  "Thanks for your message. I'm here to help with our services and bookings — I can't assist with technical commands or server topics. If you still need a team member, they'll follow up on your request.";
+  '';
 
 export function isTechnicalOperatorInput(raw: string): boolean {
   const t = raw.trim();

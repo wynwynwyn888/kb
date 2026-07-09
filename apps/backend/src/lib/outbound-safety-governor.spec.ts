@@ -110,8 +110,8 @@ describe('outbound-safety-governor', () => {
       expect(COMPLAINT_ESCALATION_REPLY.toLowerCase()).not.toMatch(/\b(i'?ve\s+arranged|scheduled\s+a\s+call)\b/);
     });
 
-    it('still mentions the team for internal escalation instructions', () => {
-      expect(COMPLAINT_ESCALATION_REPLY.toLowerCase()).toContain('team');
+    it('does not provide canned escalation copy', () => {
+      expect(COMPLAINT_ESCALATION_REPLY).toBe('');
     });
   });
 
@@ -126,11 +126,9 @@ describe('outbound-safety-governor', () => {
       noConnect(NO_KB_FALLBACK_BROAD_SERVICE);
     });
 
-    it('NO_KB_FALLBACK_PRICE uses safe template with factors and CTA', () => {
+    it('NO_KB_FALLBACK_PRICE is empty because unsupported claims are blocked', () => {
       noConnect(NO_KB_FALLBACK_PRICE);
-      expect(NO_KB_FALLBACK_PRICE.toLowerCase()).toContain('pricing depends');
-      expect(NO_KB_FALLBACK_PRICE).toMatch(/•\s+Channels you want to connect/);
-      expect(NO_KB_FALLBACK_PRICE).toMatch(/\*Best next step:\*/);
+      expect(NO_KB_FALLBACK_PRICE).toBe('');
     });
 
     it('NO_KB_FALLBACK_HOURS is a plain uncertainty line', () => {
@@ -138,9 +136,9 @@ describe('outbound-safety-governor', () => {
       expect(NO_KB_FALLBACK_HOURS.toLowerCase()).not.toContain('team');
     });
 
-    it('NO_KB_FALLBACK_AVAILABILITY prompts for scheduling preference', () => {
+    it('NO_KB_FALLBACK_AVAILABILITY is empty because unsupported claims are blocked', () => {
       noConnect(NO_KB_FALLBACK_AVAILABILITY);
-      expect(NO_KB_FALLBACK_AVAILABILITY.toLowerCase()).toMatch(/date|time/);
+      expect(NO_KB_FALLBACK_AVAILABILITY).toBe('');
     });
   });
 

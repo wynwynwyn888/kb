@@ -33,7 +33,7 @@ describe('isTechnicalOperatorInput', () => {
     expect(isTechnicalOperatorInput('still waiting for someone')).toBe(false);
   });
 
-  it('exports a deflection reply for non-handover paths', () => {
-    expect(TECHNICAL_OPERATOR_DEFLECTION_REPLY.length).toBeGreaterThan(20);
+  it('does not export canned deflection copy for non-handover paths', () => {
+    expect(TECHNICAL_OPERATOR_DEFLECTION_REPLY).toBe('');
   });
 });

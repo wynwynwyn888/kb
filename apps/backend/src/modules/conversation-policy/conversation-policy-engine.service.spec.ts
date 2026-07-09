@@ -95,7 +95,7 @@ describe('ConversationPolicyEngineService (universal — no hardcoded categories
     expect(out.nextPolicyState.activeTopic).toBe('menu');
   });
 
-  it('MENU without KB → generic clarification (NEVER hardcoded categories)', () => {
+  it('MENU without KB → no forced fallback reply', () => {
     const out = engine.evaluate({
       intent: 'MENU',
       incomingRaw: 'menu pls',
@@ -103,10 +103,8 @@ describe('ConversationPolicyEngineService (universal — no hardcoded categories
       policyState: emptyPolicyState(),
       kbChunksRanked: [],
     });
-    expect(out.policyForcedReply).toBe(MENU_PROMPT_NO_KB);
-    expect(out.policyForcedReply!.toLowerCase()).not.toMatch(/connect you (with|to) the team/);
-    expect(out.policyForcedReply).not.toMatch(/Starters|Mains|Desserts|Vegan/);
-    expect(out.policyReplyKind).toBe('menu_no_kb_clarification');
+    expect(out.policyForcedReply).toBeNull();
+    expect(out.policyReplyKind).toBe('none');
   });
 
   const spaSixOptionState = {
@@ -183,7 +181,7 @@ describe('ConversationPolicyEngineService (universal — no hardcoded categories
     expect(out.kbChunks).toHaveLength(0);
   });
 
-  it('SHORT_SELECTION unknown letter with A–F menu → clarification', () => {
+  it('SHORT_SELECTION unknown letter with A-F menu → no forced fallback reply', () => {
     const out = engine.evaluate({
       intent: 'SHORT_SELECTION',
       incomingRaw: 'G',
@@ -192,7 +190,7 @@ describe('ConversationPolicyEngineService (universal — no hardcoded categories
       kbChunksRanked: [],
     });
     expect(out.resolvedSelection).toBeNull();
-    expect(out.policyForcedReply).toBe(SELECTION_UNCLEAR_REPLY);
+    expect(out.policyForcedReply).toBeNull();
   });
 
   it('SHORT_SELECTION "first" resolves to label A from option memory', () => {
@@ -207,7 +205,7 @@ describe('ConversationPolicyEngineService (universal — no hardcoded categories
     expect(out.resolvedSelection?.selectedText).toBe('Haircut & Styling');
   });
 
-  it('SHORT_SELECTION with no options → clarification, no hardcoded list', () => {
+  it('SHORT_SELECTION with no options → no forced fallback reply', () => {
     const out = engine.evaluate({
       intent: 'SHORT_SELECTION',
       incomingRaw: 'A',
@@ -215,8 +213,8 @@ describe('ConversationPolicyEngineService (universal — no hardcoded categories
       policyState: emptyPolicyState(),
       kbChunksRanked: [hoursFaq],
     });
-    expect(out.policyForcedReply).toBe(SELECTION_UNCLEAR_REPLY);
-    expect(out.policyReplyKind).toBe('selection_clarification');
+    expect(out.policyForcedReply).toBeNull();
+    expect(out.policyReplyKind).toBe('none');
   });
 
   it('BUSINESS_HOURS after option flow clears option memory (topic switch)', () => {
@@ -284,7 +282,7 @@ describe('ConversationPolicyEngineService (universal — no hardcoded categories
     });
     // After clearing, "A" no longer resolves.
     expect(out.resolvedSelection).toBeNull();
-    expect(out.policyForcedReply).toBe(SELECTION_UNCLEAR_REPLY);
+    expect(out.policyForcedReply).toBeNull();
   });
 
   it('option memory beyond TTL is cleared (24h)', () => {
@@ -332,7 +330,7 @@ describe('ConversationPolicyEngineService (universal — no hardcoded categories
       currentTenantId: 'tenant-new',
     });
     expect(out.resolvedSelection).toBeNull();
-    expect(out.policyForcedReply).toBe(SELECTION_UNCLEAR_REPLY);
+    expect(out.policyForcedReply).toBeNull();
   });
 
   it('buildAndRecordOptionsFromKb derives generic options from KB section titles', () => {

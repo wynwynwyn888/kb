@@ -26,7 +26,7 @@ describe('menu-kb-grounding-guard (universal)', () => {
     expect(menuDraftLooksUngrounded(draft, [restaurantMainsKb])).toBe(true);
   });
 
-  it('replaces invented menu copy with selectedCategoryNoKbReply when categoryLabel given', () => {
+  it('blocks invented menu copy when categoryLabel is present but draft is ungrounded', () => {
     const draft =
       'Sure — mains.\n\nOur seafood mains and meat mains are elegantly seasoned with ocean-fresh ingredients.';
     const out = applyMenuKbGroundingGuard({
@@ -36,13 +36,10 @@ describe('menu-kb-grounding-guard (universal)', () => {
       kbChunks: [restaurantMainsKb],
       categoryLabel: 'Mains',
     });
-    // Generic "no full details" copy referencing the chosen category — no invented seafood/ocean prose.
-    expect(out.toLowerCase()).not.toContain('seafood');
-    expect(out.toLowerCase()).not.toContain('ocean');
-    expect(out.toLowerCase()).toContain('mains');
+    expect(out).toBe('');
   });
 
-  it('falls back to MENU_PROMPT_NO_KB when ungrounded and no categoryLabel', () => {
+  it('blocks ungrounded menu copy when no categoryLabel is present', () => {
     const draft =
       'Our seafood mains include ocean-fresh salmon and richly flavoured signatures.';
     const out = applyMenuKbGroundingGuard({
@@ -51,8 +48,7 @@ describe('menu-kb-grounding-guard (universal)', () => {
       draftText: draft,
       kbChunks: [],
     });
-    expect(out).toMatch(/Happy to help|connect you/i);
-    expect(out.toLowerCase()).not.toContain('seafood');
+    expect(out).toBe('');
   });
 
   it('does not rewrite a draft already grounded in KB', () => {

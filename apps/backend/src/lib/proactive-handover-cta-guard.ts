@@ -63,7 +63,7 @@ export function stripProactiveHandoverCtaIfNeeded(params: {
 
   const text = kept.join(' ').replace(/\s{2,}/g, ' ').trim();
   return {
-    text: text.length > 0 ? text : 'How can I help you further?',
+    text,
     removed: true,
     reason: 'removed_sentences_with_proactive_handover_cta',
   };

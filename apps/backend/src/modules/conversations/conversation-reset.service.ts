@@ -43,9 +43,6 @@ function readEnvChatResetAllowedContacts(config: ConfigService): string | undefi
   return s === '' ? undefined : s;
 }
 
-const RESET_CONFIRMATION_TEXT =
-  'Started a fresh chat for this conversation.\n\nYou can test from here.';
-
 export type BotResetSource = 'chat_command' | 'dashboard';
 
 @Injectable()
@@ -73,12 +70,12 @@ export class ConversationResetService implements OnModuleInit {
 
   buildConfirmationReplyPlan(): ReplyDecision {
     return {
-      planStatus: 'PLANNED',
+      planStatus: 'SKIP_NO_REPLY',
       responseMode: 'standard',
       handoverRecommended: false,
       confidence: 1,
-      rationale: 'chat_reset_confirmation',
-      bubbles: [{ index: 0, text: RESET_CONFIRMATION_TEXT }],
+      rationale: 'chat_reset_confirmation_suppressed',
+      bubbles: [],
       suggestedActions: [],
       draftProvenance: 'policy_reply',
     };

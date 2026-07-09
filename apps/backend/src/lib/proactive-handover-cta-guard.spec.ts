@@ -27,14 +27,14 @@ describe('stripProactiveHandoverCtaIfNeeded', () => {
     expect(r.text).toBe(body);
   });
 
-  it('does not strip complaint escalation copy that mentions the team without connect-you phrasing', () => {
+  it('allows empty complaint escalation compatibility copy without substitution', () => {
     const r = stripProactiveHandoverCtaIfNeeded({
       replyText: COMPLAINT_ESCALATION_REPLY,
       latestIntent: 'MENU',
       latestUserMessage: 'menu pls',
     });
     expect(r.removed).toBe(false);
-    expect(r.text).toContain('team');
+    expect(r.text).toBe('');
   });
 
   it('still allows detectComplaintServiceIssue probe to bypass stripping for mixed batch context', () => {

@@ -52,7 +52,7 @@ const RE_REJECT = /^(no|nope|nah|don'?t|cancel|stop)\b/i;
 const RE_SHORT_LETTER = /^[a-hA-H][\s!.?]*$/;
 const RE_SHORT_DIGIT = /^[1-8][\s!.?]*$/;
 const RE_OPTION_WORD = /\b(option\s*[a-hA-H1-8]|choice\s*[a-hA-H1-8])\b/i;
-const RE_FIRST_LAST = /\b(first|last)\s*(one|option|choice)?\b/i;
+const RE_FIRST_LAST = /^(?:the\s+)?(?:first|last)(?:\s+(?:one|option|choice))?[\s!.?]*$/i;
 
 export function classifyConversationIntent(message: string): ConversationIntent {
   const t = message.trim();

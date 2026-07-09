@@ -13,12 +13,19 @@ describe('classifyConversationIntent', () => {
     expect(classifyConversationIntent('f')).toBe('SHORT_SELECTION');
     expect(classifyConversationIntent('H')).toBe('SHORT_SELECTION');
     expect(classifyConversationIntent('6')).toBe('SHORT_SELECTION');
+    expect(classifyConversationIntent('first')).toBe('SHORT_SELECTION');
     expect(classifyConversationIntent('first one')).toBe('SHORT_SELECTION');
+    expect(classifyConversationIntent('the last option')).toBe('SHORT_SELECTION');
     expect(classifyConversationIntent('option B')).toBe('SHORT_SELECTION');
   });
 
   it('does not treat hours question as short selection', () => {
     expect(classifyConversationIntent('what time you open')).toBe('BUSINESS_HOURS');
+  });
+
+  it('does not classify deferrals containing "first" as short selections', () => {
+    expect(classifyConversationIntent('I need to think about it first.')).toBe('UNKNOWN');
+    expect(classifyConversationIntent('Let me check with my partner first')).toBe('UNKNOWN');
   });
 
   it('does not classify HUMAN_HANDOVER for "human" used as a service/species context', () => {

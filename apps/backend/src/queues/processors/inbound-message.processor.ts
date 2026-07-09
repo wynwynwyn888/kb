@@ -91,6 +91,63 @@ function normalizeBurstContent(content: string | null | undefined): string {
   return String(content ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
+export function parseGhlWorkflowLocalTimestamp(raw: string): string | null {
+  const trimmed = raw.trim();
+  const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:[,\s]+)(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\s*(AM|PM))?$/i.exec(trimmed);
+  if (!m) return null;
+
+  const day = Number(m[1]);
+  const month = Number(m[2]);
+  const year = Number(m[3]);
+  let hour = Number(m[4]);
+  const minute = Number(m[5]);
+  const second = m[6] ? Number(m[6]) : 0;
+  const ampm = m[7]?.toUpperCase();
+  if (ampm === 'PM' && hour < 12) hour += 12;
+  if (ampm === 'AM' && hour === 12) hour = 0;
+  if (
+    !Number.isInteger(day) || !Number.isInteger(month) || !Number.isInteger(year) ||
+    !Number.isInteger(hour) || !Number.isInteger(minute) || !Number.isInteger(second) ||
+    day < 1 || day > 31 || month < 1 || month > 12 || hour < 0 || hour > 23 ||
+    minute < 0 || minute > 59 || second < 0 || second > 59
+  ) {
+    return null;
+  }
+
+  const localValidationMs = Date.UTC(year, month - 1, day, hour, minute, second);
+  const d = new Date(localValidationMs);
+  if (
+    d.getUTCFullYear() !== year ||
+    d.getUTCMonth() !== month - 1 ||
+    d.getUTCDate() !== day ||
+    d.getUTCHours() !== hour ||
+    d.getUTCMinutes() !== minute ||
+    d.getUTCSeconds() !== second
+  ) {
+    return null;
+  }
+  // GHL workflow `{{right_now.time}}` values arrive without timezone and are
+  // rendered in the account/business local time. The current production tenant
+  // runs in Singapore time; normalize this legacy flat-workflow format to UTC.
+  const utcMs = Date.UTC(year, month - 1, day, hour - 8, minute, second);
+  return new Date(utcMs).toISOString();
+}
+
+export function normalizeInboundTimestampForPersist(raw: string | null | undefined): {
+  iso: string;
+  raw: string;
+  source: 'input_iso' | 'workflow_local_dmy' | 'server_now';
+} {
+  const original = String(raw ?? '').trim();
+  if (original) {
+    const local = parseGhlWorkflowLocalTimestamp(original);
+    if (local) return { iso: local, raw: original, source: 'workflow_local_dmy' };
+    const ms = Date.parse(original);
+    if (Number.isFinite(ms)) return { iso: new Date(ms).toISOString(), raw: original, source: 'input_iso' };
+  }
+  return { iso: new Date().toISOString(), raw: original, source: 'server_now' };
+}
+
 function collapseNearbyDuplicateInboundRows<T extends InboundRowForBurst>(
   rowsNewestFirst: T[],
   windowMs = 10_000,
@@ -218,7 +275,7 @@ export class InboundMessageProcessor extends WorkerHost {
       ghlContactId,
       messageContent,
       messageType,
-      timestamp,
+      timestamp: rawTimestamp,
       webhookEventId,
       smokeImmediate,
       contactDisplayName,
@@ -237,6 +294,8 @@ export class InboundMessageProcessor extends WorkerHost {
       ghlMessageTypeRaw,
       workflowFlatRaw,
     } = job.data;
+    const normalizedTimestamp = normalizeInboundTimestampForPersist(rawTimestamp);
+    const timestamp = normalizedTimestamp.iso;
 
     const channelNorm = resolveGhlInboundChannel({
       channelRaw,
@@ -248,6 +307,11 @@ export class InboundMessageProcessor extends WorkerHost {
     this.logger.log(
       `Inbound persist: conversationGhlId=${ghlConversationId}, type=${messageType}, channelRaw=${channelRaw ?? 'null'}, ghlMessageTypeRaw=${ghlMessageTypeRaw ?? 'null'}, resolvedOutbound=${channelNorm.outboundChannel}, channelSource=${channelNorm.source}, smokeImmediate=${Boolean(smokeImmediate)}, voiceInboundNeedsTranscribe=${Boolean(voiceInboundNeedsTranscribe)}`,
     );
+    if (normalizedTimestamp.source !== 'input_iso') {
+      this.logger.log(
+        `Inbound timestamp normalized: source=${normalizedTimestamp.source} raw=${normalizedTimestamp.raw || '(empty)'} iso=${normalizedTimestamp.iso}`,
+      );
+    }
 
     if (webhookEventId) {
       await this.updateWebhookEventStatus(webhookEventId, 'PROCESSING');
@@ -323,6 +387,8 @@ export class InboundMessageProcessor extends WorkerHost {
           ingestSource: 'webhook',
           sourceMetadata: {
             receivedAt: timestamp,
+            ...(normalizedTimestamp.raw && normalizedTimestamp.raw !== timestamp ? { receivedAtRaw: normalizedTimestamp.raw } : {}),
+            timestampSource: normalizedTimestamp.source,
             ...resolved.voiceMetadata,
           },
         });
@@ -348,6 +414,8 @@ export class InboundMessageProcessor extends WorkerHost {
             ghlMessageId: ghlInboundMessageId?.trim() || webhookEventId,
             ...(ghlInboundMessageId?.trim() ? { ghlInboundMessageId: ghlInboundMessageId.trim() } : {}),
             receivedAt: timestamp,
+            ...(normalizedTimestamp.raw && normalizedTimestamp.raw !== timestamp ? { receivedAtRaw: normalizedTimestamp.raw } : {}),
+            timestampSource: normalizedTimestamp.source,
             ...resolved.voiceMetadata,
           },
         });
@@ -1563,6 +1631,7 @@ export class InboundMessageProcessor extends WorkerHost {
         );
       }
       await this.markOrchestrationCompleted(latestMsgId);
+      await this.releaseOrchestrationLock(tenantId, latestMsgId, lockToken);
       // Provider done marker is now set in send-bubble.processor.ts after successful send.
       // Record interim pending decision — finalized by send-bubble with PROCEED or FAILED_SEND.
       if (latestMsgId) {

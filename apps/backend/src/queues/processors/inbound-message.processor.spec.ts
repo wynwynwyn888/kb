@@ -36,7 +36,7 @@ jestGlobal.mock('../../modules/conversation-policy/conversation-intent', () => (
 import type { Job } from 'bullmq';
 
 import { INBOUND_DEBOUNCE_ENV_KEY } from '../../lib/inbound-burst-batch';
-import { InboundMessageProcessor } from './inbound-message.processor';
+import { InboundMessageProcessor, normalizeInboundTimestampForPersist } from './inbound-message.processor';
 import {
   VOICE_INBOUND_PLACEHOLDER_NO_MEDIA_USER_MESSAGE,
   VOICE_NOTE_TRANSCRIPTION_FAILED_USER_MESSAGE,
@@ -299,6 +299,27 @@ describe('InboundMessageProcessor', () => {
       { add: mockSendBubbleQueueAdd } as never,
       { add: mockInboundQueueAdd } as never,
     );
+  });
+
+  describe('timestamp normalization', () => {
+    it('parses GHL workflow D/M/YYYY timestamps as day-month-year instead of US month-day', () => {
+      expect(normalizeInboundTimestampForPersist('9/7/2026 22:45')).toEqual({
+        iso: '2026-07-09T14:45:00.000Z',
+        raw: '9/7/2026 22:45',
+        source: 'workflow_local_dmy',
+      });
+    });
+
+    it('falls back to server time when the workflow timestamp is removed', () => {
+      const before = Date.now();
+      const out = normalizeInboundTimestampForPersist('');
+      const after = Date.now();
+      const parsed = Date.parse(out.iso);
+      expect(out.source).toBe('server_now');
+      expect(Number.isFinite(parsed)).toBe(true);
+      expect(parsed).toBeGreaterThanOrEqual(before - 1000);
+      expect(parsed).toBeLessThanOrEqual(after + 1000);
+    });
   });
 
   it('persist stores inbound and schedules orchestrate with default debounce delay and versioned jobId', async () => {
@@ -693,6 +714,88 @@ describe('InboundMessageProcessor', () => {
     }).releaseOrchestrationLock('tenant-1', 'msg-1', 'token-1');
 
     expect(releaseLock).toHaveBeenCalledWith('lock:orch:tenant-1:msg-1', 'token-1');
+  });
+
+  it('orchestrate: PROCEED releases the per-inbound orchestration lock after enqueueing send', async () => {
+    orchestrate.mockResolvedValueOnce({
+      outcome: 'PROCEED',
+      conversationId: CONV_ID,
+      routing: { recommendedModel: 'gpt-4o-mini' },
+      replyPlan: {
+        bubbles: [{ index: 0, text: 'Reply' }],
+        generationModelActuallyUsed: 'gpt-4o-mini-2024-07-18',
+      },
+    } as never);
+    const acquireLock = jestGlobal.fn(async () => 'acquired');
+    const releaseLock = jestGlobal.fn(async () => true);
+    const withCache = new InboundMessageProcessor(
+      mockOrchestration as never,
+      mockResetService as never,
+      mockInboundAutoTagging as never,
+      mockAudioTranscription as never,
+      mockGhlVoiceRecordingFetch as never,
+      mockGhlVoiceMessageDiscovery as never,
+      mockGhlVoiceConversationDiscovery as never,
+      mockFollowUpEngine as never,
+      mockHumanEscalationHolding as never,
+      { add: mockSendBubbleQueueAdd } as never,
+      { add: mockInboundQueueAdd } as never,
+      undefined,
+      { acquireLock, releaseLock } as never,
+    );
+
+    mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'tenant_ghl_connections') return makeTenantGhlConnectionsTableMock();
+      if (table === 'conversations') {
+        return {
+          select: () => ({
+            eq: () => ({
+              single: async () => ({
+                data: { metadata: { inboundDebounce: { pendingVersion: 4 } } },
+                error: null,
+              }),
+            }),
+          }),
+        };
+      }
+      if (table === 'messages') {
+        const inbound = {
+          id: 'msg-latest',
+          content: 'How does this help sales?',
+          contentType: 'TEXT',
+          metadata: {},
+          created_at: '2026-07-09T14:45:26.935Z',
+        };
+        return {
+          select: () => resolvedQuery({ data: [inbound], error: null }),
+          update: () => ({ eq: async () => ({ error: null }) }),
+        };
+      }
+      if (table === 'tenants') {
+        return {
+          select: () => ({
+            eq: () => ({
+              single: async () => ({ data: { id: 'tenant-1', bot_mode: 'autopilot' }, error: null }),
+            }),
+          }),
+        };
+      }
+      return {} as never;
+    });
+
+    await withCache.process(
+      makeJob('orchestrate', {
+        tenantId: 'tenant-1',
+        conversationId: CONV_ID,
+        locationId: 'loc_1',
+        ghlContactId: 'ct_1',
+        ghlConversationId: 'ghl_conv_1',
+        debounceVersion: 4,
+      }),
+    );
+
+    expect(mockSendBubbleQueueAdd).toHaveBeenCalledTimes(1);
+    expect(releaseLock).toHaveBeenCalledWith('lock:orch:tenant-1:msg-latest', expect.any(String));
   });
 
   it('orchestrate: exact /new triggers reset service and skips AI orchestration', async () => {

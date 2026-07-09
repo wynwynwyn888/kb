@@ -417,13 +417,13 @@ function classifiesAsFile(d: KbDocumentRow): boolean {
   );
 }
 
-type KbRowBucket = 'faq' | 'rich' | 'file' | 'other';
+type KbRowBucket = 'faq' | 'rich' | 'website' | 'file' | 'other';
 
 function rowBucket(d: KbDocumentRow): KbRowBucket {
   const k = (d.documentKind || '').toLowerCase();
   if (k === 'faq') return 'faq';
   if (k === 'rich_text') return 'rich';
-  if (k === 'website') return 'rich';
+  if (k === 'website') return 'website';
   if (k === 'file') return 'file';
   if (k === 'manual' || k === '') {
     if (classifiesAsFaq(d)) return 'faq';
@@ -1859,22 +1859,24 @@ export default function SubaccountKnowledgePage() {
     [vaults, selectedVaultId],
   );
 
-  const { faqRows, richRows, fileRows, otherRows } = useMemo(() => {
+  const { faqRows, richRows, websiteRows, fileRows, otherRows } = useMemo(() => {
     const faq: KbDocumentRow[] = [];
     const file: KbDocumentRow[] = [];
     const rich: KbDocumentRow[] = [];
+    const website: KbDocumentRow[] = [];
     const other: KbDocumentRow[] = [];
     for (const d of vaultScopeDocs) {
       const b = rowBucket(d);
       if (b === 'faq') faq.push(d);
       else if (b === 'file') file.push(d);
+      else if (b === 'website') website.push(d);
       else if (b === 'rich') rich.push(d);
       else {
         other.push(d);
         rich.push(d);
       }
     }
-    return { faqRows: faq, richRows: rich, fileRows: file, otherRows: other };
+    return { faqRows: faq, richRows: rich, websiteRows: website, fileRows: file, otherRows: other };
   }, [vaultScopeDocs]);
 
   const bump = () => setReload(x => x + 1);
@@ -3058,6 +3060,55 @@ export default function SubaccountKnowledgePage() {
                         </div>
                       </div>
                     ) : null}
+
+                    <div style={{ marginTop: '1.25rem' }}>
+                      <h4
+                        style={{
+                          fontSize: '0.85rem',
+                          fontWeight: 800,
+                          margin: '0 0 0.35rem',
+                          color: 'var(--aisbp-text-heading, #0f172a)',
+                        }}
+                      >
+                        Imported website pages
+                      </h4>
+                      <p
+                        style={{
+                          fontSize: '0.78rem',
+                          color: 'var(--aisbp-muted, #64748b)',
+                          margin: '0 0 0.85rem',
+                          lineHeight: 1.45,
+                        }}
+                      >
+                        These are the saved website documents in this vault. Open a page to inspect the text and chunks KB will search,
+                        or delete the page if it should not be used.
+                      </p>
+                      {websiteRows.length === 0 ? (
+                        <p style={{ fontSize: '0.875rem', color: 'var(--aisbp-muted, #64748b)', margin: 0, lineHeight: 1.5 }}>
+                          No website pages imported into this vault yet.
+                        </p>
+                      ) : (
+                        <div>
+                          {websiteRows.map(d => (
+                            <NoteKnowledgeCard
+                              key={d.id}
+                              doc={d}
+                              token={token!}
+                              subId={subId}
+                              deleting={deletingId === d.id}
+                              onDelete={() => onDelete(d.id)}
+                              vaults={vaults}
+                              vaultAssignBusy={vaultAssignBusy}
+                              onVaultAssignBusy={setVaultAssignBusy}
+                              onPatchDocVault={patchDocVault}
+                              setWriteErr={setWriteErr}
+                              setSaveOk={setSaveOk}
+                              inVaultView
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </section>
                 ) : null}
 

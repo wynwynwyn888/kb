@@ -1739,7 +1739,7 @@ export default function SubaccountKnowledgePage() {
   const params = useParams();
   const subId = params['tenantId'] as string;
   const { token } = useAuth();
-  const [tab, setTab] = useState<Tab>('faq');
+  const [tab, setTab] = useState<Tab>('website');
   const [docs, setDocs] = useState<KbDocumentRow[]>([]);
   const [loadErr, setLoadErr] = useState('');
   const [loading, setLoading] = useState(true);
@@ -2581,6 +2581,25 @@ export default function SubaccountKnowledgePage() {
                         setSaveOk('');
                         return;
                       }
+                      setTab('website');
+                      setSaveOk('');
+                    }}
+                  >
+                    <span style={iconCircle}>🌐</span>
+                    <span style={{ fontSize: '0.875rem', fontWeight: 600 }}>Import Website</span>
+                  </button>
+                  <button
+                    type="button"
+                    style={{
+                      ...bentoBtn,
+                      ...(!selectedVaultId ? { opacity: 0.68, cursor: 'not-allowed' as const } : {}),
+                    }}
+                    onClick={() => {
+                      if (!selectedVaultId) {
+                        setWriteErr(NO_VAULT_EMPTY_MSG);
+                        setSaveOk('');
+                        return;
+                      }
                       setTab('faq');
                       setSaveOk('');
                     }}
@@ -2606,25 +2625,6 @@ export default function SubaccountKnowledgePage() {
                   >
                     <span style={iconCircle}>📝</span>
                     <span style={{ fontSize: '0.875rem', fontWeight: 600 }}>Add Note</span>
-                  </button>
-                  <button
-                    type="button"
-                    style={{
-                      ...bentoBtn,
-                      ...(!selectedVaultId ? { opacity: 0.68, cursor: 'not-allowed' as const } : {}),
-                    }}
-                    onClick={() => {
-                      if (!selectedVaultId) {
-                        setWriteErr(NO_VAULT_EMPTY_MSG);
-                        setSaveOk('');
-                        return;
-                      }
-                      setTab('website');
-                      setSaveOk('');
-                    }}
-                  >
-                    <span style={iconCircle}>🌐</span>
-                    <span style={{ fontSize: '0.875rem', fontWeight: 600 }}>Import Website</span>
                   </button>
                   <button
                     type="button"
@@ -2682,6 +2682,18 @@ export default function SubaccountKnowledgePage() {
                 >
                   <button
                     type="button"
+                    style={tabUnderline(tab === 'website')}
+                    onClick={() => {
+                      setTab('website');
+                      setSaveOk('');
+                    }}
+                    role="tab"
+                    aria-selected={tab === 'website'}
+                  >
+                    Website
+                  </button>
+                  <button
+                    type="button"
                     style={tabUnderline(tab === 'faq')}
                     onClick={() => {
                       setTab('faq');
@@ -2703,18 +2715,6 @@ export default function SubaccountKnowledgePage() {
                     aria-selected={tab === 'rich'}
                   >
                     Notes
-                  </button>
-                  <button
-                    type="button"
-                    style={tabUnderline(tab === 'website')}
-                    onClick={() => {
-                      setTab('website');
-                      setSaveOk('');
-                    }}
-                    role="tab"
-                    aria-selected={tab === 'website'}
-                  >
-                    Website
                   </button>
                   <button
                     type="button"
@@ -2982,7 +2982,7 @@ export default function SubaccountKnowledgePage() {
                           >
                             <option value="sitemap">Sitemap first</option>
                             <option value="single">Single page</option>
-                            <option value="crawl">Follow page links</option>
+                            <option value="crawl">Full site crawl</option>
                           </select>
                         </label>
                         <label>

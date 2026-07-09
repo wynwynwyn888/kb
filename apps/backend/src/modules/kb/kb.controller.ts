@@ -26,6 +26,7 @@ import type { SessionUser } from '../../lib/supabase';
 import {
   CreateKbFaqBodyDto,
   CreateKbRichTextBodyDto,
+  ImportWebsiteBodyDto,
   KbFileUploadBodyDto,
   KbSearchBodyDto,
   UpdateKbFaqBodyDto,
@@ -306,6 +307,27 @@ export class KbController {
       if (/pdf|word|extraction|not enabled|empty or unsupported/i.test(me) && me.length < 220) {
         throw new BadRequestException(me);
       }
+      throw new BadRequestException(mapKbError(e));
+    }
+  }
+
+  @Post('documents/website')
+  @ApiOperation({ summary: 'Import same-domain website pages into a knowledge vault' })
+  async importWebsite(
+    @Body() dto: ImportWebsiteBodyDto,
+    @CurrentUser() user: SessionUser,
+  ) {
+    if (!dto.tenantId?.trim()) throw new BadRequestException('tenantId is required');
+    if (!dto.url?.trim()) throw new BadRequestException('url is required');
+    await this.assertTenantScope(user, dto.tenantId);
+    try {
+      return await this.kbService.importWebsite(dto.tenantId.trim(), {
+        url: dto.url.trim(),
+        requestedVaultId: dto.vaultId?.trim(),
+        crawlMode: dto.crawlMode,
+        maxPages: dto.maxPages,
+      });
+    } catch (e) {
       throw new BadRequestException(mapKbError(e));
     }
   }

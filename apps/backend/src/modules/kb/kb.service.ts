@@ -4,7 +4,7 @@
 // Real pgvector RAG is a separate, fail-closed tenant-gated path in orchestration.
 // All operations are tenant-scoped.
 
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import type { Queue } from 'bullmq';
@@ -45,6 +45,11 @@ const KB_SEARCH_DEFAULT_TOP_K = 12;
 /** Cap corpus size for keyword retrieval (most recently updated docs first). */
 const MAX_KB_DOCUMENTS_FOR_RETRIEVAL = 200;
 const MAX_KB_CHUNKS_FOR_RETRIEVAL = 3000;
+const WEBSITE_IMPORT_DEFAULT_MAX_PAGES = 20;
+const WEBSITE_IMPORT_HARD_MAX_PAGES = 50;
+const WEBSITE_IMPORT_MAX_BYTES = 2_000_000;
+const WEBSITE_IMPORT_FETCH_TIMEOUT_MS = 12_000;
+const WEBSITE_IMPORT_USER_AGENT = 'AISalesBotPro-KnowledgeImporter/1.0';
 
 function truncateSnippetToLines(snippet: string, maxLines: number, maxChars: number): string {
   const normalized = snippet.replace(/\r\n/g, '\n');
@@ -67,8 +72,129 @@ function inferDocumentKind(
   const s = (source || '').toLowerCase();
   if (s === 'faq') return 'faq';
   if (s === 'rich_text' || s === 'rich') return 'rich_text';
+  if (s === 'website') return 'website';
   if (s.includes('pdf') || s.includes('word') || s === 'file') return 'file';
   return 'manual';
+}
+
+function clampWebsiteImportMaxPages(n: number | null | undefined): number {
+  if (!Number.isFinite(n ?? NaN)) return WEBSITE_IMPORT_DEFAULT_MAX_PAGES;
+  return Math.max(1, Math.min(WEBSITE_IMPORT_HARD_MAX_PAGES, Math.floor(n!)));
+}
+
+function isUnsafeWebsiteHostname(hostname: string): boolean {
+  const h = hostname.trim().toLowerCase();
+  if (!h || h === 'localhost' || h.endsWith('.localhost')) return true;
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(h)) {
+    const parts = h.split('.').map(x => Number(x));
+    const [a, b] = parts;
+    if (a === 10 || a === 127 || a === 0) return true;
+    if (a === 172 && b != null && b >= 16 && b <= 31) return true;
+    if (a === 192 && b === 168) return true;
+    if (a === 169 && b === 254) return true;
+  }
+  if (h === '::1' || h.startsWith('fc') || h.startsWith('fd') || h.startsWith('fe80')) return true;
+  return false;
+}
+
+function normalizeWebsiteImportUrl(raw: string, base?: URL): URL {
+  const u = new URL(raw.trim(), base);
+  if (u.protocol !== 'https:' && u.protocol !== 'http:') {
+    throw new Error('Only http and https website URLs are supported');
+  }
+  if (isUnsafeWebsiteHostname(u.hostname)) {
+    throw new Error('This website host is not allowed for import');
+  }
+  u.hash = '';
+  if ((u.protocol === 'https:' && u.port === '443') || (u.protocol === 'http:' && u.port === '80')) {
+    u.port = '';
+  }
+  return u;
+}
+
+function canonicalWebsiteUrl(u: URL): string {
+  const copy = new URL(u.toString());
+  copy.hash = '';
+  copy.searchParams.sort();
+  const out = copy.toString();
+  return out.endsWith('/') && copy.pathname !== '/' ? out.slice(0, -1) : out;
+}
+
+function sameWebsiteScope(candidate: URL, root: URL): boolean {
+  return candidate.hostname.toLowerCase() === root.hostname.toLowerCase() && candidate.protocol === root.protocol;
+}
+
+function decodeBasicHtmlEntities(input: string): string {
+  const named: Record<string, string> = {
+    amp: '&',
+    lt: '<',
+    gt: '>',
+    quot: '"',
+    apos: "'",
+    nbsp: ' ',
+  };
+  return input.replace(/&(#x?[0-9a-f]+|[a-z]+);/gi, (m, e: string) => {
+    const key = e.toLowerCase();
+    if (key[0] === '#') {
+      const hex = key.startsWith('#x');
+      const n = Number.parseInt(hex ? key.slice(2) : key.slice(1), hex ? 16 : 10);
+      return Number.isFinite(n) ? String.fromCodePoint(n) : m;
+    }
+    return named[key] ?? m;
+  });
+}
+
+function extractHtmlTitle(html: string, fallback: string): string {
+  const m = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html);
+  const t = decodeBasicHtmlEntities((m?.[1] ?? '').replace(/\s+/g, ' ').trim());
+  return t || fallback;
+}
+
+function cleanWebsiteHtmlToText(html: string): string {
+  let s = html
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<script\b[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style\b[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<noscript\b[\s\S]*?<\/noscript>/gi, ' ')
+    .replace(/<svg\b[\s\S]*?<\/svg>/gi, ' ')
+    .replace(/<(nav|footer|header|form|aside)\b[\s\S]*?<\/\1>/gi, ' ')
+    .replace(/<(br|hr)\b[^>]*>/gi, '\n')
+    .replace(/<\/(p|div|section|article|li|ul|ol|h1|h2|h3|h4|h5|h6|tr|table)>/gi, '\n')
+    .replace(/<[^>]+>/g, ' ');
+  s = decodeBasicHtmlEntities(s);
+  const lines = s
+    .replace(/\r\n/g, '\n')
+    .replace(/[ \t\f\v]+/g, ' ')
+    .split('\n')
+    .map(line => line.trim())
+    .filter(Boolean);
+  const out: string[] = [];
+  let prev = '';
+  for (const line of lines) {
+    if (line === prev) continue;
+    out.push(line);
+    prev = line;
+  }
+  return out.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+function extractSameSiteLinks(html: string, pageUrl: URL, rootUrl: URL): string[] {
+  const out = new Set<string>();
+  const hrefRe = /<a\b[^>]*\bhref=(["'])(.*?)\1/gi;
+  let m: RegExpExecArray | null;
+  while ((m = hrefRe.exec(html))) {
+    const raw = decodeBasicHtmlEntities(m[2] ?? '').trim();
+    if (!raw || raw.startsWith('#') || /^mailto:|^tel:|^javascript:/i.test(raw)) continue;
+    try {
+      const u = normalizeWebsiteImportUrl(raw, pageUrl);
+      if (!sameWebsiteScope(u, rootUrl)) continue;
+      if (/\.(pdf|jpg|jpeg|png|gif|webp|svg|zip|mp4|mov|avi|doc|docx|xls|xlsx)$/i.test(u.pathname)) continue;
+      out.add(canonicalWebsiteUrl(u));
+    } catch {
+      // Ignore malformed or unsafe links.
+    }
+  }
+  return [...out];
 }
 
 @Injectable()
@@ -838,6 +964,230 @@ export class KbService {
     if (ce) throw new Error(`File chunk: ${ce.message}`);
     this.enqueueKbEmbeddingRefresh(tenantId, doc.id, 'create');
     return { id: doc.id, status: 'READY' };
+  }
+
+  async importWebsite(
+    tenantId: string,
+    params: {
+      url: string;
+      requestedVaultId?: string;
+      crawlMode?: 'single' | 'sitemap' | 'crawl' | string;
+      maxPages?: number;
+    },
+  ): Promise<{
+    ok: true;
+    imported: number;
+    updated: number;
+    skipped: number;
+    failed: number;
+    pages: Array<{ url: string; title?: string; documentId?: string; status: 'imported' | 'updated' | 'skipped' | 'failed'; reason?: string }>;
+  }> {
+    const root = normalizeWebsiteImportUrl(params.url);
+    const vaultId = await this.resolveVaultIdForNewDocument(tenantId, params.requestedVaultId);
+    const maxPages = clampWebsiteImportMaxPages(params.maxPages);
+    const mode = params.crawlMode === 'single' || params.crawlMode === 'sitemap' || params.crawlMode === 'crawl'
+      ? params.crawlMode
+      : 'sitemap';
+    const urls = await this.discoverWebsiteImportUrls(root, mode, maxPages);
+    const pages: Array<{ url: string; title?: string; documentId?: string; status: 'imported' | 'updated' | 'skipped' | 'failed'; reason?: string }> = [];
+    let imported = 0;
+    let updated = 0;
+    let skipped = 0;
+    let failed = 0;
+
+    for (const url of urls.slice(0, maxPages)) {
+      try {
+        const fetched = await this.fetchWebsitePage(url);
+        if (!fetched.html.trim()) {
+          skipped++;
+          pages.push({ url, status: 'skipped', reason: 'No readable HTML content' });
+          continue;
+        }
+        const title = extractHtmlTitle(fetched.html, new URL(url).pathname.replace(/^\/+/, '') || new URL(url).hostname);
+        const text = cleanWebsiteHtmlToText(fetched.html);
+        if (text.length < 80) {
+          skipped++;
+          pages.push({ url, title, status: 'skipped', reason: 'Not enough readable text after cleanup' });
+          continue;
+        }
+        const result = await this.upsertWebsiteDocument(tenantId, vaultId, {
+          url,
+          title,
+          text,
+          contentType: fetched.contentType,
+        });
+        if (result.created) imported++;
+        else updated++;
+        pages.push({ url, title, documentId: result.id, status: result.created ? 'imported' : 'updated' });
+      } catch (e) {
+        failed++;
+        const msg = e instanceof Error ? e.message : 'Failed to import page';
+        pages.push({ url, status: 'failed', reason: msg.slice(0, 180) });
+      }
+    }
+
+    this.logger.log(
+      `Website import complete tenant=${tenantId} root=${canonicalWebsiteUrl(root)} mode=${mode} ` +
+        `imported=${imported} updated=${updated} skipped=${skipped} failed=${failed}`,
+    );
+    return { ok: true, imported, updated, skipped, failed, pages };
+  }
+
+  private async discoverWebsiteImportUrls(root: URL, mode: 'single' | 'sitemap' | 'crawl', maxPages: number): Promise<string[]> {
+    const start = canonicalWebsiteUrl(root);
+    if (mode === 'single') return [start];
+
+    const sitemapUrls = await this.discoverSitemapUrls(root, maxPages).catch(() => []);
+    if (sitemapUrls.length > 0 || mode === 'sitemap') {
+      return (sitemapUrls.length > 0 ? sitemapUrls : [start]).slice(0, maxPages);
+    }
+
+    const seen = new Set<string>([start]);
+    const queue = [start];
+    for (let i = 0; i < queue.length && seen.size < maxPages; i++) {
+      const current = queue[i]!;
+      try {
+        const fetched = await this.fetchWebsitePage(current);
+        for (const link of extractSameSiteLinks(fetched.html, new URL(current), root)) {
+          if (seen.size >= maxPages) break;
+          if (seen.has(link)) continue;
+          seen.add(link);
+          queue.push(link);
+        }
+      } catch {
+        // Keep discovery best-effort; import phase will report page failures.
+      }
+    }
+    return [...seen].slice(0, maxPages);
+  }
+
+  private async discoverSitemapUrls(root: URL, maxPages: number): Promise<string[]> {
+    const sitemap = new URL('/sitemap.xml', root);
+    const fetched = await this.fetchWebsitePage(canonicalWebsiteUrl(sitemap), { allowXml: true });
+    const urls = new Set<string>();
+    const locRe = /<loc[^>]*>([\s\S]*?)<\/loc>/gi;
+    let m: RegExpExecArray | null;
+    while ((m = locRe.exec(fetched.html)) && urls.size < maxPages) {
+      const raw = decodeBasicHtmlEntities(m[1] ?? '').trim();
+      if (!raw) continue;
+      try {
+        const u = normalizeWebsiteImportUrl(raw);
+        if (!sameWebsiteScope(u, root)) continue;
+        if (/\.(pdf|jpg|jpeg|png|gif|webp|svg|zip|mp4|mov|avi|doc|docx|xls|xlsx)$/i.test(u.pathname)) continue;
+        urls.add(canonicalWebsiteUrl(u));
+      } catch {
+        // Ignore malformed sitemap URLs.
+      }
+    }
+    return [...urls];
+  }
+
+  private async fetchWebsitePage(
+    url: string,
+    opts?: { allowXml?: boolean },
+  ): Promise<{ html: string; contentType: string }> {
+    const u = normalizeWebsiteImportUrl(url);
+    const res = await fetch(u, {
+      redirect: 'follow',
+      signal: AbortSignal.timeout(WEBSITE_IMPORT_FETCH_TIMEOUT_MS),
+      headers: {
+        'User-Agent': WEBSITE_IMPORT_USER_AGENT,
+        Accept: opts?.allowXml ? 'text/html,application/xhtml+xml,application/xml,text/xml;q=0.9,*/*;q=0.4' : 'text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.4',
+      },
+    });
+    const finalUrl = normalizeWebsiteImportUrl(res.url || u.toString());
+    if (!sameWebsiteScope(finalUrl, u)) {
+      throw new Error('Redirected outside the original website domain');
+    }
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const contentType = res.headers.get('content-type') ?? '';
+    const lower = contentType.toLowerCase();
+    if (!lower.includes('text/html') && !lower.includes('application/xhtml') && !lower.includes('text/plain') && !(opts?.allowXml && lower.includes('xml'))) {
+      throw new Error(`Unsupported content type: ${contentType || 'unknown'}`);
+    }
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length > WEBSITE_IMPORT_MAX_BYTES) {
+      throw new Error('Page is too large to import');
+    }
+    return { html: buf.toString('utf8'), contentType };
+  }
+
+  private async upsertWebsiteDocument(
+    tenantId: string,
+    vaultId: string,
+    page: { url: string; title: string; text: string; contentType: string },
+  ): Promise<{ id: string; created: boolean }> {
+    const now = new Date().toISOString();
+    const checksum = createHash('sha256').update(page.text, 'utf8').digest('hex');
+    const sourceUrl = canonicalWebsiteUrl(normalizeWebsiteImportUrl(page.url));
+    const safeTitle = page.title.trim().slice(0, 220) || sourceUrl;
+    const metadata = {
+      documentKind: 'website',
+      sourceUrl,
+      canonicalUrl: sourceUrl,
+      crawledAt: now,
+      contentChecksum: checksum,
+      contentType: page.contentType,
+      [KB_RICH_TEXT_SOURCE_METADATA_KEY]: `Source URL: ${sourceUrl}\n\n${page.text}`,
+    };
+    const existing = await this.supabase
+      .from('knowledge_documents')
+      .select('id')
+      .eq('tenant_id', tenantId)
+      .eq('source', 'website')
+      .filter('metadata->>sourceUrl', 'eq', sourceUrl)
+      .maybeSingle();
+    if (existing.error) throw new Error(`Website doc lookup: ${existing.error.message}`);
+
+    let documentId = existing.data?.id as string | undefined;
+    let created = false;
+    if (!documentId) {
+      documentId = randomUUID();
+      created = true;
+      const { error } = await this.supabase
+        .from('knowledge_documents')
+        .insert({
+          id: documentId,
+          tenant_id: tenantId,
+          vault_id: vaultId,
+          title: safeTitle,
+          source: 'website',
+          mime_type: 'text/html',
+          size: page.text.length,
+          status: 'READY',
+          metadata,
+          created_at: now,
+          updated_at: now,
+        });
+      if (error) throw new Error(`Website doc: ${error.message}`);
+    } else {
+      const { error: chunkDeleteError } = await this.supabase.from('knowledge_chunks').delete().eq('document_id', documentId);
+      if (chunkDeleteError) throw new Error(`Website chunks delete: ${chunkDeleteError.message}`);
+      const { error } = await this.supabase
+        .from('knowledge_documents')
+        .update({
+          vault_id: vaultId,
+          title: safeTitle,
+          source: 'website',
+          mime_type: 'text/html',
+          size: page.text.length,
+          status: 'READY',
+          metadata,
+          updated_at: now,
+        })
+        .eq('id', documentId)
+        .eq('tenant_id', tenantId);
+      if (error) throw new Error(`Website doc update: ${error.message}`);
+    }
+
+    const specs = buildRichTextChunkSpecs({
+      fullText: `Source URL: ${sourceUrl}\n\n${page.text}`,
+      documentTitle: safeTitle,
+      documentUpdatedAtIso: now,
+    });
+    await this.insertChunkSpecsForDocument(documentId, specs, 'website');
+    this.enqueueKbEmbeddingRefresh(tenantId, documentId, created ? 'create' : 'update');
+    return { id: documentId, created };
   }
 
   async updateFaq(

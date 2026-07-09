@@ -2172,6 +2172,36 @@ export async function uploadKbFile(
   return response.json() as Promise<{ id: string; status: string }>;
 }
 
+export type KbWebsiteImportPage = {
+  url: string;
+  title?: string;
+  documentId?: string;
+  status: 'imported' | 'updated' | 'skipped' | 'failed';
+  reason?: string;
+};
+
+export type KbWebsiteImportResponse = {
+  ok: true;
+  imported: number;
+  updated: number;
+  skipped: number;
+  failed: number;
+  pages: KbWebsiteImportPage[];
+};
+
+export async function importKbWebsite(
+  token: string,
+  dto: {
+    tenantId: string;
+    url: string;
+    vaultId?: string;
+    crawlMode?: 'single' | 'sitemap' | 'crawl';
+    maxPages?: number;
+  },
+): Promise<KbWebsiteImportResponse> {
+  return apiRequest('/kb/documents/website', { token, method: 'POST', body: JSON.stringify(dto) });
+}
+
 export async function deleteKbDocument(token: string, tenantId: string, documentId: string): Promise<void> {
   const q = new URLSearchParams({ tenantId });
   await apiRequestNoContent(`/kb/documents/${encodeURIComponent(documentId)}?${q}`, { token, method: 'DELETE' });

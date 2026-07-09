@@ -75,6 +75,31 @@ export class KbFileUploadBodyDto {
   vaultId?: string;
 }
 
+export class ImportWebsiteBodyDto {
+  @IsString()
+  @IsNotEmpty()
+  tenantId!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  url!: string;
+
+  @IsOptional()
+  @IsUUID()
+  vaultId?: string;
+
+  @IsOptional()
+  @IsString()
+  crawlMode?: 'single' | 'sitemap' | 'crawl';
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(50)
+  maxPages?: number;
+}
+
 export class KbSearchBodyDto {
   @IsString()
   @IsNotEmpty()

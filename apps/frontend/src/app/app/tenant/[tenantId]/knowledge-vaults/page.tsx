@@ -17,6 +17,7 @@ import {
   downloadKbDocumentOriginal,
   getKbDocumentChunks,
   getKbRichNoteSource,
+  importKbWebsite,
   isApiHttpError,
   listKbDocuments,
   listKbVaults,
@@ -30,6 +31,7 @@ import {
   type KbRichNoteSource,
   type KbRichTextDocumentPayload,
   type KbSearchHit,
+  type KbWebsiteImportResponse,
   type KbVaultRow,
 } from '@/lib/api';
 import {
@@ -123,6 +125,7 @@ function kbSearchRelevanceLabelDisplay(h: KbSearchHit): string {
 function kbSearchHitKindLabel(kind: string | null | undefined): string {
   const k = (kind ?? '').trim().toLowerCase();
   if (k === 'faq') return 'FAQ';
+  if (k === 'website') return 'Website';
   if (k === 'rich_text') return 'Note';
   if (k === 'file') return 'Uploaded file';
   if (k.includes('/')) return 'Uploaded file';
@@ -420,6 +423,7 @@ function rowBucket(d: KbDocumentRow): KbRowBucket {
   const k = (d.documentKind || '').toLowerCase();
   if (k === 'faq') return 'faq';
   if (k === 'rich_text') return 'rich';
+  if (k === 'website') return 'rich';
   if (k === 'file') return 'file';
   if (k === 'manual' || k === '') {
     if (classifiesAsFaq(d)) return 'faq';
@@ -429,7 +433,7 @@ function rowBucket(d: KbDocumentRow): KbRowBucket {
   return 'other';
 }
 
-type Tab = 'faq' | 'rich' | 'files';
+type Tab = 'faq' | 'rich' | 'website' | 'files';
 
 function friendlifyKbMessage(msg: string): string {
   const l = msg.toLowerCase();
@@ -451,6 +455,7 @@ function friendlifyKbMessage(msg: string): string {
 function fmtKind(s: string | null | undefined) {
   const u = (s ?? '').toLowerCase();
   if (u === 'faq') return 'FAQ';
+  if (u === 'website') return 'Website';
   if (u === 'rich_text' || u === 'rich' || u === 'manual') return 'Note';
   if (u === 'file') return 'File';
   return s || 'Note';
@@ -980,6 +985,7 @@ function NoteKnowledgeCard({
   const preview = (doc.answerPreview ?? '').trim();
   const previewLines = preview ? preview.split('\n').length : 0;
   const needsShowMore = preview.length > 260 || previewLines > 4;
+  const isWebsite = (doc.documentKind ?? doc.source ?? '').trim().toLowerCase() === 'website';
 
   const openModal = async () => {
     setModalOpen(true);
@@ -1233,7 +1239,7 @@ function NoteKnowledgeCard({
                 cursor: 'pointer',
               }}
             >
-              View / Edit
+              {isWebsite ? 'View' : 'View / Edit'}
             </button>
             <button
               type="button"
@@ -1259,7 +1265,7 @@ function NoteKnowledgeCard({
       {modalOpen ? (
         <KbModal
           wide
-          title="View / edit note"
+          title={isWebsite ? 'View website page' : 'View / edit note'}
           onClose={() => {
             if (!savingModal) {
               setModalOpen(false);
@@ -1274,19 +1280,36 @@ function NoteKnowledgeCard({
                 onClick={() => setModalOpen(false)}
                 style={{ ...mvpSecondaryButtonStyle, borderRadius: 10 }}
               >
-                Cancel
+                {isWebsite ? 'Close' : 'Cancel'}
               </button>
-              <button
-                type="button"
-                disabled={savingModal || loadingModal}
-                onClick={() => void saveModal()}
-                style={{ ...mvpPrimaryButtonStyle, borderRadius: 10 }}
-              >
-                {savingModal ? 'Saving…' : 'Save'}
-              </button>
+              {!isWebsite ? (
+                <button
+                  type="button"
+                  disabled={savingModal || loadingModal}
+                  onClick={() => void saveModal()}
+                  style={{ ...mvpPrimaryButtonStyle, borderRadius: 10 }}
+                >
+                  {savingModal ? 'Saving…' : 'Save'}
+                </button>
+              ) : null}
             </div>
           }
         >
+          {isWebsite ? (
+            <p
+              style={{
+                fontSize: '0.78rem',
+                color: 'var(--aisbp-text-secondary, #475569)',
+                background: 'var(--aisbp-surface-muted, #f8fafc)',
+                border: '1px solid var(--aisbp-border, #e2e8f0)',
+                borderRadius: 10,
+                padding: '0.55rem 0.7rem',
+                margin: '0 0 1rem',
+              }}
+            >
+              Website imports are read-only here. Re-import the page to refresh its source text.
+            </p>
+          ) : null}
           <dl
             style={{
               margin: '0 0 1rem',
@@ -1325,7 +1348,7 @@ function NoteKnowledgeCard({
               value={editTitle}
               onChange={e => setEditTitle(e.target.value)}
               style={{ ...mvpInputStyle, marginTop: '0.35rem', width: '100%' }}
-              disabled={loadingModal}
+              disabled={loadingModal || isWebsite}
             />
           </label>
           <label style={{ display: 'block', marginTop: '0.85rem' }}>
@@ -1345,7 +1368,7 @@ function NoteKnowledgeCard({
                 fontFamily: 'ui-sans-serif, system-ui, sans-serif',
                 lineHeight: 1.5,
               }}
-              disabled={loadingModal}
+              disabled={loadingModal || isWebsite}
               spellCheck
             />
           </label>
@@ -1742,6 +1765,10 @@ export default function SubaccountKnowledgePage() {
   const [faqA, setFaqA] = useState('');
   const [richTitle, setRichTitle] = useState('');
   const [richBody, setRichBody] = useState('');
+  const [websiteUrl, setWebsiteUrl] = useState('');
+  const [websiteMode, setWebsiteMode] = useState<'single' | 'sitemap' | 'crawl'>('sitemap');
+  const [websiteMaxPages, setWebsiteMaxPages] = useState(20);
+  const [websiteImportResult, setWebsiteImportResult] = useState<KbWebsiteImportResponse | null>(null);
 
   const [qSearch, setQSearch] = useState('');
   const [searching, setSearching] = useState(false);
@@ -1958,6 +1985,49 @@ export default function SubaccountKnowledgePage() {
       await load();
     } catch (er) {
       const raw = isApiHttpError(er) ? er.message : er instanceof Error ? er.message : 'Upload failed';
+      setWriteErr(friendlifyKbMessage(raw));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const onWebsiteImport = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!token || !subId) {
+      setWriteErr('You must be signed in to import a website.');
+      setSaveOk('');
+      return;
+    }
+    if (!selectedVaultId) {
+      setWriteErr(NO_VAULT_EMPTY_MSG);
+      setSaveOk('');
+      return;
+    }
+    const url = websiteUrl.trim();
+    if (!url) {
+      setWriteErr('Enter a website URL.');
+      setSaveOk('');
+      return;
+    }
+    setWriteErr('');
+    setSaveOk('');
+    setWebsiteImportResult(null);
+    setSaving(true);
+    try {
+      const result = await importKbWebsite(token, {
+        tenantId: subId,
+        url,
+        vaultId: selectedVaultId,
+        crawlMode: websiteMode,
+        maxPages: websiteMaxPages,
+      });
+      setWebsiteImportResult(result);
+      setSaveOk(
+        `Website import finished: ${result.imported} new, ${result.updated} updated, ${result.skipped} skipped, ${result.failed} failed.`,
+      );
+      await load();
+    } catch (er) {
+      const raw = isApiHttpError(er) ? er.message : er instanceof Error ? er.message : 'Website import failed';
       setWriteErr(friendlifyKbMessage(raw));
     } finally {
       setSaving(false);
@@ -2493,7 +2563,7 @@ export default function SubaccountKnowledgePage() {
                 <div
                   style={{
                     display: 'grid',
-                    gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+                    gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
                     gap: '0.75rem',
                     marginBottom: '1.35rem',
                   }}
@@ -2536,6 +2606,25 @@ export default function SubaccountKnowledgePage() {
                   >
                     <span style={iconCircle}>📝</span>
                     <span style={{ fontSize: '0.875rem', fontWeight: 600 }}>Add Note</span>
+                  </button>
+                  <button
+                    type="button"
+                    style={{
+                      ...bentoBtn,
+                      ...(!selectedVaultId ? { opacity: 0.68, cursor: 'not-allowed' as const } : {}),
+                    }}
+                    onClick={() => {
+                      if (!selectedVaultId) {
+                        setWriteErr(NO_VAULT_EMPTY_MSG);
+                        setSaveOk('');
+                        return;
+                      }
+                      setTab('website');
+                      setSaveOk('');
+                    }}
+                  >
+                    <span style={iconCircle}>🌐</span>
+                    <span style={{ fontSize: '0.875rem', fontWeight: 600 }}>Import Website</span>
                   </button>
                   <button
                     type="button"
@@ -2614,6 +2703,18 @@ export default function SubaccountKnowledgePage() {
                     aria-selected={tab === 'rich'}
                   >
                     Notes
+                  </button>
+                  <button
+                    type="button"
+                    style={tabUnderline(tab === 'website')}
+                    onClick={() => {
+                      setTab('website');
+                      setSaveOk('');
+                    }}
+                    role="tab"
+                    aria-selected={tab === 'website'}
+                  >
+                    Website
                   </button>
                   <button
                     type="button"
@@ -2831,6 +2932,132 @@ export default function SubaccountKnowledgePage() {
                         ))}
                       </div>
                     )}
+                  </section>
+                ) : null}
+
+                {tab === 'website' ? (
+                  <section style={glassSection}>
+                    <h3 style={{ fontSize: '0.95rem', fontWeight: 700, margin: '0 0 0.5rem', color: 'var(--aisbp-text-heading, #0f172a)' }}>
+                      Import website
+                    </h3>
+                    <p style={{ fontSize: '0.8125rem', color: 'var(--aisbp-muted, #64748b)', margin: '0 0 1rem', lineHeight: 1.45 }}>
+                      Crawl same-domain pages and save readable page text into this vault. Re-importing the same URL updates the existing website document.
+                    </p>
+                    <form onSubmit={onWebsiteImport} style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', maxWidth: 620, marginBottom: '1.25rem' }}>
+                      {selectedVault ? (
+                        <p style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)', margin: 0, lineHeight: 1.45 }}>
+                          Website pages will be saved to{' '}
+                          <strong style={{ fontWeight: 600, color: 'var(--aisbp-text-secondary, #334155)' }}>{selectedVault.name}</strong>.
+                        </p>
+                      ) : (
+                        <p style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)', margin: 0, lineHeight: 1.45 }}>{NO_VAULT_EMPTY_MSG}</p>
+                      )}
+                      <label>
+                        <span style={mvpLabelStyle}>Website URL</span>
+                        <input
+                          name="kb-website-url"
+                          value={websiteUrl}
+                          onChange={e => {
+                            setWebsiteUrl(e.target.value);
+                            setWebsiteImportResult(null);
+                            setSaveOk('');
+                          }}
+                          required
+                          style={{ ...mvpInputStyle, marginTop: '0.35rem' }}
+                          placeholder="https://example.com"
+                          autoComplete="off"
+                          inputMode="url"
+                        />
+                      </label>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 150px', gap: '0.75rem' }}>
+                        <label>
+                          <span style={mvpLabelStyle}>Crawl mode</span>
+                          <select
+                            value={websiteMode}
+                            onChange={e => {
+                              setWebsiteMode(e.target.value as 'single' | 'sitemap' | 'crawl');
+                              setWebsiteImportResult(null);
+                            }}
+                            style={{ ...mvpInputStyle, marginTop: '0.35rem' }}
+                          >
+                            <option value="sitemap">Sitemap first</option>
+                            <option value="single">Single page</option>
+                            <option value="crawl">Follow page links</option>
+                          </select>
+                        </label>
+                        <label>
+                          <span style={mvpLabelStyle}>Max pages</span>
+                          <input
+                            type="number"
+                            min={1}
+                            max={50}
+                            value={websiteMaxPages}
+                            onChange={e => {
+                              const n = Number(e.target.value);
+                              setWebsiteMaxPages(Number.isFinite(n) ? Math.max(1, Math.min(50, Math.floor(n))) : 20);
+                            }}
+                            style={{ ...mvpInputStyle, marginTop: '0.35rem' }}
+                          />
+                        </label>
+                      </div>
+                      <button
+                        type="submit"
+                        disabled={saving}
+                        style={{ ...mvpPrimaryButtonStyle, width: 'fit-content' }}
+                      >
+                        {saving ? 'Importing…' : 'Import website'}
+                      </button>
+                    </form>
+
+                    {websiteImportResult ? (
+                      <div
+                        style={{
+                          border: '1px solid var(--aisbp-border, #e2e8f0)',
+                          borderRadius: 12,
+                          overflow: 'hidden',
+                          background: 'var(--aisbp-surface-elevated, #fff)',
+                        }}
+                      >
+                        <div
+                          style={{
+                            padding: '0.65rem 0.8rem',
+                            borderBottom: '1px solid var(--aisbp-border, #e2e8f0)',
+                            fontSize: '0.8rem',
+                            fontWeight: 700,
+                            color: 'var(--aisbp-text-heading, #0f172a)',
+                          }}
+                        >
+                          Import results
+                        </div>
+                        <div style={{ maxHeight: 260, overflow: 'auto' }}>
+                          {websiteImportResult.pages.map((p, idx) => (
+                            <div
+                              key={`${p.url}-${idx}`}
+                              style={{
+                                display: 'grid',
+                                gridTemplateColumns: '92px minmax(0, 1fr)',
+                                gap: '0.7rem',
+                                padding: '0.65rem 0.8rem',
+                                borderBottom:
+                                  idx === websiteImportResult.pages.length - 1
+                                    ? 'none'
+                                    : '1px solid var(--aisbp-border, #e2e8f0)',
+                                fontSize: '0.78rem',
+                              }}
+                            >
+                              <span style={{ fontWeight: 700, color: p.status === 'failed' ? '#b91c1c' : p.status === 'skipped' ? '#92400e' : '#166534' }}>
+                                {p.status}
+                              </span>
+                              <span style={{ minWidth: 0, color: 'var(--aisbp-text-secondary, #334155)', overflowWrap: 'anywhere' }}>
+                                {p.title ? <strong style={{ color: 'var(--aisbp-text-heading, #0f172a)' }}>{p.title} </strong> : null}
+                                {p.url}
+                                {p.reason ? <span style={{ color: 'var(--aisbp-muted, #64748b)' }}> — {p.reason}</span> : null}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
                   </section>
                 ) : null}
 

@@ -23,6 +23,7 @@ import {
   mvpPrimaryButtonStyle,
   mvpSecondaryButtonStyle,
 } from '@/components/app/mvp-ui';
+import { useToast } from '@/components/app/ToastProvider';
 
 function btn(kind: 'primary' | 'secondary', disabled: boolean): CSSProperties {
   const base = kind === 'primary' ? mvpPrimaryButtonStyle : mvpSecondaryButtonStyle;
@@ -38,6 +39,7 @@ export function AutomationEscalationPanel() {
   const params = useParams();
   const tenantId = params['tenantId'] as string;
   const { token } = useAuth();
+  const { pushToast } = useToast();
 
   const [loadErr, setLoadErr] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
@@ -87,9 +89,13 @@ export function AutomationEscalationPanel() {
     try {
       await resumeHandover(token, conversationId);
       setActiveHandovers(prev => prev.filter(h => h.conversationId !== conversationId));
-      setBanner('Escalation ended — the AI Agent will reply again for that conversation.');
+      const message = 'AI resumed for this conversation.';
+      setBanner(message);
+      pushToast(message, 'success');
     } catch (e) {
-      setBanner(e instanceof Error ? e.message : 'Could not resume AI Agent');
+      const message = e instanceof Error ? e.message : 'Could not resume AI Agent';
+      setBanner(message);
+      pushToast(message, 'error');
     } finally {
       setBusy(null);
     }
@@ -105,9 +111,13 @@ export function AutomationEscalationPanel() {
         await resumeHandover(token, h.conversationId);
       }
       setActiveHandovers([]);
-      setBanner(`Ended escalation for ${count} conversation(s). The AI Agent can reply again.`);
+      const message = `AI resumed for ${count} conversation(s).`;
+      setBanner(message);
+      pushToast(message, 'success');
     } catch (e) {
-      setBanner(e instanceof Error ? e.message : 'Could not resume all conversations');
+      const message = e instanceof Error ? e.message : 'Could not resume all conversations';
+      setBanner(message);
+      pushToast(message, 'error');
       await loadHandovers();
     } finally {
       setBusy(null);
@@ -151,6 +161,7 @@ export function AutomationEscalationPanel() {
 
   const dim = !settings;
   const hasActive = activeHandovers.length > 0;
+  const bannerIsError = Boolean(banner) && /fail|could not|required|error/i.test(banner);
 
   return (
     <>
@@ -164,6 +175,29 @@ export function AutomationEscalationPanel() {
           below to cancel an escalation that is already active.
         </p>
       </SectionCard>
+
+      {banner ? (
+        <div
+          role={bannerIsError ? 'alert' : 'status'}
+          style={{
+            padding: '0.75rem 0.9rem',
+            borderRadius: 8,
+            border: bannerIsError
+              ? '1px solid var(--aisbp-alert-error-border, #f5c2c7)'
+              : '1px solid var(--aisbp-alert-success-border, #b7e0c8)',
+            background: bannerIsError
+              ? 'var(--aisbp-alert-error-bg, #fde8e8)'
+              : 'var(--aisbp-alert-success-bg, #e6f7ed)',
+            color: bannerIsError
+              ? 'var(--aisbp-alert-error-fg, #8b1d1d)'
+              : 'var(--aisbp-alert-success-fg, #0d5c2e)',
+            fontSize: '0.86rem',
+            fontWeight: 600,
+          }}
+        >
+          {banner}
+        </div>
+      ) : null}
 
       <SectionCard title="Human escalation" subtitle="Team notification via CRM" accent="default">
         <p style={{ fontSize: '0.9rem', color: 'var(--aisbp-text-secondary)', lineHeight: 1.55, margin: '0 0 1rem' }}>
@@ -242,9 +276,6 @@ export function AutomationEscalationPanel() {
             />
 
             <SaveButtonRow busy={busy} onSave={() => void save()} onReload={() => void load()} />
-            {banner ? (
-              <p style={{ fontSize: '0.82rem', margin: '0.65rem 0 0', color: 'var(--aisbp-text-secondary)' }}>{banner}</p>
-            ) : null}
           </>
         ) : null}
       </SectionCard>

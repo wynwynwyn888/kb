@@ -70,12 +70,17 @@ export class ConversationResetService implements OnModuleInit {
 
   buildConfirmationReplyPlan(): ReplyDecision {
     return {
-      planStatus: 'SKIP_NO_REPLY',
+      planStatus: 'PLANNED',
       responseMode: 'standard',
       handoverRecommended: false,
       confidence: 1,
-      rationale: 'chat_reset_confirmation_suppressed',
-      bubbles: [],
+      rationale: 'chat_reset_confirmation',
+      bubbles: [
+        {
+          index: 0,
+          text: 'Started a fresh chat for this conversation.\n\nYou can test from here.',
+        },
+      ],
       suggestedActions: [],
       draftProvenance: 'policy_reply',
     };

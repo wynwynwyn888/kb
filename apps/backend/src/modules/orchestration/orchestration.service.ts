@@ -264,49 +264,7 @@ export class ConversationOrchestrationService {
           };
         }
 
-        this.logger.log(
-          `technicalOperatorInputDeflection ${JSON.stringify({
-            conversationId,
-            tenantId: input.tenantId,
-          })}`,
-        );
-        const deflectionPlan: ReplyDecision = {
-          planStatus: 'SKIP_NO_REPLY',
-          responseMode: 'standard',
-          handoverRecommended: false,
-          confidence: 0.95,
-          rationale: 'technical_operator_input:unrelated_topic_suppressed',
-          bubbles: [],
-          suggestedActions: [],
-          draftProvenance: 'policy_reply',
-        };
-        const routingDeflection: RoutingResponse = {
-          recommendedModel: 'n/a',
-          responseMode: 'standard',
-          draftReply: null,
-          handoverRecommended: false,
-          bookingIntentDetected: false,
-          tagsSuggested: [],
-          confidence: 1,
-          reasoning: 'technical_operator_input_deflection',
-        };
-        const logId = await this.persistOrchestrationLog(
-          input,
-          guardOutcome,
-          routingDeflection,
-          null,
-          deflectionPlan,
-        );
-        return {
-          success: true,
-          outcome: 'PROCEED',
-          conversationId,
-          webhookEventId,
-          guards: guardOutcome,
-          routing: routingDeflection,
-          replyPlan: deflectionPlan,
-          logId,
-        };
+        // Outside handover: let tenant prompts handle the response naturally.
       }
 
       const batch =
@@ -399,6 +357,7 @@ export class ConversationOrchestrationService {
             : ''),
       );
 
+      let complaintContext: { handoverPaused: boolean; reason: string; tags: string[] } | null = null;
       const complaintDet = detectComplaintServiceIssue(latestMsg);
       if (complaintDet.triggered) {
         let complaintHandoverPaused = false;
@@ -463,54 +422,22 @@ export class ConversationOrchestrationService {
 
         await this.persistConversationPolicyMetadata(conversationId, complaintPolicyState);
 
-        const complaintReplyPlan: ReplyDecision = {
-          planStatus: 'SKIP_NO_REPLY',
-          responseMode: complaintHandoverPaused ? 'handover' : 'standard',
-          handoverRecommended: complaintHandoverPaused,
-          confidence: 0.95,
-          rationale: `complaint_service_issue:${complaintDet.reason}:customer_reply_suppressed`,
-          bubbles: [],
-          suggestedActions: [
-            {
-              type: 'TAG_CONTACT',
-              params: { tags: complaintDet.tags },
-              reason: `complaint escalation (${complaintDet.reason})`,
-            },
-          ],
-          draftProvenance: 'policy_reply',
-        };
+        // Pass complaint through normal AI generation; tenant Escalation Behaviour + Persona + Business Notes control the reply.
+        complaintContext = { handoverPaused: complaintHandoverPaused, reason: complaintDet.reason, tags: complaintDet.tags };
+        routingIntent = 'COMPLAINT';
 
-        const routingComplaint: RoutingResponse = {
-          recommendedModel: 'n/a',
-          responseMode: complaintHandoverPaused ? 'handover' : 'standard',
-          draftReply: null,
-          handoverRecommended: complaintHandoverPaused,
-          bookingIntentDetected: false,
-          tagsSuggested: [],
-          confidence: 1,
-          reasoning: 'complaint_handover_short_circuit',
-        };
-
-        const logId = await this.persistOrchestrationLog(
-          input,
-          guardOutcome,
-          routingComplaint,
-          null,
-          complaintReplyPlan,
+        this.logger.log(
+          `complaintRoutingToAi: ${JSON.stringify({
+            conversationId,
+            tenantId: input.tenantId,
+            complaintReason: complaintDet.reason,
+            handoverPaused: complaintHandoverPaused,
+            replyProvenance: 'ai_complaint_generated',
+          })}`,
         );
-
-        return {
-          success: true,
-          outcome: 'PROCEED',
-          conversationId,
-          webhookEventId,
-          guards: guardOutcome,
-          routing: routingComplaint,
-          replyPlan: complaintReplyPlan,
-          logId,
-        };
       }
 
+      let handoverContext: { escalated: boolean } | null = null;
       if (routingIntent === 'HUMAN_HANDOVER') {
         let humanEscalationActive = false;
         try {
@@ -553,58 +480,17 @@ export class ConversationOrchestrationService {
           );
         }
 
-        const humanReplyPlan: ReplyDecision = {
-          planStatus: 'SKIP_NO_REPLY',
-          responseMode: 'handover',
-          handoverRecommended: humanEscalationActive,
-          confidence: 0.95,
-          rationale: humanEscalationActive
-            ? 'human_request:HUMAN_HANDOVER'
-            : 'human_request:HUMAN_HANDOVER_ack_suppressed',
-          bubbles: [],
-          suggestedActions: [],
-          draftProvenance: humanEscalationActive ? 'human_escalation' : 'policy_reply',
-        };
+        // Pass through normal AI generation; tenant Escalation Behaviour + Persona control the conversational reply.
+        handoverContext = { escalated: humanEscalationActive };
 
         this.logger.log(
-          `humanEscalationCustomerAckSent ${JSON.stringify({
+          `humanHandoverRoutingToAi: ${JSON.stringify({
             conversationId,
             tenantId: input.tenantId,
             escalated: humanEscalationActive,
+            replyProvenance: 'ai_handover_generated',
           })}`,
         );
-
-        const routingHuman: RoutingResponse = {
-          recommendedModel: 'n/a',
-          responseMode: 'handover',
-          draftReply: null,
-          handoverRecommended: humanEscalationActive,
-          bookingIntentDetected: false,
-          tagsSuggested: [],
-          confidence: 1,
-          reasoning: humanEscalationActive
-            ? 'human_handover_short_circuit'
-            : 'human_handover_ack_only',
-        };
-
-        const logId = await this.persistOrchestrationLog(
-          input,
-          guardOutcome,
-          routingHuman,
-          null,
-          humanReplyPlan,
-        );
-
-        return {
-          success: true,
-          outcome: 'PROCEED',
-          conversationId,
-          webhookEventId,
-          guards: guardOutcome,
-          routing: routingHuman,
-          replyPlan: humanReplyPlan,
-          logId,
-        };
       }
 
       const bookingHook = await this.bookingFlow.maybeHandleConversationBookingTurn({

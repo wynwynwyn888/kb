@@ -887,6 +887,13 @@ export class ConversationOrchestrationService {
         replyPlan,
         routingIntent,
       });
+      replyPlan = await this.maybeEscalateNoReplyPlan({
+        input,
+        conversationId,
+        latestMsg,
+        memoryEntries: memory.entries,
+        replyPlan,
+      });
 
       // Inspect the planned reply bubbles for option lists (A/B/C, 1./2., bullets) and capture
       // them into option memory so the next user reply ("A") can be resolved against them.
@@ -1060,6 +1067,100 @@ export class ConversationOrchestrationService {
     }
 
     return replyPlan;
+  }
+
+  /**
+   * Customer enquiries should never disappear. If the planner/guards cannot produce a safe
+   * grounded reply, route the conversation to human takeover instead of leaving it as a silent
+   * no-reply.
+   */
+  private async maybeEscalateNoReplyPlan(params: {
+    input: OrchestrationInput;
+    conversationId: string;
+    latestMsg: string;
+    memoryEntries: MemoryEntry[];
+    replyPlan: ReplyDecision;
+  }): Promise<ReplyDecision> {
+    const { input, conversationId, latestMsg, memoryEntries } = params;
+    const replyPlan = params.replyPlan;
+    if (replyPlan.planStatus !== 'SKIP_NO_REPLY' && replyPlan.bubbles.length > 0) {
+      return replyPlan;
+    }
+    if (replyPlan.handoverRecommended || replyPlan.draftProvenance === 'human_escalation') {
+      return replyPlan;
+    }
+
+    this.logger.warn(
+      `noSafeAiReplyEscalatingToHuman ${JSON.stringify({
+        conversationId,
+        tenantId: input.tenantId,
+        planStatus: replyPlan.planStatus,
+        draftProvenance: replyPlan.draftProvenance ?? null,
+        draftFallbackReason: replyPlan.draftFallbackReason ?? null,
+        rationale: replyPlan.rationale,
+      })}`,
+    );
+
+    let escalated = false;
+    try {
+      const result = await this.humanEscalationRuntime.onHumanHandoverIntent({
+        tenantId: input.tenantId,
+        tenantDisplayName: input.tenant?.name,
+        conversationId,
+        contactId: input.conversation?.contactId ?? null,
+        latestInboundMessage: latestMsg,
+        memoryEntries,
+        contactPhone: input.incomingMessage.contactPhone ?? null,
+        contactDisplayName: input.incomingMessage.contactDisplayName ?? null,
+        handoverReason: 'no_safe_ai_reply',
+        summaryFallback: 'The AI could not produce a safe grounded reply. Please review and respond to the customer.',
+      });
+      escalated = result.escalated;
+    } catch (e) {
+      this.logger.warn(
+        `noSafeAiReplyEscalationRuntimeFailed ${JSON.stringify({
+          conversationId,
+          message: e instanceof Error ? e.message : String(e),
+        })}`,
+      );
+    }
+
+    if (!escalated) {
+      try {
+        await this.conversationsService.pauseForHandover(
+          conversationId,
+          'REQUEST',
+          'AI',
+          'no_safe_ai_reply',
+        );
+        escalated = true;
+      } catch (e) {
+        this.logger.warn(
+          `noSafeAiReplyPauseFailed ${JSON.stringify({
+            conversationId,
+            message: e instanceof Error ? e.message : String(e),
+          })}`,
+        );
+      }
+    }
+
+    return {
+      ...replyPlan,
+      planStatus: 'HANDOVER',
+      responseMode: 'handover',
+      handoverRecommended: escalated,
+      rationale: `${replyPlan.rationale}; humanTakeover=no_safe_ai_reply`,
+      bubbles: [],
+      suggestedActions: [
+        ...replyPlan.suggestedActions,
+        {
+          type: 'ESCALATE',
+          params: { reason: 'no_safe_ai_reply' },
+          reason: 'AI could not produce a safe grounded reply',
+        },
+      ],
+      draftProvenance: 'human_escalation',
+    };
   }
 
   /**

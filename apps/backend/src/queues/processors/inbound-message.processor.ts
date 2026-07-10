@@ -1646,6 +1646,32 @@ export class InboundMessageProcessor extends WorkerHost {
           },
         });
       }
+    } else if (
+      result.outcome === 'PROCEED' &&
+      result.replyPlan &&
+      (result.replyPlan.planStatus === 'HANDOVER' || result.replyPlan.handoverRecommended)
+    ) {
+      await this.markOrchestrationCompleted(latestMsgId);
+      if (latestMsgId) {
+        await recordTerminalDecision({
+          supabase: this.supabase,
+          logger: this.logger,
+          messageId: latestMsgId,
+          decision: {
+            status: 'SKIP_HUMAN_TAKEOVER',
+            reason: result.replyPlan.rationale || 'human takeover',
+            triggerSource: 'webhook',
+            decidedAt: new Date().toISOString(),
+          },
+        });
+      }
+      if (ctxGhlMsgId) {
+        await markProviderOrchestrationDone(this.appCache, tenantId, ctxGhlMsgId);
+      }
+      await this.releaseOrchestrationLock(tenantId, latestMsgId, lockToken);
+      this.logger.log(
+        `Human takeover recorded without outbound bubble: conversationId=${conversationId}, status=${result.replyPlan.planStatus}`,
+      );
     } else {
       // Non-PROCEED outcome (e.g. guard blocked) — record terminal decision and release lock
       const skipStatus = mapOutcomeToDecisionStatus(result.outcome as string);

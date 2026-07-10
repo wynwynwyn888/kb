@@ -163,9 +163,20 @@ export class OutboundSafetyGovernorService {
 
     return {
       ...plan,
-      planStatus: 'SKIP_NO_REPLY',
+      planStatus: 'HANDOVER',
+      responseMode: 'handover',
+      handoverRecommended: true,
       bubbles: [],
-      rationale: `${plan.rationale}; outboundSafetyBlocked=${guarded.reason ?? 'no_kb_claim'}`,
+      rationale: `${plan.rationale}; humanTakeover=${guarded.reason ?? 'no_kb_claim'}`,
+      suggestedActions: [
+        ...plan.suggestedActions,
+        {
+          type: 'ESCALATE',
+          params: { reason: guarded.reason ?? 'no_kb_claim' },
+          reason: 'Outbound safety blocked unsupported no-KB claim',
+        },
+      ],
+      draftProvenance: 'human_escalation',
     };
   }
 
@@ -189,9 +200,20 @@ export class OutboundSafetyGovernorService {
 
     return {
       ...plan,
-      planStatus: 'SKIP_NO_REPLY',
+      planStatus: 'HANDOVER',
+      responseMode: 'handover',
+      handoverRecommended: true,
       bubbles: [],
-      rationale: `${plan.rationale}; outboundSafetyBlocked=booking_confirmation_without_booking_action`,
+      rationale: `${plan.rationale}; humanTakeover=booking_confirmation_without_booking_action`,
+      suggestedActions: [
+        ...plan.suggestedActions,
+        {
+          type: 'ESCALATE',
+          params: { reason: 'booking_confirmation_without_booking_action' },
+          reason: 'Outbound safety blocked unverified booking confirmation',
+        },
+      ],
+      draftProvenance: 'human_escalation',
     };
   }
 
@@ -221,9 +243,20 @@ export class OutboundSafetyGovernorService {
 
     return {
       ...plan,
-      planStatus: 'SKIP_NO_REPLY',
+      planStatus: 'HANDOVER',
+      responseMode: 'handover',
+      handoverRecommended: true,
       bubbles: [],
-      rationale: `${plan.rationale}; outboundSafetyBlocked=unrequested_menu_repetition`,
+      rationale: `${plan.rationale}; humanTakeover=unrequested_menu_repetition`,
+      suggestedActions: [
+        ...plan.suggestedActions,
+        {
+          type: 'ESCALATE',
+          params: { reason: 'unrequested_menu_repetition' },
+          reason: 'Outbound safety blocked unrequested repeated menu reply',
+        },
+      ],
+      draftProvenance: 'human_escalation',
     };
   }
 }

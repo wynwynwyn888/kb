@@ -10,6 +10,7 @@ function isLikelyListPhraseLine(trim: string): boolean {
   if (words.length > 8) return false;
   if (/^[-*+]\s/.test(trim)) return false;
   if (/^#{1,6}\s/.test(trim)) return false;
+  if (/^\d+[\.\)]\s/.test(trim)) return false;
   return true;
 }
 

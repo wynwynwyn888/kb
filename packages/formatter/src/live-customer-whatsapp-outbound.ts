@@ -19,7 +19,6 @@ export function normalizeLiveCustomerMarkdownForWhatsAppOutbound(text: string): 
   s = s.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
 
   s = s.replace(/^\s*[-*+]\s+/gm, '• ');
-  s = s.replace(/^\s*\d+\.\s+/gm, '• ');
 
   return s.trim();
 }

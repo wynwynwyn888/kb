@@ -187,7 +187,7 @@ export const NO_KB_FALLBACK_MENU_SERVICE_LIST =
 export const NO_KB_FALLBACK_BROAD_SERVICE =
   '';
 
-export const NO_KB_FALLBACK_BREED_OR_SPECIES_SERVICE =
+export const NO_KB_FALLBACK_SERVICE =
   '';
 
 export const NO_KB_FALLBACK_PRICE =
@@ -303,7 +303,7 @@ function supportCheckPriceBase(params: {
   };
 }
 
-export function userMessageSuggestsBreedOrSpeciesServiceQuery(message: string): boolean {
+export function userMessageSuggestsUnsupportedServiceQuery(message: string): boolean {
   const raw = message.trim();
   if (!raw) return false;
   const m = raw.toLowerCase();
@@ -320,7 +320,7 @@ export function userMessageSuggestsBreedOrSpeciesServiceQuery(message: string): 
   return false;
 }
 
-function replySuggestsUnsupportedBreedOrPackageRecommendation(text: string): boolean {
+function replySuggestsUnsupportedServiceRecommendation(text: string): boolean {
   const t = text.trim();
   if (!t) return false;
   if (/\b(typically\s+recommend|we\s+typically|recommend\s+our|essential\s+grooming|our\s+essential)\b/i.test(t)) {
@@ -380,7 +380,7 @@ function pickIntentAwareNoKbFallback(
   const ml = probe.toLowerCase();
 
   if (
-    (CLAIM_BREED_SPECIES.test(userMessage) || userMessageSuggestsBreedOrSpeciesServiceQuery(userMessage)) &&
+    (CLAIM_BREED_SPECIES.test(userMessage) || userMessageSuggestsUnsupportedServiceQuery(userMessage)) &&
     CLAIM_BREED_SPECIES.test(replyText) &&
     CLAIM_ACCEPT_OFFER.test(replyText)
   ) {
@@ -440,8 +440,8 @@ export function rewriteUnsupportedBusinessClaimsWhenNoKb(params: {
 
   if (
     userMsg &&
-    userMessageSuggestsBreedOrSpeciesServiceQuery(userMsg) &&
-    replySuggestsUnsupportedBreedOrPackageRecommendation(t)
+    userMessageSuggestsUnsupportedServiceQuery(userMsg) &&
+    replySuggestsUnsupportedServiceRecommendation(t)
   ) {
     return {
       rewritten: true,

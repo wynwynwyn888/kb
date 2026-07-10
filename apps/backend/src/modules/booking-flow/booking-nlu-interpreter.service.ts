@@ -74,7 +74,7 @@ export class BookingNluInterpreterService {
     );
 
     const system = [
-      'You are a strict NLU component for a salon/booking chatbot.',
+      'You are a strict NLU component for a business booking assistant.',
       'Extract structured meaning from the LATEST user message using the transcript and booking state as context.',
       'Return ONLY one JSON object matching this schema (no markdown, no prose):',
       '{',

@@ -88,7 +88,6 @@ import {
 } from '../../lib/compact-runtime-system-prompt';
 import { shouldSkipKbShortFollowUpActiveTopic } from '../../lib/short-followup-kb';
 import { WHATSAPP_OUTPUT_CONTRACT_BLOCK } from '../../lib/whatsapp-output-contract';
-import { buildBrandAssistantIdentitySystemContent } from '../../lib/brand-assistant-identity';
 import {
   promptCompactTruncationWarnKey,
   shouldEmitPromptCompactTruncationWarn,
@@ -1631,15 +1630,12 @@ export class ConversationOrchestrationService {
       const sections: ProfileSections = input.promptConfig.profileSections;
       const compacted = compactProfileSections(sections);
       const tenantBody = buildCompactedPromptBody(compacted);
-      const brand = buildBrandAssistantIdentitySystemContent(input.tenant?.name);
-
       // Global policy is its own layer with its own budget — never squeezed into the tenant blob.
       const global = budgetGlobalPolicy(globalPolicyRaw);
 
       const layers: string[] = [];
       if (global.text) layers.push(`Global policy (applies before subaccount instructions):\n${global.text}`);
       if (tenantBody) layers.push(tenantBody);
-      layers.push(brand);
       const base = layers.join('\n\n---\n\n');
       const assembled = `${base}\n\n${block}${caps}`;
 
@@ -1690,13 +1686,13 @@ export class ConversationOrchestrationService {
       agencyPrompt: agencyRaw,
     });
 
-    let base = buildBrandAssistantIdentitySystemContent(input.tenant?.name);
+    let base = '';
     if (compact.agencyBody.trim() && compact.tenantBody.trim()) {
-      base = `${compact.agencyBody.trim()}\n\n---\n\nSubaccount bot instructions:\n${compact.tenantBody.trim()}\n\n---\n\n${base}`;
+      base = `${compact.agencyBody.trim()}\n\n---\n\nSubaccount bot instructions:\n${compact.tenantBody.trim()}`;
     } else if (compact.tenantBody.trim()) {
-      base = `${compact.tenantBody.trim()}\n\n---\n\n${base}`;
+      base = compact.tenantBody.trim();
     } else if (compact.agencyBody.trim()) {
-      base = `${compact.agencyBody.trim()}\n\n---\n\n${base}`;
+      base = compact.agencyBody.trim();
     }
 
     const assembled = `${base}\n\n${block}${caps}`;

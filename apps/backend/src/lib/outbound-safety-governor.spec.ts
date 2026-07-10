@@ -8,7 +8,7 @@ import {
   textClaimsBookingConfirmed,
   userAskedForColourAlternatives,
   rewriteUnsupportedBusinessClaimsWhenNoKb,
-  NO_KB_FALLBACK_BREED_OR_SPECIES_SERVICE,
+  NO_KB_FALLBACK_SERVICE,
   NO_KB_FALLBACK_HOURS,
   NO_KB_FALLBACK_MENU_SERVICE_LIST,
   NO_KB_FALLBACK_BROAD_SERVICE,
@@ -172,7 +172,7 @@ describe('outbound-safety-governor', () => {
         replyText: 'Absolutely! We welcome all breeds, including Chihuahuas.',
       });
       expect(r.rewritten).toBe(true);
-      expect(r.text).toBe(NO_KB_FALLBACK_BREED_OR_SPECIES_SERVICE);
+      expect(r.text).toBe(NO_KB_FALLBACK_SERVICE);
       expect(r.text.toLowerCase()).not.toContain('welcome all breeds');
     });
 
@@ -201,7 +201,7 @@ describe('outbound-safety-governor', () => {
         replyText: 'For a Labrador, we typically recommend our Essential Grooming package.',
       });
       expect(r.rewritten).toBe(true);
-      expect(r.text).toBe(NO_KB_FALLBACK_BREED_OR_SPECIES_SERVICE);
+      expect(r.text).toBe(NO_KB_FALLBACK_SERVICE);
       expect(r.text.toLowerCase()).not.toContain('essential grooming');
       expect(r.text.toLowerCase()).not.toMatch(/\btypically\s+recommend\b/);
     });
@@ -224,7 +224,7 @@ describe('outbound-safety-governor', () => {
         replyText: 'Yes! All breeds are welcome here.',
       });
       expect(r.rewritten).toBe(true);
-      expect(r.text).toBe(NO_KB_FALLBACK_BREED_OR_SPECIES_SERVICE);
+      expect(r.text).toBe(NO_KB_FALLBACK_SERVICE);
     });
 
     it('rewrites ungrounded grooming price list when KB empty and corpus has no matching facts', () => {

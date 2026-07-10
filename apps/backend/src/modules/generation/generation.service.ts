@@ -438,7 +438,7 @@ export class GenerationService {
     const multiLineTurn = (params.policyContext?.combinedInboundMessageCount ?? 0) > 1;
     const scopeRule =
       pc?.suppressColourRecommendations === true
-        ? ' The latest question is likely about something outside your core hair/scalp offer (or a non-hair service). Answer that scope directly. Do **not** recommend colour services (Balayage, highlights, bleach, toners, etc.) or reuse prior colour conversation topics unless the customer explicitly asks for colour options or alternatives.'
+        ? ' The latest question is likely outside the scope of the business\'s core services or raises an unrelated topic. Answer that scope directly; do **not** carry forward product or service recommendations from earlier conversation turns unless the customer explicitly asks for them.'
         : '';
     const baseRules =
       'The excerpts below are **source material only**. They are not a script to paste. ' +

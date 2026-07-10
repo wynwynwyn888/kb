@@ -106,8 +106,8 @@ describe('orchestration prompt assembly — section-budget default path', () => 
     expect(build(service, makeInput())).toContain('WHATSAPP_CONTRACT');
   });
 
-  it('brand identity remains after sections', () => {
-    expect(build(service, makeInput())).toContain('BRAND_IDENTITY');
+  it('brand identity is not duplicated in the primary prompt (injected once via buildMessages instead)', () => {
+    expect(build(service, makeInput())).not.toContain('BRAND_IDENTITY');
   });
 
   it('governor appendix remains after sections', () => {

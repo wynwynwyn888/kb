@@ -613,7 +613,7 @@ describe('GenerationService', () => {
           },
         }),
       );
-      expect(msg.content as string).toContain('colour');
+      expect(msg.content as string).toContain('outside the scope');
     });
 
     it('includes multi-line turn rules when combinedInboundMessageCount > 1', () => {

@@ -405,7 +405,7 @@ export class InboundMessageProcessor extends WorkerHost {
           // creating unrecoverable "unknown no-reply" gaps.
         }
       } else {
-        await this.addMessage(conversation.id, {
+        await this.addMessage(tenantId, conversation.id, {
           direction: 'INBOUND',
           sender: 'CONTACT',
           content: resolved.content,
@@ -2544,6 +2544,7 @@ export class InboundMessageProcessor extends WorkerHost {
   }
 
   private async addMessage(
+    tenantId: string,
     conversationId: string,
     message: {
       direction: string;
@@ -2555,6 +2556,7 @@ export class InboundMessageProcessor extends WorkerHost {
   ): Promise<void> {
     const { error } = await this.supabase.from('messages').insert({
       id: randomUUID(),
+      tenant_id: tenantId,
       conversation_id: conversationId,
       direction: message.direction,
       sender: message.sender,

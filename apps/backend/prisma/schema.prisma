@@ -175,6 +175,8 @@ model Tenant {
   modelOverrides TenantModelOverride[]
   documents      KnowledgeDocument[]
   conversations  Conversation[]
+  messages       Message[]
+  handoverEvents HandoverEvent[]
   quotaWallet    QuotaWallet?
   actionLogs     ActionLog[]
   actionIntents  ActionIntent[]
@@ -743,6 +745,7 @@ enum ContentType {
 
 model Message {
   id             String          @id @default(uuid())
+  tenantId       String?         @map("tenant_id")
   conversationId String          @map("conversation_id")
   direction      MessageDirection
   sender         MessageSender
@@ -753,7 +756,10 @@ model Message {
 
   // Relations
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  tenant       Tenant?      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
+  @@index([tenantId, createdAt(sort: Desc)])
+  @@index([tenantId, conversationId, createdAt(sort: Desc)])
   @@index([conversationId])
   @@index([conversationId, createdAt(sort: Desc)])
   @@map("messages")
@@ -776,6 +782,7 @@ enum HandoverStatus {
 
 model HandoverEvent {
   id            String         @id @default(uuid())
+  tenantId      String?        @map("tenant_id")
   conversationId String        @map("conversation_id")
   type          HandoverType
   status        HandoverStatus @default(ACTIVE)
@@ -787,7 +794,10 @@ model HandoverEvent {
 
   // Relations
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  tenant       Tenant?      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
+  @@index([tenantId, status, createdAt(sort: Desc)])
+  @@index([tenantId, conversationId, createdAt(sort: Desc)])
   @@index([conversationId])
   @@index([status, createdAt(sort: Desc)])
   @@map("handover_events")

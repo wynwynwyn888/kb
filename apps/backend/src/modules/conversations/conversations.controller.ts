@@ -90,7 +90,7 @@ export class ConversationsController {
 
     await this.assertTenantScope(user, conversation.tenantId);
 
-    return this.controllerService.getMessages(id, limit, before);
+    return this.controllerService.getMessages(conversation.tenantId, id, limit, before);
   }
 
   @Post(':id/reset-state')

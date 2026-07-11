@@ -14,8 +14,22 @@ export class OpsController {
 
   private assertAgency(req: Request): SessionUser {
     const user = req.user as SessionUser | undefined;
-    if (!user?.agencyRole) {
+    if (!user?.agencyRole || !user.agencyId) {
       throw new ForbiddenException('Agency membership required');
+    }
+    return user;
+  }
+
+  private assertPlatformAdmin(req: Request): SessionUser {
+    const user = req.user as SessionUser | undefined;
+    const allowed = new Set(
+      (process.env['PLATFORM_ADMIN_PROFILE_IDS'] ?? '')
+        .split(',')
+        .map(value => value.trim())
+        .filter(Boolean),
+    );
+    if (!user?.id || !allowed.has(user.id)) {
+      throw new ForbiddenException('Platform admin access required');
     }
     return user;
   }
@@ -23,14 +37,14 @@ export class OpsController {
   @Get('health')
   @ApiOperation({ summary: 'System health overview' })
   async getHealth(@Req() req: Request) {
-    this.assertAgency(req);
+    this.assertPlatformAdmin(req);
     return this.opsService.getHealth();
   }
 
   @Get('flags')
   @ApiOperation({ summary: 'Read-only runtime feature flags (no secrets)' })
   getFlags(@Req() req: Request) {
-    this.assertAgency(req);
+    this.assertPlatformAdmin(req);
     return this.opsService.getFlags();
   }
 
@@ -43,8 +57,9 @@ export class OpsController {
     @Query('page') page?: number,
     @Query('pageSize') pageSize?: number,
   ) {
-    this.assertAgency(req);
+    const user = this.assertAgency(req);
     return this.opsService.getOutboundSends({
+      agencyId: user.agencyId!,
       tenantId,
       status,
       page: Math.max(1, page ?? 1),
@@ -60,8 +75,9 @@ export class OpsController {
     @Query('page') page?: number,
     @Query('pageSize') pageSize?: number,
   ) {
-    this.assertAgency(req);
+    const user = this.assertAgency(req);
     return this.opsService.getConversations({
+      agencyId: user.agencyId!,
       tenantId,
       page: Math.max(1, page ?? 1),
       pageSize: Math.min(100, Math.max(1, pageSize ?? 20)),
@@ -76,8 +92,9 @@ export class OpsController {
     @Query('page') page?: number,
     @Query('pageSize') pageSize?: number,
   ) {
-    this.assertAgency(req);
+    const user = this.assertAgency(req);
     return this.opsService.getGhlSync({
+      agencyId: user.agencyId!,
       conversationId,
       page: Math.max(1, page ?? 1),
       pageSize: Math.min(250, Math.max(1, pageSize ?? 20)),
@@ -93,8 +110,9 @@ export class OpsController {
     @Query('page') page?: number,
     @Query('pageSize') pageSize?: number,
   ) {
-    this.assertAgency(req);
+    const user = this.assertAgency(req);
     return this.opsService.getErrors({
+      agencyId: user.agencyId!,
       tenantId,
       severity,
       page: Math.max(1, page ?? 1),
@@ -110,8 +128,9 @@ export class OpsController {
     @Query('page') page?: number,
     @Query('pageSize') pageSize?: number,
   ) {
-    this.assertAgency(req);
+    const user = this.assertAgency(req);
     return this.opsService.getAuditEvents({
+      agencyId: user.agencyId!,
       tenantId,
       page: Math.max(1, page ?? 1),
       pageSize: Math.min(100, Math.max(1, pageSize ?? 20)),
@@ -121,14 +140,14 @@ export class OpsController {
   @Get('tenants')
   @ApiOperation({ summary: 'Tenant readiness overview' })
   async getTenants(@Req() req: Request) {
-    this.assertAgency(req);
-    return this.opsService.getTenants();
+    const user = this.assertAgency(req);
+    return this.opsService.getTenants(user.agencyId!);
   }
 
   @Get('queues')
   @ApiOperation({ summary: 'BullMQ queue health' })
   async getQueues(@Req() req: Request) {
-    this.assertAgency(req);
+    this.assertPlatformAdmin(req);
     return this.opsService.getQueueHealth();
   }
 
@@ -139,7 +158,7 @@ export class OpsController {
     @Req() req: Request,
     @Param('id') conversationId: string,
   ) {
-    this.assertAgency(req);
-    return this.opsService.clearHandover(conversationId);
+    const user = this.assertAgency(req);
+    return this.opsService.clearHandover(conversationId, user.agencyId!, user.id);
   }
 }

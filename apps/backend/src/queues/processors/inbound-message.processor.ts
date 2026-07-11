@@ -1575,7 +1575,16 @@ export class InboundMessageProcessor extends WorkerHost {
     }
 
     const latestMsgId = lockToken === 'empty-claim' ? '' : (await this.fetchLatestInboundOrchestrationContext(conversationId)).id ?? '';
-    const result = await this.orchestrationService.orchestrate(orchestrationInput);
+    let result: Awaited<ReturnType<ConversationOrchestrationService['orchestrate']>>;
+    try {
+      result = await this.orchestrationService.orchestrate(orchestrationInput);
+    } catch (error) {
+      // A technical orchestration failure must reject the BullMQ job so its
+      // configured attempts/backoff are exercised. Release only our owned
+      // orchestration claim; do not mark the provider done or webhook complete.
+      await this.releaseOrchestrationLock(tenantId, latestMsgId, lockToken);
+      throw error;
+    }
 
     if (result.outcome === 'SKIP_HANDOVER_ACTIVE') {
       // Active handover is an intentional silent skip. Record the terminal

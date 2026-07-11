@@ -98,6 +98,7 @@ import {
   isTechnicalOperatorInput,
 } from '../../lib/technical-operator-input';
 import { buildKbRetrievalPlans } from '../../lib/kb-compound-retrieval';
+import { PIPELINE_ERROR_CODES, RetryablePipelineError } from '../../lib/pipeline-errors';
 
 const DEFAULT_REPLY_PATH_RAG_TIMEOUT_MS = 1200;
 const MIN_REPLY_PATH_RAG_TIMEOUT_MS = 250;
@@ -853,26 +854,16 @@ export class ConversationOrchestrationService {
         `Orchestration error: conversationId=${conversationId}, error=${message}`,
       );
       try {
-        const logId = await this.persistOrchestrationLog(input, { final: 'ERROR', guards: [] }, null, null, null);
-        return {
-          success: false,
-          outcome: 'ERROR',
-          conversationId,
-          webhookEventId,
-          guards: { final: 'ERROR', guards: [] },
-          logId,
-          error: message,
-        };
+        await this.persistOrchestrationLog(input, { final: 'ERROR', guards: [] }, null, null, null);
       } catch {
-        return {
-          success: false,
-          outcome: 'ERROR',
-          conversationId,
-          webhookEventId,
-          guards: { final: 'ERROR', guards: [] },
-          error: message,
-        };
+        // The original failure must still reach BullMQ even when error logging fails.
       }
+      if (error instanceof RetryablePipelineError) throw error;
+      throw new RetryablePipelineError(
+        message,
+        PIPELINE_ERROR_CODES.ORCHESTRATION_FAILED,
+        error,
+      );
     }
   }
 

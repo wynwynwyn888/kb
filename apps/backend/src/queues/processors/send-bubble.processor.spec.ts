@@ -70,6 +70,7 @@ function mockSendReplyGlobal() { return jestGlobal.fn(); }
 function mockIsReplyStaleGlobal() { return jestGlobal.fn(async () => false); }
 
 import { SendBubbleProcessor } from './send-bubble.processor';
+import { PIPELINE_ERROR_CODES, RetryablePipelineError } from '../../lib/pipeline-errors';
 
 function makeJob(overrides: Partial<{
   providerGhlMessageId: string;
@@ -111,6 +112,8 @@ describe('SendBubbleProcessor — provider done-after-send', () => {
   let processor: SendBubbleProcessor;
   let mockSendReply: ReturnType<typeof jestGlobal.fn>;
   let mockIsReplyStale: ReturnType<typeof jestGlobal.fn>;
+  let mockCheckPriorBubble: ReturnType<typeof jestGlobal.fn>;
+  let mockAppCache: any;
 
   beforeEach(() => {
     jestGlobal.clearAllMocks();
@@ -119,6 +122,7 @@ describe('SendBubbleProcessor — provider done-after-send', () => {
 
     mockSendReply = jestGlobal.fn();
     mockIsReplyStale = jestGlobal.fn(async () => false);
+    mockCheckPriorBubble = jestGlobal.fn(async () => 'proceed');
 
     // Override the class mock's method references with fresh fns
     (SendBubbleProcessor as any).prototype._mockSendReply = mockSendReply;
@@ -142,6 +146,7 @@ describe('SendBubbleProcessor — provider done-after-send', () => {
     const outboundSendStub = {
       sendReply: mockSendReply,
       isReplyStale: mockIsReplyStale,
+      checkPriorBubble: mockCheckPriorBubble,
     };
 
     mockSendReply.mockResolvedValue({
@@ -151,7 +156,13 @@ describe('SendBubbleProcessor — provider done-after-send', () => {
       quotaDebited: 0,
     });
 
-    const mockAppCache = { acquireLock: jestGlobal.fn(), releaseLock: jestGlobal.fn(), redis: { exists: jestGlobal.fn(), set: jestGlobal.fn() } } as any;
+    mockAppCache = {
+      acquireSemaphore: jestGlobal.fn(async () => true),
+      releaseSemaphore: jestGlobal.fn(async () => true),
+      acquireLock: jestGlobal.fn(async () => 'acquired'),
+      releaseLock: jestGlobal.fn(async () => true),
+      redis: { exists: jestGlobal.fn(), set: jestGlobal.fn() },
+    } as any;
 
     processor = new SendBubbleProcessor(
       outboundSendStub as any,
@@ -257,6 +268,49 @@ describe('SendBubbleProcessor — provider done-after-send', () => {
     expect(doneCall[0]).toBeDefined(); // appCache
     expect(doneCall[1]).toBe('tenant-abc');
     expect(doneCall[2]).toBe('specific-ghl-id-123');
+  });
+
+  it('throws a retryable error when the tenant send capacity is full', async () => {
+    process.env['AISBP_TENANT_CAPS_ENABLED'] = 'true';
+    mockAppCache.acquireSemaphore.mockResolvedValue(false);
+
+    await expect(processor.process(makeJob())).rejects.toMatchObject({
+      name: 'RetryablePipelineError',
+      code: PIPELINE_ERROR_CODES.SEND_TENANT_CAPACITY,
+    } satisfies Partial<RetryablePipelineError>);
+    expect(mockSendReply).not.toHaveBeenCalled();
+    delete process.env['AISBP_TENANT_CAPS_ENABLED'];
+  });
+
+  it('throws a retryable error when the conversation lock is held', async () => {
+    process.env['AISBP_CONV_ORDERING_ENABLED'] = 'true';
+    mockAppCache.acquireLock.mockResolvedValue('held');
+
+    await expect(processor.process(makeJob())).rejects.toMatchObject({
+      name: 'RetryablePipelineError',
+      code: PIPELINE_ERROR_CODES.SEND_CONVERSATION_LOCK,
+    } satisfies Partial<RetryablePipelineError>);
+    expect(mockSendReply).not.toHaveBeenCalled();
+    delete process.env['AISBP_CONV_ORDERING_ENABLED'];
+  });
+
+  it('throws a retryable error while a predecessor bubble is pending', async () => {
+    process.env['AISBP_CONV_ORDERING_ENABLED'] = 'true';
+    mockCheckPriorBubble.mockResolvedValue('wait');
+    const job = makeJob();
+    (job.data as any).replyPlanJson = JSON.stringify({
+      planStatus: 'PLANNED',
+      bubbles: [{ index: 1, text: 'Second bubble' }],
+      suggestedActions: [],
+    });
+
+    await expect(processor.process(job)).rejects.toMatchObject({
+      name: 'RetryablePipelineError',
+      code: PIPELINE_ERROR_CODES.SEND_PRIOR_BUBBLE_PENDING,
+    } satisfies Partial<RetryablePipelineError>);
+    expect(mockAppCache.releaseLock).toHaveBeenCalled();
+    expect(mockSendReply).not.toHaveBeenCalled();
+    delete process.env['AISBP_CONV_ORDERING_ENABLED'];
   });
 
 });

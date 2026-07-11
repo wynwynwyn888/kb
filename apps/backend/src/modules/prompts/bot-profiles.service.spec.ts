@@ -26,6 +26,45 @@ describe('BotProfilesService', () => {
     svc = new BotProfilesService(auth as never);
   });
 
+  it('rejects cross-tenant knowledge vault links before changing selections', async () => {
+    const deleteLinks = jest.fn();
+    mockFrom.mockImplementation((table: string) => {
+      if (table === 'tenant_bot_profiles') {
+        return {
+          select: () => ({
+            eq: () => ({
+              eq: () => ({
+                maybeSingle: () => Promise.resolve({ data: { id: profileId }, error: null }),
+              }),
+            }),
+          }),
+        };
+      }
+      if (table === 'knowledge_vaults') {
+        return {
+          select: () => ({
+            eq: () => ({
+              in: () => Promise.resolve({ data: [{ id: 'owned-vault' }], error: null }),
+            }),
+          }),
+        };
+      }
+      if (table === 'tenant_bot_profile_knowledge_vaults') {
+        return { delete: deleteLinks };
+      }
+      return {};
+    });
+
+    await expect(
+      // Private-method access is intentional: this is the shared write boundary
+      // used by both create and update flows.
+      (svc as unknown as {
+        replaceProfileVaultLinks: (tenant: string, profile: string, vaults: string[]) => Promise<void>;
+      }).replaceProfileVaultLinks(tenantId, profileId, ['owned-vault', 'foreign-vault']),
+    ).rejects.toThrow('do not belong to this workspace');
+    expect(deleteLinks).not.toHaveBeenCalled();
+  });
+
   it('getActivePromptForOrchestration uses active profile fields in system prompt', async () => {
     mockFrom.mockImplementation((table: string) => {
       if (table === 'tenant_bot_profiles') {
@@ -72,17 +111,19 @@ describe('BotProfilesService', () => {
         return {
           select: () => ({
             eq: () => ({
-              maybeSingle: () =>
-                Promise.resolve({
-                  data: {
-                    id: 'cfg1',
-                    temperature: 0.7,
-                    model_override: null,
-                    max_tokens: 800,
-                    updated_at: 'u',
-                  },
-                  error: null,
-                }),
+              eq: () => ({
+                maybeSingle: () =>
+                  Promise.resolve({
+                    data: {
+                      id: 'cfg1',
+                      temperature: 0.7,
+                      model_override: null,
+                      max_tokens: 800,
+                      updated_at: 'u',
+                    },
+                    error: null,
+                  }),
+              }),
             }),
           }),
         };
@@ -144,11 +185,13 @@ describe('BotProfilesService', () => {
         return {
           select: () => ({
             eq: () => ({
-              maybeSingle: () =>
-                Promise.resolve({
-                  data: { id: 'cfg1', temperature: 0.7, model_override: null, max_tokens: 800, updated_at: 'u' },
-                  error: null,
-                }),
+              eq: () => ({
+                maybeSingle: () =>
+                  Promise.resolve({
+                    data: { id: 'cfg1', temperature: 0.7, model_override: null, max_tokens: 800, updated_at: 'u' },
+                    error: null,
+                  }),
+              }),
             }),
           }),
         };
@@ -287,7 +330,9 @@ describe('BotProfilesService', () => {
       if (table === 'tenant_bot_profile_knowledge_vaults') {
         return {
           select: () => ({
-            eq: () => Promise.resolve({ data: [], error: null }),
+            eq: () => ({
+              eq: () => Promise.resolve({ data: [], error: null }),
+            }),
           }),
         };
       }
@@ -331,7 +376,9 @@ describe('BotProfilesService', () => {
       if (table === 'tenant_bot_profile_knowledge_vaults') {
         return {
           select: () => ({
-            eq: () => Promise.resolve({ data: [{ vault_id: 'vault-1' }], error: null }),
+            eq: () => ({
+              eq: () => Promise.resolve({ data: [{ vault_id: 'vault-1' }], error: null }),
+            }),
           }),
         };
       }
@@ -386,7 +433,9 @@ describe('BotProfilesService', () => {
       if (table === 'tenant_bot_profile_knowledge_vaults') {
         return {
           select: () => ({
-            eq: () => Promise.resolve({ data: [{ vault_id: 'vault-1' }], error: null }),
+            eq: () => ({
+              eq: () => Promise.resolve({ data: [{ vault_id: 'vault-1' }], error: null }),
+            }),
           }),
         };
       }

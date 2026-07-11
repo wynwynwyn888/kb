@@ -147,6 +147,7 @@ export class PromptsService {
             business_notes: parsed.additional,
             updated_at: now,
           })
+          .eq('tenant_id', tenantId)
           .eq('id', existing.bot_profile_id as string);
       }
       const { data: updated, error: ue } = await supabase
@@ -160,6 +161,7 @@ export class PromptsService {
           is_active: isActive,
           updated_at: now,
         })
+        .eq('tenant_id', tenantId)
         .eq('id', existing.id)
         .select(
           'id, tenant_id, name, system_prompt, temperature, model_override, max_tokens, prompt_variables, is_active, created_at, updated_at',

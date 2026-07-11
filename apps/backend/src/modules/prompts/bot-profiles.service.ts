@@ -171,6 +171,7 @@ export class BotProfilesService {
     const { data, error } = await supabase
       .from('tenant_bot_profile_knowledge_vaults')
       .select('profile_id, vault_id')
+      .eq('tenant_id', tenantId)
       .in('profile_id', profileIds);
     if (error) {
       throw new BadRequestException(`Failed to load profile vault links: ${error.message}`);
@@ -198,6 +199,7 @@ export class BotProfilesService {
     const { data: links } = await supabase
       .from('tenant_bot_profile_knowledge_vaults')
       .select('vault_id')
+      .eq('tenant_id', tenantId)
       .eq('profile_id', pid);
     const vids = (links ?? []).map(l => l['vault_id'] as string).filter(Boolean);
     if (vids.length === 0) {
@@ -404,11 +406,47 @@ export class BotProfilesService {
     if (ce) throw new BadRequestException(`Failed to create default prompt config: ${ce.message}`);
   }
 
-  private async replaceProfileVaultLinks(profileId: string, vaultIds: string[]): Promise<void> {
+  private async replaceProfileVaultLinks(
+    tenantId: string,
+    profileId: string,
+    vaultIds: string[],
+  ): Promise<void> {
     const supabase = getSupabaseService();
-    await supabase.from('tenant_bot_profile_knowledge_vaults').delete().eq('profile_id', profileId);
-    if (!vaultIds.length) return;
-    const rows = vaultIds.map(vid => ({ profile_id: profileId, vault_id: vid }));
+    const { data: ownedProfile } = await supabase
+      .from('tenant_bot_profiles')
+      .select('id')
+      .eq('tenant_id', tenantId)
+      .eq('id', profileId)
+      .maybeSingle();
+    if (!ownedProfile) throw new NotFoundException('Profile not found');
+
+    const uniqueVaultIds = [...new Set(vaultIds.map(id => id.trim()).filter(Boolean))];
+    if (uniqueVaultIds.length > 0) {
+      const { data: ownedVaults, error: vaultError } = await supabase
+        .from('knowledge_vaults')
+        .select('id')
+        .eq('tenant_id', tenantId)
+        .in('id', uniqueVaultIds);
+      if (vaultError) {
+        throw new BadRequestException(`Failed to validate vault selection: ${vaultError.message}`);
+      }
+      const ownedIds = new Set((ownedVaults ?? []).map(row => String(row['id'])));
+      if (uniqueVaultIds.some(id => !ownedIds.has(id))) {
+        throw new BadRequestException('One or more selected vaults do not belong to this workspace');
+      }
+    }
+
+    await supabase
+      .from('tenant_bot_profile_knowledge_vaults')
+      .delete()
+      .eq('tenant_id', tenantId)
+      .eq('profile_id', profileId);
+    if (!uniqueVaultIds.length) return;
+    const rows = uniqueVaultIds.map(vid => ({
+      tenant_id: tenantId,
+      profile_id: profileId,
+      vault_id: vid,
+    }));
     const { error } = await supabase.from('tenant_bot_profile_knowledge_vaults').insert(rows);
     if (error) throw new BadRequestException(`Failed to save vault selection: ${error.message}`);
   }
@@ -437,6 +475,7 @@ export class BotProfilesService {
     await supabase
       .from('tenant_prompt_configs')
       .update({ is_active: true, updated_at: now })
+      .eq('tenant_id', tenantId)
       .eq('bot_profile_id', profileId);
   }
 
@@ -605,7 +644,7 @@ export class BotProfilesService {
       updated_at: now,
     });
     if (pcErr) {
-      await supabase.from('tenant_bot_profiles').delete().eq('id', pid);
+      await supabase.from('tenant_bot_profiles').delete().eq('tenant_id', tenantId).eq('id', pid);
       throw new BadRequestException(`Failed to create prompt config: ${pcErr.message}`);
     }
 
@@ -615,12 +654,13 @@ export class BotProfilesService {
 
     const selectedVaults = Array.isArray(body.selectedVaultIds) ? body.selectedVaultIds.filter(Boolean) : [];
     if (accessMode === KNOWLEDGE_ACCESS_SELECTED_VAULTS && selectedVaults.length > 0) {
-      await this.replaceProfileVaultLinks(pid, selectedVaults);
+      await this.replaceProfileVaultLinks(tenantId, pid, selectedVaults);
     }
 
     const { data: row, error: re } = await supabase
       .from('tenant_bot_profiles')
       .select('*')
+      .eq('tenant_id', tenantId)
       .eq('id', pid)
       .single();
     if (re || !row) {
@@ -629,6 +669,7 @@ export class BotProfilesService {
     const { data: pr } = await supabase
       .from('tenant_prompt_configs')
       .select('id, tenant_id, bot_profile_id, temperature, model_override, max_tokens')
+      .eq('tenant_id', tenantId)
       .eq('bot_profile_id', pid)
       .maybeSingle();
     const vm = await this.loadVaultSelectionsForProfiles(tenantId, [row['id'] as string]);
@@ -770,25 +811,31 @@ export class BotProfilesService {
     if (body.modelOverride !== undefined) updPrompt['model_override'] = body.modelOverride;
     if (body.maxTokens !== undefined) updPrompt['max_tokens'] = body.maxTokens;
 
-    await supabase.from('tenant_prompt_configs').update(updPrompt).eq('bot_profile_id', botProfileId);
+    await supabase
+      .from('tenant_prompt_configs')
+      .update(updPrompt)
+      .eq('tenant_id', tenantId)
+      .eq('bot_profile_id', botProfileId);
 
     if (body.knowledgeAccessMode !== undefined && nextAccessMode === KNOWLEDGE_ACCESS_ALL_VAULTS) {
-      await this.replaceProfileVaultLinks(botProfileId, []);
+      await this.replaceProfileVaultLinks(tenantId, botProfileId, []);
     } else if (
       nextAccessMode === KNOWLEDGE_ACCESS_SELECTED_VAULTS &&
       body.selectedVaultIds !== undefined
     ) {
-      await this.replaceProfileVaultLinks(botProfileId, body.selectedVaultIds.filter(Boolean));
+      await this.replaceProfileVaultLinks(tenantId, botProfileId, body.selectedVaultIds.filter(Boolean));
     }
 
     const { data: row } = await supabase
       .from('tenant_bot_profiles')
       .select('*')
+      .eq('tenant_id', tenantId)
       .eq('id', botProfileId)
       .single();
     const pr = await supabase
       .from('tenant_prompt_configs')
       .select('id, tenant_id, bot_profile_id, temperature, model_override, max_tokens')
+      .eq('tenant_id', tenantId)
       .eq('bot_profile_id', botProfileId)
       .maybeSingle();
     const vm = await this.loadVaultSelectionsForProfiles(tenantId, [botProfileId]);
@@ -817,11 +864,13 @@ export class BotProfilesService {
     const { data: row } = await supabase
       .from('tenant_bot_profiles')
       .select('*')
+      .eq('tenant_id', tenantId)
       .eq('id', botProfileId)
       .single();
     const pr = await supabase
       .from('tenant_prompt_configs')
       .select('id, tenant_id, bot_profile_id, temperature, model_override, max_tokens')
+      .eq('tenant_id', tenantId)
       .eq('bot_profile_id', botProfileId)
       .maybeSingle();
     const vm = await this.loadVaultSelectionsForProfiles(tenantId, [botProfileId]);
@@ -897,7 +946,11 @@ export class BotProfilesService {
       throw new BadRequestException('Cannot delete the only Assistant Profile for this workspace.');
     }
 
-    const { error } = await supabase.from('tenant_bot_profiles').delete().eq('id', botProfileId);
+    const { error } = await supabase
+      .from('tenant_bot_profiles')
+      .delete()
+      .eq('tenant_id', tenantId)
+      .eq('id', botProfileId);
     if (error) throw new BadRequestException(`Failed to delete profile: ${error.message}`);
   }
 
@@ -937,6 +990,7 @@ export class BotProfilesService {
     const { data: links } = await supabase
       .from('tenant_bot_profile_knowledge_vaults')
       .select('vault_id')
+      .eq('tenant_id', tenantId)
       .eq('profile_id', prof['id'] as string);
     const vaultIds = (links ?? []).map(l => l['vault_id'] as string).filter(Boolean);
     if (vaultIds.length === 0) {
@@ -1000,6 +1054,7 @@ export class BotProfilesService {
       const { data: pr } = await supabase
         .from('tenant_prompt_configs')
         .select('id, temperature, model_override, max_tokens, updated_at')
+        .eq('tenant_id', tenantId)
         .eq('bot_profile_id', prof['id'] as string)
         .maybeSingle();
 
@@ -1101,6 +1156,7 @@ export class BotProfilesService {
     const { data: pr } = await supabase
       .from('tenant_prompt_configs')
       .select('id, temperature, model_override, is_active')
+      .eq('tenant_id', tenantId)
       .eq('bot_profile_id', prof['id'] as string)
       .maybeSingle();
     return {

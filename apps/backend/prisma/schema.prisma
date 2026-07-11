@@ -191,6 +191,7 @@ model Tenant {
   followUpSettings   TenantFollowUpSettings?
   humanEscalationSettings TenantHumanEscalationSettings?
   botProfiles        TenantBotProfile[]
+  botProfileVaultLinks TenantBotProfileKnowledgeVault[]
   knowledgeVaults  KnowledgeVault[]
   creditWarningEvents WorkspaceCreditWarningEvent[]
   creditResetReminderEvents WorkspaceCreditResetReminderEvent[]
@@ -607,13 +608,16 @@ model KnowledgeVault {
 }
 
 model TenantBotProfileKnowledgeVault {
+  tenantId  String? @map("tenant_id")
   profileId String @map("profile_id")
   vaultId   String @map("vault_id")
 
+  tenant  Tenant?           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   profile TenantBotProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
   vault   KnowledgeVault   @relation(fields: [vaultId], references: [id], onDelete: Cascade)
 
   @@id([profileId, vaultId])
+  @@index([tenantId, profileId])
   @@index([vaultId])
   @@map("tenant_bot_profile_knowledge_vaults")
 }

@@ -28,7 +28,15 @@ import {
   metadataPatchForSuccessfulOutbound,
   resolveOutboundChannelForSend,
 } from '../../lib/ghl-channel-routing';
-import type { OutboundChannel } from '@aisbp/ghl-client';
+import type { GhlSendFailureOutcome, OutboundChannel } from '@aisbp/ghl-client';
+
+type OutboundClaimResult =
+  | { kind: 'disabled' }
+  | { kind: 'claimed'; attempt: number }
+  | { kind: 'already_sent' }
+  | { kind: 'in_flight' }
+  | { kind: 'provider_outcome_unknown' }
+  | { kind: 'ledger_error'; error: string };
 
 export interface BubbleSendResult {
   index: number;
@@ -39,6 +47,7 @@ export interface BubbleSendResult {
   ghlChannelUsed?: OutboundChannel;
   ghlMessageId?: string;
   error?: string;
+  failureOutcome?: GhlSendFailureOutcome;
 }
 
 export interface SendSummary {
@@ -217,7 +226,7 @@ export class OutboundSendService {
 
       // Idempotency guard: check ledger first (feature-flagged, off by default)
       if (replyId) {
-        const claimed = await this.claimOutboundSend({
+        const claim = await this.claimOutboundSend({
           tenantId,
           conversationId,
           ghlLocationId,
@@ -226,7 +235,7 @@ export class OutboundSendService {
           content: bubble.text,
           sendBubbleJobId: jobId,
         });
-          if (claimed === null && process.env['AISBP_OUTBOUND_IDEMPOTENCY_ENABLED'] === 'true') {
+        if (claim.kind === 'already_sent') {
           this.metrics?.emit({ tenantId, conversationId, eventType: 'duplicate_send_prevented', eventSource: 'outbound-send', metadata: { replyId, bubbleSequence: bubble.index } });
           bubbleResults.push({
             index: bubble.index,
@@ -235,6 +244,24 @@ export class OutboundSendService {
             skippedDuplicate: true,
           });
           succeeded++;
+          continue;
+        }
+        if (claim.kind === 'in_flight' || claim.kind === 'provider_outcome_unknown' || claim.kind === 'ledger_error') {
+          const error = claim.kind === 'provider_outcome_unknown'
+            ? 'Provider outcome is unknown; automatic resend blocked to prevent a duplicate'
+            : claim.kind === 'in_flight'
+              ? 'Outbound send is already in flight; retry later'
+              : `Outbound idempotency ledger unavailable: ${claim.error}`;
+          this.metrics?.emit({
+            tenantId,
+            conversationId,
+            eventType: claim.kind === 'provider_outcome_unknown' ? 'outbound_send_unknown_outcome' : 'outbound_send_claim_blocked',
+            eventSource: 'outbound-send',
+            severity: claim.kind === 'provider_outcome_unknown' ? 'error' : 'warn',
+            metadata: { replyId, bubbleSequence: bubble.index, claimKind: claim.kind },
+          });
+          bubbleResults.push({ index: bubble.index, text: bubble.text, success: false, error });
+          failed++;
           continue;
         }
       }
@@ -289,7 +316,9 @@ export class OutboundSendService {
         if (replyId) {
           await this.updateOutboundSendResult({
             tenantId, conversationId, replyId, bubbleSequence: bubble.index,
-            status: 'failed_provider_rejected',
+            status: result.failureOutcome === 'provider_outcome_unknown'
+              ? 'unknown_provider_outcome'
+              : 'failed_provider_rejected',
             errorCode: result.error ?? undefined,
           });
         }
@@ -418,6 +447,7 @@ export class OutboundSendService {
 
     const tryChannels: OutboundChannel[] = [...ghlOutboundFallbackChannels(ghlChannel)];
     let lastError = 'Unknown send error';
+    let lastFailureOutcome: GhlSendFailureOutcome | undefined;
     let attemptIndex = 0;
 
     while (attemptIndex < tryChannels.length) {
@@ -442,6 +472,7 @@ export class OutboundSendService {
           text: bubble.text,
           success: false,
           error: 'Rate limited by GHL API',
+          failureOutcome: response.failureOutcome,
         };
       }
 
@@ -460,7 +491,11 @@ export class OutboundSendService {
         };
       }
 
-      lastError = response.error ?? 'Unknown send error';
+      lastError = response.error ?? (response.success ? 'GHL accepted the request without a message ID' : 'Unknown send error');
+      lastFailureOutcome = response.failureOutcome ?? (response.success ? 'provider_outcome_unknown' : 'provider_rejected');
+      // A transport failure may have been accepted by GHL. Trying another channel
+      // can duplicate the customer-visible message.
+      if (lastFailureOutcome === 'provider_outcome_unknown') break;
       const hasMoreQueued = attemptIndex < tryChannels.length;
       if (hasMoreQueued && isGhlMetaSiblingChannelRetryable(lastError)) {
         continue;
@@ -479,6 +514,7 @@ export class OutboundSendService {
       text: bubble.text,
       success: false,
       error: lastError,
+      failureOutcome: lastFailureOutcome,
     };
   }
 
@@ -868,8 +904,8 @@ export class OutboundSendService {
 
   /**
    * Try to claim a send slot in the outbound idempotency ledger.
-   * Returns null if this bubble was already sent (duplicate prevented).
-   * Returns the row id if a new pending row was created (proceed to send).
+   * The typed result prevents database errors, in-flight sends, and ambiguous
+   * provider outcomes from being mistaken for a successful duplicate.
    */
   private async claimOutboundSend(params: {
     tenantId: string;
@@ -879,8 +915,8 @@ export class OutboundSendService {
     bubbleSequence: number;
     content: string;
     sendBubbleJobId: string;
-  }): Promise<{ id: string; status: string } | null> {
-    if (process.env['AISBP_OUTBOUND_IDEMPOTENCY_ENABLED'] !== 'true') return null;
+  }): Promise<OutboundClaimResult> {
+    if (process.env['AISBP_OUTBOUND_IDEMPOTENCY_ENABLED'] !== 'true') return { kind: 'disabled' };
     try {
       const { error: insErr } = await this.supabase.from('outbound_sends').insert({
         id: randomUUID(),
@@ -902,21 +938,45 @@ export class OutboundSendService {
             this.logger.log(
               `outboundIdempotencyRetry: tenantId=${params.tenantId} conversationId=${params.conversationId} replyId=${params.replyId} bubble=${params.bubbleSequence} attempt=${reclaimed.attempt}`,
             );
-            return reclaimed;
+            return { kind: 'claimed', attempt: reclaimed.attempt };
           }
-          this.logger.log(
-            `outboundIdempotencyDuplicate: tenantId=${params.tenantId} conversationId=${params.conversationId} replyId=${params.replyId} bubble=${params.bubbleSequence}`,
-          );
-          return null;
+          const { data: existing, error: selectError } = await this.loadOutboundSendClaim(params);
+          if (selectError) {
+            const error = formatPostgrestError(selectError);
+            this.logger.error(`claimOutboundSend select error: ${error}`);
+            return { kind: 'ledger_error', error };
+          }
+          const status = typeof existing?.status === 'string' ? existing.status : '';
+          if (status === 'sent') return { kind: 'already_sent' };
+          if (status === 'unknown_provider_outcome') return { kind: 'provider_outcome_unknown' };
+          if (status === 'pending' || status === 'processing') return { kind: 'in_flight' };
+          return { kind: 'ledger_error', error: `Unexpected outbound ledger status: ${status || 'missing'}` };
         }
         this.logger.error(`claimOutboundSend insert error: ${msg}`);
-        return null;
+        return { kind: 'ledger_error', error: msg };
       }
-      return { id: '', status: 'pending' };
+      return { kind: 'claimed', attempt: 1 };
     } catch (e) {
-      this.logger.warn(`claimOutboundSend catch: ${e instanceof Error ? e.message : String(e)}`);
-      return null;
+      const error = e instanceof Error ? e.message : String(e);
+      this.logger.warn(`claimOutboundSend catch: ${error}`);
+      return { kind: 'ledger_error', error };
     }
+  }
+
+  private async loadOutboundSendClaim(params: {
+    tenantId: string;
+    conversationId: string;
+    replyId: string;
+    bubbleSequence: number;
+  }) {
+    return this.supabase
+      .from('outbound_sends')
+      .select('id, status, attempt')
+      .eq('tenant_id', params.tenantId)
+      .eq('conversation_id', params.conversationId)
+      .eq('reply_id', params.replyId)
+      .eq('bubble_sequence', params.bubbleSequence)
+      .maybeSingle();
   }
 
   /**
@@ -936,17 +996,9 @@ export class OutboundSendService {
       'failed_provider_rejected',
       'failed_before_provider',
       'dead_lettered',
-      'unknown_provider_outcome',
     ];
 
-    const { data: existing } = await this.supabase
-      .from('outbound_sends')
-      .select('id, status, attempt')
-      .eq('tenant_id', params.tenantId)
-      .eq('conversation_id', params.conversationId)
-      .eq('reply_id', params.replyId)
-      .eq('bubble_sequence', params.bubbleSequence)
-      .maybeSingle();
+    const { data: existing } = await this.loadOutboundSendClaim(params);
 
     if (!existing) return null;
 

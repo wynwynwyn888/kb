@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue } from 'bullmq';
 import { getSupabaseService } from '../../lib/supabase';
@@ -162,12 +162,15 @@ export class OpsService {
   }
 
   async getOutboundSends(params: {
+    agencyId: string;
     tenantId?: string;
     status?: string;
     page: number;
     pageSize: number;
   }): Promise<PaginatedResponse<OutboundSendRow>> {
-    const { tenantId, status, page, pageSize } = params;
+    const { agencyId, tenantId, status, page, pageSize } = params;
+    const tenantIds = await this.resolveAgencyTenantIds(agencyId, tenantId);
+    if (tenantIds.length === 0) return { data: [], total: 0, page, pageSize };
     const from = (page - 1) * pageSize;
     const to = from + pageSize - 1;
 
@@ -175,7 +178,7 @@ export class OpsService {
       .from('outbound_sends')
       .select('id, tenant_id, conversation_id, reply_id, bubble_sequence, status, provider_message_id, attempt, last_error_code, last_error_message, sent_at, created_at', { count: 'exact' });
 
-    if (tenantId) query = query.eq('tenant_id', tenantId);
+    query = query.in('tenant_id', tenantIds);
     if (status) query = query.eq('status', status);
 
     const { data, error, count } = await query
@@ -187,7 +190,7 @@ export class OpsService {
       return { data: [], total: 0, page, pageSize };
     }
 
-    const tenantNames = await this.loadTenantNames();
+    const tenantNames = await this.loadTenantNames(tenantIds);
     return {
       data: ((data ?? []) as Record<string, unknown>[]).map(r => {
         const tid = String(r['tenant_id'] ?? '');
@@ -214,11 +217,14 @@ export class OpsService {
   }
 
   async getConversations(params: {
+    agencyId: string;
     tenantId?: string;
     page: number;
     pageSize: number;
   }): Promise<PaginatedResponse<ConversationHealthRow>> {
-    const { tenantId, page, pageSize } = params;
+    const { agencyId, tenantId, page, pageSize } = params;
+    const tenantIds = await this.resolveAgencyTenantIds(agencyId, tenantId);
+    if (tenantIds.length === 0) return { data: [], total: 0, page, pageSize };
     const from = (page - 1) * pageSize;
     const to = from + pageSize - 1;
 
@@ -226,7 +232,7 @@ export class OpsService {
       .from('conversations')
       .select('id, tenant_id, contact_id, last_message_at, status', { count: 'exact' });
 
-    if (tenantId) query = query.eq('tenant_id', tenantId);
+    query = query.in('tenant_id', tenantIds);
 
     const { data, error, count } = await query
       .order('last_message_at', { ascending: false, nullsFirst: false })
@@ -237,7 +243,7 @@ export class OpsService {
       return { data: [], total: 0, page, pageSize };
     }
 
-    const tenantNames = await this.loadTenantNames();
+    const tenantNames = await this.loadTenantNames(tenantIds);
     const rows: ConversationHealthRow[] = [];
     for (const c of (data ?? []) as Record<string, unknown>[]) {
       const conversationId = String(c['id'] ?? '');
@@ -262,11 +268,14 @@ export class OpsService {
   }
 
   async getGhlSync(params: {
+    agencyId: string;
     conversationId?: string | null;
     page: number;
     pageSize: number;
   }): Promise<PaginatedResponse<GhlSyncRow>> {
-    const { conversationId, page, pageSize } = params;
+    const { agencyId, conversationId, page, pageSize } = params;
+    const tenantIds = await this.resolveAgencyTenantIds(agencyId);
+    if (tenantIds.length === 0) return { data: [], total: 0, page, pageSize };
     const from = (page - 1) * pageSize;
     const to = from + pageSize - 1;
 
@@ -274,6 +283,7 @@ export class OpsService {
       .from('metrics_events')
       .select('conversation_id, tenant_id, event_type, metadata, created_at', { count: 'exact' })
       .in('event_type', ['ghl_sync_started', 'ghl_sync_completed', 'ghl_sync_failed', 'ghl_message_imported'])
+      .in('tenant_id', tenantIds)
       .order('created_at', { ascending: false })
       .range(from, to);
 
@@ -285,7 +295,7 @@ export class OpsService {
       return { data: [], total: 0, page, pageSize };
     }
 
-    const tenantNames = await this.loadTenantNames();
+    const tenantNames = await this.loadTenantNames(tenantIds);
     return {
       data: ((data ?? []) as Record<string, unknown>[]).map(r => {
         const tid = r['tenant_id'] ? String(r['tenant_id']) : '';
@@ -305,12 +315,15 @@ export class OpsService {
   }
 
   async getErrors(params: {
+    agencyId: string;
     tenantId?: string;
     severity?: string;
     page: number;
     pageSize: number;
   }): Promise<PaginatedResponse<ErrorEventRow>> {
-    const { tenantId, severity, page, pageSize } = params;
+    const { agencyId, tenantId, severity, page, pageSize } = params;
+    const tenantIds = await this.resolveAgencyTenantIds(agencyId, tenantId);
+    if (tenantIds.length === 0) return { data: [], total: 0, page, pageSize };
     const from = (page - 1) * pageSize;
     const to = from + pageSize - 1;
 
@@ -318,9 +331,9 @@ export class OpsService {
       .from('metrics_events')
       .select('id, tenant_id, conversation_id, event_type, event_source, severity, metadata, created_at', { count: 'exact' })
       .in('severity', ['error', 'warn'])
+      .in('tenant_id', tenantIds)
       .order('created_at', { ascending: false });
 
-    if (tenantId) query = query.eq('tenant_id', tenantId);
     if (severity) query = query.eq('severity', severity);
 
     const { data, error, count } = await query.range(from, to);
@@ -329,7 +342,7 @@ export class OpsService {
       return { data: [], total: 0, page, pageSize };
     }
 
-    const tenantNames = await this.loadTenantNames();
+    const tenantNames = await this.loadTenantNames(tenantIds);
     return {
       data: ((data ?? []) as Record<string, unknown>[]).map(r => {
         const tid = r['tenant_id'] ? String(r['tenant_id']) : null;
@@ -352,20 +365,22 @@ export class OpsService {
   }
 
   async getAuditEvents(params: {
+    agencyId: string;
     tenantId?: string;
     page: number;
     pageSize: number;
   }): Promise<PaginatedResponse<ErrorEventRow>> {
-    const { tenantId, page, pageSize } = params;
+    const { agencyId, tenantId, page, pageSize } = params;
+    const tenantIds = await this.resolveAgencyTenantIds(agencyId, tenantId);
+    if (tenantIds.length === 0) return { data: [], total: 0, page, pageSize };
     const from = (page - 1) * pageSize;
     const to = from + pageSize - 1;
 
     let query = this.supabase
       .from('metrics_events')
       .select('id, tenant_id, conversation_id, event_type, event_source, severity, metadata, created_at', { count: 'exact' })
+      .in('tenant_id', tenantIds)
       .order('created_at', { ascending: false });
-
-    if (tenantId) query = query.eq('tenant_id', tenantId);
 
     const { data, error, count } = await query.range(from, to);
     if (error) {
@@ -373,7 +388,7 @@ export class OpsService {
       return { data: [], total: 0, page, pageSize };
     }
 
-    const tenantNames2 = await this.loadTenantNames();
+    const tenantNames2 = await this.loadTenantNames(tenantIds);
     return {
       data: ((data ?? []) as Record<string, unknown>[]).map(r => {
         const tid = r['tenant_id'] ? String(r['tenant_id']) : null;
@@ -395,16 +410,20 @@ export class OpsService {
     };
   }
 
-  async getTenants(): Promise<TenantReadinessRow[]> {
+  async getTenants(agencyId: string): Promise<TenantReadinessRow[]> {
+    const tenantIds = await this.resolveAgencyTenantIds(agencyId);
+    if (tenantIds.length === 0) return [];
     const { data: tenants, error: tErr } = await this.supabase
       .from('tenants')
       .select('id, name, ghl_location_id, bot_enabled')
+      .in('id', tenantIds)
       .order('name');
     if (tErr || !tenants) return [];
 
     const { data: connections, error: cErr } = await this.supabase
       .from('tenant_ghl_connections')
-      .select('tenant_id, status');
+      .select('tenant_id, status')
+      .in('tenant_id', tenantIds);
     const connMap = new Map<string, string>();
     if (!cErr && connections) {
       for (const c of connections as Record<string, unknown>[]) {
@@ -469,12 +488,29 @@ export class OpsService {
    * Load all tenant names into a map for batch enrichment of API responses.
    * Called once per request, not per row.
    */
-  private async loadTenantNames(): Promise<Map<string, string>> {
+  private async resolveAgencyTenantIds(agencyId: string, requestedTenantId?: string): Promise<string[]> {
+    const { data, error } = await this.supabase
+      .from('tenants')
+      .select('id')
+      .eq('agency_id', agencyId)
+      .limit(1000);
+    if (error) {
+      this.logger.warn(`resolveAgencyTenantIds error: ${String(error)}`);
+      return [];
+    }
+    const ids = (data ?? []).map((row: { id: string }) => row.id).filter(Boolean);
+    if (!requestedTenantId) return ids;
+    if (!ids.includes(requestedTenantId)) throw new NotFoundException('Tenant not found');
+    return [requestedTenantId];
+  }
+
+  private async loadTenantNames(tenantIds: string[]): Promise<Map<string, string>> {
     const map = new Map<string, string>();
     try {
       const { data } = await this.supabase
         .from('tenants')
         .select('id, name')
+        .in('id', tenantIds)
         .limit(500);
       for (const row of (data ?? []) as Array<{ id: string; name: string }>) {
         map.set(row.id, row.name);
@@ -539,7 +575,7 @@ export class OpsService {
    * Does NOT send any outbound. Does NOT reset bot state or memory.
    * ai_status is preserved — if ai_status=off, AI remains blocked.
    */
-  async clearHandover(conversationId: string): Promise<{
+  async clearHandover(conversationId: string, agencyId: string, actorProfileId: string): Promise<{
     ok: boolean;
     handoverCleared: boolean;
     activeHandoverFound: boolean;
@@ -548,15 +584,19 @@ export class OpsService {
     conversationStatusAfter: string | null;
     tenantId: string | null;
   }> {
-    // Resolve the conversation first
+    const allowedTenantIds = await this.resolveAgencyTenantIds(agencyId);
+    if (allowedTenantIds.length === 0) throw new NotFoundException('Conversation not found');
+
+    // Resolve and authorize the conversation before any mutation.
     const { data: convRow } = await this.supabase
       .from('conversations')
       .select('id, tenant_id, status, metadata')
       .eq('id', conversationId)
+      .in('tenant_id', allowedTenantIds)
       .maybeSingle();
 
     if (!convRow) {
-      return { ok: false, handoverCleared: false, activeHandoverFound: false, handoverEventsResolved: 0, conversationStatusBefore: null, conversationStatusAfter: null, tenantId: null };
+      throw new NotFoundException('Conversation not found');
     }
 
     const tenantId = (convRow as Record<string, unknown>)['tenant_id'] as string;
@@ -582,21 +622,24 @@ export class OpsService {
     await this.supabase
       .from('conversations')
       .update({ status: 'ACTIVE', updated_at: now })
-      .eq('id', conversationId);
+      .eq('id', conversationId)
+      .eq('tenant_id', tenantId);
 
     // Write audit metadata
     const { data: convAfter } = await this.supabase
       .from('conversations')
       .select('metadata')
       .eq('id', conversationId)
+      .eq('tenant_id', tenantId)
       .maybeSingle();
     const currentMeta = (convAfter?.metadata ?? {}) as Record<string, unknown>;
     currentMeta['handoverClearedAt'] = now;
-    currentMeta['handoverClearedBy'] = 'ops/clear-handover';
+    currentMeta['handoverClearedBy'] = actorProfileId;
     await this.supabase
       .from('conversations')
       .update({ metadata: currentMeta, updated_at: now })
-      .eq('id', conversationId);
+      .eq('id', conversationId)
+      .eq('tenant_id', tenantId);
 
     this.logger.log(
       `ops_clear_handover: conversationId=${conversationId} tenantId=${tenantId} activeFound=${ids.length > 0} resolved=${ids.length}`,

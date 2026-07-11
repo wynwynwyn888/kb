@@ -22,6 +22,7 @@ import { resolveInboundDebounceMs } from '../../lib/inbound-burst-batch';
 import { readConversationMetadataField, mergeConversationMetadataForPersist } from '../../lib/conversation-metadata-merge';
 import { markProviderOrchestrationDone } from '../../lib/schedule-orchestration-if-new';
 import { recordTerminalDecision, recordInterimDecision } from '../../lib/inbound-decision';
+import { PIPELINE_ERROR_CODES, RetryablePipelineError } from '../../lib/pipeline-errors';
 
 export interface SendBubbleJobData {
   conversationId: string;
@@ -105,10 +106,10 @@ export class SendBubbleProcessor extends WorkerHost {
       if (!(await this.appCache!.acquireSemaphore(semKey, String(job.id ?? ''), sendCap))) {
         this.metrics?.emit({ tenantId, conversationId, eventType: 'tenant_cap_blocked', eventSource: 'send-bubble', severity: 'warn', metadata: { cap: sendCap, class: 'send' } });
         this.logger.log(`tenantCapFull: tenantId=${tenantId} class=send — delaying`);
-        return {
-          conversationId, tenantId, totalBubbles: 0, succeeded: 0, failed: 0,
-          bubbleResults: [], quotaDebited: 0,
-        };
+        throw new RetryablePipelineError(
+          'Tenant send capacity unavailable',
+          PIPELINE_ERROR_CODES.SEND_TENANT_CAPACITY,
+        );
       }
       semAcquired = true;
       this.metrics?.emit({ tenantId, conversationId, eventType: 'tenant_cap_acquired', eventSource: 'send-bubble', metadata: { cap: sendCap, class: 'send' } });
@@ -124,10 +125,10 @@ export class SendBubbleProcessor extends WorkerHost {
       if (lockResult !== 'acquired') {
         this.metrics?.emit({ tenantId, conversationId, eventType: 'conv_ordering_blocked', eventSource: 'send-bubble', severity: 'warn', metadata: { replyId } });
         this.logger.log(`conversationLockHeld: conversationId=${conversationId} — requeuing`);
-        return {
-          conversationId, tenantId, totalBubbles: 0, succeeded: 0, failed: 0,
-          bubbleResults: [], quotaDebited: 0,
-        };
+        throw new RetryablePipelineError(
+          'Conversation ordering lock unavailable',
+          PIPELINE_ERROR_CODES.SEND_CONVERSATION_LOCK,
+        );
       }
       lockAcquired = true;
     }
@@ -201,10 +202,10 @@ export class SendBubbleProcessor extends WorkerHost {
           if (decision === 'wait') {
             this.metrics?.emit({ tenantId, conversationId, eventType: 'conv_ordering_wait', eventSource: 'send-bubble', severity: 'warn', metadata: { replyId, bubbleSequence: bubble.index } });
             this.logger.log(`bubbleSequenceBlocked: conversationId=${conversationId} bubble=${bubble.index} — predecessor pending, requeuing`);
-            return {
-              conversationId, tenantId, totalBubbles: 0, succeeded: 0, failed: 0,
-              bubbleResults: [], quotaDebited: 0,
-            };
+            throw new RetryablePipelineError(
+              'Predecessor bubble is not terminal',
+              PIPELINE_ERROR_CODES.SEND_PRIOR_BUBBLE_PENDING,
+            );
           }
           if (decision === 'cancel') {
             this.metrics?.emit({ tenantId, conversationId, eventType: 'conv_ordering_cancelled', eventSource: 'send-bubble', severity: 'warn', metadata: { replyId, bubbleSequence: bubble.index } });

@@ -5,7 +5,11 @@ import type { SessionUser } from '../../lib/supabase';
 
 function mockReq(agencyRole?: string): Request {
   return {
-    user: { agencyRole: agencyRole ?? null } as SessionUser,
+    user: {
+      id: 'profile-1',
+      agencyId: agencyRole ? 'agency-1' : undefined,
+      agencyRole: agencyRole ?? null,
+    } as SessionUser,
   } as unknown as Request;
 }
 
@@ -14,6 +18,7 @@ describe('OpsController', () => {
   let service: OpsService;
 
   beforeEach(() => {
+    process.env['PLATFORM_ADMIN_PROFILE_IDS'] = 'profile-1';
     service = {
       getHealth: jest.fn().mockResolvedValue({ backend: 'Healthy', frontend: 'HTTP 200', redis: 'Healthy', bookingSave: 'Works', vpsCommit: 'abc', stableTag: 'v1', uptimeSec: 10, nodeEnv: 'test' }),
       getFlags: jest.fn().mockReturnValue([{ key: 'AISBP_FOO', value: 'true' }]),
@@ -33,19 +38,28 @@ describe('OpsController', () => {
     controller = new OpsController(service);
   });
 
+  afterEach(() => {
+    delete process.env['PLATFORM_ADMIN_PROFILE_IDS'];
+  });
+
   describe('auth', () => {
     it('rejects requests without agency role', async () => {
-      await expect(controller.getHealth(mockReq(undefined))).rejects.toThrow('Agency membership required');
+      await expect(controller.getTenants(mockReq(undefined))).rejects.toThrow('Agency membership required');
     });
 
     it('rejects requests with only tenant role', async () => {
       const req = mockReq();
       req.user = { tenantRole: 'ADMIN' } as SessionUser;
-      await expect(controller.getHealth(req)).rejects.toThrow('Agency membership required');
+      await expect(controller.getTenants(req)).rejects.toThrow('Agency membership required');
     });
 
     it('allows requests with agency role', async () => {
-      await expect(controller.getHealth(mockReq('OWNER'))).resolves.toBeDefined();
+      await expect(controller.getTenants(mockReq('OWNER'))).resolves.toBeDefined();
+    });
+
+    it('rejects a normal agency user from platform-global ops', async () => {
+      process.env['PLATFORM_ADMIN_PROFILE_IDS'] = 'someone-else';
+      await expect(controller.getHealth(mockReq('OWNER'))).rejects.toThrow('Platform admin access required');
     });
   });
 
@@ -73,7 +87,7 @@ describe('OpsController', () => {
 
     it('clamps pageSize to max 100', async () => {
       await controller.getOutboundSends(mockReq('OWNER'), undefined, undefined, 1, 999);
-      expect(service.getOutboundSends).toHaveBeenCalledWith(expect.objectContaining({ pageSize: 100 }));
+      expect(service.getOutboundSends).toHaveBeenCalledWith(expect.objectContaining({ agencyId: 'agency-1', pageSize: 100 }));
     });
   });
 
@@ -100,7 +114,7 @@ describe('OpsController', () => {
 
     it('clamps pageSize to max 250', async () => {
       await controller.getGhlSync(mockReq('OWNER'), undefined, 1, 999);
-      expect(service.getGhlSync).toHaveBeenCalledWith(expect.objectContaining({ pageSize: 250 }));
+      expect(service.getGhlSync).toHaveBeenCalledWith(expect.objectContaining({ agencyId: 'agency-1', pageSize: 250 }));
     });
   });
 
@@ -121,7 +135,7 @@ describe('OpsController', () => {
   describe('clear-handover', () => {
     it('clears handover for a conversation and returns result', async () => {
       const result = await controller.clearHandover(mockReq('OWNER'), 'conv-1');
-      expect(service.clearHandover).toHaveBeenCalledWith('conv-1');
+      expect(service.clearHandover).toHaveBeenCalledWith('conv-1', 'agency-1', 'profile-1');
       expect(result.handoverCleared).toBe(true);
       expect(result.conversationStatusAfter).toBe('ACTIVE');
       expect(result.activeHandoverFound).toBe(true);

@@ -72,7 +72,7 @@ export const queueConfig: Record<QueueName, {
       attempts: 3,
       backoff: { type: 'exponential', delay: 2000 },
       removeOnComplete: true,
-      removeOnFail: true,
+      removeOnFail: false,
     },
   },
   [QUEUES.KB_INGEST]: {

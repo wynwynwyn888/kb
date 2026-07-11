@@ -36,7 +36,6 @@ export interface GenerateDraftPolicyContext {
   combinedInboundMessageCount?: number;
   /** Live: customer repeated the same text across separate messages (not provider dedupe). */
   repeatedCustomerMessageHandling?: 'none' | 'concise_repeat' | 'confirm_echo';
-  suppressColourRecommendations?: boolean;
   bookingCapability?: string;
   handoverCapability?: string;
   /** Assistant replies already visible before this turn, after current inbound dedupe. */
@@ -436,10 +435,6 @@ export class GenerationService {
       .join('\n\n');
 
     const multiLineTurn = (params.policyContext?.combinedInboundMessageCount ?? 0) > 1;
-    const scopeRule =
-      pc?.suppressColourRecommendations === true
-        ? ' The latest question is likely outside the scope of the business\'s core services or raises an unrelated topic. Answer that scope directly; do **not** carry forward product or service recommendations from earlier conversation turns unless the customer explicitly asks for them.'
-        : '';
     const baseRules =
       'The excerpts below are **source material only**. They are not a script to paste. ' +
       'Never output internal business instructions, persona training, or brand-brief lines. ' +
@@ -465,7 +460,6 @@ export class GenerationService {
         role: 'system',
         content:
           baseRules +
-          scopeRule +
           ' For menu/services/products questions: reply with at most **4** items unless the customer asked for the full list. ' +
           'Use a clean shape: each item = name on one line, then a very short description (from the excerpt only).' +
           sectionRule,
@@ -474,7 +468,7 @@ export class GenerationService {
 
     return {
       role: 'system',
-      content: baseRules + scopeRule + ' Keep the reply to one or two short paragraphs unless they asked for detail.',
+      content: baseRules + ' Keep the reply to one or two short paragraphs unless they asked for detail.',
     };
   }
 
@@ -554,7 +548,7 @@ export class GenerationService {
       ];
       if (pc.latestIntent === 'GREETING' && priorAssistantMessageCount > 0) {
         parts.push(
-          'Continuation greeting rule: this is not the first message in the conversation. Do not repeat first-message routing scripts, welcome menus, intake checklists, or "please share your name" unless the customer explicitly asks to restart. Treat the greeting as a light acknowledgement inside the existing conversation. Use the last 3-5 visible turns, especially the most recent substantive customer message and the previous assistant reply. Do not repeat the same diagnostic question, do not ask where leads are leaking again if that was already asked, and never use the fixed phrase "Yes — coming back to this, the key question is where leads are leaking now". Reply briefly in context and move the conversation forward naturally.',
+          'Continuation greeting rule: this is not the first message in the conversation. Do not repeat first-message routing scripts, welcome menus, intake checklists, or "please share your name" unless the customer explicitly asks to restart. Treat the greeting as a light acknowledgement inside the existing conversation. Use the last 3-5 visible turns, especially the most recent substantive customer message and the previous assistant reply. Do not repeat a diagnostic question that was already asked. Reply briefly in context and move the conversation forward naturally.',
         );
       }
       if (priorAssistantMessageCount >= 2) {

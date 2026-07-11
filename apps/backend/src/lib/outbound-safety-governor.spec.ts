@@ -3,7 +3,6 @@ import {
   SAFE_UNSUPPORTED_BUSINESS_CLAIM_REPLY,
   detectComplaintServiceIssue,
   isTrustedExecutedBookSlotSource,
-  isUnsupportedSalonScopeQuery,
   shouldRewriteUnrequestedMenuRepetition,
   textClaimsBookingConfirmed,
   userAskedForColourAlternatives,
@@ -69,16 +68,6 @@ describe('outbound-safety-governor', () => {
       const r = detectComplaintServiceIssue('I want a refund — this was terrible');
       expect(r.triggered).toBe(true);
       expect(r.tags).toContain('complaint_service_issue');
-    });
-  });
-
-  describe('isUnsupportedSalonScopeQuery', () => {
-    it('detects neck massage scope question', () => {
-      expect(isUnsupportedSalonScopeQuery('do you do neck massage?')).toBe(true);
-    });
-
-    it('does not flag generic hair question', () => {
-      expect(isUnsupportedSalonScopeQuery('Do you do balayage for Asian hair?')).toBe(false);
     });
   });
 

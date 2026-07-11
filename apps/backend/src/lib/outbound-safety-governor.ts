@@ -108,22 +108,6 @@ export function detectComplaintServiceIssue(raw: string): ComplaintServiceIssue 
   return { triggered: false, reason: 'none', colourRelated: false, tags: [] };
 }
 
-/** Non-hair / out-of-salon-scope questions where prior colour topic should not drive recommendations. */
-const OUT_OF_SCOPE_SALON: RegExp[] = [
-  /\bneck\s+massage\b/i,
-  /\b(do\s+you\s+do|do\s+you\s+offer)\s+([a-z]+\s+){0,3}massage\b/i,
-  /\bfull[\s-]*body\s+massage\b/i,
-  /\bmanicure\b/i,
-  /\bpedi(cure)?\b/i,
-  /\beyebrow(s)?\s+(tattoo|microblad)\b/i,
-];
-
-export function isUnsupportedSalonScopeQuery(raw: string): boolean {
-  const t = raw.trim();
-  if (!t) return false;
-  return OUT_OF_SCOPE_SALON.some(r => r.test(t));
-}
-
 const MENU_ASK = /\b(menu|categories|category|options?|what\s+do\s+you\s+offer|list\s+of\s+services|book\s+from\s+the\s+menu)\b/i;
 const ALTERNATIVE_ASK =
   /\b(any\s+other|what\s+else|alternatives?|other\s+options?|something\s+else|instead|recommend(ation)?s?\s+for\s+colou?r|other\s+colou?r\s+options?)\b/i;
@@ -547,7 +531,7 @@ export function buildGovernorCapabilityAppendix(params: {
     `- If bookingCapability is collect_details_only, use pending / team-will-confirm language instead.\n` +
     `- If bookingCapability is live_slot_booking, the assistant may offer live CRM slots and collect a selection, but must still avoid confirmed/booked language until the backend confirms a successful appointment create for this conversation.\n` +
     `- For complaints or service recovery, you may ask for details and rely on tag/handover flows — do not claim a callback was arranged unless those backend actions succeeded.\n` +
-    `- AISalesBot Pro can handle text enquiries and can process supported voice notes by transcription when voice handling is enabled; do not tell customers that voice notes are unsupported.\n` +
+    `- The assistant can handle text enquiries and can process supported voice notes by transcription when voice handling is enabled; do not tell customers that voice notes are unsupported.\n` +
     `- You can analyze photos customers send in chat (WhatsApp, Messenger, etc.) when the image is delivered to the platform. If they ask whether you understand or can see images, answer yes and invite them to send a photo — do not say you cannot analyze images unless this turn has no photo and they are not asking about capability.\n`
   );
 }

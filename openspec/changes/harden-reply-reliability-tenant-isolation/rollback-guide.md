@@ -127,6 +127,24 @@ both the legacy and composite relationships makes PostgREST embedded joins
 ambiguous. The write-time ownership trigger supplies mismatch enforcement in
 this phase.
 
+Assistant Profile ↔ Knowledge Vault links follow the same additive pattern in
+migration `20260711190000_tenant_own_profile_vault_links`: retain the nullable
+`tenant_id`, validation trigger, direct tenant foreign key, index, and RLS during
+an application rollback. Before enforcing `NOT NULL`, verify:
+
+```sql
+SELECT count(*)
+FROM public.tenant_bot_profile_knowledge_vaults
+WHERE tenant_id IS NULL;
+
+SELECT count(*)
+FROM public.tenant_bot_profile_knowledge_vaults link
+JOIN public.tenant_bot_profiles profile ON profile.id = link.profile_id
+JOIN public.knowledge_vaults vault ON vault.id = link.vault_id
+WHERE link.tenant_id IS DISTINCT FROM profile.tenant_id
+   OR link.tenant_id IS DISTINCT FROM vault.tenant_id;
+```
+
 ## Prompt/locale rollback
 
 - Roll tenant-by-tenant through explicit compatibility settings.

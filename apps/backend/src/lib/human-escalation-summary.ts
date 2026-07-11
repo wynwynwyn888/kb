@@ -1,6 +1,6 @@
 import type { MemoryEntry } from '../modules/orchestration/dto/memory-entry';
 
-const RE_MENU = /\b(menu|food|drink|dish|dishes|service)\b/i;
+const RE_OFFERINGS = /\b(service|services|product|products|offering|offerings|options)\b/i;
 const RE_BOOK = /\b(book|booking|reserve|appointment|slot)\b/i;
 const RE_PRICE = /\b(price|cost|how much|fee)\b/i;
 const RE_HOURS = /\b(open|close|hour|hours)\b/i;
@@ -21,7 +21,7 @@ export function buildReadableFallbackInternalSummary(
   const combined = `${lines.join('\n')} ${latestCustomerMessage}`.toLowerCase();
 
   const cues: string[] = [];
-  if (RE_MENU.test(combined)) cues.push('the service menu');
+  if (RE_OFFERINGS.test(combined)) cues.push('the business offerings');
   if (RE_BOOK.test(combined)) cues.push('booking or scheduling');
   if (RE_PRICE.test(combined)) cues.push('pricing');
   if (RE_HOURS.test(combined)) cues.push('business hours');

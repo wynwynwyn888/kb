@@ -146,17 +146,15 @@ export const KB_STOPWORDS = new Set([
   'got',
 ]);
 
-// Universal "menu / services / products" intent — covers restaurants, salons, clinics, retail.
-// We keep food-style keywords *and* generic service/product/category vocabulary so the same regex
-// works across verticals without hardcoding any one domain.
+// Universal business-offerings intent. Industry vocabulary belongs to tenant configuration/KB.
 const MENU_QUERY =
-  /\b(menu|menus|food|foods|eat|eating|drink|drinks|starter|starters|main|mains|dessert|desserts|vegan|vegetarian|dish|dishes|kitchen|lunch|dinner|breakfast|order|ordering|buffet|service|services|product|products|offering|offerings|catalogue|catalog|category|categories|treatment|treatments|grooming|groom|daycare|spa\b|boarding|kennel|packages?|pet\s+spa)\b/i;
+  /\b(menu|menus|service|services|product|products|offering|offerings|catalogue|catalog|category|categories|options|packages?)\b/i;
 const HOURS_QUERY =
   /\b(hour|hours|opening|open|close|closing|closed|time|times|when|weekday|weekdays|weekend|weekends|schedule|today|tomorrow|am|pm)\b/i;
 
 const HOURS_KB = /\b(hour|hours|opening|open|close|closing|weekday|weekends?|weekdays?|am|pm|schedule)\b/i;
 const MENU_KB =
-  /\b(menu|menus|food|drink|starter|starters|main|mains|dessert|desserts|vegan|vegetarian|dish|dishes|kitchen|buffet|course|service|services|product|products|offering|offerings|catalogue|catalog|category|categories|treatment|treatments|grooming|groom|daycare|spa\b|boarding|kennel|packages?|pet\s+spa)\b/i;
+  /\b(menu|menus|service|services|product|products|offering|offerings|catalogue|catalog|category|categories|options|packages?)\b/i;
 
 export function tokenizeMeaningful(text: string): string[] {
   return text
@@ -292,7 +290,7 @@ export function detectMenuIntentInMessage(text: string): boolean {
  * other intents use lexical relevance vs latest message.
  */
 export type FilterKbForPolicyOptions = {
-  /** When user picked A/B/C/D, anchor retrieval filter to this category label (e.g. Starters). */
+  /** When the user picked A/B/C/D, anchor retrieval to the tenant-provided category label. */
   menuKbAnchor?: string;
 };
 
@@ -313,8 +311,7 @@ export function filterKbChunksForPolicy(
 
   const menuAnchor = opts?.menuKbAnchor?.trim();
   if (intent === 'SHORT_SELECTION' && menuAnchor) {
-    // Universal synthetic query: anchor + generic "menu/services/products" terms so we don't
-    // skew the retriever toward food vocabulary.
+    // Synthetic query uses only generic business-offering vocabulary.
     const synthetic = `${menuAnchor} menu services products offerings categories items`;
     const rejections: KbRejectionLogEntry[] = [];
     const kept: RetrievalChunk[] = [];

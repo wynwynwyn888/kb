@@ -26,7 +26,7 @@ export interface AisbpPolicyStateV1 {
   v: 1;
   activeTopic?: string | null;
   awaiting?: PolicyAwaiting;
-  /** Option key → label (e.g. A → Haircut & Styling) */
+  /** Option key → tenant-provided label. */
   options?: Record<string, string>;
   lastAssistantOptions?: Record<string, string>;
   /** When the option list was last (re)written. Used for stale-state clearing. */
@@ -203,7 +203,7 @@ export type OptionMemoryStaleReason =
  *
  * Reasons:
  * - `prompt_updated_after_option_memory` — the active prompt config has been re-saved since the
- *   options were stored (covers "switched demo from restaurant to salon").
+ *   options were stored (covers switching between different tenant configurations).
  * - `kb_updated_after_option_memory` — the tenant's KB has changed and the *options no longer
  *   match* current KB section titles (true contamination signal, not just any KB save).
  * - `tenant_changed` — the conversation now belongs to a different tenant than the option memory.

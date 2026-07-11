@@ -4,10 +4,10 @@
  */
 
 export const DEFAULT_DISPLAY_TIMEZONE =
-  (typeof process !== 'undefined' && process.env['NEXT_PUBLIC_APP_TIMEZONE']?.trim()) || 'Asia/Singapore';
+  (typeof process !== 'undefined' && process.env['NEXT_PUBLIC_APP_TIMEZONE']?.trim()) || 'UTC';
 
 /**
- * Human-readable wall time in the app display timezone (GMT+8 by default: Singapore / Malaysia).
+ * Human-readable wall time in the configured app display timezone (UTC by default).
  * Example: "9 May 2026, 11:06 pm" — avoids raw ISO and browser-local ambiguity.
  */
 export function formatDisplayDateTime(iso: string | null | undefined, timeZone: string = DEFAULT_DISPLAY_TIMEZONE): string {

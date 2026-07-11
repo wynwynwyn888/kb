@@ -303,11 +303,15 @@ describe('InboundMessageProcessor', () => {
 
   describe('timestamp normalization', () => {
     it('parses GHL workflow D/M/YYYY timestamps as day-month-year instead of US month-day', () => {
+      const previousOffset = process.env['GHL_WORKFLOW_TIMEZONE_OFFSET_MINUTES'];
+      process.env['GHL_WORKFLOW_TIMEZONE_OFFSET_MINUTES'] = '480';
       expect(normalizeInboundTimestampForPersist('9/7/2026 22:45')).toEqual({
         iso: '2026-07-09T14:45:00.000Z',
         raw: '9/7/2026 22:45',
         source: 'workflow_local_dmy',
       });
+      if (previousOffset === undefined) delete process.env['GHL_WORKFLOW_TIMEZONE_OFFSET_MINUTES'];
+      else process.env['GHL_WORKFLOW_TIMEZONE_OFFSET_MINUTES'] = previousOffset;
     });
 
     it('falls back to server time when the workflow timestamp is removed', () => {

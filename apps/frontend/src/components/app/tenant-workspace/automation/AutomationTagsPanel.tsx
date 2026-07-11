@@ -621,7 +621,7 @@ export function AutomationTagsPanel() {
                             <textarea
                               value={kwDraft[rule.id] ?? rule.keywords.join('\n')}
                               onChange={e => setKwDraft(prev => ({ ...prev, [rule.id]: e.target.value }))}
-                              placeholder="e.g. oily scalp"
+                              placeholder="e.g. pricing enquiry"
                               rows={3}
                               style={{ ...mvpInputStyle, marginTop: '0.35rem', width: '100%', resize: 'vertical', fontSize: '0.85rem' }}
                             />

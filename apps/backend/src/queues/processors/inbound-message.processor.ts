@@ -126,10 +126,11 @@ export function parseGhlWorkflowLocalTimestamp(raw: string): string | null {
   ) {
     return null;
   }
-  // GHL workflow `{{right_now.time}}` values arrive without timezone and are
-  // rendered in the account/business local time. The current production tenant
-  // runs in Singapore time; normalize this legacy flat-workflow format to UTC.
-  const utcMs = Date.UTC(year, month - 1, day, hour - 8, minute, second);
+  // GHL workflow `{{right_now.time}}` values arrive without timezone. Apply an
+  // explicitly configured legacy workflow offset; default to UTC with no regional assumption.
+  const configuredOffset = Number(process.env['GHL_WORKFLOW_TIMEZONE_OFFSET_MINUTES'] ?? '0');
+  const offsetMinutes = Number.isFinite(configuredOffset) ? configuredOffset : 0;
+  const utcMs = Date.UTC(year, month - 1, day, hour, minute - offsetMinutes, second);
   return new Date(utcMs).toISOString();
 }
 

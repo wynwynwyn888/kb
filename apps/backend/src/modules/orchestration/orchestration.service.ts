@@ -303,7 +303,7 @@ export class ConversationOrchestrationService {
       let retrieveQuery = latestMsg;
       let menuKbAnchor: string | undefined;
       // Universal: if user replied with a short selection AND we have option memory, expand the
-      // KB query to use the selectedText (e.g. "Haircut & Styling") instead of the literal "A".
+      // KB query uses the tenant-provided selectedText instead of the literal option letter.
       const optionsAwaiting =
         policyStatePre.awaiting === 'menu_category_selection' ||
         policyStatePre.awaiting === 'option_selection';

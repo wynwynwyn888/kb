@@ -444,7 +444,7 @@ export class GenerationService {
           'Answer each distinct question or theme **in order** in one reply — do not only address the last line. ' +
           'If one line is factual (hours, location, price) and another is different, answer both briefly in the same message. ' +
           'If one line requests something likely out of scope for this business and another is in scope, address the in-scope part and politely clarify the other. ' +
-          'When several threads compete, prioritize: (1) safety, allergy, medical concerns, complaints (2) booking (3) factual KB (hours, location, price) (4) out-of-scope vs alternatives (5) recommendations (6) menu / meta / small talk. ' +
+          'When several threads compete, prioritize: (1) safety concerns and complaints (2) booking (3) factual KB such as hours, location, and price (4) scope clarification (5) recommendations (6) general browsing and small talk. ' +
           'Use only facts that answer those messages; '
         : 'Use only facts that answer the **latest** customer message; ignore irrelevant snippets, distractions, and off-topic media. ') +
       'Summarize and rewrite into a short, natural WhatsApp-style reply.\n\n' +
@@ -460,7 +460,7 @@ export class GenerationService {
         role: 'system',
         content:
           baseRules +
-          ' For menu/services/products questions: reply with at most **4** items unless the customer asked for the full list. ' +
+          ' For questions about the business\'s offerings: reply with at most **4** items unless the customer asked for the full list. ' +
           'Use a clean shape: each item = name on one line, then a very short description (from the excerpt only).' +
           sectionRule,
       };
@@ -531,7 +531,7 @@ export class GenerationService {
         role: 'system',
         content:
           'No knowledge-base data is available for this query. Be honest about what you do and do not know. ' +
-          'Do not invent prices, menus, availability, policies, or booking details. ' +
+          'Do not invent prices, offerings, availability, policies, or booking details. ' +
           'If the answer requires business-specific information you do not have, say so clearly and ask what else you can help with.',
       });
     }
@@ -548,7 +548,7 @@ export class GenerationService {
       ];
       if (pc.latestIntent === 'GREETING' && priorAssistantMessageCount > 0) {
         parts.push(
-          'Continuation greeting rule: this is not the first message in the conversation. Do not repeat first-message routing scripts, welcome menus, intake checklists, or "please share your name" unless the customer explicitly asks to restart. Treat the greeting as a light acknowledgement inside the existing conversation. Use the last 3-5 visible turns, especially the most recent substantive customer message and the previous assistant reply. Do not repeat a diagnostic question that was already asked. Reply briefly in context and move the conversation forward naturally.',
+          'Continuation greeting rule: this is not the first message in the conversation. Do not repeat first-message routing scripts, welcome choices, intake checklists, or "please share your name" unless the customer explicitly asks to restart. Treat the greeting as a light acknowledgement inside the existing conversation. Use the last 3-5 visible turns, especially the most recent substantive customer message and the previous assistant reply. Do not repeat a diagnostic question that was already asked. Reply briefly in context and move the conversation forward naturally.',
         );
       }
       if (priorAssistantMessageCount >= 2) {
@@ -578,12 +578,12 @@ export class GenerationService {
       }
       if (pc.optionMenuSourceExcerpt?.trim()) {
         parts.push(
-          `The customer just picked from this menu the assistant previously sent (excerpt): ${pc.optionMenuSourceExcerpt.trim()}`,
+          `The customer just picked from choices the assistant previously sent (excerpt): ${pc.optionMenuSourceExcerpt.trim()}`,
         );
       }
       if (pc.latestIntent === 'MENU' || pc.latestIntent === 'SHORT_SELECTION') {
         parts.push(
-          'Menu rule: Never invent dish names, drink names, prices, availability, dietary claims, or marketing descriptions not explicitly supported by the KB excerpts.',
+          'Offerings rule: Never invent item or service names, prices, availability, suitability claims, or marketing descriptions not explicitly supported by the KB excerpts.',
         );
       }
       if (pc.latestIntent === 'BOOKING') {

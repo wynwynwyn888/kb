@@ -52,8 +52,8 @@ describe('expandKbQueryWithIntent', () => {
     expect(expandKbQueryWithIntent('menu pls').broadMenuListingQuery).toBe(true);
   });
 
-  it('"grooming?" maps to INTENT_MENU', () => {
-    expect(expandKbQueryWithIntent('grooming?').intents).toContain('INTENT_MENU');
+  it('a generic offerings query maps to INTENT_MENU', () => {
+    expect(expandKbQueryWithIntent('what services do you offer?').intents).toContain('INTENT_MENU');
   });
 
   it('aftercareIntent for post-care phrasing', () => {

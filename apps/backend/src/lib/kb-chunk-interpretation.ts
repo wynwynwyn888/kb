@@ -1,6 +1,6 @@
 /**
  * Classifies KB paragraphs for safe customer-facing use vs internal-only ops copy.
- * Mixed restaurant notes (tone + menu + hours) are split so internal lines never reach verbatim KB injection.
+ * Mixed tenant notes are split so internal instructions never reach customer-facing KB injection.
  */
 
 import type { RetrievalChunk } from '../modules/kb/dto/retrieval.dto';
@@ -10,8 +10,6 @@ export type KbSectionKind =
   | 'menu_data'
   | 'operating_hours'
   | 'address'
-  | 'dietary_guidance'
-  | 'beverage_pairing'
   | 'reservation_guidance'
   | 'special_request_internal'
   | 'complaint_flow_internal'
@@ -46,9 +44,6 @@ export function classifyKbParagraph(raw: string): KbSectionKind {
   if (/\brecommendation\s*rules\s*:/i.test(s) || /\bkeep\s+suggestions\s+selective\b/i.test(s)) {
     return 'recommendation_style_internal';
   }
-  if (/\bwhen\s+responding\s+to\s+guests\b/i.test(s) || /\bthe\s+dining\s+experience\s+should\s+feel\b/i.test(s)) {
-    return 'recommendation_style_internal';
-  }
   if (/\b(?:internal|staff-only|for\s+staff)\b.*\b(?:format|template|script)\b/i.test(s)) {
     return 'special_request_internal';
   }
@@ -61,25 +56,11 @@ export function classifyKbParagraph(raw: string): KbSectionKind {
     return 'operating_hours';
   }
 
-  if (/\b\d{5,6}\b/.test(s) && /\b(?:ave|avenue|st\.?|street|road|drive|singapore)\b/i.test(s)) {
-    return 'address';
-  }
-  if (/\bmarina\s+bay|bayfront\s+ave\b/i.test(s)) {
+  if (/\b\d{4,10}\b/.test(s) && /\b(?:ave|avenue|st\.?|street|road|drive|lane|boulevard|building)\b/i.test(s)) {
     return 'address';
   }
 
-  if (/\b(?:wine|pairing|sommelier|cocktails?|beverages?)\b/i.test(s) && /\b(?:pair|suggest|recommend)\b/i.test(s)) {
-    return 'beverage_pairing';
-  }
-
-  if (/\b(?:vegan|vegetarian|gluten|allerg|dairy|nuts?|halal|kosher)\b/i.test(s)) {
-    return 'dietary_guidance';
-  }
-
-  if (/\bRESTAURANT\s+MENU\b/i.test(s) || /\b(?:STARTERS?|MAINS?|DESSERTS?)\b.*\n/i.test(s)) {
-    return 'menu_data';
-  }
-  if (/\$\s*\d|\bSGD\s*\d|\bEUR\s*\d|\bUSD\s*\d/.test(s) && /[A-D]\)|^\s*\d+\.\s/m.test(s)) {
+  if (/(?:[$€£]|\b[A-Z]{3}\s*)\d/.test(s) && /[A-H]\)|^\s*\d+\.\s/m.test(s)) {
     return 'menu_data';
   }
 
@@ -113,8 +94,6 @@ export function summarizeSegmentKinds(segments: KbInterpretedSegment[]): Record<
     'menu_data',
     'operating_hours',
     'address',
-    'dietary_guidance',
-    'beverage_pairing',
     'reservation_guidance',
     'special_request_internal',
     'complaint_flow_internal',

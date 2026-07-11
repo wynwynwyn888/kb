@@ -1,4 +1,4 @@
-// Pre-send safety: booking-language guard, menu repetition rewrite — runs before GHL outbound.
+// Pre-send safety: booking and unsupported-business-claim guards — runs before CRM outbound.
 
 import { Injectable, Logger, Optional } from '@nestjs/common';
 import { classifyConversationIntent } from '../conversation-policy/conversation-intent';
@@ -9,7 +9,6 @@ import { KbService } from '../kb/kb.service';
 import {
   isTrustedExecutedBookSlotSource,
   rewriteUnsupportedBusinessClaimsWhenNoKb,
-  shouldRewriteUnrequestedMenuRepetition,
   textClaimsBookingConfirmed,
 } from '../../lib/outbound-safety-governor';
 
@@ -104,7 +103,6 @@ export class OutboundSafetyGovernorService {
     let next = plan;
 
     next = await this.applyBookingClaimGuard(next, ctx.conversationId);
-    next = await this.applyMenuRepetitionGuard(next, ctx.conversationId);
     next = await this.applyNoKbClaimGuard(next, ctx);
 
     return next;
@@ -217,46 +215,4 @@ export class OutboundSafetyGovernorService {
     };
   }
 
-  private async applyMenuRepetitionGuard(plan: ReplyDecision, conversationId: string): Promise<ReplyDecision> {
-    const inbound = await this.getLatestInbound(conversationId);
-    if (!inbound) return plan;
-
-    const joined = plan.bubbles.map(b => b.text).join('\n\n');
-    const intent = classifyConversationIntent(inbound.content.trim());
-
-    if (
-      !shouldRewriteUnrequestedMenuRepetition({
-        replyText: joined,
-        latestInboundText: inbound.content,
-        latestIntent: intent,
-      })
-    ) {
-      return plan;
-    }
-
-    this.logger.log(
-      `outboundSafetyRewrite: ${JSON.stringify({
-        reason: 'unrequested_menu_repetition',
-        conversationId,
-      })}`,
-    );
-
-    return {
-      ...plan,
-      planStatus: 'HANDOVER',
-      responseMode: 'handover',
-      handoverRecommended: true,
-      bubbles: [],
-      rationale: `${plan.rationale}; humanTakeover=unrequested_menu_repetition`,
-      suggestedActions: [
-        ...plan.suggestedActions,
-        {
-          type: 'ESCALATE',
-          params: { reason: 'unrequested_menu_repetition' },
-          reason: 'Outbound safety blocked unrequested repeated menu reply',
-        },
-      ],
-      draftProvenance: 'human_escalation',
-    };
-  }
 }

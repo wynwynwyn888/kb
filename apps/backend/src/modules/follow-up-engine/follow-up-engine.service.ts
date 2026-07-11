@@ -121,7 +121,7 @@ export class FollowUpEngineService implements OnModuleInit, OnModuleDestroy {
       this.logger.warn(`resolveTenantTimeZone: ${error.message}`);
     }
     const tz = parseTenantTzFromSettings(data?.settings) ?? resolveAppTimeZone();
-    return tz || 'Asia/Singapore';
+    return tz || 'UTC';
   }
 
   /**

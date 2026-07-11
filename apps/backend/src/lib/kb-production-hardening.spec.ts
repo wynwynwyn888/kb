@@ -30,20 +30,20 @@ function chunk(id: string, content: string, meta: Record<string, unknown> = {}):
 }
 
 describe('KB production hardening', () => {
-  it('1: mixed restaurant KB + internal guidance — internal paragraphs excluded from customer assembly', () => {
+  it('1: mixed tenant KB and internal guidance excludes instructions from customer assembly', () => {
     const mixed = [
-      'The dining experience should feel premium and unhurried.',
-      'When responding to guests, keep tone warm and concise.',
+      'Customers should feel supported and confident.',
+      'When responding to customers, keep tone warm and concise.',
       '',
       'Operating hours: 10am to 12am daily, including public holidays.',
-      'Address: Marina Bay Sands, 10 Bayfront Ave, Singapore 018956',
+      'Address: 10 Example Avenue, 12345',
     ].join('\n\n');
     const segs = segmentKbContent(mixed);
     const facing = assembleCustomerFacingSegments(segs);
     expect(facing).toMatch(/10am to 12am/i);
-    expect(facing).toMatch(/Marina Bay Sands/i);
-    expect(facing).not.toMatch(/dining experience should feel/i);
-    expect(facing).not.toMatch(/When responding to guests/i);
+    expect(facing).toMatch(/Example Avenue/i);
+    expect(facing).not.toMatch(/Customers should feel/i);
+    expect(facing).not.toMatch(/When responding to customers/i);
   });
 
   it('2: operating hours query corpus — hours segments extractable', () => {
@@ -54,19 +54,19 @@ describe('KB production hardening', () => {
     const interpreted = interpretRetrievalChunks(kb);
     const out = composeFactsOnlyFallbackFromKb('BUSINESS_HOURS', interpreted);
     expect(out).toMatch(/10am|12am|open/i);
-    expect(out).not.toMatch(/dining experience should feel/i);
+    expect(out).not.toMatch(/Customers should feel/i);
   });
 
   it('3: menu query without anchor → original chunks pass through (no fake categories)', () => {
     const c = chunk('m1', [
-      'Internal: When responding to guests, be selective.',
+      'Internal: When responding to customers, be selective.',
       '',
-      'SERVICE MENU',
-      'A) Cuts',
-      'B) Colour',
-    ].join('\n'), { sectionTitle: 'SERVICE MENU' });
+      'SERVICE OPTIONS',
+      'A) Basic Support',
+      'B) Premium Support',
+    ].join('\n'), { sectionTitle: 'SERVICE OPTIONS' });
     const out = prepareCustomerFacingMenuKb([c], {
-      latestUserMessage: 'menu pls',
+      latestUserMessage: 'what services do you offer',
       latestIntent: 'MENU',
     });
     expect(out).toEqual([c]);
@@ -77,18 +77,18 @@ describe('KB production hardening', () => {
       'OPENING HOURS',
       'Mon-Fri 10am-7pm',
       '',
-      'COLOUR SERVICES',
-      'Balayage from RM350',
-      'Root touch up RM150',
+      'SUPPORT SERVICES',
+      'Premium Support from USD 350',
+      'Basic Support USD 150',
       '',
-      'HAIRCUT & STYLING',
-      'Ladies cut RM80',
+      'TRAINING SERVICES',
+      'Team Workshop USD 80',
     ].join('\n');
-    const slice = findSectionSliceByLabel(merged, 'Colour Services');
+    const slice = findSectionSliceByLabel(merged, 'Support Services');
     expect(slice).not.toBeNull();
     const text = merged.slice(slice!.start, slice!.end);
-    expect(text).toMatch(/Balayage|Root touch/i);
-    expect(text).not.toMatch(/Ladies cut/i);
+    expect(text).toMatch(/Premium Support|Basic Support/i);
+    expect(text).not.toMatch(/Team Workshop/i);
   });
 
   it('5: special request logging guidance is not in customer-facing assembly', () => {
@@ -129,11 +129,11 @@ describe('KB production hardening', () => {
   });
 
   it('outbound guard blocks verbatim internal phrases and rebuilds with KB when provided', () => {
-    const leaked = 'Thanks for asking! When responding to guests, keep suggestions selective.';
+    const leaked = 'Thanks for asking! When responding to customers, use this exact format.';
     expect(outboundContainsHardKbLeak(leaked)).toBe(true);
     const kb = [chunk('h', 'Operating hours: 10am to 12am daily.')];
     const fixed = sanitizeOutboundInternalKbLeak(leaked, 'BUSINESS_HOURS', kb);
-    expect(fixed).not.toMatch(/When responding to guests|selective/i);
+    expect(fixed).not.toMatch(/When responding to customers|exact format/i);
     expect(fixed).toMatch(/10am|12am|open/i);
   });
 });

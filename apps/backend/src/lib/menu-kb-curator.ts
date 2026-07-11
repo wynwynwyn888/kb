@@ -2,8 +2,8 @@
  * Universal "menu / services / products" KB curator.
  *
  * Goals:
- * - Never hardcode restaurant categories (Starters / Mains / Desserts / Vegan).
- * - When the user picked an option (e.g. "Haircut & Styling"), prefer chunks whose `sectionTitle`
+ * - Never hardcode industry categories.
+ * - When the user picked an option, prefer chunks whose `sectionTitle`
  *   matches that label and slice their content to a short customer-facing excerpt.
  * - When no anchor is given, return the original chunks unchanged — section-aware retrieval has
  *   already done the right thing.
@@ -64,7 +64,7 @@ export function extractMenuItemBlocks(sectionText: string, maxItems: number): st
  * Find the slice of merged KB text that corresponds to the given section label, generically.
  *
  * - Looks for a heading line that contains all of the label's significant tokens, regardless of
- *   case ("HAIRCUT & STYLING" matches "Haircut", "ADDRESS" matches "address", etc.).
+ *   case ("PREMIUM SUPPORT" matches "Premium", "ADDRESS" matches "address", etc.).
  * - If found, slice up to the next ALL-CAPS heading line (or 1.6kB cap).
  * - If not found, returns null.
  */
@@ -124,7 +124,7 @@ export type PrepareMenuKbParams = {
  * Curated chunks for menu/services flows. Universal:
  *
  * - With anchor → slice by section label and emit one curated synthetic chunk.
- * - Without anchor → pass chunks through unchanged (no restaurant assumptions).
+ * - Without anchor → pass chunks through unchanged.
  */
 export function prepareCustomerFacingMenuKb(
   chunks: RetrievalChunk[],

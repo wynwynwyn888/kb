@@ -151,7 +151,7 @@ function classifyChunkType(title: string, body: string): WebsiteKnowledgeCardChu
   if (/\b(roi|return on investment|calculator|%|x\b|increase|reduce|save|missed leads|24\/7|seconds?|minutes?)\b/.test(text)) return 'roi_claim';
   if (CTA_RE.test(text)) return 'cta';
   if (/\b(not just|chatbot|human|handover|escalat|compare|comparison|instead of)\b/.test(text)) return 'objection_handling';
-  if (/\b(industry|industries|clinic|salon|real estate|education|fitness|agency|restaurant|retail|use case)\b/.test(text)) return 'industry_use_case';
+  if (/\b(industry|industries|sector|sectors|vertical|verticals|use case|use cases)\b/.test(text)) return 'industry_use_case';
   if (/\b(how it works|setup|step|process|workflow|integrat|connect|install|onboard)\b/.test(text)) return 'process';
   if (/\b(qualif|lead score|budget|timeline|requirements?|fit)\b/.test(text)) return 'qualification';
   if (/\b(refund|guarantee|policy|privacy|terms|contract|compliance)\b/.test(text)) return 'policy';
@@ -178,7 +178,7 @@ function tagsForCard(chunkType: WebsiteKnowledgeCardChunkType, title: string, bo
   if (/missed lead|lead/.test(text)) tags.push('lead_capture');
   if (/roi|calculator|%|24\/7/.test(text)) tags.push('roi');
   if (/price|pricing|cost|plan/.test(text)) tags.push('pricing');
-  if (/industry|clinic|salon|real estate|fitness|restaurant/.test(text)) tags.push('industry');
+  if (/industry|sector|vertical|use case/.test(text)) tags.push('industry');
   return uniqueStrings(tags, 8);
 }
 

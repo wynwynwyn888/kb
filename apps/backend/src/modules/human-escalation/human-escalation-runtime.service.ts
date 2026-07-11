@@ -190,11 +190,25 @@ export class HumanEscalationRuntimeService {
       contactId: contactId?.trim() || null,
     });
 
+    // Do not depend on a customer-facing acknowledgement being generated/sent. Some valid
+    // escalation paths intentionally produce no outbound bubble; the send worker remains a retry.
+    let immediateAlert: Awaited<ReturnType<HumanEscalationRuntimeService['flushPendingInternalAlert']>> = 'failed';
+    try {
+      immediateAlert = await this.flushPendingInternalAlert(tenantId, conversationId, null);
+    } catch (e) {
+      this.logger.warn(
+        `humanEscalationImmediateAlertFailed ${JSON.stringify({
+          conversationId,
+          tenantId,
+          message: e instanceof Error ? e.message : String(e),
+        })}`,
+      );
+    }
     this.logger.log(
-      `humanEscalationInternalAlertDeferred ${JSON.stringify({
+      `humanEscalationImmediateAlertAttempt ${JSON.stringify({
         conversationId,
         tenantId,
-        reason: 'await_outbound_channel',
+        outcome: immediateAlert,
       })}`,
     );
 

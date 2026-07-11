@@ -241,9 +241,7 @@ describe('HumanEscalationRuntimeService', () => {
       contactDisplayName: 'Daphne Wong',
     });
 
-    expect(notify.sendInternalAlert).not.toHaveBeenCalled();
-
-    await makeSvc().flushPendingInternalAlert('t1', 'c1', 'INSTAGRAM');
+    expect(notify.sendInternalAlert).toHaveBeenCalledTimes(1);
 
     const body = String(notify.sendInternalAlert.mock.calls[0]![0].messageBody);
     expect(body).toContain('Channel: instagram');

@@ -382,6 +382,20 @@ function HandoverMeta({ handover }: { handover: ActiveHandoverRow }) {
       <p style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted)', margin: 0 }}>
         {handover.reasonLabel?.trim() || 'Human escalation'} · started {formatDateTime(handover.createdAt)}
       </p>
+      <div
+        style={{
+          marginTop: '0.55rem',
+          padding: '0.6rem 0.7rem',
+          borderRadius: 7,
+          background: 'var(--aisbp-surface-muted, rgba(148, 163, 184, 0.12))',
+          border: '1px solid var(--aisbp-border)',
+        }}
+      >
+        <p style={{ ...mvpLabelStyle, margin: '0 0 0.25rem' }}>Customer message that triggered escalation</p>
+        <p style={{ fontSize: '0.82rem', color: 'var(--aisbp-text)', margin: 0, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
+          {handover.triggerMessage?.trim() || 'Triggering message is unavailable for this older escalation.'}
+        </p>
+      </div>
     </div>
   );
 }

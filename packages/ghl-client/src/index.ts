@@ -278,6 +278,17 @@ export interface GhlSendMessageResponse {
   timestamp: string;
 }
 
+export type GhlSendFailureOutcome = 'provider_rejected' | 'provider_outcome_unknown';
+
+export interface GhlSendMessageResult {
+  success: boolean;
+  messageId?: string;
+  conversationId?: string;
+  error?: string;
+  /** A transport failure without a response may have reached GHL. */
+  failureOutcome?: GhlSendFailureOutcome;
+}
+
 // Contact tagging types
 export interface TagContactRequest {
   contactId: string;
@@ -968,11 +979,11 @@ export class GhlClient {
  *
  * Other channels (WHATSAPP, FACEBOOK, etc.) are unverified — will return an explicit error.
  */
-  async sendMessage(request: GhlSendMessageRequest): Promise<{ success: boolean; messageId?: string; conversationId?: string; error?: string }> {
+  async sendMessage(request: GhlSendMessageRequest): Promise<GhlSendMessageResult> {
     const config = getChannelConfig(request.channel);
     if (!config) {
       const supported = Object.keys(CHANNEL_MAP).filter(k => CHANNEL_MAP[k as OutboundChannel] !== null);
-      return { success: false, error: `Channel ${request.channel} is not yet verified. Supported: ${supported.join(', ') || 'none'}` };
+      return { success: false, error: `Channel ${request.channel} is not yet verified. Supported: ${supported.join(', ') || 'none'}`, failureOutcome: 'provider_rejected' };
     }
 
     try {
@@ -1027,17 +1038,23 @@ export class GhlClient {
     return null;
   }
 
-  private handleSendError(error: unknown): { success: boolean; error: string } {
+  private handleSendError(error: unknown): GhlSendMessageResult {
     if (axios.isAxiosError(error)) {
       const status = error.response?.status;
       const ghlMessage = this.extractGhlErrorMessage(error);
       if (process.env['NODE_ENV'] !== 'production') {
         this.logger.debug(`[SEND_VERIFY] POST /conversations/messages — HTTP ${status ?? 'unknown'}, ghlMessage=${ghlMessage ?? 'none'}`);
       }
-      if (status === 401) return { success: false, error: 'Invalid or expired token' };
-      if (status === 403) return { success: false, error: 'Insufficient permissions for this location' };
-      if (status === 404) return { success: false, error: 'Conversation or location not found' };
-      if (status === 429) return { success: false, error: 'Rate limited by GHL API' };
+      // A 4xx response (except timeout) proves GHL rejected this request. A
+      // transport failure, timeout, or 5xx can occur after server-side acceptance.
+      const failureOutcome: GhlSendFailureOutcome =
+        typeof status === 'number' && status >= 400 && status < 500 && status !== 408
+          ? 'provider_rejected'
+          : 'provider_outcome_unknown';
+      if (status === 401) return { success: false, error: 'Invalid or expired token', failureOutcome };
+      if (status === 403) return { success: false, error: 'Insufficient permissions for this location', failureOutcome };
+      if (status === 404) return { success: false, error: 'Conversation or location not found', failureOutcome };
+      if (status === 429) return { success: false, error: 'Rate limited by GHL API', failureOutcome };
       if (status === 422) {
         // 422 Unprocessable Entity — body validation failed
         // Extract structured field first, then fall back to raw body excerpt
@@ -1051,11 +1068,11 @@ export class GhlClient {
             : JSON.stringify(rawBody).slice(0, 500);
         }
         const note = bodyExcerpt ?? `HTTP ${status}`;
-        return { success: false, error: note };
+        return { success: false, error: note, failureOutcome };
       }
-      return { success: false, error: ghlMessage || error.message || 'Send failed' };
+      return { success: false, error: ghlMessage || error.message || 'Send failed', failureOutcome };
     }
-    return { success: false, error: 'Unknown error during send' };
+    return { success: false, error: 'Unknown error during send', failureOutcome: 'provider_outcome_unknown' };
   }
 
   // ---------------------------------------------------------------------------
@@ -2040,7 +2057,5 @@ export function createGhlApiError(code: string, message: string, status: number)
 
 // Export types for use in other packages
 // (Types are already exported via their inline interface declarations above)
-
-
 
 

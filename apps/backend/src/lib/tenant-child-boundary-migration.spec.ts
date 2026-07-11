@@ -9,6 +9,13 @@ describe('tenant-owned message and handover migration', () => {
     ),
     'utf8',
   );
+  const relationshipHotfix = readFileSync(
+    join(
+      process.cwd(),
+      'prisma/migrations/20260711173000_remove_ambiguous_child_composite_fks/migration.sql',
+    ),
+    'utf8',
+  );
 
   it('adds and backfills tenant ownership for both child tables', () => {
     expect(migration).toContain('ALTER TABLE public.messages');
@@ -21,6 +28,8 @@ describe('tenant-owned message and handover migration', () => {
     expect(migration).toContain('tenant ownership mismatch for conversation');
     expect(migration).toContain('messages_conversation_tenant_fkey');
     expect(migration).toContain('handover_events_conversation_tenant_fkey');
+    expect(relationshipHotfix).toContain('DROP CONSTRAINT IF EXISTS messages_conversation_tenant_fkey');
+    expect(relationshipHotfix).toContain('DROP CONSTRAINT IF EXISTS handover_events_conversation_tenant_fkey');
   });
 
   it('enables RLS only with authenticated membership policies present', () => {

@@ -121,8 +121,11 @@ JOIN public.conversations c ON c.id = h.conversation_id
 WHERE h.tenant_id IS DISTINCT FROM c.tenant_id;
 ```
 
-All four counts must be zero before later enforcement of `NOT NULL` or
-validation of the `NOT VALID` foreign keys.
+All four counts must be zero before later enforcement of `NOT NULL`. Composite
+child-to-conversation foreign keys are intentionally deferred because retaining
+both the legacy and composite relationships makes PostgREST embedded joins
+ambiguous. The write-time ownership trigger supplies mismatch enforcement in
+this phase.
 
 ## Prompt/locale rollback
 

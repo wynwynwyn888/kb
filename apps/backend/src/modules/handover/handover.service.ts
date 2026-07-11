@@ -40,6 +40,7 @@ export class HandoverService {
   ) {}
 
   async initiate(
+    tenantId: string,
     conversationId: string,
     type: 'REQUEST' | 'TRANSFER',
     initiatedBy: string,
@@ -51,6 +52,7 @@ export class HandoverService {
       .from('handover_events')
       .insert({
         id: randomUUID(),
+        tenant_id: tenantId,
         conversation_id: conversationId,
         type,
         status: 'ACTIVE',
@@ -80,11 +82,12 @@ export class HandoverService {
     return event.id;
   }
 
-  async resume(conversationId: string): Promise<void> {
+  async resume(tenantId: string, conversationId: string): Promise<void> {
     // Find active handover
     const { data: active, error: findError } = await this.supabase
       .from('handover_events')
       .select('id')
+      .eq('tenant_id', tenantId)
       .eq('conversation_id', conversationId)
       .eq('status', 'ACTIVE')
       .single();
@@ -97,6 +100,7 @@ export class HandoverService {
       const { error: updateError } = await this.supabase
         .from('handover_events')
         .update({ status: 'RESUMED', resumed_at: new Date().toISOString() })
+        .eq('tenant_id', tenantId)
         .eq('id', active.id);
 
       if (updateError) {
@@ -141,7 +145,7 @@ export class HandoverService {
     this.logger.log(`Handover resumed: conversationId=${conversationId}`);
   }
 
-  async getActiveHandover(conversationId: string): Promise<{
+  async getActiveHandover(tenantId: string, conversationId: string): Promise<{
     id: string;
     type: string;
     initiatedBy: string;
@@ -151,6 +155,7 @@ export class HandoverService {
     const { data, error } = await this.supabase
       .from('handover_events')
       .select('id, type, initiated_by, note, created_at')
+      .eq('tenant_id', tenantId)
       .eq('conversation_id', conversationId)
       .eq('status', 'ACTIVE')
       .single();
@@ -188,6 +193,7 @@ export class HandoverService {
           metadata
         )
       `)
+      .eq('tenant_id', tenantId)
       .eq('conversation.tenant_id', tenantId)
       .eq('status', 'ACTIVE')
       .order('created_at', { ascending: false });
@@ -293,7 +299,7 @@ export class HandoverService {
     return null;
   }
 
-  async getHandoverHistory(conversationId: string): Promise<{
+  async getHandoverHistory(tenantId: string, conversationId: string): Promise<{
     id: string;
     type: string;
     status: string;
@@ -305,6 +311,7 @@ export class HandoverService {
     const { data, error } = await this.supabase
       .from('handover_events')
       .select('id, type, status, initiated_by, note, created_at, resumed_at')
+      .eq('tenant_id', tenantId)
       .eq('conversation_id', conversationId)
       .order('created_at', { ascending: false });
 

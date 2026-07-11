@@ -44,14 +44,14 @@ export class HandoverController {
     @CurrentUser() user: SessionUser,
   ) {
     const { conversationId } = dto;
-    await this.assertConversationScope(user, conversationId);
+    const tenantId = await this.assertConversationScope(user, conversationId);
 
-    const active = await this.handoverService.getActiveHandover(conversationId);
+    const active = await this.handoverService.getActiveHandover(tenantId, conversationId);
     if (!active) {
       throw new NotFoundException('Active handover not found');
     }
 
-    await this.handoverService.resume(conversationId);
+    await this.handoverService.resume(tenantId, conversationId);
     return { success: true, conversationId };
   }
 
@@ -61,9 +61,9 @@ export class HandoverController {
     @Param('conversationId') conversationId: string,
     @CurrentUser() user: SessionUser,
   ) {
-    await this.assertConversationScope(user, conversationId);
+    const tenantId = await this.assertConversationScope(user, conversationId);
 
-    const handover = await this.handoverService.getActiveHandover(conversationId);
+    const handover = await this.handoverService.getActiveHandover(tenantId, conversationId);
     return {
       inHandover: handover !== null,
       handover: handover ?? null,
@@ -76,8 +76,8 @@ export class HandoverController {
     @Param('conversationId') conversationId: string,
     @CurrentUser() user: SessionUser,
   ) {
-    await this.assertConversationScope(user, conversationId);
-    return this.handoverService.getHandoverHistory(conversationId);
+    const tenantId = await this.assertConversationScope(user, conversationId);
+    return this.handoverService.getHandoverHistory(tenantId, conversationId);
   }
 
   private async assertTenantScope(user: SessionUser, effectiveTenantId: string): Promise<void> {
@@ -87,11 +87,12 @@ export class HandoverController {
     }
   }
 
-  private async assertConversationScope(user: SessionUser, conversationId: string): Promise<void> {
+  private async assertConversationScope(user: SessionUser, conversationId: string): Promise<string> {
     const conversation = await this.conversationsControllerService.findOne(conversationId);
     if (!conversation) {
       throw new NotFoundException('Conversation not found');
     }
     await this.assertTenantScope(user, conversation.tenantId);
+    return conversation.tenantId;
   }
 }

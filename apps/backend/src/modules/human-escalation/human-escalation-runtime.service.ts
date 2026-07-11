@@ -94,7 +94,7 @@ export class HumanEscalationRuntimeService {
     } = params;
 
     const settings = await this.escalationSettings.getSettings(tenantId);
-    const alreadyInHandover = await this.conversations.isInHandover(conversationId);
+    const alreadyInHandover = await this.conversations.isInHandover(tenantId, conversationId);
 
     if (!settings.enabled) {
       this.logger.log(
@@ -118,6 +118,7 @@ export class HumanEscalationRuntimeService {
     if (!alreadyInHandover) {
       try {
         await this.conversations.pauseForHandover(
+          tenantId,
           conversationId,
           'REQUEST',
           'AI',

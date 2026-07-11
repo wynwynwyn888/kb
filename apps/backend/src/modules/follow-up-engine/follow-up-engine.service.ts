@@ -140,7 +140,7 @@ export class FollowUpEngineService implements OnModuleInit, OnModuleDestroy {
     if (!settings.enabled) return;
 
     if (settings.stopOnEscalated) {
-      const inHandover = await this.conversations.isInHandover(conversationId);
+      const inHandover = await this.conversations.isInHandover(tenantId, conversationId);
       if (inHandover) {
         this.logger.log(
           `followUpScheduleSkipped ${JSON.stringify({ tenantId, conversationId, reason: 'handover_active' })}`,
@@ -362,7 +362,7 @@ export class FollowUpEngineService implements OnModuleInit, OnModuleDestroy {
 
     // Stop conditions
     if (settings.stopOnEscalated) {
-      const inHandover = await this.conversations.isInHandover(conversationId);
+      const inHandover = await this.conversations.isInHandover(tenantId, conversationId);
       if (inHandover) {
         await this.markJobSkipped(followUpJobId, 'handover_active');
         this.logger.log(
@@ -958,4 +958,3 @@ export class FollowUpEngineService implements OnModuleInit, OnModuleDestroy {
     return { expired, skippedPending, skippedBullExists };
   }
 }
-

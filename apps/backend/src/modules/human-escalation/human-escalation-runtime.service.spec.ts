@@ -165,8 +165,9 @@ describe('HumanEscalationRuntimeService', () => {
     });
 
     expect(result.escalated).toBe(true);
-    expect(conversations.pauseForHandover).toHaveBeenCalledWith(
-      'c1',
+      expect(conversations.pauseForHandover).toHaveBeenCalledWith(
+        't1',
+        'c1',
       'REQUEST',
       'AI',
       'human_intent:HUMAN_HANDOVER',

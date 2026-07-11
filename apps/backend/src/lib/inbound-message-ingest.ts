@@ -237,6 +237,7 @@ export async function ingestInboundMessage(
 
   const insertRow: Record<string, unknown> = {
     id: newId,
+    tenant_id: tenantId,
     conversation_id: conversationId,
     direction: params.direction,
     sender: params.sender,

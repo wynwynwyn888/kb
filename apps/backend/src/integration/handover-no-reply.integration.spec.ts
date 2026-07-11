@@ -189,6 +189,7 @@ describe('Handover Active → No Outbound Reply', () => {
       await sendBubbleProcessor.process(job);
 
       expect(conversationsService.pauseForHandover).toHaveBeenCalledWith(
+        'tenant_1',
         'conv_1',
         'REQUEST',
         'AI',

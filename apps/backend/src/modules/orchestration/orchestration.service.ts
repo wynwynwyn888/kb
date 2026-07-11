@@ -228,7 +228,7 @@ export class ConversationOrchestrationService {
         const inHumanHandover =
           conversationStatus === 'HANDOVER' ||
           policyTopic === 'handover' ||
-          (await this.conversationsService.isInHandover(conversationId));
+          (await this.conversationsService.isInHandover(input.tenantId, conversationId));
 
         if (inHumanHandover) {
           this.logger.log(
@@ -366,6 +366,7 @@ export class ConversationOrchestrationService {
           const escSettings = await this.humanEscalationSettings.getSettings(input.tenantId);
           if (escSettings.enabled) {
             await this.conversationsService.pauseForHandover(
+              input.tenantId,
               conversationId,
               'REQUEST',
               'AI',
@@ -1004,6 +1005,7 @@ export class ConversationOrchestrationService {
     if (!escalated) {
       try {
         await this.conversationsService.pauseForHandover(
+          input.tenantId,
           conversationId,
           'REQUEST',
           'AI',

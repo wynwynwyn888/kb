@@ -865,6 +865,7 @@ export class WebhooksService {
     const msgId = randomUUID();
     const { error: insErr } = await this.supabase.from('messages').insert({
       id: msgId,
+      tenant_id: params.tenantId,
       conversation_id: params.conversationId,
       direction: 'OUTBOUND',
       sender: 'SYSTEM',
@@ -933,6 +934,7 @@ export class WebhooksService {
     const now = new Date().toISOString();
     const { error: insErr } = await this.supabase.from('messages').insert({
       id: msgId,
+      tenant_id: tenantId,
       conversation_id: internalConvId,
       direction: 'OUTBOUND',
       sender: 'SYSTEM',

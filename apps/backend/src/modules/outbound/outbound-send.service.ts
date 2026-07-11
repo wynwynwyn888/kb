@@ -872,6 +872,7 @@ export class OutboundSendService {
     const now = new Date().toISOString();
     const { error: insErr } = await this.supabase.from('messages').insert({
       id: randomUUID(),
+      tenant_id: params.tenantId,
       conversation_id: params.conversationId,
       direction: 'OUTBOUND',
       sender: 'AI',

@@ -347,9 +347,10 @@ export class SendBubbleProcessor extends WorkerHost {
     // Guard already blocks future inbound while an active HandoverEvent exists.
     // This is idempotent — skip if already handed over.
     if (replyPlan.planStatus === 'HANDOVER' || replyPlan.handoverRecommended) {
-      const existing = await this.conversationsService.getActiveHandover(conversationId);
+      const existing = await this.conversationsService.getActiveHandover(tenantId, conversationId);
       if (!existing) {
         await this.conversationsService.pauseForHandover(
+          tenantId,
           conversationId,
           'REQUEST',
           'AI',

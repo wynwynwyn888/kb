@@ -82,6 +82,48 @@ For later additive tenant columns/RLS work:
 - Keep migration verification queries and row counts with the deployment record.
 - Security authorization fixes must not be rolled back to known cross-tenant access.
 
+### Message/handover tenant-boundary rollback
+
+Migration `20260711170000_tenant_owned_messages_handovers` is additive. Its
+preferred rollback is application rollback while retaining `tenant_id`, indexes,
+backfilled values, and foreign keys.
+
+If an RLS policy causes an authenticated direct-client incident, first confirm
+the backend service-role path and API authorization remain healthy. Temporarily
+disable only the affected table's RLS while a corrected membership policy is
+prepared:
+
+```sql
+ALTER TABLE public.messages DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.handover_events DISABLE ROW LEVEL SECURITY;
+```
+
+Re-enable RLS immediately after the corrected policies have been validated.
+Do not drop the ownership triggers or tenant columns during an incident. They
+prevent mismatched cross-tenant child rows and are compatible with the previous
+application version because they derive a missing `tenant_id` from the parent
+conversation.
+
+Before and after rollout, record these checks:
+
+```sql
+SELECT count(*) FROM public.messages WHERE tenant_id IS NULL;
+SELECT count(*) FROM public.handover_events WHERE tenant_id IS NULL;
+
+SELECT count(*)
+FROM public.messages m
+JOIN public.conversations c ON c.id = m.conversation_id
+WHERE m.tenant_id IS DISTINCT FROM c.tenant_id;
+
+SELECT count(*)
+FROM public.handover_events h
+JOIN public.conversations c ON c.id = h.conversation_id
+WHERE h.tenant_id IS DISTINCT FROM c.tenant_id;
+```
+
+All four counts must be zero before later enforcement of `NOT NULL` or
+validation of the `NOT VALID` foreign keys.
+
 ## Prompt/locale rollback
 
 - Roll tenant-by-tenant through explicit compatibility settings.

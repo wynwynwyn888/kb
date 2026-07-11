@@ -14,6 +14,7 @@ export class ConversationsService {
    * Creates a HandoverEvent (status=ACTIVE) and updates Conversation.status = HANDOVER.
    */
   async pauseForHandover(
+    tenantId: string,
     conversationId: string,
     type: 'REQUEST' | 'TRANSFER',
     initiatedBy: string,
@@ -25,6 +26,7 @@ export class ConversationsService {
       .from('handover_events')
       .insert({
         id: randomUUID(),
+        tenant_id: tenantId,
         conversation_id: conversationId,
         type,
         status: 'ACTIVE',
@@ -54,11 +56,12 @@ export class ConversationsService {
    * Resume a conversation from handover.
    * Updates HandoverEvent to RESUMED + sets resumedAt; restores Conversation.status = ACTIVE.
    */
-  async resumeFromHandover(conversationId: string): Promise<void> {
+  async resumeFromHandover(tenantId: string, conversationId: string): Promise<void> {
     // Find active handover event
     const { data: active, error: findError } = await this.supabase
       .from('handover_events')
       .select('id')
+      .eq('tenant_id', tenantId)
       .eq('conversation_id', conversationId)
       .eq('status', 'ACTIVE')
       .single();
@@ -71,6 +74,7 @@ export class ConversationsService {
       const { error: updateError } = await this.supabase
         .from('handover_events')
         .update({ status: 'RESUMED', resumed_at: new Date().toISOString() })
+        .eq('tenant_id', tenantId)
         .eq('id', active.id);
 
       if (updateError) {
@@ -86,10 +90,11 @@ export class ConversationsService {
   /**
    * Get the active handover event for a conversation, if any.
    */
-  async getActiveHandover(conversationId: string): Promise<{ id: string } | null> {
+  async getActiveHandover(tenantId: string, conversationId: string): Promise<{ id: string } | null> {
     const { data, error } = await this.supabase
       .from('handover_events')
       .select('id')
+      .eq('tenant_id', tenantId)
       .eq('conversation_id', conversationId)
       .eq('status', 'ACTIVE')
       .single();
@@ -104,8 +109,8 @@ export class ConversationsService {
   /**
    * Returns true if the conversation has an active handover.
    */
-  async isInHandover(conversationId: string): Promise<boolean> {
-    const active = await this.getActiveHandover(conversationId);
+  async isInHandover(tenantId: string, conversationId: string): Promise<boolean> {
+    const active = await this.getActiveHandover(tenantId, conversationId);
     return active !== null;
   }
 
@@ -168,6 +173,7 @@ export class ConversationsService {
     const { data: activeRows, error: heErr } = await this.supabase
       .from('handover_events')
       .select('id')
+      .eq('tenant_id', tenantId)
       .eq('conversation_id', conversationId)
       .eq('status', 'ACTIVE');
 
@@ -182,6 +188,7 @@ export class ConversationsService {
       const { error: upErr } = await this.supabase
         .from('handover_events')
         .update({ status: 'RESUMED', resumed_at: now })
+        .eq('tenant_id', tenantId)
         .in('id', ids);
       if (upErr) {
         throw new Error(`Failed to resolve handover events: ${upErr.message}`);

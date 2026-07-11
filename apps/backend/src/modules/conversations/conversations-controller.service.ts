@@ -76,6 +76,7 @@ export class ConversationsControllerService {
   }
 
   async getMessages(
+    tenantId: string,
     conversationId: string,
     limit: number = 20,
     before?: string,
@@ -83,6 +84,7 @@ export class ConversationsControllerService {
     let query = this.supabase
       .from('messages')
       .select('id, direction, sender, content, contentType, metadata, created_at')
+      .eq('tenant_id', tenantId)
       .eq('conversation_id', conversationId)
       .order('created_at', { ascending: false })
       .limit(limit);

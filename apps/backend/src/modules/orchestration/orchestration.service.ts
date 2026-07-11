@@ -44,7 +44,6 @@ import {
   mergePolicyIntoConversationMetadata,
   parseAisbpPolicyState,
   emptyPolicyState,
-  clearAwaitingState,
   type AisbpPolicyStateV1,
 } from '../conversation-policy/conversation-policy-state';
 import { resolveShortSelection, shouldSkipKbForPureOptionLetterSelection } from '../conversation-policy/option-resolver';
@@ -63,7 +62,6 @@ import { detectRepeatedCustomerUserLines } from '../../lib/repeated-customer-mes
 import {
   buildGovernorCapabilityAppendix,
   detectComplaintServiceIssue,
-  isUnsupportedSalonScopeQuery,
 } from '../../lib/outbound-safety-governor';
 import { inferKbRetrievalIntentHint } from '../../lib/kb-intent-synonyms';
 import { ConversationBookingFlowService } from '../booking-flow/conversation-booking-flow.service';
@@ -277,21 +275,7 @@ export class ConversationOrchestrationService {
       const repeatMeta = detectRepeatedCustomerUserLines(memory.entries);
 
       const policyStatePreInit = this.conversationPolicy.parseState(input.conversation?.metadata);
-      let policyStatePre = policyStatePreInit;
-      if (isUnsupportedSalonScopeQuery(latestMsg)) {
-        const cleared = clearAwaitingState(policyStatePreInit);
-        policyStatePre = {
-          ...cleared,
-          activeTopic: null,
-          options: undefined,
-          lastAssistantOptions: undefined,
-          optionsUpdatedAt: null,
-          optionsSource: null,
-          optionsDerivedFromChunkIds: null,
-          optionsTenantId: null,
-          updatedAt: new Date().toISOString(),
-        };
-      }
+      const policyStatePre = policyStatePreInit;
 
       const optionLetterToken = shouldSkipKbForPureOptionLetterSelection(policyStatePre, latestMsg);
 
@@ -319,7 +303,7 @@ export class ConversationOrchestrationService {
       let retrieveQuery = latestMsg;
       let menuKbAnchor: string | undefined;
       // Universal: if user replied with a short selection AND we have option memory, expand the
-      // KB query to use the selectedText (e.g. "Haircut & Styling") instead of the literal "A".
+      // KB query uses the tenant-provided selectedText instead of the literal option letter.
       const optionsAwaiting =
         policyStatePre.awaiting === 'menu_category_selection' ||
         policyStatePre.awaiting === 'option_selection';
@@ -746,7 +730,6 @@ export class ConversationOrchestrationService {
             batchSecondaryIntents: batchSummary.secondaryIntents,
             repeatedHumanTextDetected: repeatMeta.repeatedHumanTextDetected,
             repeatedHumanTextAction: repeatMeta.repeatedHumanTextAction,
-            suppressColourRecommendations: isUnsupportedSalonScopeQuery(latestMsg),
             bookingCapability: bookingCapabilityForPrompt,
             handoverCapability: input.tenant?.ghlLocationId?.trim()
               ? 'tag_and_notify'

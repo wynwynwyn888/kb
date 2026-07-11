@@ -3,10 +3,7 @@ import {
   SAFE_UNSUPPORTED_BUSINESS_CLAIM_REPLY,
   detectComplaintServiceIssue,
   isTrustedExecutedBookSlotSource,
-  isUnsupportedSalonScopeQuery,
-  shouldRewriteUnrequestedMenuRepetition,
   textClaimsBookingConfirmed,
-  userAskedForColourAlternatives,
   rewriteUnsupportedBusinessClaimsWhenNoKb,
   NO_KB_FALLBACK_SERVICE,
   NO_KB_FALLBACK_HOURS,
@@ -15,7 +12,6 @@ import {
   NO_KB_FALLBACK_PRICE,
   NO_KB_FALLBACK_AVAILABILITY,
 } from './outbound-safety-governor';
-import { classifyConversationIntent } from '../modules/conversation-policy/conversation-intent';
 
 describe('outbound-safety-governor', () => {
   describe('textClaimsBookingConfirmed', () => {
@@ -56,52 +52,16 @@ describe('outbound-safety-governor', () => {
   });
 
   describe('detectComplaintServiceIssue', () => {
-    it('detects uneven colour result', () => {
-      const r = detectComplaintServiceIssue(
-        'I did colour yesterday but the result looks uneven',
-      );
+    it('detects a generic dissatisfied customer', () => {
+      const r = detectComplaintServiceIssue('I am not satisfied with the service');
       expect(r.triggered).toBe(true);
       expect(r.tags).toContain('needs_human_review');
-      expect(r.tags).toContain('complaint_colour');
     });
 
     it('detects refund language', () => {
       const r = detectComplaintServiceIssue('I want a refund — this was terrible');
       expect(r.triggered).toBe(true);
       expect(r.tags).toContain('complaint_service_issue');
-    });
-  });
-
-  describe('isUnsupportedSalonScopeQuery', () => {
-    it('detects neck massage scope question', () => {
-      expect(isUnsupportedSalonScopeQuery('do you do neck massage?')).toBe(true);
-    });
-
-    it('does not flag generic hair question', () => {
-      expect(isUnsupportedSalonScopeQuery('Do you do balayage for Asian hair?')).toBe(false);
-    });
-  });
-
-  describe('shouldRewriteUnrequestedMenuRepetition', () => {
-    it('rewrites when user states scalp concern and reply is a category dump', () => {
-      const reply =
-        'Colour\n- Opt A\n- Opt B\n- Opt C\n\nTreatment\n- T1\n- T2\n- T3\n\nStyling\n- S1\n- S2\n- S3';
-      const sh = shouldRewriteUnrequestedMenuRepetition({
-        replyText: reply,
-        latestInboundText: 'oily scalp and dry ends',
-        latestIntent: classifyConversationIntent('oily scalp and dry ends'),
-      });
-      expect(sh).toBe(true);
-    });
-
-    it('skips when user asked for menu', () => {
-      const reply = 'Category A\n- a\n- b\n- c\n\nCategory B\n- d\n- e\n- f';
-      const sh = shouldRewriteUnrequestedMenuRepetition({
-        replyText: reply,
-        latestInboundText: 'what categories do you have',
-        latestIntent: classifyConversationIntent('what categories do you have'),
-      });
-      expect(sh).toBe(false);
     });
   });
 
@@ -142,12 +102,6 @@ describe('outbound-safety-governor', () => {
     });
   });
 
-  describe('userAskedForColourAlternatives', () => {
-    it('detects alternative requests', () => {
-      expect(userAskedForColourAlternatives('any other colour options?')).toBe(true);
-    });
-  });
-
   describe('isTrustedExecutedBookSlotSource', () => {
     it('allows legacy WHATSAPP_BOOKING and new CONVERSATION_BOOKING prefixes', () => {
       expect(isTrustedExecutedBookSlotSource('WHATSAPP_BOOKING:ap1')).toBe(true);
@@ -166,14 +120,14 @@ describe('outbound-safety-governor', () => {
   });
 
   describe('rewriteUnsupportedBusinessClaimsWhenNoKb', () => {
-    it('rewrites breed acceptance claims when KB is empty', () => {
+    it('rewrites unsupported offering claims when KB is empty', () => {
       const r = rewriteUnsupportedBusinessClaimsWhenNoKb({
         kbChunksReturned: 0,
-        replyText: 'Absolutely! We welcome all breeds, including Chihuahuas.',
+        replyText: 'Absolutely! We offer the Premium Plan.',
       });
       expect(r.rewritten).toBe(true);
       expect(r.text).toBe(NO_KB_FALLBACK_SERVICE);
-      expect(r.text.toLowerCase()).not.toContain('welcome all breeds');
+      expect(r.text.toLowerCase()).not.toContain('premium plan');
     });
 
     it('rewrites no-KB opening hours / availability claims', () => {
@@ -188,51 +142,50 @@ describe('outbound-safety-governor', () => {
     it('does not rewrite when KB has support', () => {
       const r = rewriteUnsupportedBusinessClaimsWhenNoKb({
         kbChunksReturned: 2,
-        replyText: 'Absolutely! We welcome all breeds, including Chihuahuas.',
+        replyText: 'Absolutely! We offer the Premium Plan.',
       });
       expect(r.rewritten).toBe(false);
     });
 
-    it('rewrites breed/package recommendation hallucination when user asked breed-specific grooming (no KB)', () => {
+    it('rewrites an unsupported recommendation when no tenant facts exist', () => {
       const r = rewriteUnsupportedBusinessClaimsWhenNoKb({
         kbChunksReturned: 0,
         latestIntent: 'MENU',
-        latestUserMessage: 'grooming for labrador',
-        replyText: 'For a Labrador, we typically recommend our Essential Grooming package.',
+        latestUserMessage: 'which plan should I choose',
+        replyText: 'We recommend our Enterprise package.',
       });
       expect(r.rewritten).toBe(true);
       expect(r.text).toBe(NO_KB_FALLBACK_SERVICE);
-      expect(r.text.toLowerCase()).not.toContain('essential grooming');
-      expect(r.text.toLowerCase()).not.toMatch(/\btypically\s+recommend\b/);
+      expect(r.text.toLowerCase()).not.toContain('enterprise package');
     });
 
-    it('broad menu browse + risky reply uses furkid-safe broad fallback', () => {
+    it('broad offerings browse with a risky reply uses the empty safe fallback', () => {
       const r = rewriteUnsupportedBusinessClaimsWhenNoKb({
         kbChunksReturned: 0,
         latestIntent: 'MENU',
-        latestUserMessage: 'menu pls',
-        replyText: 'Yes, we welcome all breeds and offer full grooming on site.',
+        latestUserMessage: 'what services do you offer',
+        replyText: 'Yes, we offer implementation and training.',
       });
       expect(r.rewritten).toBe(true);
       expect(r.text).toBe(NO_KB_FALLBACK_BROAD_SERVICE);
     });
 
-    it('does not promise all breeds when user named a breed (no KB)', () => {
+    it('does not promise eligibility when no tenant facts exist', () => {
       const r = rewriteUnsupportedBusinessClaimsWhenNoKb({
         kbChunksReturned: 0,
-        latestUserMessage: 'can i bring chihuahua for service',
-        replyText: 'Yes! All breeds are welcome here.',
+        latestUserMessage: 'can my company join this plan',
+        replyText: 'Yes, we accept every company.',
       });
       expect(r.rewritten).toBe(true);
       expect(r.text).toBe(NO_KB_FALLBACK_SERVICE);
     });
 
-    it('rewrites ungrounded grooming price list when KB empty and corpus has no matching facts', () => {
+    it('rewrites an ungrounded price when KB is empty', () => {
       const r = rewriteUnsupportedBusinessClaimsWhenNoKb({
         kbChunksReturned: 0,
         latestIntent: 'PRICE',
-        latestUserMessage: 'how much grooming',
-        replyText: 'Yes, we offer grooming from $80.',
+        latestUserMessage: 'how much is onboarding',
+        replyText: 'Yes, we offer onboarding from $80.',
         tenantPricingCorpus: '',
         tenantId: 't1',
         conversationId: 'c1',
@@ -244,9 +197,9 @@ describe('outbound-safety-governor', () => {
     it('does not allow PRICE intent alone without tenant-grounded dollar amounts', () => {
       const r = rewriteUnsupportedBusinessClaimsWhenNoKb({
         kbChunksReturned: 0,
-        replyText: 'Keratin Smoothing — from $999',
+        replyText: 'Premium Support — from $999',
         tenantPricingCorpus:
-          'Keratin Smoothing Treatment - from $250\nDeep Conditioning Treatment - from $60',
+          'Premium Support - from $250\nBasic Support - from $60',
         latestIntent: 'PRICE',
         latestUserMessage: 'how much isit',
         tenantId: 't1',
@@ -259,9 +212,9 @@ describe('outbound-safety-governor', () => {
 
     it('allows explicit prices when KB empty but tenant corpus lists matching amounts and anchors', () => {
       const corpus =
-        'Deep Conditioning Treatment - from $60\nScalp Detox Treatment - from $70\nKeratin Smoothing Treatment - from $250';
+        'Basic Support - from $60\nStandard Support - from $70\nPremium Support - from $250';
       const reply =
-        'Deep Conditioning Treatment - from $60\nScalp Detox Treatment - from $70\nKeratin Smoothing Treatment - from $250';
+        'Basic Support - from $60\nStandard Support - from $70\nPremium Support - from $250';
       const r = rewriteUnsupportedBusinessClaimsWhenNoKb({
         kbChunksReturned: 0,
         replyText: reply,
@@ -278,7 +231,7 @@ describe('outbound-safety-governor', () => {
     it('logs KB support source when chunks present even if tenant corpus empty', () => {
       const r = rewriteUnsupportedBusinessClaimsWhenNoKb({
         kbChunksReturned: 2,
-        replyText: 'Keratin — from $250',
+        replyText: 'Premium Support — from $250',
         tenantPricingCorpus: '',
         latestIntent: 'MENU',
         tenantId: 't1',

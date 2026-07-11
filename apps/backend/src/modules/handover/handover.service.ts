@@ -28,6 +28,8 @@ export interface ActiveHandoverListItem {
   channelLabel: string;
   handoverTypeLabel: string;
   reasonLabel: string;
+  triggerMessage: string | null;
+  triggerMessageCreatedAt: string | null;
 }
 
 @Injectable()
@@ -225,7 +227,10 @@ export class HandoverService {
 
     return Promise.all(
       rows.map(async row => {
-        const crm = await this.resolveContactForDisplay(tenantId, row.contactId);
+        const [crm, trigger] = await Promise.all([
+          this.resolveContactForDisplay(tenantId, row.contactId),
+          this.resolveTriggerMessage(tenantId, row.conversationId, row.createdAt),
+        ]);
         const channelLabel = formatHandoverChannelLabel({
           dbChannel: row.channel,
           metadata: row.metadata,
@@ -253,9 +258,44 @@ export class HandoverService {
           channelLabel,
           handoverTypeLabel: formatHandoverTypeLabel(row.handoverType),
           reasonLabel: formatHandoverReasonLabel(row.note),
+          triggerMessage: trigger.content,
+          triggerMessageCreatedAt: trigger.createdAt,
         };
       }),
     );
+  }
+
+  private async resolveTriggerMessage(
+    tenantId: string,
+    conversationId: string,
+    handoverCreatedAt: string,
+  ): Promise<{ content: string | null; createdAt: string | null }> {
+    const { data, error } = await this.supabase
+      .from('messages')
+      .select('content, created_at')
+      .eq('tenant_id', tenantId)
+      .eq('conversation_id', conversationId)
+      .eq('direction', 'INBOUND')
+      .eq('sender', 'CONTACT')
+      .lte('created_at', handoverCreatedAt)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error || !data) {
+      if (error) {
+        this.logger.warn(
+          `Failed to resolve handover trigger message: conversationId=${conversationId} error=${error.message}`,
+        );
+      }
+      return { content: null, createdAt: null };
+    }
+
+    const content = typeof data.content === 'string' ? data.content.trim() : '';
+    return {
+      content: content ? content.slice(0, 2000) : null,
+      createdAt: typeof data.created_at === 'string' ? data.created_at : null,
+    };
   }
 
   private async resolveContactForDisplay(

@@ -9,7 +9,7 @@ import type { KbSearchRelevanceLabel } from '../modules/kb/dto/retrieval.dto';
 
 /** Section titles that usually describe post-care, not the service itself. */
 const AFTERCARE_SECTION_TITLE =
-  /aftercare|after\s+care|post[- ]?treatment|care\s+guide|aftercare\s+guide|what\s+to\s+expect|following\s+service|home\s+care|after\s+treatment|aftercare\s+guidance/i;
+  /aftercare|after\s+care|post[- ]?(?:purchase|service)|care\s+guide|aftercare\s+guide|what\s+to\s+expect|following\s+service|aftercare\s+guidance/i;
 
 /** Word-form variants kept as legacy export for callers that care about plural forms only. */
 const TOKEN_ALIASES: ReadonlyArray<[string, string]> = [
@@ -55,7 +55,7 @@ function normWords(s: string): string {
 
 /**
  * Generic heading "strength" for ranking: formal ALL-CAPS blocks score higher than
- * sentence-like helper headings ("The salon offers…", "After treatment…").
+ * sentence-like helper headings ("The business offers…", "After your purchase…").
  */
 export function sectionHeadingStrength(sectionTitle: string | null | undefined): number {
   if (!sectionTitle?.trim()) return 1;
@@ -75,7 +75,7 @@ export function sectionHeadingStrength(sectionTitle: string | null | undefined):
 function looksLikeServiceCatalogSectionTitle(st: string): boolean {
   const s = st.toLowerCase();
   return (
-    /\b(treatment|treatments|services|menu|styling|colour|color|perm|rebond|scalp|price\s*list|catalog|offerings?|products?|grooming|daycare|spa\b|boarding|pet|packages?)\b/.test(
+    /\b(services|menu|price\s*list|catalog|offerings?|products?|packages?)\b/.test(
       s,
     ) || /\bservice\s+menu\b/.test(s)
   );
@@ -165,7 +165,7 @@ export function scoreChunkForQuery(
         !sectionTitleLc.includes('service menu') &&
         !/\bprice\s*list\b/i.test(sectionTitleLc)
       ) {
-        /* Softer penalty: generic "Services" headings often hold the full catalog (salon + pet care). */
+        /* Softer penalty: generic "Services" headings often hold the full catalog. */
         score -= 2.25 * (2 - hStrength);
       }
     } else {
@@ -205,7 +205,7 @@ export function scoreChunkForQuery(
     if (qn.length >= 4 && /^after\s+/.test(lead) && lead.includes(qn) && sectionTitle && AFTERCARE_SECTION_TITLE.test(sectionTitle)) {
       score -= 8;
     }
-    if (/\b(from\s*[\$£€¥]|from\s+\d+|\$\s*\d|rm\s*\d|£\s*\d|€\s*\d|\bfrom\s*\$)/i.test(chunk.content)) {
+    if (/\b(from\s*[\$£€¥]|from\s+\d+|\$\s*\d|[A-Z]{3}\s*\d|£\s*\d|€\s*\d|\bfrom\s*\$)/i.test(chunk.content)) {
       score += 5.5;
     }
     if (sectionTitle && looksLikeServiceCatalogSectionTitle(sectionTitle) && !AFTERCARE_SECTION_TITLE.test(sectionTitle)) {

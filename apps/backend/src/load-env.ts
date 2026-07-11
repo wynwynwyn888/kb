@@ -41,5 +41,5 @@ applyEnvFile(resolve(cwd, '.env.local'), true);
 applyEnvFile(resolve(cwd, '..', '.env.local'), true);
 applyEnvFile(resolve(cwd, 'apps', 'backend', '.env.local'), true);
 
-/** APP_TIMEZONE → TZ → Asia/Singapore; sets `process.env["TZ"]` for Node (logs, local Date formatting). */
+/** APP_TIMEZONE → TZ → UTC; sets `process.env["TZ"]` for Node logs and local date formatting. */
 resolveAndApplyProcessTimeZone();

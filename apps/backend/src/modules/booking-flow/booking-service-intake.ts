@@ -82,26 +82,6 @@ export function matchUserLineToMenuOption(line: string, menuOptions: string[] | 
   return undefined;
 }
 
-const KEYWORD_SERVICE: { re: RegExp; label: string }[] = [
-  { re: /\bscalp\s+treatment\b/i, label: 'Scalp Treatment' },
-  { re: /\bwash\s+and\s+cut\b/i, label: 'Wash and Cut' },
-  { re: /\bhair\s*colou?r\b/i, label: 'Hair Colour' },
-  { re: /\bhair\s*cut\b|\bhaircut\b/i, label: 'Haircut' },
-  { re: /\bcolou?r\b/i, label: 'Colour' },
-  { re: /\bhighlights?\b/i, label: 'Highlights' },
-  { re: /\bblow\s*dry\b|\bblowdry\b/i, label: 'Blow dry' },
-  { re: /\btreatment\b/i, label: 'Treatment' },
-];
-
-export function matchKeywordServicePhrase(text: string): string | undefined {
-  const t = collapseWs(text);
-  if (!t) return undefined;
-  for (const { re, label } of KEYWORD_SERVICE) {
-    if (re.test(t)) return label;
-  }
-  return undefined;
-}
-
 /** If `stored` equals the entire option list (legacy bad value), treat as invalid. */
 export function customSelectAnswerIsWholeOptionList(answer: string, options: string[] | undefined): boolean {
   const expanded = expandBookingSelectOptions(options);
@@ -160,27 +140,8 @@ export function resolveServiceFromUserReplyLine(text: string, menuOptions: strin
     if (!ex || isGenericBookingServicePhrase(ex)) return undefined;
     const fromMenuEx = matchUserLineToMenuOption(ex, menuOptions);
     if (fromMenuEx) return pickCanonicalMenuLabel(fromMenuEx, menuOptions);
-    const kw = matchKeywordServicePhrase(ex);
-    if (kw) {
-      if (menuOptions?.length) {
-        const mapped = matchUserLineToMenuOption(kw, menuOptions);
-        if (mapped) return pickCanonicalMenuLabel(mapped, menuOptions);
-        return undefined;
-      }
-      return kw;
-    }
     if (menuOptions?.length) return undefined;
     if (ex.length >= 3 && !isGenericBookingServicePhrase(ex)) return ex;
-  }
-
-  const kwOnly = matchKeywordServicePhrase(text);
-  if (kwOnly) {
-    if (menuOptions?.length) {
-      const mapped = matchUserLineToMenuOption(kwOnly, menuOptions);
-      if (mapped) return pickCanonicalMenuLabel(mapped, menuOptions);
-      return undefined;
-    }
-    return kwOnly;
   }
 
   if (menuOptions?.length) return undefined;
@@ -195,7 +156,6 @@ export function isAcceptedBookingServiceValue(stored: string | undefined, menuOp
   if (menuOptions?.length) {
     return Boolean(matchUserLineToMenuOption(s, menuOptions));
   }
-  if (matchKeywordServicePhrase(s)) return true;
   const ex = extractServiceFromBookingMessage(s);
   if (ex && !isGenericBookingServicePhrase(ex)) return true;
   return s.length >= 4 && !isGenericBookingServicePhrase(s);

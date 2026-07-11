@@ -7,14 +7,11 @@ import type { RetrievalChunk } from '../modules/kb/dto/retrieval.dto';
 
 /** Paragraphs/lines matching these are dropped from customer-facing KB text. */
 export const INTERNAL_GUIDANCE_LINE_PATTERNS: RegExp[] = [
-  /\bwhen responding to guests\b/i,
-  /\bthe dining experience should feel\b/i,
-  /\bguests should feel\b/i,
-  /\bkeep suggestions selective\b/i,
-  /\bsuggestions should feel\b/i,
+  /\bwhen responding to (?:customers|users|clients)\b/i,
+  /\b(?:customers|users|clients) should feel\b/i,
   /\btone of voice\b/i,
   /\binternal use only\b/i,
-  /\bdo not (?:say|tell|share)\b.*\bguest\b/i,
+  /\bdo not (?:say|tell|share)\b.*\b(?:customer|user|client)\b/i,
   /\buse this exact format\b/i,
   /\bspecial\s*request\s*:/i,
   /\brecommendation\s*rules\s*:/i,
@@ -22,20 +19,7 @@ export const INTERNAL_GUIDANCE_LINE_PATTERNS: RegExp[] = [
   /\blog\s*(?:the|this)\s*(?:request|note)\b/i,
 ];
 
-const MENU_SECTION_HEADERS = new Set([
-  'STARTERS',
-  'STARTER',
-  'MAINS',
-  'MAIN',
-  'DESSERTS',
-  'DESSERT',
-  'VEGAN',
-  'DRINKS',
-  'BEVERAGES',
-  'SIDES',
-  'RESTAURANT MENU',
-  'MENU',
-]);
+const CONTENT_SECTION_HEADERS = new Set(['SERVICES', 'PRODUCTS', 'OFFERINGS', 'OPTIONS', 'PRICING']);
 
 /** Leading ALL CAPS venue / title lines before real menu body (not section headers). */
 function stripLeadingBrandCapsNoise(text: string): string {
@@ -54,7 +38,7 @@ function stripLeadingBrandCapsNoise(text: string): string {
       line.length <= 56 &&
       line === line.toUpperCase() &&
       !/^[\d$€£,.:?\-–—]+$/u.test(line) &&
-      !MENU_SECTION_HEADERS.has(compact);
+      !CONTENT_SECTION_HEADERS.has(compact);
     if (isAllCapsShort) {
       i++;
       continue;

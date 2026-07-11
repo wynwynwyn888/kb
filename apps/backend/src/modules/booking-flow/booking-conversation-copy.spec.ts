@@ -7,7 +7,7 @@ import {
 } from './booking-conversation-copy';
 
 describe('formatCustomFieldBookingQuestion', () => {
-  it('polishes awkward stylist label and lists single_select options', () => {
+  it('uses the tenant-defined custom-field label without injecting an industry rewrite', () => {
     const cf: CustomBookingFieldDto = {
       id: 'f1',
       label: 'Any Preference for Male or Female stylist??',
@@ -18,8 +18,8 @@ describe('formatCustomFieldBookingQuestion', () => {
       options: ['Male', 'Female', 'No preference'],
     };
     const t = formatCustomFieldBookingQuestion(cf, true);
-    expect(t).toContain('Do you have any stylist preference');
-    expect(t).toContain('male, female, or no preference');
+    expect(t).toContain('Any preference for male or female stylist');
+    expect(t).not.toContain('Do you have any stylist preference');
     expect(t).not.toMatch(/Quick one/i);
     expect(t).not.toContain('??');
     expect(t).toContain('Options: Male, Female, No preference');
@@ -76,4 +76,3 @@ describe('buildPreferredDateNeedAsk', () => {
     expect(r.suggestedYmd).toBeUndefined();
   });
 });
-

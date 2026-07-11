@@ -33,7 +33,6 @@ const RE_FORBIDDEN = [
   /\bbook(ing)?\b/i,
   /\bappointment\b/i,
   /\bpackage\b/i,
-  /\bgroom(ing)?\b/i,
   /\bwithin\s+\d+\s*(minute|minutes|min|hour|hours|hr|hrs)\b/i,
   /\bin\s+\d+\s*(minute|minutes|min|hour|hours|hr|hrs)\b/i,
   /\b\d+\s*(minute|minutes|min|hour|hours|hr|hrs)\b/i,

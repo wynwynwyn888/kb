@@ -33,16 +33,16 @@ const RE_HANDOVER_DIRECT_REQUEST =
 const RE_HANDOVER_PHRASE_PRIORITIZED =
   /\b(?:(?:talk|speak)\s+to\s+(?:a\s+)?(?:human|staff|person|someone)|can\s+i\s+(?:talk|speak|request)\s+(?:to\s+)?(?:a\s+)?(?:human|staff|person|someone|agent|manager)|could\s+i\s+(?:talk|speak|request)\s+(?:to\s+)?(?:a\s+)?(?:human|staff|person|someone|agent|manager)|(?:request|need|want)\s+(?:a\s+)?(?:human|staff|person|someone|agent|manager)|connect\s+me\s+to\s+(?:the\s+)?(?:team|staff|human|someone)|get\s+someone\s+to\s+contact\s+me)\b/i;
 const RE_HUMAN_ONLY_SERVICE_CONTEXT =
-  /\b(for\s+human|for\s+humans|human\s+(facial|shampoo|skin|food)|treat\s+humans|safe\s+for\s+humans)\b/i;
+  /\b(for\s+human|for\s+humans|treat\s+humans|safe\s+for\s+humans)\b/i;
 const RE_COMPLAINT = /\b(complaint|complain|terrible|awful|horrible|angry|furious|disgusting|worst|sue|refund\s*now)\b/i;
 const RE_GREETING = /^(hi|hello|hey|hiya|yo|good\s*(morning|afternoon|evening)|howdy)\b[!?.\s]*$/i;
 const RE_GREETING_LOOSE = /^(hi|hello|hey)\b/i;
 const RE_HOURS =
   /\b(open|opening|close|closing|closed|hour|hours|what\s*time|when\s*(do|are)|weekday|weekend|schedule|today|tomorrow)\b/i;
 const RE_MENU =
-  /\b(menu|menus|food|eat|eating|drink|drinks|starter|starters|main|mains|dessert|desserts|vegan|vegetarian|dish|dishes|kitchen|buffet|course|service|services|grooming|groom|daycare|day\s*care|spa\b|boarding|kennel|full\s+groom|dog\s+wash|deshed|de-shed|nail\s+trim|pet\s+spa|service\s+categories|packages?|package\s+list)\b/i;
+  /\b(menu|menus|service|services|product|products|offering|offerings|catalog|catalogue|options|categories|packages?|package\s+list)\b/i;
 const RE_BOOKING =
-  /\b(book|booking|reserve|reservation|table\s*for|appointment|schedule\s*(a|an)?\s*(table|visit))\b/i;
+  /\b(book|booking|reserve|reservation|appointment|schedule\s*(?:a|an)?\s*(?:appointment|visit))\b/i;
 const RE_PRICE = /\b(price|pricing|cost|how\s*much|expensive|cheap|fee|charge)\b/i;
 const RE_LOCATION = /\b(where\s*(are|is|do)|address|location|directions|map|find\s*you|parking)\b/i;
 const RE_CONFIRM = /^(yes|yeah|yep|yup|sure|ok|okay|please\s*do|go\s*ahead)\b[!?.\s]*$/i;

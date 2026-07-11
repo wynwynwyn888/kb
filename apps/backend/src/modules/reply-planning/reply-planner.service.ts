@@ -28,7 +28,6 @@ import {
 import { applyBusinessHoursGroundingGuard } from '../../lib/business-hours-grounding-guard';
 import { applyMenuKbGroundingGuard } from '../../lib/menu-kb-grounding-guard';
 import { sanitizeOutboundInternalKbLeak } from '../../lib/outbound-internal-kb-sanitizer';
-import { containsDisallowedSingaporeReplyLanguage } from '../../lib/reply-language-guard';
 
 import { applyOutboundPolicyGuard } from '../../lib/outbound-policy-guard';
 import { rewriteUnsupportedBusinessClaimsWhenNoKb } from '../../lib/outbound-safety-governor';
@@ -65,8 +64,6 @@ export interface ReplyPlanPolicyContext {
   batchSecondaryIntents?: ConversationIntent[];
   repeatedHumanTextDetected?: boolean;
   repeatedHumanTextAction?: 'none' | 'answer_again' | 'concise_confirm';
-  /** Hair-salon: prior colour topic must not drive recommendations for out-of-scope questions. */
-  suppressColourRecommendations?: boolean;
   bookingCapability?: 'collect_details_only' | 'live_slot_booking' | string;
   handoverCapability?: string;
   /** Assistant replies already visible before this turn. Used to avoid restarting first-message flows. */
@@ -531,9 +528,6 @@ export class ReplyPlannerService {
               menuSelectionActive: policyContext.menuSelectionActive,
               ...(batchCount > 1 ? { combinedInboundMessageCount: batchCount } : {}),
               ...(handling !== 'none' ? { repeatedCustomerMessageHandling: handling } : {}),
-              ...(policyContext.suppressColourRecommendations === true
-                ? { suppressColourRecommendations: true }
-                : {}),
               ...(policyContext.bookingCapability
                 ? { bookingCapability: policyContext.bookingCapability }
                 : {}),
@@ -556,7 +550,7 @@ export class ReplyPlannerService {
     const generation_ms = Date.now() - generationStarted;
 
     const outboundText = stripModelThinking(liveDraft.content ?? '').trim();
-    if (outboundText.length > 0 && !containsDisallowedSingaporeReplyLanguage(outboundText)) {
+    if (outboundText.length > 0) {
       const gma = liveDraft.generationModelActuallyUsed ?? liveDraft.generationModel;
       this.logger.log(
         `Live draft generated: generation_ms=${generation_ms} ${outboundText.length} chars (generationModelActuallyUsed=${gma ?? 'n/a'}, configuredModel=${liveDraft.configuredModel ?? 'n/a'})`,
@@ -573,22 +567,6 @@ export class ReplyPlannerService {
         usedOpenAiFallback: liveDraft.usedOpenAiFallback,
         fallbackUsed: liveDraft.fallbackUsed ?? Boolean(liveDraft.usedOpenAiFallback),
       };
-    }
-
-    if (outboundText.length > 0 && containsDisallowedSingaporeReplyLanguage(outboundText)) {
-      this.logger.warn(
-        `disallowedReplyLanguage ${JSON.stringify({
-          tenantId,
-          sample: outboundText.slice(0, 120),
-        })}`,
-      );
-    } else if (outboundText.length > 0 && containsDisallowedSingaporeReplyLanguage(outboundText)) {
-      this.logger.warn(
-        `disallowedReplyLanguage ${JSON.stringify({
-          tenantId,
-          sample: outboundText.slice(0, 120),
-        })}`,
-      );
     }
 
     this.logger.log(

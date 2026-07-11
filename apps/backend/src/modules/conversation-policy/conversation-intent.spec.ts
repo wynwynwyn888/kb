@@ -29,15 +29,13 @@ describe('classifyConversationIntent', () => {
   });
 
   it('does not classify HUMAN_HANDOVER for "human" used as a service/species context', () => {
-    expect(classifyConversationIntent('do you do facial for human?')).not.toBe('HUMAN_HANDOVER');
     expect(classifyConversationIntent('is it safe for humans?')).not.toBe('HUMAN_HANDOVER');
-    expect(classifyConversationIntent('human facial service')).not.toBe('HUMAN_HANDOVER');
-    expect(classifyConversationIntent('human shampoo')).not.toBe('HUMAN_HANDOVER');
+    expect(classifyConversationIntent('is this intended for humans?')).not.toBe('HUMAN_HANDOVER');
   });
 
-  it('classifies MENU for pet service / menu browse phrases', () => {
+  it('classifies MENU for generic offering browse phrases', () => {
     expect(classifyConversationIntent('menu pls')).toBe('MENU');
-    expect(classifyConversationIntent('grooming?')).toBe('MENU');
+    expect(classifyConversationIntent('what products are available?')).toBe('MENU');
     expect(classifyConversationIntent('what service do you have')).toBe('MENU');
   });
 

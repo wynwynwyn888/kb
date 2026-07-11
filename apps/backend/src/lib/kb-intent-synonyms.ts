@@ -1,7 +1,7 @@
 /**
  * Universal query→intent synonym map for KB retrieval.
  *
- * Goal: when a user types "hour" / "where" / "menu" / "refund" / "balayage", we expand the query
+ * Goal: when a user types "hour" / "where" / "services" / "refund", we expand the query
  * into a richer token set + a virtual intent (e.g. INTENT_HOURS) that matches typical KB section
  * titles regardless of business vertical. No business-specific topics; only generic intents.
  */
@@ -24,7 +24,7 @@ export interface KbIntentSynonymHit {
   sectionTitleHints: string[];
   /** For INTENT_MENU only: headings that indicate a top-level menu / catalog (not category sections). */
   menuListingPrimaryHints?: string[];
-  /** For INTENT_MENU only: weaker menu-adjacent heading tokens (e.g. "services" inside "Colour Services"). */
+  /** For INTENT_MENU only: weaker offering-adjacent heading tokens. */
   menuListingSecondaryHints?: string[];
 }
 
@@ -105,14 +105,6 @@ const INTENT_GROUPS: ReadonlyArray<{
       'products',
       'offer',
       'offers',
-      'grooming',
-      'groom',
-      'daycare',
-      'spa',
-      'boarding',
-      'kennel',
-      'deshed',
-      'trim',
     ],
     expand: ['menu', 'service', 'services', 'offering', 'pricing', 'catalog', 'product', 'products'],
     titleHints: [
@@ -127,11 +119,6 @@ const INTENT_GROUPS: ReadonlyArray<{
       'offerings',
       'products',
       'packages',
-      'grooming',
-      'daycare',
-      'spa',
-      'boarding',
-      'pet',
     ],
     menuListingPrimaryHints: [
       'service menu',
@@ -142,16 +129,13 @@ const INTENT_GROUPS: ReadonlyArray<{
       'catalog',
       'offerings',
       'products',
-      'grooming',
-      'daycare',
-      'spa',
     ],
     menuListingSecondaryHints: ['services', 'service', 'pricing', 'packages'],
   },
   {
     intent: 'INTENT_PRICE',
     triggers: ['price', 'prices', 'pricing', 'cost', 'costs', 'fee', 'fees', 'charge', 'charges', 'rate', 'rates', 'how much', 'expensive', 'cheap', 'budget'],
-    expand: ['price', 'pricing', 'cost', 'fee', 'rate', 'rm', 'sgd', 'usd'],
+    expand: ['price', 'pricing', 'cost', 'fee', 'rate', 'currency'],
     titleHints: ['price', 'pricing', 'rates', 'fees', 'cost'],
   },
   {
@@ -198,7 +182,7 @@ export interface ExpandQueryResult {
   menuListingSecondaryHints: string[];
   /**
    * True when the user is browsing offerings (menu / catalog / "what do you offer"),
-   * not asking for a named item like "keratin".
+   * not asking for a specific named item.
    */
   broadMenuListingQuery: boolean;
   /** Post-care / maintenance / "after X" style queries. */
@@ -393,7 +377,7 @@ export function detectAftercareIntentForSearch(query: string, intentHint?: strin
   if (!lc.trim()) return false;
   if (/\baftercare\b|after-care|after care\b/.test(lc)) return true;
   if (/\bwhat\s+to\s+do\s+after\b/.test(lc)) return true;
-  if (/\b(post|following)\s+(-| )?(treatment|care|service)\b/i.test(lc)) return true;
+  if (/\b(post|following)\s+(-| )?(purchase|care|service)\b/i.test(lc)) return true;
   if (/\b(maintain|maintenance|wash|washing)\b/.test(lc) && /\b(after|following)\b/.test(lc)) return true;
   if (/\bafter\s+[a-zÀ-ÿ]{3,}\b/i.test(lc)) return true;
   return false;
@@ -406,7 +390,7 @@ function computeBroadMenuListingQuery(query: string, intents: KbIntentSynonymGro
   return toks.every(t => MENU_LISTING_TOKEN_SET.has(t));
 }
 
-/** True when the query names a specific item (e.g. keratin) rather than only menu-browsing words. */
+/** True when the query names a specific item rather than only offering-browsing words. */
 export function isFocusedEntityServiceQuery(query: string): boolean {
   const toks = lowerTokens(query).filter(t => t.length >= 4 && !KB_STOPWORDS.has(t));
   if (toks.length === 0) return false;
@@ -528,7 +512,7 @@ export function expandKbQueryWithIntent(query: string, intentHint?: string): Exp
 
 /**
  * When orchestration still has UNKNOWN intent, infer a retrieval hint from the query so keyword
- * scoring + heading boosts align with service/menu/hours/price questions (pet vertical included).
+ * scoring and heading boosts align with generic offering, hours, price, and booking questions.
  */
 export function inferKbRetrievalIntentHint(message: string): ConversationIntent | undefined {
   const direct = classifyConversationIntent(message);
@@ -537,11 +521,7 @@ export function inferKbRetrievalIntentHint(message: string): ConversationIntent 
   const lc = message.trim().toLowerCase();
   if (!lc) return undefined;
 
-  if (
-    /\b(grooming|groom|daycare|spa\b|boarding|kennel|deshed|full\s+groom|dog\s+wash|nail\s+trim|service\s+categories)\b/i.test(
-      lc,
-    )
-  ) {
+  if (/\b(services?|products?|offerings?|catalog(?:ue)?|service\s+categories)\b/i.test(lc)) {
     return 'MENU';
   }
   if (/\b(how\s+much|price|pricing|cost|fee|charge)\b/i.test(lc)) return 'PRICE';

@@ -3,7 +3,6 @@ import {
   customSelectAnswerIsWholeOptionList,
   isAcceptedBookingServiceValue,
   isGenericBookingServicePhrase,
-  matchKeywordServicePhrase,
   resolveServiceFromBookingIntake,
   resolveServiceFromUserReplyLine,
 } from './booking-service-intake';
@@ -38,10 +37,6 @@ describe('resolveServiceFromBookingIntake', () => {
     expect(resolveServiceFromUserReplyLine('colour please', menu)).toBe('Colour');
   });
 
-  it('maps hair colour phrase to Hair Colour (not bare Colour)', () => {
-    expect(matchKeywordServicePhrase('hair colour on Monday')).toBe('Hair Colour');
-    expect(matchKeywordServicePhrase('just colour')).toBe('Colour');
-  });
 });
 
 describe('isAcceptedBookingServiceValue', () => {

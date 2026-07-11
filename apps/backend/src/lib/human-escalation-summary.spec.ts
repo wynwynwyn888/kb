@@ -12,10 +12,10 @@ describe('buildReadableFallbackInternalSummary', () => {
     expect(s).not.toMatch(/menu pls/i);
   });
 
-  it('mentions menu context when detected', () => {
+  it('mentions offering context when detected', () => {
     const s = buildReadableFallbackInternalSummary('Human please', [
-      { role: 'user', content: 'What is on the food menu?', sender: 'CONTACT', timestamp: 't1', messageType: 'text' },
+      { role: 'user', content: 'What services do you offer?', sender: 'CONTACT', timestamp: 't1', messageType: 'text' },
     ]);
-    expect(s.toLowerCase()).toContain('menu');
+    expect(s.toLowerCase()).toContain('offerings');
   });
 });

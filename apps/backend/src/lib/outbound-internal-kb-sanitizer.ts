@@ -4,14 +4,11 @@ import { polishKbSnippetForCustomer } from './kb-faq-customer-text';
 import { segmentKbContent } from './kb-chunk-interpretation';
 import { INTERNAL_GUIDANCE_LINE_PATTERNS, stripInternalGuidanceFromText } from './kb-internal-guidance';
 
-/** Detects when a raw, very-large RESTAURANT MENU document body has leaked into the draft. */
-const RAW_MENU_DUMP = /\bRESTAURANT MENU\b/i;
+/** Detects a labelled raw internal document leaking into a customer reply. */
+const RAW_INTERNAL_DOCUMENT = /\b(?:KNOWLEDGE BASE|SOURCE DOCUMENT|INTERNAL DOCUMENT)\b/i;
 
 /** Phrases that must never appear verbatim in customer messages (last-line guard). */
 export const OUTBOUND_VERBATIM_BLOCKLIST: RegExp[] = [
-  /\bthe dining experience should feel\b/i,
-  /\bwhen responding to guests\b/i,
-  /\bkeep suggestions selective\b/i,
   /\buse this exact format\b/i,
   /\bSPECIAL\s*REQUEST\s*:/i,
   /\brecommendation\s*rules\s*:/i,
@@ -37,7 +34,7 @@ export function outboundContainsHardKbLeak(text: string): boolean {
   const t = text ?? '';
   if (!t.trim()) return false;
   if (BLOCKLIST.some(re => re.test(t))) return true;
-  if (RAW_MENU_DUMP.test(t) && t.length > 2800) return true;
+  if (RAW_INTERNAL_DOCUMENT.test(t) && t.length > 2200) return true;
   return false;
 }
 
@@ -100,6 +97,7 @@ export function sanitizeOutboundInternalKbLeak(
   if (blocked && kbChunks && kbChunks.length > 0) {
     return composeFactsOnlyFallbackFromKb(latestIntent, kbChunks);
   }
+  if (blocked) return '';
 
   if (hadInternalInOriginal) {
     if (menuish && t.length >= 24 && !INTERNAL_GUIDANCE_LINE_PATTERNS.some(re => re.test(t))) {
@@ -111,12 +109,8 @@ export function sanitizeOutboundInternalKbLeak(
     return t.length >= 12 ? t : '';
   }
 
-  if (menuish && RAW_MENU_DUMP.test(t) && t.length > 2200) {
-    // Truncate the leak and ask the customer what they want, without inventing categories.
-    return (
-      `${t.slice(0, 1900).trim()}…\n\n` +
-      'Would you like more detail on a specific section?'
-    );
+  if (menuish && RAW_INTERNAL_DOCUMENT.test(t) && t.length > 2200) {
+    return `${t.slice(0, 1900).trim()}…\n\nWould you like more detail on a specific section?`;
   }
 
   const originalTrimmed = text.trim();

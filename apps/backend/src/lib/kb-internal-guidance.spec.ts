@@ -5,19 +5,17 @@ describe('kb-internal-guidance', () => {
     const raw = [
       'EMBER & SOY',
       '',
-      'The dining experience should feel premium and calm.',
+      'Customers should feel supported and confident.',
       '',
-      'RESTAURANT MENU',
-      'STARTERS',
-      'A) Charred Wagyu Short Rib Bao',
-      '12-hour braised short rib',
+      'SERVICES',
+      'A) Basic Support',
+      'B) Premium Support',
     ].join('\n');
 
     const out = stripInternalGuidanceFromText(raw);
-    expect(out).not.toMatch(/dining experience should feel/i);
-    expect(out).not.toMatch(/premium and calm/i);
-    expect(out).toMatch(/Charred Wagyu/i);
-    expect(out).toMatch(/RESTAURANT MENU/i);
+    expect(out).not.toMatch(/Customers should feel/i);
+    expect(out).toMatch(/Basic Support/i);
+    expect(out).toMatch(/SERVICES/i);
   });
 
   it('preserves short single-line ALL-CAPS customer replies', () => {

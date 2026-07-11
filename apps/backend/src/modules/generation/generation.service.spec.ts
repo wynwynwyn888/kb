@@ -320,7 +320,8 @@ describe('GenerationService', () => {
       expect(messages[0].role).toBe('system');
       expect(messages[0].content).toBe('Test system prompt');
       const contents = messages.map(m => (typeof m.content === 'string' ? m.content : ''));
-      expect(contents.some(c => c.includes('language') && c.includes('Singapore'))).toBe(true);
+      expect(contents.some(c => c.includes('LANGUAGE:') && c.includes('customer'))).toBe(true);
+      expect(contents.some(c => c.includes('Singapore only'))).toBe(false);
       expect(contents.some(c => c.includes('Acme Salon'))).toBe(true);
     });
 
@@ -486,8 +487,8 @@ describe('GenerationService', () => {
       expect(policyMsg?.content as string).toContain('not the first message');
       expect(policyMsg?.content as string).toContain('Do not repeat first-message routing scripts');
       expect(policyMsg?.content as string).toContain('Use the last 3-5 visible turns');
-      expect(policyMsg?.content as string).toContain('never use the fixed phrase');
-      expect(policyMsg?.content as string).toContain('Yes — coming back to this');
+      expect(policyMsg?.content as string).toContain('Do not repeat a diagnostic question');
+      expect(policyMsg?.content as string).not.toContain('leads are leaking');
     });
 
     it('adds cadence guidance after several assistant replies to avoid endless questions', () => {
@@ -597,23 +598,6 @@ describe('GenerationService', () => {
         }),
       );
       expect(msg.content as string).toContain('at most **4** items');
-    });
-
-    it('injects suppressColourRecommendations scope rule', () => {
-      const msg = (service as never)['buildKbContextSystemMessage'](
-        makeParams({
-          kbContext: [
-            { chunkId: 'c1', documentId: 'd1', content: 'Hair services', title: 'Hair', source: 'kb', relevanceScore: 0.9 },
-          ],
-          policyContext: {
-            latestIntent: 'UNKNOWN' as never,
-            resolvedSelection: null,
-            conversationStateSummary: 'idle',
-            suppressColourRecommendations: true,
-          },
-        }),
-      );
-      expect(msg.content as string).toContain('outside the scope');
     });
 
     it('includes multi-line turn rules when combinedInboundMessageCount > 1', () => {

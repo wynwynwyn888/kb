@@ -74,59 +74,33 @@ export function isTrustedExecutedBookSlotSource(source: string | null | undefine
 export type ComplaintServiceIssue = {
   triggered: boolean;
   reason: string;
-  colourRelated: boolean;
   /** Tag names to queue for GHL (lowercase, snake_case) */
   tags: string[];
 };
 
-const COMPLAINT_PATTERNS: { re: RegExp; reason: string; colour: boolean }[] = [
-  { re: /\buneven\b/i, reason: 'uneven_result', colour: true },
-  { re: /\bunhappy\s+with\s+(my\s+)?(colour|color|results?)\b/i, reason: 'unhappy_with_colour', colour: true },
-  { re: /\b(colou?r|results?)\s+looks?\s+wrong\b/i, reason: 'colour_looks_wrong', colour: true },
-  { re: /\bhaircut\s+too\s+short\b/i, reason: 'haircut_too_short', colour: false },
-  { re: /\b(damaged|breaking)\s+after\s+(the\s+)?(treatment|service|colour|color)\b/i, reason: 'damaged_after_service', colour: true },
-  { re: /\bcomplaint\b/i, reason: 'complaint_keyword', colour: false },
-  { re: /\brefund\b/i, reason: 'refund', colour: false },
-  { re: /\bfix\s+my\s+hair\b/i, reason: 'fix_my_hair', colour: false },
-  { re: /\bnot\s+happy\s+with\s+(the\s+)?(result|service|colour|color)\b/i, reason: 'not_happy_with_result', colour: true },
-  { re: /\ballergic\s+reaction\s+after\s+(the\s+)?(service|treatment|colour|color)\b/i, reason: 'allergic_after_service', colour: true },
-  { re: /\b(result|colour|color)\s+looks?\s+uneven\b/i, reason: 'result_uneven', colour: true },
+const COMPLAINT_PATTERNS: { re: RegExp; reason: string }[] = [
+  { re: /\bcomplaint\b/i, reason: 'complaint_keyword' },
+  { re: /\brefund\b/i, reason: 'refund' },
+  { re: /\bnot\s+(?:happy|satisfied)\s+with\b/i, reason: 'customer_dissatisfied' },
+  { re: /\b(?:bad|poor|terrible|unacceptable)\s+(?:result|experience|service|product)\b/i, reason: 'negative_experience' },
+  { re: /\b(?:damaged|defective|broken|wrong)\b.*\b(?:after|received|result|service|product)\b/i, reason: 'reported_problem' },
 ];
 
 export function detectComplaintServiceIssue(raw: string): ComplaintServiceIssue {
   const t = raw.trim();
   if (!t) {
-    return { triggered: false, reason: 'none', colourRelated: false, tags: [] };
+    return { triggered: false, reason: 'none', tags: [] };
   }
   for (const p of COMPLAINT_PATTERNS) {
     if (p.re.test(t)) {
       const tags = ['needs_human_review', 'complaint_service_issue'];
-      if (p.colour) tags.push('complaint_colour');
-      return { triggered: true, reason: p.reason, colourRelated: p.colour, tags: [...new Set(tags)] };
+      return { triggered: true, reason: p.reason, tags };
     }
   }
-  return { triggered: false, reason: 'none', colourRelated: false, tags: [] };
-}
-
-/** Non-hair / out-of-salon-scope questions where prior colour topic should not drive recommendations. */
-const OUT_OF_SCOPE_SALON: RegExp[] = [
-  /\bneck\s+massage\b/i,
-  /\b(do\s+you\s+do|do\s+you\s+offer)\s+([a-z]+\s+){0,3}massage\b/i,
-  /\bfull[\s-]*body\s+massage\b/i,
-  /\bmanicure\b/i,
-  /\bpedi(cure)?\b/i,
-  /\beyebrow(s)?\s+(tattoo|microblad)\b/i,
-];
-
-export function isUnsupportedSalonScopeQuery(raw: string): boolean {
-  const t = raw.trim();
-  if (!t) return false;
-  return OUT_OF_SCOPE_SALON.some(r => r.test(t));
+  return { triggered: false, reason: 'none', tags: [] };
 }
 
 const MENU_ASK = /\b(menu|categories|category|options?|what\s+do\s+you\s+offer|list\s+of\s+services|book\s+from\s+the\s+menu)\b/i;
-const ALTERNATIVE_ASK =
-  /\b(any\s+other|what\s+else|alternatives?|other\s+options?|something\s+else|instead|recommend(ation)?s?\s+for\s+colou?r|other\s+colou?r\s+options?)\b/i;
 
 export function userAskedForMenuOrOptions(latestInbound: string, latestIntent: ConversationIntent): boolean {
   if (latestIntent === 'MENU' || latestIntent === 'SHORT_SELECTION') return true;
@@ -136,46 +110,13 @@ export function userAskedForMenuOrOptions(latestInbound: string, latestIntent: C
   return false;
 }
 
-export function userAskedForColourAlternatives(latestInbound: string): boolean {
-  return ALTERNATIVE_ASK.test(latestInbound.trim());
-}
-
-/**
- * Heuristic: multiple bullet/numbered lines or long multi-section list looks like a menu dump.
- */
-export function looksLikeMenuCategoryBlock(text: string): boolean {
-  const lines = text.split(/\n/).map(l => l.trim()).filter(Boolean);
-  if (lines.length < 4) return false;
-  const bulletLines = lines.filter(
-    l => /^\s*[-•*●]+\s+/.test(l) || /^\s*\d+[.)]\s+/.test(l) || /^\s*[A-Da-d][.)]\s+/.test(l),
-  );
-  if (bulletLines.length >= 3) return true;
-  const sectiony =
-    /\b(categories?|our\s+services|choose\s+from|colour|color|treatment|styling|cuts?)\b/i.test(text) &&
-    lines.length >= 6;
-  return sectiony;
-}
-
-const CONCERN_HINTS = /\b(oily|greasy|dry|scalp|ends|frizz|damage|dull|itchy|flaky|split)\b/i;
-
-export function shouldRewriteUnrequestedMenuRepetition(params: {
-  replyText: string;
-  latestInboundText: string;
-  latestIntent: ConversationIntent;
-}): boolean {
-  const { replyText, latestInboundText, latestIntent } = params;
-  if (userAskedForMenuOrOptions(latestInboundText, latestIntent)) return false;
-  if (!CONCERN_HINTS.test(latestInboundText)) return false;
-  return looksLikeMenuCategoryBlock(replyText);
-}
-
 export const UNREQUESTED_MENU_FALLBACK_REPLY =
   '';
 
 /**
  * No-KB business-claim guard:
- * When KB retrieval is empty/weak, block hallucinated business-specific claims (breeds accepted,
- * services offered, prices, opening hours, availability, policies, medical/suitability advice).
+ * When KB retrieval is empty/weak, block hallucinated business-specific claims about offerings,
+ * prices, opening hours, availability, policies, or regulated advice.
  * Returns a safe uncertainty reply when a risky claim is detected.
  */
 export const SAFE_UNSUPPORTED_BUSINESS_CLAIM_REPLY =
@@ -198,13 +139,9 @@ export const NO_KB_FALLBACK_HOURS = '';
 export const NO_KB_FALLBACK_AVAILABILITY =
   '';
 
-const BUSINESS_ASSERTION = /\b(we|our\s+(team|clinic|shop|salon)|yes,?\s+we)\b/i;
-/** Welcomes / acceptance claims that do not literally include "we …" but are still unsafe without KB. */
-const STANDALONE_WELCOME_ALL_BREEDS = /\b(all\s+breeds\s+are\s+welcome|welcome\s+all\s+breeds)\b/i;
-const CLAIM_BREED_SPECIES =
-  /\b(breed|breeds|chihuahua|pomeranian|bulldog|labrador|retriever|poodle|cat|cats|dog|dogs|puppy|puppies|pet|pets|all\s+breeds|any\s+breed|furkid|fur\s*kids?)\b/i;
+const BUSINESS_ASSERTION = /\b(we|our\s+(?:team|business|company)|yes,?\s+we)\b/i;
 const CLAIM_ACCEPT_OFFER =
-  /\b(accept|welcome|allow|can\s+take|we\s+do|we\s+offer|provide|available|availability)\b/i;
+  /\b(accept|welcome|allow|can\s+take|we\s+do|we\s+offer|we\s+recommend|provide|available|availability)\b/i;
 const CLAIM_PRICING =
   /\b(price|pricing|cost|fee|charge|usd|sgd|rm|eur|gbp)\b|\$\s*\d+(?:\.\d{1,2})?|\d+(?:\.\d{1,2})?\s*(?:usd|sgd|rm)/i;
 const CLAIM_HOURS = /\b(open|opening|close|closing|hours?|am|pm)\b/i;
@@ -303,47 +240,10 @@ function supportCheckPriceBase(params: {
   };
 }
 
-export function userMessageSuggestsUnsupportedServiceQuery(message: string): boolean {
-  const raw = message.trim();
-  if (!raw) return false;
-  const m = raw.toLowerCase();
-  if (/\b(grooming|groom|wash|spa)\s+for\s+/i.test(raw)) return true;
-  if (/\b(can\s+my\s+\w+|bring\s+my|bring\s+(?:a\s+)?(?:chihuahua|dog|puppy))\b/i.test(m)) return true;
-  if (/\bfor\s+my\s+(?:dog|cat|puppy)\b/i.test(m)) return true;
-  if (
-    /\b(chihuahua|labrador|poodle|pug|terrier|shepherd|retriever|bulldog|breed)\b/i.test(m) &&
-    /\b(groom|grooming|service|spa|skin|coat)\b/i.test(m)
-  ) {
-    return true;
-  }
-  if (/\b(skin\s+issue|sensitive\s+skin)\b/i.test(m) && /\b(groom|grooming)\b/i.test(m)) return true;
-  return false;
-}
-
-function replySuggestsUnsupportedServiceRecommendation(text: string): boolean {
-  const t = text.trim();
-  if (!t) return false;
-  if (/\b(typically\s+recommend|we\s+typically|recommend\s+our|essential\s+grooming|our\s+essential)\b/i.test(t)) {
-    return true;
-  }
-  if (/\bwe\s+recommend\b/i.test(t) && /\b(grooming|package|service|spa|treatment|essential)\b/i.test(t)) {
-    return true;
-  }
-  if (
-    /\bfor\s+(?:a\s+)?(?:labrador|golden\s+retriever|chihuahua|poodle|your\s+puppy|your\s+dog),\s*(?:we\s+)?(?:usually|typically|recommend)\b/i.test(
-      t,
-    )
-  ) {
-    return true;
-  }
-  return false;
-}
-
 export function userAskedBroadServiceBrowseQuery(message: string, intent: ConversationIntent): boolean {
   const raw = message.trim();
   if (!raw) return false;
-  if (/^(grooming|daycare|spa)\??$/i.test(raw)) return true;
-  if (/\b(menu\s+pls|menu\s+plz|what\s+services?\s+do\s+you|what\s+do\s+you\s+offer|service\s+list|list\s+of\s+services)\b/i.test(raw)) {
+  if (/\b(what\s+(?:services|products|options)\s+do\s+you|what\s+do\s+you\s+offer|service\s+list|list\s+of\s+(?:services|products))\b/i.test(raw)) {
     return true;
   }
   if (intent === 'MENU' && /\b(what\s+service|your\s+menu)\b/i.test(raw)) return true;
@@ -351,7 +251,7 @@ export function userAskedBroadServiceBrowseQuery(message: string, intent: Conver
 }
 
 function resolveRiskyPatternGroup(replyText: string): string {
-  if (CLAIM_BREED_SPECIES.test(replyText) && CLAIM_ACCEPT_OFFER.test(replyText)) return 'breed_acceptance';
+  if (BUSINESS_ASSERTION.test(replyText) && CLAIM_ACCEPT_OFFER.test(replyText)) return 'unsupported_offering';
   if (CLAIM_PRICING.test(replyText) && CLAIM_ACCEPT_OFFER.test(replyText)) return 'pricing';
   if (CLAIM_HOURS.test(replyText) && (/\bwe\s*(are|'re)\s*open\b/i.test(replyText) || /\bopen\s+(from|until|at)\b/i.test(replyText))) {
     return 'hours_availability_claim';
@@ -369,23 +269,7 @@ function pickIntentAwareNoKbFallback(
   const primary = userMessage.trim();
   const probe = primary || replyText.trim();
 
-  if (
-    !primary &&
-    CLAIM_BREED_SPECIES.test(replyText) &&
-    CLAIM_ACCEPT_OFFER.test(replyText)
-  ) {
-    return BLOCK_UNSUPPORTED_CLAIM_REPLY;
-  }
-
   const ml = probe.toLowerCase();
-
-  if (
-    (CLAIM_BREED_SPECIES.test(userMessage) || userMessageSuggestsUnsupportedServiceQuery(userMessage)) &&
-    CLAIM_BREED_SPECIES.test(replyText) &&
-    CLAIM_ACCEPT_OFFER.test(replyText)
-  ) {
-    return BLOCK_UNSUPPORTED_CLAIM_REPLY;
-  }
 
   if (userAskedBroadServiceBrowseQuery(probe, intent)) {
     return BLOCK_UNSUPPORTED_CLAIM_REPLY;
@@ -438,24 +322,6 @@ export function rewriteUnsupportedBusinessClaimsWhenNoKb(params: {
 
   if (!t) return { rewritten: false, text: params.replyText };
 
-  if (
-    userMsg &&
-    userMessageSuggestsUnsupportedServiceQuery(userMsg) &&
-    replySuggestsUnsupportedServiceRecommendation(t)
-  ) {
-    return {
-      rewritten: true,
-      text: BLOCK_UNSUPPORTED_CLAIM_REPLY,
-      reason: 'no_kb_breed_service_hallucination',
-      log: {
-        reason: 'no_kb_breed_service_hallucination',
-        latestIntent: intent,
-        kbChunksLength: 0,
-        patternGroup: 'breed_service_recommendation',
-      },
-    };
-  }
-
   if (replyContainsCustomerFacingPriceClaims(t)) {
     const base = supportCheckPriceBase({
       tenantId: params.tenantId,
@@ -500,13 +366,11 @@ export function rewriteUnsupportedBusinessClaimsWhenNoKb(params: {
   }
 
   const riskySurface =
-    BUSINESS_ASSERTION.test(t) ||
-    STANDALONE_WELCOME_ALL_BREEDS.test(t) ||
-    (/^yes[!.,]?\s+/i.test(t.trim()) && CLAIM_BREED_SPECIES.test(t) && /\b(welcome|welcome\s+here)\b/i.test(t));
+    BUSINESS_ASSERTION.test(t);
 
   const risky =
     riskySurface &&
-    ((CLAIM_BREED_SPECIES.test(t) && CLAIM_ACCEPT_OFFER.test(t)) ||
+    (CLAIM_ACCEPT_OFFER.test(t) ||
       (CLAIM_PRICING.test(t) && CLAIM_ACCEPT_OFFER.test(t)) ||
       (CLAIM_HOURS.test(t) && (/\bwe\s*(are|'re)\s*open\b/i.test(t) || /\bopen\s+(from|until|at)\b/i.test(t))) ||
       (CLAIM_POLICY.test(t) && CLAIM_ACCEPT_OFFER.test(t)) ||
@@ -547,7 +411,7 @@ export function buildGovernorCapabilityAppendix(params: {
     `- If bookingCapability is collect_details_only, use pending / team-will-confirm language instead.\n` +
     `- If bookingCapability is live_slot_booking, the assistant may offer live CRM slots and collect a selection, but must still avoid confirmed/booked language until the backend confirms a successful appointment create for this conversation.\n` +
     `- For complaints or service recovery, you may ask for details and rely on tag/handover flows — do not claim a callback was arranged unless those backend actions succeeded.\n` +
-    `- AISalesBot Pro can handle text enquiries and can process supported voice notes by transcription when voice handling is enabled; do not tell customers that voice notes are unsupported.\n` +
+    `- The assistant can handle text enquiries and can process supported voice notes by transcription when voice handling is enabled; do not tell customers that voice notes are unsupported.\n` +
     `- You can analyze photos customers send in chat (WhatsApp, Messenger, etc.) when the image is delivered to the platform. If they ask whether you understand or can see images, answer yes and invite them to send a photo — do not say you cannot analyze images unless this turn has no photo and they are not asking about capability.\n`
   );
 }

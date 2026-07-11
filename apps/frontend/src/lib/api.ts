@@ -1021,6 +1021,8 @@ export interface ActiveHandoverRow {
   channelLabel: string;
   handoverTypeLabel: string;
   reasonLabel: string;
+  triggerMessage: string | null;
+  triggerMessageCreatedAt: string | null;
 }
 
 export async function getActiveHandovers(token: string, tenantId: string) {

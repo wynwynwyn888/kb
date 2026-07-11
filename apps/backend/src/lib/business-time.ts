@@ -1,6 +1,6 @@
 /**
  * Business-local wall clock and greeting period (IANA zones via Intl).
- * Greeting periods match Singapore-facing defaults; tenant override can pass a different zone.
+ * Tenant-local business clock. Callers should pass the tenant's configured IANA timezone.
  */
 
 export type DayPeriod = 'morning' | 'afternoon' | 'evening';
@@ -44,7 +44,7 @@ function wallClockInZone(at: Date, timeZone: string): { year: number; month: num
   };
 }
 
-/** Singapore-style day parts: morning 05–11, afternoon 12–17, evening otherwise (including 00–04). */
+/** Neutral day parts: morning 05–11, afternoon 12–17, evening otherwise (including 00–04). */
 export function getDayPeriodFromLocalHour(hour: number): DayPeriod {
   if (hour >= 5 && hour <= 11) return 'morning';
   if (hour >= 12 && hour <= 17) return 'afternoon';
@@ -78,14 +78,14 @@ export function getBusinessLocalNow(timeZone: string, at: Date = new Date()): Bu
 
 /**
  * Resolved IANA zone for the app process (no side effects).
- * Order: APP_TIMEZONE → TZ → Asia/Singapore.
+ * Order: APP_TIMEZONE → TZ → UTC.
  */
 export function resolveAppTimeZone(): string {
   const fromApp = process.env['APP_TIMEZONE']?.trim();
   if (fromApp) return fromApp;
   const fromTz = process.env['TZ']?.trim();
   if (fromTz) return fromTz;
-  return 'Asia/Singapore';
+  return 'UTC';
 }
 
 /** Sets `process.env["TZ"]` so Node logs and default locale behavior align with the resolved zone. */

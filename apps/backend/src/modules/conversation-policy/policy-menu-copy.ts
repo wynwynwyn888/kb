@@ -1,6 +1,5 @@
 /**
- * Generic, business-agnostic copy for the menu/services flow. No vertical-specific categories
- * (no Starters/Mains/Desserts, no Cuts/Colours, etc.). When the assistant must offer choices, it
+ * Generic, business-agnostic copy for the offerings flow. No vertical-specific categories. When the assistant must offer choices, it
  * builds them from the tenant's KB section titles via {@link buildOptionsFromKbSectionTitles}.
  */
 

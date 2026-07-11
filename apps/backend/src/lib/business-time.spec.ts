@@ -26,13 +26,13 @@ describe('business-time', () => {
     expect(greetingLabelForPeriod('evening')).toBe('Good evening');
   });
 
-  it('resolveAppTimeZone prefers APP_TIMEZONE then TZ then Asia/Singapore', () => {
+  it('resolveAppTimeZone prefers APP_TIMEZONE then TZ then UTC', () => {
     const prevApp = process.env['APP_TIMEZONE'];
     const prevTz = process.env['TZ'];
     try {
       delete process.env['APP_TIMEZONE'];
       delete process.env['TZ'];
-      expect(resolveAppTimeZone()).toBe('Asia/Singapore');
+      expect(resolveAppTimeZone()).toBe('UTC');
 
       process.env['TZ'] = 'Europe/Berlin';
       delete process.env['APP_TIMEZONE'];

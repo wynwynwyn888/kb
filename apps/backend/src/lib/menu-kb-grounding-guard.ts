@@ -2,10 +2,6 @@ import type { ConversationIntent } from '../modules/conversation-policy/conversa
 import type { RetrievalChunk } from '../modules/kb/dto/retrieval.dto';
 import { tokenizeMeaningful } from './kb-relevance';
 
-/** Marketing / sensory menu prose unlikely to appear verbatim in grounded KB answers. */
-const FLUFF_SIGNAL =
-  /\b(ocean-?\s*fresh|elegantly\s+seasoned|heart(y|ily)|richly\s+flavou?red|signatures?|artisanal|curated\s+selection|mouth-?watering|succulent|tender\s+loin|seafood\s+mains?|meat\s+mains?)\b/i;
-
 function kbCorpusLower(chunks: RetrievalChunk[]): string {
   return chunks
     .map(c => `${c.title ?? ''} ${c.content ?? ''}`)
@@ -49,12 +45,6 @@ export function menuDraftLooksUngrounded(draft: string, chunks: RetrievalChunk[]
   if (!t) return false;
   /** Policy-authored no-KB menu reply — never rewrite. */
   if (/would you like the team to send you the menu\?/i.test(t)) return false;
-  if (FLUFF_SIGNAL.test(t)) {
-    if (chunks.length === 0) return true;
-    const corpus = kbCorpusLower(chunks);
-    const m = FLUFF_SIGNAL.exec(t);
-    if (m?.[0] && !corpus.includes(m[0].toLowerCase())) return true;
-  }
   if (chunks.length > 0 && !menuDraftGroundedInKb(draft, chunks)) return true;
   if (chunks.length === 0 && draftTokensForGroundingCheck(draft).length >= 4) return true;
   return false;
@@ -65,7 +55,7 @@ export type MenuKbGroundingParams = {
   menuSelectionActive: boolean;
   draftText: string;
   kbChunks: RetrievalChunk[];
-  /** e.g. Starters from policy selection */
+  /** Tenant-provided category label from policy selection. */
   categoryLabel?: string | null;
 };
 

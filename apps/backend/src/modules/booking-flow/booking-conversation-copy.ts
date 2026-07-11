@@ -316,12 +316,6 @@ export function formatCustomFieldBookingQuestion(cf: CustomBookingFieldDto, opti
   const opts = optLine.length ? `\n\nOptions: ${optLine}` : '';
 
   const cleaned = sentenceCaseFromLabel(base);
-  if (/\bpreference\b/i.test(cleaned) || (/\bmale\b/i.test(cleaned) && /\bfemale\b/i.test(cleaned))) {
-    return collapseWhitespace(
-      `Do you have any stylist preference — male, female, or no preference?${suffix}${opts}`,
-    );
-  }
-
   if (labelLooksLikeQuestion(base)) {
     return collapseWhitespace(dedupeQuestionMarks(sentenceCaseFromLabel(base))) + suffix + opts;
   }
@@ -342,7 +336,7 @@ export function copyClarifyEmail(): string {
 }
 
 export function copyClarifyService(): string {
-  return 'Which service would you like — for example colour, haircut, or treatment?';
+  return 'Which service would you like to book?';
 }
 
 export function copyClarifyPreferredDate(): string {

@@ -551,7 +551,7 @@ export default function AgencyTenantDirectoryPage() {
                     setNewName(e.target.value);
                     setCreateErr('');
                   }}
-                  placeholder="e.g. Acme Dental"
+                  placeholder="e.g. Acme Company"
                   style={mvpInputStyle}
                   autoComplete="off"
                   aria-label="Workspace name"

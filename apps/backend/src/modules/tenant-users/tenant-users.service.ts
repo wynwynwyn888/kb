@@ -9,6 +9,7 @@ import {
 } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { getSupabaseService } from '../../lib/supabase';
+import { createUserDatabaseClient } from '../../lib/database/user-database-client';
 import type { TenantRole } from '../../lib/enums';
 import { AuthService } from '../auth/auth.service';
 
@@ -29,18 +30,24 @@ export interface TenantMemberRow {
 export class TenantUsersService {
   constructor(private readonly auth: AuthService) {}
 
+  async listMembersForCaller(
+    tenantId: string,
+    actorProfileId: string,
+    accessToken: string,
+  ): Promise<TenantMemberRow[]> {
+    await this.assertCanReadRoster(tenantId, actorProfileId);
+    const caller = createUserDatabaseClient(accessToken);
+    const { data, error } = await caller.rpc('list_tenant_members', { p_tenant_id: tenantId });
+    if (error) throw new BadRequestException('Failed to list workspace members');
+    return (data ?? []).map((row: unknown) => this.mapRosterRpcRow(row as Record<string, unknown>));
+  }
+
   /**
    * List members of a tenant. Caller must be a member of that tenant or agency staff for its agency.
    */
   async listMembers(tenantId: string, actorProfileId: string): Promise<TenantMemberRow[]> {
+    await this.assertCanReadRoster(tenantId, actorProfileId);
     const supabase = getSupabaseService();
-    const member = await this.getMembership(actorProfileId, tenantId);
-    if (!member) {
-      const agencyOk = await this.isAgencyStaffForTenant(actorProfileId, tenantId);
-      if (!agencyOk) {
-        throw new NotFoundException('Tenant not found');
-      }
-    }
 
     const { data, error } = await supabase
       .from('tenant_users')
@@ -285,6 +292,13 @@ export class TenantUsersService {
     return m?.role ?? null;
   }
 
+  private async assertCanReadRoster(tenantId: string, actorProfileId: string): Promise<void> {
+    const member = await this.getMembership(actorProfileId, tenantId);
+    if (member) return;
+    if (await this.isAgencyStaffForTenant(actorProfileId, tenantId)) return;
+    throw new NotFoundException('Tenant not found');
+  }
+
   private async countAdminsExcept(tenantId: string, excludeMembershipId: string): Promise<number> {
     const supabase = getSupabaseService();
     const { data, error } = await supabase
@@ -311,6 +325,19 @@ export class TenantUsersService {
       fullName: prof?.full_name ?? null,
       createdAt: data['created_at'] as string,
       updatedAt: data['updated_at'] as string,
+    };
+  }
+
+  private mapRosterRpcRow(data: Record<string, unknown>): TenantMemberRow {
+    return {
+      id: String(data['id'] ?? ''),
+      tenantId: String(data['tenant_id'] ?? ''),
+      profileId: String(data['profile_id'] ?? ''),
+      role: String(data['role'] ?? '') as TenantRole,
+      email: data['email'] == null ? null : String(data['email']),
+      fullName: data['full_name'] == null ? null : String(data['full_name']),
+      createdAt: String(data['created_at'] ?? ''),
+      updatedAt: String(data['updated_at'] ?? ''),
     };
   }
 

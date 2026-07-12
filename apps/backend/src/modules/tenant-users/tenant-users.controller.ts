@@ -20,7 +20,7 @@ import { ApiTags, ApiBearerAuth, ApiOperation } from '@nestjs/swagger';
 import { TenantUsersService } from './tenant-users.service';
 import { InvitationsService } from '../invitations/invitations.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { CurrentAccessToken, CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { SessionUser } from '../../lib/supabase';
 import type { TenantRole } from '../../lib/enums';
 
@@ -50,11 +50,12 @@ export class TenantUsersController {
   async findAll(
     @Query('tenantId') tenantId: string | undefined,
     @CurrentUser() user: SessionUser,
+    @CurrentAccessToken() accessToken: string,
   ) {
     if (!tenantId?.trim()) {
       throw new BadRequestException('tenantId query parameter is required');
     }
-    return this.service.listMembers(tenantId.trim(), user.id);
+    return this.service.listMembersForCaller(tenantId.trim(), user.id, accessToken);
   }
 
   @Get('invites')

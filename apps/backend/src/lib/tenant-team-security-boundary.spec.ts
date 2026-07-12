@@ -18,6 +18,10 @@ describe('tenant team security boundary', () => {
     join(process.cwd(), 'prisma/migrations/20260712190000_tenant_users_last_admin_guard/migration.sql'),
     'utf8',
   );
+  const cascadeFix = readFileSync(
+    join(process.cwd(), 'prisma/migrations/20260712200000_allow_tenant_admin_cascade_cleanup/migration.sql'),
+    'utf8',
+  );
 
   it('has no direct-password customer provisioning surface', () => {
     expect(controller).not.toContain("@Post('provision-credentials')");
@@ -46,5 +50,6 @@ describe('tenant team security boundary', () => {
     expect(migration).toMatch(/pg_advisory_xact_lock/i);
     expect(migration).toMatch(/remaining_admins < 1/i);
     expect(migration).toMatch(/ERRCODE = '23514'/i);
+    expect(cascadeFix).toMatch(/NOT EXISTS[\s\S]*FROM public\.tenants/i);
   });
 });

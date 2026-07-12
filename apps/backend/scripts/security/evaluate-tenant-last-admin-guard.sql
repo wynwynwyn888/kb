@@ -43,4 +43,10 @@ SELECT count(*) AS remaining_admins
 FROM public.tenant_users
 WHERE tenant_id = 'last-admin-tenant-fixture' AND role = 'ADMIN';
 
+DELETE FROM public.tenants WHERE id = 'last-admin-tenant-fixture';
+
+SELECT count(*) AS memberships_after_tenant_delete
+FROM public.tenant_users
+WHERE tenant_id = 'last-admin-tenant-fixture';
+
 ROLLBACK;

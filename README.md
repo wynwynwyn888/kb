@@ -145,15 +145,13 @@ After running `pnpm db:seed`:
 - `apps/backend/src/lib/supabase/` - Supabase client configuration
 - `apps/backend/src/modules/auth/` - Auth service and guards
 - `apps/frontend/src/contexts/AuthContext.tsx` - Frontend auth state
-- `apps/backend/prisma/rls/RLS_PLAN.md` - Row Level Security plan
+- `docs/security/TENANT_ISOLATION_ROADMAP.md` - current tenant-isolation roadmap
+- `docs/archive/security/` - superseded security plans retained for history only
 
-## TODO (Next Steps)
+## Current Next Steps
 
-1. GHL OAuth integration and webhook handling
-2. AI model provider adapters
-3. Knowledge base with embeddings (pgvector)
-4. Message formatter and bubble splitting
-5. Queue workers for async processing
+Use `NEXT_STEPS.md` as the current index. Do not infer current gaps from dated
+reviews, archived plans, or completed OpenSpec proposals.
 
 ## GHL Private Integration Setup
 

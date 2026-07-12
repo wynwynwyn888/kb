@@ -1,5 +1,7 @@
 # Tenant Roster RLS Cutover
 
+Status: **COMPLETED — PRODUCTION EVIDENCE AND ROLLBACK RECORD**
+
 Date: 2026-07-12  
 Baseline: `481df7760e66f5519c4439a7eb4e23907dd637fc`
 

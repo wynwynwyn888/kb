@@ -41,13 +41,13 @@ Role notation:
 | `Tenant` | `tenants` | tenant root: required `agency_id` | confidential workspace | AO/AA:CRUD; OP:R; TM:R assigned tenant | RLS enabled; no documented user policy | tenants, auth, ops, most tenant services | Add tenant-root policies using fixed-path membership helpers. |
 | `WorkspaceCreditWarningEvent` | `workspace_credit_warning_events` | tenant: required `tenant_id` and `agency_id`; must agree | confidential billing/operations | AO/AA/OP:R; INT:C/U | RLS enabled; no documented user policy | credit-warnings, notifications | Enforce agency/tenant equality and internal-only writes. |
 | `WorkspaceCreditResetReminderEvent` | `workspace_credit_reset_reminder_events` | tenant: required `tenant_id` and `agency_id`; must agree | confidential billing/operations | AO/AA/OP:R; INT:C/U | RLS enabled; no documented user policy | credit-reset-reminders, notifications | Enforce agency/tenant equality and internal-only writes. |
-| `TenantTaggingSettings` | `tenant_tagging_settings` | tenant: `tenant_id` is required primary key | confidential configuration | AO/AA:CRUD; OP:R/U operational; TM:R, admin-role U | RLS enabled; no documented user policy | intent-tags | Add tenant configuration CRUD policies. |
+| `TenantTaggingSettings` | `tenant_tagging_settings` | tenant: `tenant_id` is required primary key | confidential configuration | AO/AA:CRUD; OP:R/U operational; TM:R, admin-role U | RLS enabled; `tenant_tagging_settings_member_select` uses `can_read_tenant(tenant_id)`; direct authenticated writes denied | intent-tags | Keep writes behind guarded backend; specify mutation policy separately. |
 | `TenantTagRule` | `tenant_tag_rules` | tenant: required `tenant_id` | confidential configuration | AO/AA:CRUD; OP:R/U; TM:R, admin-role C/U/D | RLS enabled; no documented user policy | intent-tags | Add tenant configuration CRUD policies and tenant-leading tests. |
 | `TenantBookingSettings` | `tenant_booking_settings` | tenant: `tenant_id` is required primary key | confidential configuration | AO/AA:CRUD; OP:R/U; TM:R, admin-role U | RLS enabled; no documented user policy | booking-settings, booking-flow | Add tenant configuration CRUD policies. |
 | `TenantFollowUpSettings` | `tenant_follow_up_settings` | tenant: `tenant_id` is required primary key | confidential configuration | AO/AA:CRUD; OP:R/U; TM:R, admin-role U | RLS enabled; no documented user policy | follow-up-settings, follow-up-engine | Add tenant configuration CRUD policies. |
 | `TenantHumanEscalationSettings` | `tenant_human_escalation_settings` | tenant: `tenant_id` is required primary key | confidential configuration/contact destination | AO/AA:CRUD; OP:R/U; TM:R, admin-role U | RLS enabled; no documented user policy | human-escalation settings/runtime | Add tenant configuration policies; redact notification destinations from non-admins. |
 | `ConversationFollowUpJob` | `conversation_follow_up_jobs` | tenant: required `tenant_id`; conversation must have same tenant | restricted automation | AO/AA/OP:R; INT:CRUD | RLS enabled; no documented user policy; no Prisma relation to conversation | follow-up-engine, recovery workers | Add conversation/tenant FK or constraint trigger; internal-only mutations. |
-| `TenantUser` | `tenant_users` | tenant: required `tenant_id` plus `profile_id` | restricted authorization | AO/AA:CRUD; tenant admin limited CRUD; SELF:R | RLS enabled; no documented user policy | auth, tenant-users, invitations, tenants | Add non-recursive membership policies and revocation behavioral tests. |
+| `TenantUser` | `tenant_users` | tenant: required `tenant_id` plus `profile_id` | restricted authorization | AO/AA:CRUD; tenant admin limited CRUD; SELF:R | RLS enabled; `tenant_users_member_select` uses `can_read_tenant(tenant_id)`; roster profile fields exposed only by narrow `list_tenant_members` RPC; direct authenticated writes denied | auth, tenant-users, invitations, tenants | Keep writes behind guarded backend; retain last-admin and agency-identity protections. |
 | `TenantGhlConnection` | `tenant_ghl_connections` | tenant: required unique `tenant_id` | secret credentials/integration | AO/AA:CRUD; OP:R health metadata only; INT:R/U secrets | RLS enabled; no documented user policy | ghl, webhooks, transcription, outbound | Separate secret material from safe status; never return tokens through user RLS. |
 | `AgencyModelProvider` | `agency_model_providers` | agency: required `agency_id` | secret credentials/model config | AO:CRUD; AA:R/U by policy; INT:R | RLS enabled; no documented user policy | agency-ai-config, generation | Restrict secret columns to narrow server operations. |
 | `AgencySystemPolicy` | `agency_system_policies` | agency: required unique `agency_id` | restricted global AI policy | AO:CRUD; AA:R/U; OP:R | RLS enabled; no documented user policy | prompts, orchestration, agency config | Add agency role policies and immutable audit trail for changes. |
@@ -89,6 +89,8 @@ Production baseline has RLS enabled on all public tables, but only these authent
 | `messages_member_select` | `messages` | SELECT | `public.can_read_tenant(tenant_id)` |
 | `handover_events_member_select` | `handover_events` | SELECT | `public.can_read_tenant(tenant_id)` |
 | `profile_vault_links_member_select` | `tenant_bot_profile_knowledge_vaults` | SELECT | `public.can_read_tenant(tenant_id)` |
+| `tenant_tagging_settings_member_select` | `tenant_tagging_settings` | SELECT | `public.can_read_tenant(tenant_id)` |
+| `tenant_users_member_select` | `tenant_users` | SELECT | `public.can_read_tenant(tenant_id)`; roster profile fields require narrow RPC |
 
 All other policy entries above mean “RLS enabled with no documented user policy”, not that the table is safely available to authenticated users. Ordinary backend service-role access bypasses RLS and remains a classified migration risk.
 
@@ -98,7 +100,7 @@ All other policy entries above mean “RLS enabled with no documented user polic
 - An explicit tenant membership can read its assigned tenant.
 - Agency MEMBER alone grants no tenant access.
 - Revoked, unrelated, and anonymous users receive no tenant rows.
-- Database mutation access is denied on the three protected tables until separately specified and behaviorally tested.
+- Database mutation access is denied on the five protected tables until separately specified and behaviorally tested.
 
 ## Change-control checklist
 

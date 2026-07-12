@@ -1,5 +1,10 @@
 # Live Tenant-Isolation Audit and First Cutover Specification
 
+> **Status: HISTORICAL — COMPLETED.** This document records the baseline before
+> the first caller-scoped cutover. It is not the current production inventory.
+> Use `docs/security/README.md`, `docs/security/TENANT_ISOLATION_ROADMAP.md`, and
+> `docs/security/tenant-data-catalogue.md` for current state.
+
 Date: 2026-07-12 (Asia/Singapore)  
 Audited runtime revision: `6d2605e6afea557f81a1069523a6a814e84d3c84`  
 Audit branch/worktree: `audit/live-tenant-isolation-20260712` / `/Users/wyn/Projects/KB/kb-live-tenant-audit`  

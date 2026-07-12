@@ -64,13 +64,17 @@ export class AuthService {
 
       let agencyMembership: { agencyId: string; role: AgencyRole } | null = null;
       let tenantMemberships: Array<{ tenantId: string; agencyId: string; role: TenantRole }> = [];
+      let agencyMembershipLoaded = false;
+      let tenantMembershipsLoaded = false;
       try {
-        agencyMembership = await this.getAgencyMembership(user.id);
+        agencyMembership = await this.getAgencyMembership(user.id, true);
+        agencyMembershipLoaded = true;
       } catch (e) {
         this.logger.warn(`getAgencyMembership failed: ${e instanceof Error ? e.message : e}`);
       }
       try {
-        tenantMemberships = await this.getTenantMemberships(user.id);
+        tenantMemberships = await this.getTenantMemberships(user.id, true);
+        tenantMembershipsLoaded = true;
       } catch (e) {
         this.logger.warn(`getTenantMemberships failed: ${e instanceof Error ? e.message : e}`);
       }
@@ -103,6 +107,12 @@ export class AuthService {
         tenantId,
         accessContext: {
           profileId: user.id,
+          membershipStatus:
+            agencyMembershipLoaded && tenantMembershipsLoaded
+              ? 'complete'
+              : agencyMembershipLoaded || tenantMembershipsLoaded
+                ? 'partial'
+                : 'failed',
           agencyMemberships: agencyMembership ? [agencyMembership] : [],
           tenantMemberships,
         },
@@ -140,7 +150,10 @@ export class AuthService {
   /**
    * Get agency membership for a user
    */
-  async getAgencyMembership(profileId: string): Promise<{ agencyId: string; role: AgencyRole } | null> {
+  async getAgencyMembership(
+    profileId: string,
+    strict = false,
+  ): Promise<{ agencyId: string; role: AgencyRole } | null> {
     const supabase = getSupabaseService();
     // Deterministic when multiple agency_users rows exist (use oldest membership).
     const { data, error } = await supabase
@@ -151,7 +164,11 @@ export class AuthService {
       .limit(1)
       .maybeSingle();
 
-    if (error || !data) {
+    if (error) {
+      if (strict) throw new Error('agency_membership_load_failed');
+      return null;
+    }
+    if (!data) {
       return null;
     }
 
@@ -165,7 +182,10 @@ export class AuthService {
    * Get all tenant memberships for a user.
    * Tries a single join first; on PostgREST embed errors (relation hints / schema drift) falls back to two queries.
    */
-  async getTenantMemberships(profileId: string): Promise<Array<{ tenantId: string; agencyId: string; role: TenantRole }>> {
+  async getTenantMemberships(
+    profileId: string,
+    strict = false,
+  ): Promise<Array<{ tenantId: string; agencyId: string; role: TenantRole }>> {
     const supabase = getSupabaseService();
     const { data, error } = await supabase
       .from('tenant_users')
@@ -185,23 +205,24 @@ export class AuthService {
           role: d.role as TenantRole,
         });
       }
-      if (out.length > 0) {
+      if (out.length > 0 && (!strict || out.length === data.length)) {
         return out;
       }
     }
 
     if (error) {
       this.logger.debug(
-        `tenant membership embed query: ${error.code ?? ''} ${error.message ?? 'unknown'} — using fallback`,
+        `tenant membership embed query failed: code=${error.code ?? 'unknown'} — using fallback`,
       );
     }
 
-    return this.getTenantMembershipsByLookup(profileId);
+    return this.getTenantMembershipsByLookup(profileId, strict);
   }
 
   /** Resolve tenant + agency without embed (more compatible across Supabase/PostgREST). */
   private async getTenantMembershipsByLookup(
     profileId: string,
+    strict = false,
   ): Promise<Array<{ tenantId: string; agencyId: string; role: TenantRole }>> {
     const supabase = getSupabaseService();
     const { data: rows, error } = await supabase
@@ -209,19 +230,24 @@ export class AuthService {
       .select('tenant_id, role')
       .eq('profile_id', profileId);
 
-    if (error || !rows?.length) {
-      if (error) {
-        this.logger.warn(`getTenantMembershipsByLookup: ${error.message ?? error.code ?? 'error'}`);
-      }
+    if (error) {
+      this.logger.warn(`getTenantMembershipsByLookup failed: code=${error.code ?? 'unknown'}`);
+      if (strict) throw new Error('tenant_membership_load_failed');
+      return [];
+    }
+    if (!rows?.length) {
       return [];
     }
 
     const tenantIds = [...new Set(rows.map(r => r.tenant_id as string))];
     const { data: tenants, error: te } = await supabase.from('tenants').select('id, agency_id').in('id', tenantIds);
-    if (te || !tenants?.length) {
-      if (te) {
-        this.logger.warn(`getTenantMembershipsByLookup tenants: ${te.message ?? te.code ?? 'error'}`);
-      }
+    if (te) {
+      this.logger.warn(`getTenantMembershipsByLookup tenants failed: code=${te.code ?? 'unknown'}`);
+      if (strict) throw new Error('tenant_parent_load_failed');
+      return [];
+    }
+    if (!tenants?.length) {
+      if (strict) throw new Error('tenant_parent_missing');
       return [];
     }
 
@@ -234,6 +260,7 @@ export class AuthService {
         out.push({ tenantId: tid, agencyId, role: r.role as TenantRole });
       }
     }
+    if (strict && out.length !== rows.length) throw new Error('tenant_parent_incomplete');
     return out;
   }
 

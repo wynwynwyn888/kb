@@ -26,6 +26,9 @@ export class AuthorizationPolicyService {
     tenantAgencyId: string,
     action: TenantAccessAction,
   ): AccessDecision {
+    if (context.membershipStatus !== 'complete') {
+      return { allowed: false, reason: 'context_incomplete' };
+    }
     const agencyMembership = context.agencyMemberships.find(
       membership => membership.agencyId === tenantAgencyId,
     );
@@ -52,6 +55,9 @@ export class AuthorizationPolicyService {
     agencyId: string,
     action: AgencyAccessAction,
   ): AccessDecision {
+    if (context.membershipStatus !== 'complete') {
+      return { allowed: false, reason: 'context_incomplete' };
+    }
     const membership = context.agencyMemberships.find(item => item.agencyId === agencyId);
     if (!membership) return { allowed: false, reason: 'no_matching_membership' };
     if (action === 'read') return { allowed: true, reason: 'agency_member_read' };

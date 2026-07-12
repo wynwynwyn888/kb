@@ -58,3 +58,21 @@ Batch 2 introduces a central `AccessContext` and `AuthorizationPolicyService` wi
 - A shadow query failure is observation-only: it is safely logged and never alters or interrupts the legacy request.
 
 Known expected disagreement to measure before enforcement: legacy application checks currently treat agency `MEMBER` as tenant-readable, while the deployed database contract requires agency `OWNER`, `ADMIN`, or `OPERATOR` unless the member is explicitly assigned to the tenant.
+
+Before enabling observation traffic, run the read-only, content-free staging membership evaluator:
+
+```bash
+NODE_ENV=staging pnpm --filter @aisbp/backend security:evaluate:staging-authz-shadow
+```
+
+Enabled observation is bounded by a short-lived context cache, in-flight request deduplication, a database-load concurrency ceiling, and an observation timeout. Timed-out database work continues to count against the ceiling until it actually settles. Aggregate summaries contain counters only.
+
+Safe defaults, all bounded in code:
+
+- `AUTHORIZATION_SHADOW_CACHE_TTL_MS=15000` (1–60 seconds)
+- `AUTHORIZATION_SHADOW_CACHE_MAX_ENTRIES=1000` (10–10,000 entries)
+- `AUTHORIZATION_SHADOW_MAX_CONCURRENT=8` (1–32 database loads)
+- `AUTHORIZATION_SHADOW_TIMEOUT_MS=1500` (100–5,000 ms observation wait)
+- `AUTHORIZATION_SHADOW_SUMMARY_EVERY=100` (10–10,000 observations)
+
+Membership context carries `complete`, `partial`, or `failed` load status. An incomplete context is never treated as a genuine no-membership decision and is ineligible for enforcement.

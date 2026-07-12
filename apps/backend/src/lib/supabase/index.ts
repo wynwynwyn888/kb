@@ -88,6 +88,7 @@ export interface SessionUser {
   /** Complete membership facts for centralized authorization; never serialized by auth endpoints. */
   accessContext?: {
     profileId: string;
+    membershipStatus: 'complete' | 'partial' | 'failed';
     agencyMemberships: Array<{ agencyId: string; role: 'OWNER' | 'ADMIN' | 'OPERATOR' | 'MEMBER' }>;
     tenantMemberships: Array<{
       tenantId: string;

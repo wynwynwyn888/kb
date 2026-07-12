@@ -42,6 +42,8 @@ export interface GenerateDraftPolicyContext {
   priorAssistantMessageCount?: number;
   /** Recent assistant history already contains a booking/scheduling URL. */
   recentAssistantBookingUrlSent?: boolean;
+  /** Resolved tenant-configured choices received in one debounced customer burst. */
+  multiOptionSelections?: Array<{ label: string; text: string }>;
 }
 
 export interface GenerateDraftParams {
@@ -590,6 +592,16 @@ export class GenerationService {
       if (pc.latestIntent === 'MENU' || pc.latestIntent === 'SHORT_SELECTION') {
         parts.push(
           'Offerings rule: Never invent item or service names, prices, availability, suitability claims, or marketing descriptions not explicitly supported by the KB excerpts.',
+        );
+      }
+      if ((pc.multiOptionSelections?.length ?? 0) > 1) {
+        const selections = pc.multiOptionSelections!
+          .map(selection => `${selection.label}. ${selection.text}`)
+          .join(' | ');
+        parts.push(
+          `Multi-selection rule: the customer selected all of these choices in one trailing-debounce turn: ${selections}. ` +
+            'Address every selected choice together and follow the tenant Sales Playbook after-selection instruction. ' +
+            'Do not reduce the turn to only the final choice and do not use a generic single-option “share more details” fallback.',
         );
       }
       if (pc.latestIntent === 'BOOKING') {

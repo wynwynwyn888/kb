@@ -3,6 +3,7 @@ import type { AisbpPolicyStateV1 } from './conversation-policy-state';
 import {
   isOptionSelectionSingleToken,
   parseAssistantOptionLines,
+  resolveMultiSelectionBurst,
   resolveShortSelection,
   shouldSkipKbForPureOptionLetterSelection,
 } from './option-resolver';
@@ -182,5 +183,32 @@ describe('option-resolver — resolution from memory and state', () => {
     expect(isOptionSelectionSingleToken('6')).toBe(true);
     expect(isOptionSelectionSingleToken('FF')).toBe(false);
     expect(isOptionSelectionSingleToken('E F')).toBe(false);
+  });
+
+  it('resolves a 2 → 3 → 4 trailing-debounce burst in customer order', () => {
+    const state: AisbpPolicyStateV1 = {
+      ...baseState(),
+      awaiting: 'option_selection',
+      options: {
+        A: 'Leads going cold',
+        B: 'Prospects ask for price but do not book',
+        C: 'Too much manual chasing',
+        D: 'Unsure how many sales are lost',
+      },
+    };
+    const result = resolveMultiSelectionBurst(['2', '3', '4'], state, []);
+    expect(result?.selections.map(selection => selection.raw)).toEqual(['2', '3', '4']);
+    expect(result?.selections.map(selection => selection.selectedText)).toEqual([
+      'Prospects ask for price but do not book',
+      'Too much manual chasing',
+      'Unsure how many sales are lost',
+    ]);
+  });
+
+  it('does not treat a mixed burst as a multi-selection turn', () => {
+    const state: AisbpPolicyStateV1 = {
+      ...baseState(), awaiting: 'option_selection', options: { A: 'One', B: 'Two' },
+    };
+    expect(resolveMultiSelectionBurst(['2', 'what is the price?'], state, [])).toBeNull();
   });
 });

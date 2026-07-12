@@ -1609,9 +1609,33 @@ export class InboundMessageProcessor extends WorkerHost {
     }
 
     if (result.outcome === 'SKIP_HANDOVER_ACTIVE') {
-      // Active handover is an intentional silent skip. Record the terminal
-      // decision even if the provider id is missing so this never becomes an
-      // unknown no-reply.
+      // A human owns the conversation, but the customer must not encounter silence while
+      // waiting. The handover responder uses recent conversation context and its own cooldown/
+      // acknowledgement guards; it never resumes normal autonomous business answering.
+      try {
+        await this.humanEscalationHolding.tryEnqueueHoldingReply({
+          tenantId,
+          conversationId,
+          locationId,
+          ghlContactId,
+          latestInboundText,
+          contactDisplayName: contactDisplayName?.trim() || null,
+          contactPhone: contactPhone?.trim() || null,
+          botMode: tenantContext?.botMode ?? null,
+          pipelineWallStartMs,
+        });
+      } catch (e) {
+        this.logger.warn(
+          `humanEscalationHoldingReplyFailed ${JSON.stringify({
+            conversationId,
+            tenantId,
+            message: e instanceof Error ? e.message.slice(0, 200) : String(e).slice(0, 200),
+          })}`,
+        );
+      }
+
+      // Record the terminal orchestration decision even if the provider id is missing so this
+      // never becomes an unknown no-reply. The holding reply is tracked as its own send job.
       const skipStatus = mapOutcomeToDecisionStatus(result.outcome as string);
       if (latestMsgId && skipStatus) {
         await recordTerminalDecision({

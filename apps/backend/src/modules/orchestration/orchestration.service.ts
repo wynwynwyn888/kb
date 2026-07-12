@@ -78,6 +78,7 @@ import {
   readConversationMetadataField,
 } from '../../lib/conversation-metadata-merge';
 import { containsBotHumanEscalationLanguage } from '../../lib/bot-human-escalation-language';
+import { NO_SAFE_AI_REPLY_HOLDING_TEXT } from '../../lib/no-safe-ai-reply';
 import { BotProfilesService } from '../prompts/bot-profiles.service';
 import { safeTextPreviewForLog } from '../../lib/safe-text-preview-for-log';
 import { resolveMandatoryAfterNameRoute } from '../../lib/mandatory-playbook-route';
@@ -990,9 +991,9 @@ export class ConversationOrchestrationService {
   }
 
   /**
-   * Customer enquiries should never disappear. If the planner/guards cannot produce a safe
-   * grounded reply, route the conversation to human takeover instead of leaving it as a silent
-   * no-reply.
+   * Customer enquiries should never disappear. General contextual replies are already allowed
+   * without KB grounding. If a business-specific reply cannot be produced safely, send the
+   * deterministic holding acknowledgement and route the conversation to human takeover.
    */
   private async maybeEscalateNoReplyPlan(params: {
     input: OrchestrationInput;
@@ -1067,11 +1068,11 @@ export class ConversationOrchestrationService {
 
     return {
       ...replyPlan,
-      planStatus: 'HANDOVER',
+      planStatus: 'PLANNED',
       responseMode: 'handover',
       handoverRecommended: escalated,
-      rationale: `${replyPlan.rationale}; humanTakeover=no_safe_ai_reply`,
-      bubbles: [],
+      rationale: `${replyPlan.rationale}; holdingReply=no_safe_ai_reply; humanTakeover=no_safe_ai_reply`,
+      bubbles: [{ index: 0, text: NO_SAFE_AI_REPLY_HOLDING_TEXT }],
       suggestedActions: [
         ...replyPlan.suggestedActions,
         {

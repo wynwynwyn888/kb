@@ -19,14 +19,14 @@ The intended invariants are:
 
 - one canonical AISBP agency;
 - founder-controlled identities only in `agency_users`;
-- `OWNER` is the only agency role required by the product;
+- the confirmed founder `OWNER` and founder `ADMIN` are the only live agency identities required by the product;
 - every customer business is represented by a tenant;
 - customer access is granted only through explicit tenant membership;
 - tenant `ADMIN` manages its customer workspace, not the AISBP agency;
 - tenant `AGENT` and `VIEWER` permissions remain confined to the assigned tenant;
 - the founder can enter every customer tenant for support and platform operation.
 
-Legacy agency roles remain in the schema for compatibility, and `can_read_tenant` currently permits agency `OWNER`, `ADMIN`, and `OPERATOR`. That is broader than the canonical product model. Do not silently narrow the shared helper during the first tagging-settings cutover because it already protects three live resources. First identify which production memberships are founder-controlled, remove or reclassify any unintended membership through a separately reviewed migration, prevent customer provisioning from creating agency memberships, and behaviorally test all affected agency pages and APIs.
+Legacy agency roles remain in the schema for compatibility, and `can_read_tenant` currently permits agency `OWNER`, `ADMIN`, and `OPERATOR`. The production `OWNER` and `ADMIN` on the real agency were confirmed by the founder on 2026-07-12 and must both be preserved. `OPERATOR` and `MEMBER` are not part of the current product model. Do not silently narrow the shared helper during the first tagging-settings cutover because it already protects three live resources. Prevent customer provisioning from creating agency memberships and behaviorally test all affected agency pages and APIs before separately hardening unused roles.
 
 The first cutover should be only:
 
@@ -198,6 +198,24 @@ Before the first production route cutover:
 6. Specify a separately reversible change to reject new non-founder agency memberships. Do not hardcode an email address or user UUID in RLS or application code.
 
 This prerequisite does not require deleting legacy role enum values. It requires making them unreachable through normal customer provisioning and ensuring no customer holds them.
+
+Production verification on 2026-07-12 found that the real agency owns both production tenants and has exactly two founder-confirmed memberships: one `OWNER` and one `ADMIN`. Neither has a tenant membership, and both must remain. A separate empty test agency has one old test owner. Eight non-production agency records have no tenants, invitations, audit logs, quota logs, or credit events, but contain one old membership, one model-provider row, and seven system-policy rows; they are excluded from this cutover and require a separate export-and-cleanup plan.
+
+Code review confirmed that customer workspace invitations use `WORKSPACE` scope and create `tenant_users` membership. Agency membership requires an explicit agency invitation or agency-member operation. Customer provisioning must continue to use only the workspace path.
+
+### Staging evidence
+
+On 2026-07-12 the SELECT policy was applied to the designated staging project and tested through real anon-key/JWT clients. Eleven database-level assertions passed:
+
+- founder read of both customer tenants;
+- Tenant A `ADMIN`, `AGENT`, and `VIEWER` confinement;
+- Tenant B `ADMIN` confinement;
+- customer denial from the agency table;
+- unaffiliated authenticated and anonymous denial;
+- insert, update, and delete denial;
+- concurrent Customer A/Customer B token isolation.
+
+All temporary fixture agencies, tenants, profiles, authentication users, memberships, and settings were removed. A read-only residue check returned zero fixture rows.
 
 ## Deployment gates
 

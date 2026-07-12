@@ -1,7 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { CurrentAccessToken, CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { SessionUser } from '../../lib/supabase';
 import { GhlService } from '../ghl/ghl.service';
 import { TagRulesService } from './tag-rules.service';
@@ -20,9 +20,13 @@ export class TenantTaggingController {
 
   @Get('tagging-settings')
   @ApiOperation({ summary: 'Get automatic tagging master toggle' })
-  async getTaggingSettings(@Param('tenantId') tenantId: string, @CurrentUser() user: SessionUser) {
+  async getTaggingSettings(
+    @Param('tenantId') tenantId: string,
+    @CurrentUser() user: SessionUser,
+    @CurrentAccessToken() accessToken: string,
+  ) {
     await this.ghlService.ensureTenantAccessOrThrow(tenantId, user.id);
-    return this.tagRulesService.getTaggingSettings(tenantId);
+    return this.tagRulesService.getTaggingSettingsForCaller(tenantId, accessToken);
   }
 
   @Patch('tagging-settings')

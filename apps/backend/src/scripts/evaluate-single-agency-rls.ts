@@ -1,12 +1,23 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { randomUUID } from 'node:crypto';
+import { AuthorizationPolicyService } from '../modules/authorization/authorization-policy.service';
+import {
+  AuthorizationShadowService,
+  type AuthorizationShadowMetrics,
+} from '../modules/authorization/authorization-shadow.service';
 
 const url = process.env['SUPABASE_URL'] ?? '';
 const anonKey = process.env['SUPABASE_ANON_KEY'] ?? '';
 const serviceKey = process.env['SUPABASE_SERVICE_ROLE_KEY'] ?? '';
 const allow = process.env['ALLOW_STAGING_RLS_FIXTURES'] === '1';
+let hostname = '';
+try {
+  hostname = new URL(url).hostname;
+} catch {
+  // Invalid or absent URLs are rejected below.
+}
 
-if (!allow || process.env['NODE_ENV'] === 'production' || !url.includes('tuxbrerxmhnotcfrmzct')) {
+if (!allow || process.env['NODE_ENV'] === 'production' || hostname !== 'tuxbrerxmhnotcfrmzct.supabase.co') {
   throw new Error('Refusing RLS fixture run: explicit staging environment is required');
 }
 if (!anonKey || !serviceKey) throw new Error('Missing staging Supabase keys');
@@ -138,6 +149,78 @@ async function cleanup(): Promise<void> {
   }
 }
 
+function expectMetric(
+  metrics: AuthorizationShadowMetrics,
+  key: keyof AuthorizationShadowMetrics,
+  expected: number,
+): void {
+  if (metrics[key] !== expected) {
+    throw new Error(`shadow metric ${key}: expected ${expected}, got ${metrics[key]}`);
+  }
+}
+
+async function evaluateAuthorizationShadow(): Promise<AuthorizationShadowMetrics> {
+  const previous = {
+    enabled: process.env['AUTHORIZATION_SHADOW_ENABLED'],
+    maximum: process.env['AUTHORIZATION_SHADOW_MAX_CONCURRENT'],
+    timeout: process.env['AUTHORIZATION_SHADOW_TIMEOUT_MS'],
+  };
+  process.env['AUTHORIZATION_SHADOW_ENABLED'] = 'true';
+  process.env['AUTHORIZATION_SHADOW_MAX_CONCURRENT'] = '8';
+  process.env['AUTHORIZATION_SHADOW_TIMEOUT_MS'] = '5000';
+  try {
+    const shadow = new AuthorizationShadowService(new AuthorizationPolicyService());
+    const observations = [
+      { actor: 'owner' as const, tenantId: tenants[0]!, legacyAllowed: true },
+      // Same pair intentionally overlaps to prove in-flight deduplication.
+      { actor: 'owner' as const, tenantId: tenants[0]!, legacyAllowed: true },
+      { actor: 'admin' as const, tenantId: tenants[1]!, legacyAllowed: true },
+      { actor: 'operator' as const, tenantId: tenants[2]!, legacyAllowed: true },
+      { actor: 'memberA' as const, tenantId: tenants[0]!, legacyAllowed: true },
+      // Expected disagreement: legacy app allows agency MEMBER, contract does not.
+      { actor: 'memberOnly' as const, tenantId: tenants[0]!, legacyAllowed: true },
+      { actor: 'viewerB' as const, tenantId: tenants[1]!, legacyAllowed: true },
+      { actor: 'revoked' as const, tenantId: tenants[2]!, legacyAllowed: false },
+      { actor: 'outsider' as const, tenantId: tenants[0]!, legacyAllowed: false },
+    ];
+    await Promise.all(observations.map(item => shadow.observeTenantAccess({
+      profileId: authIds[item.actor]!,
+      tenantId: item.tenantId,
+      action: 'read',
+      legacyAllowed: item.legacyAllowed,
+      source: 'staging-real-fixture',
+    })));
+    // The owner pair is now cached and must not create another database load.
+    await shadow.observeTenantAccess({
+      profileId: authIds.owner!, tenantId: tenants[0]!, action: 'read',
+      legacyAllowed: true, source: 'staging-real-fixture-cache',
+    });
+
+    const metrics = shadow.getMetricsSnapshot();
+    expectMetric(metrics, 'observed', 10);
+    expectMetric(metrics, 'match', 9);
+    expectMetric(metrics, 'disagreement', 1);
+    expectMetric(metrics, 'unavailable', 0);
+    expectMetric(metrics, 'error', 0);
+    expectMetric(metrics, 'timeout', 0);
+    expectMetric(metrics, 'capacity', 0);
+    expectMetric(metrics, 'cacheHit', 1);
+    expectMetric(metrics, 'deduplicated', 1);
+    expectMetric(metrics, 'databaseLoad', 8);
+    return metrics;
+  } finally {
+    for (const [key, value] of Object.entries(previous)) {
+      const envName = key === 'enabled'
+        ? 'AUTHORIZATION_SHADOW_ENABLED'
+        : key === 'maximum'
+          ? 'AUTHORIZATION_SHADOW_MAX_CONCURRENT'
+          : 'AUTHORIZATION_SHADOW_TIMEOUT_MS';
+      if (value === undefined) delete process.env[envName];
+      else process.env[envName] = value;
+    }
+  }
+}
+
 async function main(): Promise<void> {
   const report: Record<string, unknown> = { run, stagingOnly: true };
   try {
@@ -168,8 +251,10 @@ async function main(): Promise<void> {
     }
     await expectInsertDenied(clients.memberA, 'messages');
     await expectInsertDenied(clients.memberA, 'handover_events');
+    const shadowMetrics = await evaluateAuthorizationShadow();
     report['passed'] = true;
-    report['assertions'] = 29;
+    report['assertions'] = 39;
+    report['shadow'] = shadowMetrics;
   } finally {
     await cleanup();
   }

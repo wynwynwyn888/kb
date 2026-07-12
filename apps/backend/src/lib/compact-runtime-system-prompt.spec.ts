@@ -20,9 +20,10 @@ describe('runtime section budgets sourced from PROMPT_FIELD_LIMITS (no drift)', 
     expect(RUNTIME_TENANT_SECTION_BUDGETS.salesPlaybook).toBe(PROMPT_FIELD_LIMITS.salesPlaybook);
     expect(RUNTIME_TENANT_SECTION_BUDGETS.bookingBehavior).toBe(PROMPT_FIELD_LIMITS.bookingBehavior);
     expect(RUNTIME_TENANT_SECTION_BUDGETS.escalationBehavior).toBe(PROMPT_FIELD_LIMITS.escalationBehavior);
+    expect(PROMPT_FIELD_LIMITS.salesPlaybook).toBe(5000);
   });
 
-  it('total tenant section budget is 22,500 for the seven core fields', () => {
+  it('total tenant section budget is 24,500 for the seven core fields', () => {
     const core =
       RUNTIME_TENANT_SECTION_BUDGETS.criticalFacts +
       RUNTIME_TENANT_SECTION_BUDGETS.persona +
@@ -31,7 +32,7 @@ describe('runtime section budgets sourced from PROMPT_FIELD_LIMITS (no drift)', 
       RUNTIME_TENANT_SECTION_BUDGETS.salesPlaybook +
       RUNTIME_TENANT_SECTION_BUDGETS.bookingBehavior +
       RUNTIME_TENANT_SECTION_BUDGETS.escalationBehavior;
-    expect(core).toBe(22500);
+    expect(core).toBe(24500);
   });
 
   it('global policy budget is a separate, larger cap (10,000, not the legacy 7,500 tenant cap)', () => {
@@ -77,9 +78,13 @@ describe('compactProfileSections', () => {
     expect(result.truncated.businessNotes).toBe(true);
   });
 
-  it('salesPlaybook truncated only above 3,000', () => {
-    const result = compactProfileSections({ salesPlaybook: 'S'.repeat(3500) });
-    expect(result.sections.salesPlaybook!.length).toBeLessThanOrEqual(3010);
+  it('salesPlaybook preserves all 5,000 characters and truncates only above 5,000', () => {
+    const exact = compactProfileSections({ salesPlaybook: 'S'.repeat(5000) });
+    expect(exact.sections.salesPlaybook).toHaveLength(5000);
+    expect(exact.truncated.salesPlaybook).toBe(false);
+
+    const result = compactProfileSections({ salesPlaybook: 'S'.repeat(5001) });
+    expect(result.sections.salesPlaybook).toHaveLength(5000);
     expect(result.truncated.salesPlaybook).toBe(true);
   });
 
@@ -111,7 +116,7 @@ describe('compactProfileSections', () => {
       persona: 'b'.repeat(3000),
       goals: 'c'.repeat(5000),
       businessNotes: 'd'.repeat(5000),
-      salesPlaybook: 's'.repeat(3000),
+      salesPlaybook: 's'.repeat(5000),
       bookingBehavior: 'e'.repeat(2000),
       escalationBehavior: 'f'.repeat(2000),
     });
@@ -119,7 +124,7 @@ describe('compactProfileSections', () => {
     expect(result.sections.persona!.length).toBe(3000);
     expect(result.sections.goals!.length).toBe(5000);
     expect(result.sections.businessNotes!.length).toBe(5000);
-    expect(result.sections.salesPlaybook!.length).toBe(3000);
+    expect(result.sections.salesPlaybook!.length).toBe(5000);
     expect(result.sections.bookingBehavior!.length).toBe(2000);
     expect(result.sections.escalationBehavior!.length).toBe(2000);
     expect(result.totalChars).toBeGreaterThan(7500);

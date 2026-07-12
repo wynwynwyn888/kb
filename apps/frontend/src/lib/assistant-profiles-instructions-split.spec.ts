@@ -1,11 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
+import { PROMPT_FIELD_LIMITS } from '@aisbp/types';
 
 function read(p: string): string {
   return fs.readFileSync(p, 'utf8');
 }
 
 describe('assistant profiles vs instructions surfaces', () => {
+  it('allows 5,000 Sales Playbook characters in the shared frontend limit', () => {
+    expect(PROMPT_FIELD_LIMITS.salesPlaybook).toBe(5000);
+  });
   it('profiles route renders in profiles mode', () => {
     const t = read('src/app/app/tenant/[tenantId]/assistant/profiles/page.tsx');
     expect(t).toContain('mode="profiles"');

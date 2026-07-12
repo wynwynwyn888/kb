@@ -57,6 +57,8 @@ export type MenuKbGroundingParams = {
   kbChunks: RetrievalChunk[];
   /** Tenant-provided category label from policy selection. */
   categoryLabel?: string | null;
+  /** The reply is answering choices already resolved from the tenant's configured playbook. */
+  tenantConfiguredSelection?: boolean;
 };
 
 function isCanonicalMenuClarification(d: string): boolean {
@@ -70,11 +72,16 @@ function isCanonicalMenuClarification(d: string): boolean {
  * sending canned copy.
  */
 export function applyMenuKbGroundingGuard(params: MenuKbGroundingParams): string {
-  const { latestIntent, menuSelectionActive, draftText, kbChunks } = params;
+  const { latestIntent, menuSelectionActive, draftText, kbChunks, tenantConfiguredSelection } = params;
   const menuish =
     latestIntent === 'MENU' || latestIntent === 'SHORT_SELECTION' || menuSelectionActive;
   if (!menuish) return draftText;
   if (isCanonicalMenuClarification(draftText)) return draftText;
+
+  // These selected labels are tenant-authored prompt data, not claims retrieved from a KB
+  // document. Let the normal no-KB claim and leak guards below the planner pipeline validate
+  // the generated answer instead of treating absence of a KB chunk as an automatic failure.
+  if (tenantConfiguredSelection) return draftText;
 
   if (!menuDraftLooksUngrounded(draftText, kbChunks)) return draftText;
 

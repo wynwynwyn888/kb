@@ -232,6 +232,51 @@ describe('ReplyPlannerService', () => {
       expect(result.bubbles).toEqual([]);
     });
 
+    it('plans one reply for validated tenant playbook choices without KB chunks', async () => {
+      mockGen.generateDraft.mockResolvedValueOnce({
+        content:
+          'You selected prospects asking for price without booking, manual chasing, and uncertainty about lost sales. These concerns often overlap. Which one would you like to improve first?',
+      });
+      const result = await service.planReply({
+        tenantId: 't1',
+        conversationId: 'c1',
+        routing: {
+          recommendedModel: 'gpt-4o',
+          responseMode: 'standard',
+          handoverRecommended: false,
+          confidence: 0.85,
+          reasoning: 'validated multi-selection',
+          draftReply: null,
+          tagsSuggested: [],
+          bookingIntentDetected: false,
+        },
+        kbChunks: [],
+        memory: [],
+        systemPrompt: 'Follow the tenant Sales Playbook.',
+        channel: 'WHATSAPP',
+        policyContext: {
+          latestIntent: 'SHORT_SELECTION',
+          resolvedSelection: null,
+          conversationStateSummary: 'awaiting=option_selection',
+          policyForcedReply: null,
+          policyReplyKind: 'none',
+          menuSelectionActive: true,
+          latestUserMessage: '4',
+          combinedHumanMessagesText: '2\n\n3\n\n4',
+          inboundBatchCount: 3,
+          multiOptionSelections: [
+            { label: '2', text: 'Prospects ask for price but do not book or buy' },
+            { label: '3', text: 'Too much manual chasing' },
+            { label: '4', text: 'Unsure how many sales are lost' },
+          ],
+        },
+      });
+      expect(result.planStatus).toBe('PLANNED');
+      expect(result.bubbles).toHaveLength(1);
+      expect(result.handoverRecommended).toBe(false);
+      expect(result.bubbles[0]!.text).toContain('manual chasing');
+    });
+
     it('H: empty policy forced reply skips without sending fallback copy', async () => {
       const result = await service.planReply({
         tenantId: 't1',

@@ -19,6 +19,12 @@ The option resolver now validates the complete debounced batch against the same 
 
 The debounce timing, webhook ingestion, ordinary conversation generation, and tenant settings are unchanged.
 
+### Production no-reply regression correction
+
+The first deployment preserved all choices, but the general menu KB-grounding guard then rejected the generated reply when no KB document was returned. These choices came from the tenant-configured Sales Playbook rather than a KB document, so the reply was incorrectly converted to `SKIP_NO_REPLY` and automatic human handover.
+
+Validated multi-choice Sales Playbook selections are now exempt only from that KB-document-presence check. The outbound policy guard, internal-instruction leak guard, unsupported no-KB business-claim guard, and proactive-handover guard remain active. Ordinary menu answers without trusted tenant selections remain blocked when ungrounded.
+
 ## Safety and regression coverage
 
 - Exact `2` → `3` → `4` burst resolves all three configured choices in order.
@@ -26,9 +32,10 @@ The debounce timing, webhook ingestion, ordinary conversation generation, and te
 - Duplicate choices are collapsed without reordering.
 - Single-choice behaviour remains unchanged.
 - Generation prompt coverage verifies every resolved choice is present and the generic single-choice fallback is prohibited.
+- Reply-planner coverage verifies a validated `2` → `3` → `4` tenant-playbook burst with no KB chunks produces one outbound bubble instead of `SKIP_NO_REPLY`/handover.
+- Menu-guard coverage verifies the exemption is limited to validated tenant-configured selections and ungrounded ordinary menu copy remains blocked.
 - Full backend tests, backend build/typecheck, frontend tests, and frontend typecheck must pass before deployment.
 
 ## Rollback
 
 Revert the deployment commit containing this document and the multi-option routing changes, redeploy the prior production commit `08b6de55db7455b1af494e80abc00e38757b7aeb`, and verify backend/frontend health. No database migration, data rewrite, secret, or tenant-setting rollback is required.
-

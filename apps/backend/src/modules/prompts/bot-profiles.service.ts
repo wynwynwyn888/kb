@@ -10,6 +10,7 @@ import { randomUUID } from 'node:crypto';
 import { PROMPT_FIELD_LIMITS } from '@aisbp/types';
 import { getSupabaseService } from '../../lib/supabase';
 import { AuthService } from '../auth/auth.service';
+import { agencyRoleCanReadTenant } from '../authorization/authorization-policy.service';
 import {
   type BotProfilePromptFields,
   KNOWLEDGE_ACCESS_ALL_VAULTS,
@@ -104,11 +105,11 @@ export class BotProfilesService {
 
     const { data: au } = await supabase
       .from('agency_users')
-      .select('id')
+      .select('role')
       .eq('profile_id', profileId)
       .eq('agency_id', tenant.agency_id as string)
       .maybeSingle();
-    return !!au;
+    return agencyRoleCanReadTenant(au?.role);
   }
 
   private async canManage(profileId: string, tenantId: string): Promise<boolean> {

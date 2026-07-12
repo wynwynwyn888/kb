@@ -49,10 +49,13 @@ describe('single-agency staging fixture safety', () => {
 
   it('runs real shadow comparisons inside the checked fixture lifecycle', () => {
     expect(runner).toContain('evaluateAuthorizationShadow');
-    expect(runner).toContain("legacy app allows agency MEMBER");
-    expect(runner).toContain("expectMetric(metrics, 'disagreement', 1)");
+    expect(runner).toContain("memberOnly' as const, tenantId: tenants[0]!, legacyAllowed: false");
+    expect(runner).toContain("expectMetric(metrics, 'disagreement', 0)");
     expect(runner).toContain("expectMetric(metrics, 'deduplicated', 1)");
     expect(runner).toContain("expectMetric(metrics, 'cacheHit', 1)");
+    expect(runner).toContain('evaluateLegacyApplicationChecks');
+    expect(runner).toContain("['memberOnly', false]");
+    expect(runner).toContain("report['legacyApplicationChecks'] = legacyAssertions");
     const invocation = 'const shadowMetrics = await evaluateAuthorizationShadow()';
     expect(runner.indexOf('await seed()')).toBeLessThan(runner.indexOf(invocation));
     expect(runner.indexOf(invocation)).toBeLessThan(runner.indexOf('await cleanup()'));

@@ -5,6 +5,10 @@ import {
   AuthorizationShadowService,
   type AuthorizationShadowMetrics,
 } from '../modules/authorization/authorization-shadow.service';
+import { TenantsService } from '../modules/tenants/tenants.service';
+import { GhlService } from '../modules/ghl/ghl.service';
+import { PromptsService } from '../modules/prompts/prompts.service';
+import { BotProfilesService } from '../modules/prompts/bot-profiles.service';
 
 const url = process.env['SUPABASE_URL'] ?? '';
 const anonKey = process.env['SUPABASE_ANON_KEY'] ?? '';
@@ -177,8 +181,7 @@ async function evaluateAuthorizationShadow(): Promise<AuthorizationShadowMetrics
       { actor: 'admin' as const, tenantId: tenants[1]!, legacyAllowed: true },
       { actor: 'operator' as const, tenantId: tenants[2]!, legacyAllowed: true },
       { actor: 'memberA' as const, tenantId: tenants[0]!, legacyAllowed: true },
-      // Expected disagreement: legacy app allows agency MEMBER, contract does not.
-      { actor: 'memberOnly' as const, tenantId: tenants[0]!, legacyAllowed: true },
+      { actor: 'memberOnly' as const, tenantId: tenants[0]!, legacyAllowed: false },
       { actor: 'viewerB' as const, tenantId: tenants[1]!, legacyAllowed: true },
       { actor: 'revoked' as const, tenantId: tenants[2]!, legacyAllowed: false },
       { actor: 'outsider' as const, tenantId: tenants[0]!, legacyAllowed: false },
@@ -198,8 +201,8 @@ async function evaluateAuthorizationShadow(): Promise<AuthorizationShadowMetrics
 
     const metrics = shadow.getMetricsSnapshot();
     expectMetric(metrics, 'observed', 10);
-    expectMetric(metrics, 'match', 9);
-    expectMetric(metrics, 'disagreement', 1);
+    expectMetric(metrics, 'match', 10);
+    expectMetric(metrics, 'disagreement', 0);
     expectMetric(metrics, 'unavailable', 0);
     expectMetric(metrics, 'error', 0);
     expectMetric(metrics, 'timeout', 0);
@@ -219,6 +222,44 @@ async function evaluateAuthorizationShadow(): Promise<AuthorizationShadowMetrics
       else process.env[envName] = value;
     }
   }
+}
+
+async function evaluateLegacyApplicationChecks(): Promise<number> {
+  const tenantsService = new TenantsService(
+    {} as never,
+    { get: async () => null, set: async () => undefined } as never,
+  );
+  const ghlService = new GhlService();
+  const promptsService = new PromptsService({} as never);
+  const botProfilesService = new BotProfilesService({} as never);
+  const checks: Array<[string, (profileId: string, tenantId: string) => Promise<boolean>]> = [
+    ['tenants', (profileId, tenantId) => tenantsService.checkTenantAccess(tenantId, profileId)],
+    ['ghl', (profileId, tenantId) => (
+      ghlService as unknown as { checkTenantAccess: (tenantId: string, profileId: string) => Promise<boolean> }
+    ).checkTenantAccess(tenantId, profileId)],
+    ['prompts', (profileId, tenantId) => promptsService.canAccessTenant(profileId, tenantId)],
+    ['botProfiles', (profileId, tenantId) => (
+      botProfilesService as unknown as {
+        canAccessTenant: (profileId: string, tenantId: string) => Promise<boolean>;
+      }
+    ).canAccessTenant(profileId, tenantId)],
+  ];
+  const actors: Array<[ActorName, boolean]> = [
+    ['owner', true],
+    ['memberA', true],
+    ['memberOnly', false],
+  ];
+  let assertions = 0;
+  for (const [source, check] of checks) {
+    for (const [actor, expected] of actors) {
+      const actual = await check(authIds[actor]!, tenants[0]!);
+      if (actual !== expected) {
+        throw new Error(`${source}/${actor}: expected tenant access ${expected}, got ${actual}`);
+      }
+      assertions += 1;
+    }
+  }
+  return assertions;
 }
 
 async function main(): Promise<void> {
@@ -251,9 +292,11 @@ async function main(): Promise<void> {
     }
     await expectInsertDenied(clients.memberA, 'messages');
     await expectInsertDenied(clients.memberA, 'handover_events');
+    const legacyAssertions = await evaluateLegacyApplicationChecks();
     const shadowMetrics = await evaluateAuthorizationShadow();
     report['passed'] = true;
-    report['assertions'] = 39;
+    report['assertions'] = 39 + legacyAssertions;
+    report['legacyApplicationChecks'] = legacyAssertions;
     report['shadow'] = shadowMetrics;
   } finally {
     await cleanup();

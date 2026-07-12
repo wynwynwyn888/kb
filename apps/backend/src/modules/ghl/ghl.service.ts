@@ -22,6 +22,7 @@ import { getSupabaseService } from '../../lib/supabase';
 import { decrypt, encrypt, maskToken, safeLog } from '../../lib/encryption';
 import { createGhlClient, GhlConnectionStatus, type GhlClient } from '@aisbp/ghl-client';
 import { AuthorizationShadowService } from '../authorization/authorization-shadow.service';
+import { agencyRoleCanReadTenant } from '../authorization/authorization-policy.service';
 
 export interface SaveConnectionDto {
   ghlLocationId: string;
@@ -524,7 +525,7 @@ export class GhlService {
       .eq('agency_id', tenant.agency_id)
       .single();
 
-    const allowed = !!agencyMember;
+    const allowed = agencyRoleCanReadTenant(agencyMember?.role);
     void this.observeTenantRead(profileId, tenantId, allowed);
     return allowed;
   }

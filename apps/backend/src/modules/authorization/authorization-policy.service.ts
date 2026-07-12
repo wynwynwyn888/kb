@@ -6,6 +6,10 @@ import type {
   TenantAccessAction,
 } from './access-context';
 
+export function agencyRoleCanReadTenant(role: unknown): boolean {
+  return role === 'OWNER' || role === 'ADMIN' || role === 'OPERATOR';
+}
+
 const TENANT_AGENCY_ROLES = {
   read: new Set(['OWNER', 'ADMIN', 'OPERATOR']),
   write: new Set(['OWNER', 'ADMIN']),
@@ -32,7 +36,12 @@ export class AuthorizationPolicyService {
     const agencyMembership = context.agencyMemberships.find(
       membership => membership.agencyId === tenantAgencyId,
     );
-    if (agencyMembership && TENANT_AGENCY_ROLES[action].has(agencyMembership.role as never)) {
+    if (
+      agencyMembership
+      && (action === 'read'
+        ? agencyRoleCanReadTenant(agencyMembership.role)
+        : TENANT_AGENCY_ROLES[action].has(agencyMembership.role as never))
+    ) {
       return { allowed: true, reason: 'agency_privileged' };
     }
 

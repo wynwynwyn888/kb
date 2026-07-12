@@ -232,6 +232,81 @@ describe('ReplyPlannerService', () => {
       expect(result.bubbles).toEqual([]);
     });
 
+    it('retries an unsafe hesitation reply and keeps the safe contextual AI guidance', async () => {
+      mockGen.generateDraft
+        .mockResolvedValueOnce({
+          content: 'We offer a guaranteed solution. Would you like to continue?',
+        })
+        .mockResolvedValueOnce({
+          content: 'No worries — it sounds like you are weighing the options. Which part would you like to look at first?',
+        });
+      const result = await service.planReply({
+        tenantId: 't1',
+        conversationId: 'c1',
+        routing: {
+          recommendedModel: 'gpt-4o',
+          responseMode: 'standard',
+          handoverRecommended: false,
+          confidence: 0.8,
+          reasoning: 'test',
+          draftReply: null,
+          tagsSuggested: [],
+          bookingIntentDetected: false,
+        },
+        kbChunks: [],
+        memory: [
+          { role: 'assistant' as const, sender: 'assistant', messageType: 'text' as const, content: 'Would you like to continue?', timestamp: new Date().toISOString() },
+          { role: 'user' as const, sender: 'user', messageType: 'text' as const, content: 'hmmm', timestamp: new Date().toISOString() },
+        ],
+        systemPrompt: 'Follow the tenant Sales Playbook.',
+        channel: 'WHATSAPP',
+        policyContext: {
+          latestIntent: 'UNKNOWN',
+          resolvedSelection: null,
+          conversationStateSummary: 'awaiting=option_selection',
+          policyForcedReply: null,
+          policyReplyKind: 'none',
+          menuSelectionActive: true,
+          latestUserMessage: 'hmmm',
+          multiOptionSelections: [
+            { label: '1', text: 'First topic' },
+            { label: '2', text: 'Second topic' },
+          ],
+        },
+      });
+
+      expect(mockGen.generateDraft).toHaveBeenCalledTimes(2);
+      expect(result.planStatus).toBe('PLANNED');
+      expect(result.handoverRecommended).toBe(false);
+      expect(result.bubbles.map(b => b.text).join(' ')).toContain('weighing the options');
+    });
+
+    it('does not retry an unsafe factual business answer', async () => {
+      mockGen.generateDraft.mockResolvedValueOnce({
+        content: 'Absolutely! We offer a guaranteed package for every customer.',
+      });
+      const result = await service.planReply({
+        tenantId: 't1',
+        conversationId: 'c1',
+        routing: {
+          recommendedModel: 'gpt-4o', responseMode: 'standard', handoverRecommended: false,
+          confidence: 0.8, reasoning: 'test', draftReply: null, tagsSuggested: [], bookingIntentDetected: false,
+        },
+        kbChunks: [],
+        memory: [{ role: 'user' as const, sender: 'user', messageType: 'text' as const, content: 'Do you guarantee results?', timestamp: new Date().toISOString() }],
+        systemPrompt: 'You are helpful.',
+        channel: 'WHATSAPP',
+        policyContext: {
+          latestIntent: 'UNKNOWN', resolvedSelection: null, conversationStateSummary: '',
+          policyForcedReply: null, policyReplyKind: 'none', menuSelectionActive: false,
+          latestUserMessage: 'Do you guarantee results?',
+        },
+      });
+
+      expect(mockGen.generateDraft).toHaveBeenCalledTimes(1);
+      expect(result.planStatus).toBe('SKIP_NO_REPLY');
+    });
+
     it('plans one reply for validated tenant playbook choices without KB chunks', async () => {
       mockGen.generateDraft.mockResolvedValueOnce({
         content:

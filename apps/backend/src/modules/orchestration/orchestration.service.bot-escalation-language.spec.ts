@@ -1,5 +1,6 @@
 import { jest as jestGlobal } from '@jest/globals';
 import { ConversationOrchestrationService } from './orchestration.service';
+import { NO_SAFE_AI_REPLY_HOLDING_TEXT } from '../../lib/no-safe-ai-reply';
 import type { OrchestrationInput } from './dto';
 import type { ReplyDecision } from '../reply-planning/dto';
 
@@ -276,10 +277,12 @@ describe('ConversationOrchestrationService — bot reply human escalation langua
         latestInboundMessage: 'Can you help me?',
       }),
     );
-    expect(result.replyPlan?.planStatus).toBe('HANDOVER');
+    expect(result.replyPlan?.planStatus).toBe('PLANNED');
     expect(result.replyPlan?.draftProvenance).toBe('human_escalation');
     expect(result.replyPlan?.handoverRecommended).toBe(true);
-    expect(result.replyPlan?.bubbles).toEqual([]);
+    expect(result.replyPlan?.bubbles).toEqual([
+      { index: 0, text: NO_SAFE_AI_REPLY_HOLDING_TEXT },
+    ]);
 
     jestGlobal.restoreAllMocks();
   });

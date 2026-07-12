@@ -666,7 +666,7 @@ describe('InboundMessageProcessor', () => {
     });
   });
 
-  it('orchestrate: SKIP_HANDOVER_ACTIVE is an intentional silent skip (no outbound)', async () => {
+  it('orchestrate: SKIP_HANDOVER_ACTIVE requests a contextual holding reply', async () => {
     orchestrate.mockResolvedValueOnce({
       success: false,
       outcome: 'SKIP_HANDOVER_ACTIVE',
@@ -724,7 +724,15 @@ describe('InboundMessageProcessor', () => {
       }),
     );
 
-    expect(mockHumanEscalationHolding.tryEnqueueHoldingReply).not.toHaveBeenCalled();
+    expect(mockHumanEscalationHolding.tryEnqueueHoldingReply).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tenantId: 'tenant-1',
+        conversationId: CONV_ID,
+        locationId: 'loc_1',
+        ghlContactId: 'ct_1',
+        latestInboundText: 'Hello?',
+      }),
+    );
     expect(mockSendBubbleQueueAdd).not.toHaveBeenCalled();
   });
 

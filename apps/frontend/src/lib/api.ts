@@ -1789,24 +1789,6 @@ export async function addTenantMember(
   return apiRequest(`/tenant-users`, { token, method: 'POST', body: JSON.stringify(dto) });
 }
 
-/** Create Supabase Auth user (or reset password) and attach to workspace. Agency staff or tenant ADMIN. */
-export async function provisionWorkspaceMemberCredentials(
-  token: string,
-  dto: {
-    tenantId: string;
-    email: string;
-    password: string;
-    fullName?: string | null;
-    role: TenantRoleValue;
-  },
-): Promise<RosterMember & { createdAt?: string }> {
-  return apiRequest(`/tenant-users/provision-credentials`, {
-    token,
-    method: 'POST',
-    body: JSON.stringify(dto),
-  });
-}
-
 export async function updateTenantMemberRole(
   token: string,
   membershipId: string,

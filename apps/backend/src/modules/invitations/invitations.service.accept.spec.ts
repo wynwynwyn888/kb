@@ -347,6 +347,37 @@ describe('InvitationsService accept flows', () => {
     expect(profilesChain.insert).toHaveBeenCalled();
   });
 
+  it('acceptWorkspaceInvite rejects an agency identity before tenant membership insert', async () => {
+    authGetUser.mockResolvedValue({
+      data: { user: { id: actorId, email: 'founder@example.com', user_metadata: {} } },
+      error: null,
+    });
+    const inviteRow = {
+      id: inviteId,
+      email_normalized: 'founder@example.com',
+      email_original: 'founder@example.com',
+      tenant_id: 'tenant-1',
+      agency_id: agencyId,
+      role: 'ADMIN',
+      scope: 'WORKSPACE',
+      status: 'PENDING',
+      expires_at: new Date(Date.now() + 86400000).toISOString(),
+    };
+    const invitationsChain = chainTerminal({ data: inviteRow, error: null });
+    const agencyMembership = chainTerminal({ data: { id: 'agency-membership-1' }, error: null });
+    const tenantUsersInsert = jest.fn();
+
+    (supabaseMock.from as jest.Mock).mockImplementation((table: string) => {
+      if (table === 'user_invitations') return invitationsChain;
+      if (table === 'agency_users') return agencyMembership;
+      if (table === 'tenant_users') return { insert: tenantUsersInsert };
+      return chainTerminal({ data: null, error: null });
+    });
+
+    await expect(service.acceptWorkspaceInvite(actorId, inviteId, token)).rejects.toBeInstanceOf(ForbiddenException);
+    expect(tenantUsersInsert).not.toHaveBeenCalled();
+  });
+
   it('acceptAgencyInvite throws Unauthorized when getUser has no email', async () => {
     authGetUser.mockResolvedValue({
       data: { user: { id: actorId, email: null, user_metadata: {} } },

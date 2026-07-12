@@ -225,6 +225,10 @@ export class InvitationsService {
     if (te || !t) throw new NotFoundException('Workspace not found');
     const agencyId = t.agency_id as string;
 
+    if (await this.findAnyAgencyMembershipByEmail(emailNormalized)) {
+      throw new ConflictException('Agency accounts already have access to this workspace.');
+    }
+
     const existingMember = await this.findTenantMembershipByEmail(tenantId, emailNormalized);
     if (existingMember) {
       throw new ConflictException('This user already has access.');
@@ -259,6 +263,9 @@ export class InvitationsService {
       );
     }
     const tenantId = inv.tenant_id;
+    if (await this.hasAnyAgencyMembership(actorProfileId)) {
+      throw new ForbiddenException('Agency accounts cannot join a customer workspace as tenant members.');
+    }
     const existing = await this.findTenantMembershipByProfile(tenantId, actorProfileId);
     if (existing) {
       await this.markInviteAccepted(inviteId, actorProfileId);
@@ -370,12 +377,12 @@ export class InvitationsService {
     const actorIsAgencyStaff = actorAgencyRole === 'OWNER' || actorAgencyRole === 'ADMIN';
     const actorIsWorkspaceAdmin = !actorIsAgencyStaff && (await this.auth.isTenantAdmin(actorProfileId, tenantId));
 
-    // Block agency-OWNER target via the workspace surface — even an agency ADMIN cannot
-    // reset an OWNER through here. Owner resets must go through the agency team page.
+    // Agency identities are platform accounts, never customer-managed accounts. Their
+    // recovery must use the agency surface, not a customer workspace.
     if (agencyId) {
       const targetAgencyRole = await this.getAgencyRole(targetProfileId, agencyId);
-      if (targetAgencyRole === 'OWNER' && targetProfileId !== actorProfileId) {
-        throw new ForbiddenException('Cannot reset an agency owner from the workspace team.');
+      if (targetAgencyRole && targetProfileId !== actorProfileId) {
+        throw new ForbiddenException('Cannot reset an agency account from the workspace team.');
       }
     }
 
@@ -388,6 +395,11 @@ export class InvitationsService {
     if (!em) throw new BadRequestException('Member has no email on file');
     const redirectTo = `${inviteAppBaseUrl()}/auth/reset-password`;
     const send = await this.sendRecoveryEmail(em, redirectTo);
+    if (actorIsWorkspaceAdmin && targetProfileId !== actorProfileId && send.actionLink) {
+      throw new BadRequestException(
+        'Reset email delivery is unavailable. Ask this user to use Forgot password or contact AISBP support.',
+      );
+    }
     await this.auditRecoveryLink({
       agencyId,
       tenantId,
@@ -524,6 +536,26 @@ export class InvitationsService {
       .eq('profile_id', prof.id as string)
       .maybeSingle();
     return Boolean(mem);
+  }
+
+  private async findAnyAgencyMembershipByEmail(emailNormalized: string): Promise<boolean> {
+    const { data: prof } = await this.supabase
+      .from('profiles')
+      .select('id')
+      .ilike('email', emailNormalized)
+      .maybeSingle();
+    if (!prof?.id) return false;
+    return this.hasAnyAgencyMembership(prof.id as string);
+  }
+
+  private async hasAnyAgencyMembership(profileId: string): Promise<boolean> {
+    const { data } = await this.supabase
+      .from('agency_users')
+      .select('id')
+      .eq('profile_id', profileId)
+      .limit(1)
+      .maybeSingle();
+    return Boolean(data);
   }
 
   private async findAgencyMembershipByProfile(agencyId: string, profileId: string): Promise<boolean> {

@@ -608,11 +608,11 @@ model KnowledgeVault {
 }
 
 model TenantBotProfileKnowledgeVault {
-  tenantId  String? @map("tenant_id")
+  tenantId  String @map("tenant_id")
   profileId String @map("profile_id")
   vaultId   String @map("vault_id")
 
-  tenant  Tenant?           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant  Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   profile TenantBotProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
   vault   KnowledgeVault   @relation(fields: [vaultId], references: [id], onDelete: Cascade)
 
@@ -749,7 +749,7 @@ enum ContentType {
 
 model Message {
   id             String          @id @default(uuid())
-  tenantId       String?         @map("tenant_id")
+  tenantId       String          @map("tenant_id")
   conversationId String          @map("conversation_id")
   direction      MessageDirection
   sender         MessageSender
@@ -760,7 +760,7 @@ model Message {
 
   // Relations
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  tenant       Tenant?      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant       Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@index([tenantId, createdAt(sort: Desc)])
   @@index([tenantId, conversationId, createdAt(sort: Desc)])
@@ -786,7 +786,7 @@ enum HandoverStatus {
 
 model HandoverEvent {
   id            String         @id @default(uuid())
-  tenantId      String?        @map("tenant_id")
+  tenantId      String         @map("tenant_id")
   conversationId String        @map("conversation_id")
   type          HandoverType
   status        HandoverStatus @default(ACTIVE)
@@ -798,7 +798,7 @@ model HandoverEvent {
 
   // Relations
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  tenant       Tenant?      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant       Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@index([tenantId, status, createdAt(sort: Desc)])
   @@index([tenantId, conversationId, createdAt(sort: Desc)])

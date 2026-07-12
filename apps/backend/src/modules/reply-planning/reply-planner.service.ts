@@ -78,6 +78,12 @@ export interface ReplyPlanPolicyContext {
   tenantPricingCorpus?: string;
 }
 
+const CONVERSATIONAL_HESITATION = /^(?:h+m+|huh+|erm+|umm+|uh+|not sure|maybe|idk|🤔)[.!?…\s]*$/i;
+
+function isConversationalHesitation(text: string, intent: ConversationIntent): boolean {
+  return intent === 'UNKNOWN' && CONVERSATIONAL_HESITATION.test(text.trim());
+}
+
 @Injectable()
 export class ReplyPlannerService {
   private readonly logger = new Logger(ReplyPlannerService.name);
@@ -356,7 +362,57 @@ export class ReplyPlannerService {
       conversationId,
       tenantPricingCorpus: policyContext?.tenantPricingCorpus ?? '',
     });
-    const finalDraft = noKbClaimGuard.rewritten ? noKbClaimGuard.text : afterKbLeak;
+    let finalDraft = noKbClaimGuard.rewritten ? noKbClaimGuard.text : afterKbLeak;
+
+    // A low-information conversational cue such as "hmmm" is not a request for an
+    // unknown business fact. If the first model draft mixes a useful next-step question
+    // with an unsupported claim, retry once with tighter constraints instead of replacing
+    // the whole turn with the human-escalation holding message.
+    if (
+      !finalDraft.trim() &&
+      noKbClaimGuard.rewritten &&
+      noKbClaimGuard.reason === 'no_kb_unsupported_business_claim' &&
+      isConversationalHesitation(
+        policyContext?.latestUserMessage ?? '',
+        policyContext?.latestIntent ?? 'UNKNOWN',
+      )
+    ) {
+      const retryDraft = await this.buildDraft(
+        tenantId,
+        routing,
+        kbChunks,
+        memory,
+        `${systemPrompt}\n\nRETRY SAFETY INSTRUCTION (this turn only): The customer is expressing hesitation, not asking for a business fact. Reply naturally using the conversation so far. Briefly acknowledge the hesitation and guide them with exactly one easy next-step question. Do not introduce or assert any new price, policy, availability, opening hours, booking confirmation, product, service, or business capability. Do not mention knowledge-base limitations or human escalation.`,
+        params.temperature,
+        params.maxTokens,
+        policyContext,
+        params.incomingImageUrl,
+        params.businessDisplayName,
+      );
+      const retryPolicy = applyOutboundPolicyGuard({
+        latestIntent: policyContext?.latestIntent ?? 'UNKNOWN',
+        menuSelectionActive: false,
+        draftText: retryDraft.text,
+      });
+      const retryKbLeak = sanitizeOutboundInternalKbLeak(
+        retryPolicy,
+        policyContext?.latestIntent ?? 'UNKNOWN',
+        kbChunks,
+      );
+      const retryGuard = rewriteUnsupportedBusinessClaimsWhenNoKb({
+        replyText: retryKbLeak,
+        kbChunksReturned: kbChunks.length,
+        latestIntent: policyContext?.latestIntent ?? 'UNKNOWN',
+        latestUserMessage: policyContext?.latestUserMessage ?? '',
+        tenantId,
+        conversationId,
+        tenantPricingCorpus: policyContext?.tenantPricingCorpus ?? '',
+      });
+      finalDraft = retryGuard.rewritten ? retryGuard.text : retryKbLeak;
+      this.logger.log(
+        `conversationalHesitationSafetyRetry conversation=${conversationId} accepted=${finalDraft.trim().length > 0}`,
+      );
+    }
     if (!finalDraft.trim()) {
       return this.buildSkipNoReplyPlan({
         routing,

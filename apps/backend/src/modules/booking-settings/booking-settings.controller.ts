@@ -2,7 +2,7 @@ import { Body, Controller, Get, Patch, Post, Param, UseGuards } from '@nestjs/co
 import { Throttle } from '@nestjs/throttler';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { CurrentAccessToken, CurrentUser } from '../auth/decorators/current-user.decorator';
 import type { SessionUser } from '../../lib/supabase';
 import { GhlService } from '../ghl/ghl.service';
 import { BookingSettingsService } from './booking-settings.service';
@@ -20,9 +20,13 @@ export class BookingSettingsController {
 
   @Get()
   @ApiOperation({ summary: 'Get tenant booking automation settings' })
-  async get(@Param('tenantId') tenantId: string, @CurrentUser() user: SessionUser) {
+  async get(
+    @Param('tenantId') tenantId: string,
+    @CurrentUser() user: SessionUser,
+    @CurrentAccessToken() accessToken: string,
+  ) {
     await this.ghlService.ensureTenantAccessOrThrow(tenantId, user.id);
-    return this.bookingSettingsService.getBookingSettings(tenantId);
+    return this.bookingSettingsService.getBookingSettingsForCaller(tenantId, accessToken);
   }
 
   @Patch()
@@ -30,6 +34,7 @@ export class BookingSettingsController {
   async patch(
     @Param('tenantId') tenantId: string,
     @CurrentUser() user: SessionUser,
+    @CurrentAccessToken() accessToken: string,
     @Body()
     body: Partial<{
       enabled: boolean;
@@ -46,14 +51,15 @@ export class BookingSettingsController {
       serviceMenuOptions: unknown;
     }>,
   ) {
-    await this.ghlService.ensureTenantAccessOrThrow(tenantId, user.id);
-    return this.bookingSettingsService.patchBookingSettings(tenantId, body);
+    await this.ghlService.ensureTenantWriteAccessOrThrow(tenantId, user.id);
+    await this.bookingSettingsService.patchBookingSettings(tenantId, body);
+    return this.bookingSettingsService.getBookingSettingsForCaller(tenantId, accessToken);
   }
 
   @Post('sync-calendars')
   @ApiOperation({ summary: 'Fetch calendars from GHL for this location' })
   async syncCalendars(@Param('tenantId') tenantId: string, @CurrentUser() user: SessionUser) {
-    await this.ghlService.ensureTenantAccessOrThrow(tenantId, user.id);
+    await this.ghlService.ensureTenantWriteAccessOrThrow(tenantId, user.id);
     return this.bookingSettingsService.syncCalendars(tenantId, user.id);
   }
 
@@ -64,7 +70,7 @@ export class BookingSettingsController {
     @CurrentUser() user: SessionUser,
     @Body() body: TestCalendarConnectionDto,
   ) {
-    await this.ghlService.ensureTenantAccessOrThrow(tenantId, user.id);
+    await this.ghlService.ensureTenantWriteAccessOrThrow(tenantId, user.id);
     return this.bookingSettingsService.testCalendar(tenantId, user.id, body ?? {});
   }
 
@@ -75,7 +81,7 @@ export class BookingSettingsController {
     @CurrentUser() user: SessionUser,
     @Body() body: TestBookingSlotsDto,
   ) {
-    await this.ghlService.ensureTenantAccessOrThrow(tenantId, user.id);
+    await this.ghlService.ensureTenantWriteAccessOrThrow(tenantId, user.id);
     return this.bookingSettingsService.testSlots(tenantId, user.id, body ?? {});
   }
 
@@ -87,7 +93,7 @@ export class BookingSettingsController {
     @CurrentUser() user: SessionUser,
     @Body() body: ProbeFreeSlotsDto,
   ) {
-    await this.ghlService.ensureTenantAccessOrThrow(tenantId, user.id);
+    await this.ghlService.ensureTenantWriteAccessOrThrow(tenantId, user.id);
     return this.bookingSettingsService.probeFreeSlots(tenantId, user.id, body);
   }
 }

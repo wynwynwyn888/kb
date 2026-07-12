@@ -8,9 +8,9 @@ duplicating their task lists.
 ## Active security program
 
 Continue tenant isolation using
-`docs/security/TENANT_ISOLATION_ROADMAP.md`. The next candidate is a staged audit
-of `tenant_booking_settings`; production implementation depends on completing
-the roadmap safety gates.
+`docs/security/TENANT_ISOLATION_ROADMAP.md`. The booking-settings caller-read and
+manager-role cutover is the current phase. Select the following resource only
+after production verification and the roadmap safety gates are complete.
 
 ## Production operations
 

@@ -661,7 +661,8 @@ export function AutomationBookingPanel() {
   const syncCalendarsHint = calendars.length === 0 ? 'Sync calendars from CRM above to load the list.' : null;
 
   const modeHint = BOOKING_MODE_OPTIONS.find(m => m.value === booking?.bookingMode)?.hint ?? '';
-  const dim = busy !== null;
+  const canManage = booking?.canManage === true;
+  const dim = busy !== null || !canManage;
   const noTestCalendar = !calendarForTest.trim();
   const showAdvancedDiagnostics = SHOW_BOOKING_DIAGNOSTICS && isAgencyStaff;
 
@@ -673,6 +674,24 @@ export function AutomationBookingPanel() {
     () => (winningProbeVariant ? productionEnvFromWinningVariant(winningProbeVariant) : []),
     [winningProbeVariant],
   );
+
+  if (!bookingLoading && booking && !booking.canManage) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+        {loadErr ? <ErrorBanner message={loadErr} /> : null}
+        <SectionCard
+          title="Booking AI Agent"
+          subtitle="Read-only workspace status"
+          accent={booking.enabled ? 'default' : 'muted'}
+        >
+          <p style={{ margin: 0, color: 'var(--aisbp-text-secondary)', fontSize: '0.86rem', lineHeight: 1.55 }}>
+            Booking automation is {booking.enabled ? 'enabled' : 'disabled'}. A workspace administrator must change
+            settings or run calendar tools.
+          </p>
+        </SectionCard>
+      </div>
+    );
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>

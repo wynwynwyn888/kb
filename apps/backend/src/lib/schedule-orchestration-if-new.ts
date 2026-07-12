@@ -24,6 +24,8 @@ export interface ProviderGateParams {
   conversationId: string;
   ghlMessageId: string | null | undefined;
   ghlTimestamp: string | null | undefined;
+  /** Media paths have separate retrieval/transcription evidence and may lack workflow IDs. */
+  allowMissingProviderIdForVerifiedMedia?: boolean;
   /** 'webhook' = primary trigger (permissive). 'fallback' = sync/watchdog (strict). */
   source: ProviderGateSource;
 }
@@ -40,29 +42,26 @@ export interface ProviderGateResult {
 /**
  * Check whether orchestration should proceed for a provider message.
  *
- * Fallback sources (sync/watchdog): fail closed — require ghlMessageId + Redis.
- * Webhook source: ghlMessageId is optional (primary trigger), but provider
- *   gate is still checked when ID is available.
+ * All sources fail closed when the provider message ID is absent. Primary
+ * webhooks retain their event audit row, then the caller performs a focused
+ * GHL sync and re-enters this gate with the provider-owned message identity. This keeps
+ * weak/replayed workflow payloads from directly causing customer replies.
  */
 export async function checkProviderOrchestrationGate(
   params: ProviderGateParams,
 ): Promise<ProviderGateResult> {
-  const { appCache, logger, tenantId, conversationId, ghlMessageId, ghlTimestamp, source } = params;
+  const {
+    appCache, logger, tenantId, conversationId, ghlMessageId, ghlTimestamp, source,
+    allowMissingProviderIdForVerifiedMedia = false,
+  } = params;
   const isFallback = source === 'fallback';
 
   // Gate 1: require stable GHL message ID
   const msgId = ghlMessageId?.trim() || null;
   if (!msgId) {
-    // Primary webhooks are already persisted/deduped by webhook_events. Allow
-    // them through so first-message leads still get a reply when the workflow
-    // payload lacks provider message/conversation ids.
-    if (!isFallback) {
-      return { allowed: true, reason: 'no_ghl_message_id_webhook_allowed' };
+    if (!isFallback && allowMissingProviderIdForVerifiedMedia) {
+      return { allowed: true, reason: 'verified_media_without_provider_id' };
     }
-
-    // Fallback paths (sync/scanner/watchdog) still require a stable provider id
-    // to avoid duplicate replies when they rediscover messages already handled
-    // by the primary webhook path.
     return { allowed: false, reason: 'no_ghl_message_id' };
   }
 

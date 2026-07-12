@@ -155,6 +155,58 @@ export class ReplyPlannerService {
     };
   }
 
+  /** Mandatory tenant-configured playbook turn: trusted configured copy, no LLM variation. */
+  buildMandatoryPlaybookTemplateReply(params: {
+    tenantId: string;
+    conversationId: string;
+    routing: RoutingResponse;
+    templateBody: string;
+    latestIntent: ConversationIntent;
+    latestUserMessage: string;
+  }): ReplyDecision {
+    const { tenantId, conversationId, routing, templateBody, latestIntent, latestUserMessage } = params;
+    const guarded = applyOutboundPolicyGuard({
+      latestIntent,
+      menuSelectionActive: false,
+      draftText: templateBody,
+    });
+    const afterHours = applyBusinessHoursGroundingGuard({
+      latestIntent,
+      userMessage: latestUserMessage,
+      kbChunks: [],
+      draftText: guarded,
+    });
+    const afterKbLeak = sanitizeOutboundInternalKbLeak(afterHours, latestIntent, []);
+    const proactive = this.prepareProactiveHandoverOutboundText({
+      replyText: afterKbLeak,
+      latestIntent,
+      latestUserMessage,
+      tenantId,
+      conversationId,
+    });
+    const bubbles = this.formatIntoBubbles(proactive.text);
+    this.logLiveWhitespaceDebug({
+      rawDraft: proactive.text,
+      bubbles,
+      latestUserMessage,
+      inboundBatchCount: 1,
+    });
+    return {
+      planStatus: 'PLANNED',
+      responseMode: routing.responseMode,
+      handoverRecommended: routing.handoverRecommended,
+      confidence: routing.confidence,
+      rationale: routing.reasoning,
+      bubbles,
+      suggestedActions: this.suggestActions(routing, []),
+      draftProvenance: 'mandatory_playbook_template',
+      routingRecommendedModel: routing.recommendedModel,
+      ...(proactive.botHumanEscalationLanguageDetected
+        ? { botHumanEscalationLanguageDetected: true }
+        : {}),
+    };
+  }
+
   async planReply(params: {
     tenantId: string;
     routing: RoutingResponse;

@@ -845,6 +845,7 @@ export class FollowUpEngineService implements OnModuleInit, OnModuleDestroy {
       incomingMessage,
       systemPrompt,
       memory,
+      historyMessageLimit: FOLLOW_UP_MEMORY_MESSAGE_LIMIT,
       kbContext: kbChunks,
       tenantGenerationModelOverride: modelUsed,
       ...(Number.isFinite(subTemp) ? { temperature: subTemp } : {}),

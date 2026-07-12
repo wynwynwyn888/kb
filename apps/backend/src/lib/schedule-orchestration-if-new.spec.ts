@@ -45,15 +45,15 @@ describe('checkProviderOrchestrationGate', () => {
   });
 
   // ── Gate 1: no ghlMessageId ──────────────────────────────────────────
-  it('webhook: allows when ghlMessageId is missing', async () => {
+  it('webhook: blocks when ghlMessageId is missing so caller can confirm via GHL sync', async () => {
     const r = await checkProviderOrchestrationGate({
       ...baseParams,
       ghlMessageId: null,
       source: 'webhook',
       appCache: makeAppCache(),
     });
-    expect(r.allowed).toBe(true);
-    expect(r.reason).toBe('no_ghl_message_id_webhook_allowed');
+    expect(r.allowed).toBe(false);
+    expect(r.reason).toBe('no_ghl_message_id');
   });
 
   it('fallback: blocks when ghlMessageId is missing', async () => {
@@ -67,15 +67,27 @@ describe('checkProviderOrchestrationGate', () => {
     expect(r.reason).toBe('no_ghl_message_id');
   });
 
-  it('webhook: allows when ghlMessageId is blank', async () => {
+  it('webhook: permits a separately verified media path without a provider message ID', async () => {
+    const r = await checkProviderOrchestrationGate({
+      ...baseParams,
+      ghlMessageId: null,
+      source: 'webhook',
+      allowMissingProviderIdForVerifiedMedia: true,
+      appCache: makeAppCache(),
+    });
+    expect(r.allowed).toBe(true);
+    expect(r.reason).toBe('verified_media_without_provider_id');
+  });
+
+  it('webhook: blocks when ghlMessageId is blank', async () => {
     const r = await checkProviderOrchestrationGate({
       ...baseParams,
       ghlMessageId: '  ',
       source: 'webhook',
       appCache: makeAppCache(),
     });
-    expect(r.allowed).toBe(true);
-    expect(r.reason).toBe('no_ghl_message_id_webhook_allowed');
+    expect(r.allowed).toBe(false);
+    expect(r.reason).toBe('no_ghl_message_id');
   });
 
   it('fallback: blocks when ghlMessageId is blank', async () => {

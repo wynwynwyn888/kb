@@ -376,6 +376,39 @@ describe('InboundMessageProcessor', () => {
     expect(orchestrate).not.toHaveBeenCalled();
   });
 
+  it('holds weak plain-text webhook content until GHL confirms a stable message ID', async () => {
+    mockSupabase.from.mockImplementation((table: string) => {
+      if (table === 'tenant_ghl_connections') return makeTenantGhlConnectionsTableMock();
+      if (table === 'tenants') {
+        return {
+          select: () => ({
+            eq: () => ({
+              single: async () => ({ data: { ...DEFAULT_TENANT_ROW_FOR_INBOUND_RESOLUTION }, error: null }),
+            }),
+          }),
+        };
+      }
+      if (table === 'conversations') return makeConversationsTableMock({ id: CONV_ID });
+      if (table === 'messages') return makeMessagesTableMock();
+      return {} as never;
+    });
+
+    await processor.process(makeJob('persist', {
+      locationId: 'loc_1',
+      ghlConversationId: '',
+      ghlContactId: 'ct_1',
+      messageContent: 'wyn',
+      messageType: 'text',
+      timestamp: new Date().toISOString(),
+      smokeImmediate: true,
+    }));
+
+    expect((mockIngestInboundMessage as any).lastParams).toBeNull();
+    expect(mockFollowUpEngine.noteInboundFromContact).not.toHaveBeenCalled();
+    expect(orchestrate).not.toHaveBeenCalled();
+    expect(mockInboundQueueAdd).not.toHaveBeenCalled();
+  });
+
   it('persist: resolvedTenantId skips querying tenant_ghl_connections', async () => {
     let tenantGhlFromCalls = 0;
     mockSupabase.from.mockImplementation((table: string) => {

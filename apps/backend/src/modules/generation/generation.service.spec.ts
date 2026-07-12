@@ -556,7 +556,26 @@ describe('GenerationService', () => {
       const messages = (service as never)['buildMessages'](
         makeParams({ memory: longMem }),
       );
-      expect(messages.length).toBeLessThan(30);
+      const history = messages.filter((m: { content: unknown }) =>
+        typeof m.content === 'string' && m.content.startsWith('Message '),
+      );
+      expect(history).toHaveLength(20);
+      expect(history[0]?.content).toBe('Message 5');
+    });
+
+    it('allows specialized callers to pass 30 history entries without changing the default', () => {
+      const longMem = Array.from({ length: 35 }, (_, i) => ({
+        role: i % 2 === 0 ? 'user' as const : 'assistant' as const,
+        content: 'Message ' + i,
+      }));
+      const messages = (service as never)['buildMessages'](
+        makeParams({ memory: longMem, historyMessageLimit: 30 }),
+      );
+      const history = messages.filter((m: { content: unknown }) =>
+        typeof m.content === 'string' && m.content.startsWith('Message '),
+      );
+      expect(history).toHaveLength(30);
+      expect(history[0]?.content).toBe('Message 5');
     });
   });
 

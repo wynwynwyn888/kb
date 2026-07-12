@@ -372,8 +372,24 @@ export class InboundMessageProcessor extends WorkerHost {
       );
 
       const useSharedIngest = process.env['GHL_WEBHOOK_SHARED_INGEST_ENABLED'] === 'true';
+      const providerIdentityRequired =
+        messageType === 'text' &&
+        !(audioMediaUrl ?? '').trim() &&
+        !(imageMediaUrl ?? '').trim() &&
+        !voiceInboundNeedsTranscribe &&
+        !voiceInboundAudioPlaceholderWithoutMediaUrl;
+      const hasStableProviderIdentity =
+        Boolean(ghlInboundMessageId?.trim()) || !providerIdentityRequired;
 
-      if (useSharedIngest) {
+      // A workflow-shaped webhook without a provider message ID is evidence, not
+      // trusted conversation content. Keep its webhook_events audit row, but let
+      // focused GHL sync insert the provider-confirmed message. Otherwise a ghost
+      // payload could leak into memory even when its direct orchestration is blocked.
+      if (!hasStableProviderIdentity) {
+        this.logger.warn(
+          `Inbound message held for provider confirmation: conversationId=${conversation.id} webhookEventId=${webhookEventId ?? 'n/a'}`,
+        );
+      } else if (useSharedIngest) {
         const ingestResult = await ingestInboundMessage({
           supabase: this.supabase,
           conversationId: conversation.id,
@@ -452,25 +468,29 @@ export class InboundMessageProcessor extends WorkerHost {
       }
 
       this.logger.log(
-        `Inbound message stored: conversationId=${conversation.id}, messageType=${resolved.persistContentType}`,
+        hasStableProviderIdentity
+          ? `Inbound message stored: conversationId=${conversation.id}, messageType=${resolved.persistContentType}`
+          : `Inbound message awaiting provider confirmation: conversationId=${conversation.id}, messageType=${resolved.persistContentType}`,
       );
 
-      // Follow-up stop conditions: customer replied (and opt-out detection) are based on real persisted inbound messages.
-      try {
-        await this.followUpEngine.noteInboundFromContact({
-          tenantId: tenant.id,
-          conversationId: conversation.id,
-          inboundText: resolved.content,
-          inboundAtIso: timestamp,
-        });
-      } catch (e) {
-        this.logger.warn(
-          `followUpInboundHookFailed ${JSON.stringify({
+      // Only provider-confirmed content may stop follow-ups or opt a customer out.
+      if (hasStableProviderIdentity) {
+        try {
+          await this.followUpEngine.noteInboundFromContact({
             tenantId: tenant.id,
             conversationId: conversation.id,
-            msg: e instanceof Error ? e.message : String(e),
-          })}`,
-        );
+            inboundText: resolved.content,
+            inboundAtIso: timestamp,
+          });
+        } catch (e) {
+          this.logger.warn(
+            `followUpInboundHookFailed ${JSON.stringify({
+              tenantId: tenant.id,
+              conversationId: conversation.id,
+              msg: e instanceof Error ? e.message : String(e),
+            })}`,
+          );
+        }
       }
       const webhookParsedAt = Date.parse(timestamp);
       const webhook_to_persist_ms = Number.isFinite(webhookParsedAt) ? Date.now() - webhookParsedAt : null;
@@ -478,7 +498,7 @@ export class InboundMessageProcessor extends WorkerHost {
         `inboundPersistTiming: conversationId=${conversation.id} webhook_to_persist_ms=${webhook_to_persist_ms ?? 'na'}`,
       );
 
-      if (smokeImmediate) {
+      if (smokeImmediate && hasStableProviderIdentity) {
         this.logger.log(`Debounce bypassed (smokeImmediate): conversationId=${conversation.id}`);
         await this.executeOrchestrationPipeline({
           tenantId: tenant.id,
@@ -530,6 +550,7 @@ export class InboundMessageProcessor extends WorkerHost {
         ghlMessageId: ghlInboundMessageId?.trim() || null,
         ghlTimestamp: timestamp,
         source: 'webhook',
+        allowMissingProviderIdForVerifiedMedia: !providerIdentityRequired,
       });
       if (!providerGate.allowed) {
         this.logger.log(

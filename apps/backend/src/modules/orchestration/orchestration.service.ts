@@ -76,6 +76,7 @@ import {
 import { containsBotHumanEscalationLanguage } from '../../lib/bot-human-escalation-language';
 import { BotProfilesService } from '../prompts/bot-profiles.service';
 import { safeTextPreviewForLog } from '../../lib/safe-text-preview-for-log';
+import { resolveMandatoryAfterNameRoute } from '../../lib/mandatory-playbook-route';
 import {
   compactPersonaPolicyForGeneration,
   estimateApproxTokens,
@@ -644,6 +645,11 @@ export class ConversationOrchestrationService {
             !policyOutcome.policyForcedReply?.trim() &&
             policyOutcome.resolvedSelection,
         );
+      const mandatoryAfterNameRoute = resolveMandatoryAfterNameRoute({
+        memory: memory.entries,
+        latestMessage: latestMsg,
+        salesPlaybook: input.promptConfig?.profileSections?.['salesPlaybook'],
+      });
 
       let routing: RoutingResponse;
       let replyPlan: ReplyDecision;
@@ -651,7 +657,33 @@ export class ConversationOrchestrationService {
       let routing_ms: number;
       let plan_reply_ms: number;
 
-      if (useOptionSelectionTemplate && parsedDeterministicOptionLine) {
+      if (mandatoryAfterNameRoute && !policyOutcome.policyForcedReply?.trim()) {
+        this.logger.log(
+          `mandatoryPlaybookTemplateUsed=true route=after_name llmSkipped=true tenantId=${input.tenantId}`,
+        );
+        routing = {
+          recommendedModel: 'n/a',
+          responseMode: 'fast',
+          draftReply: null,
+          handoverRecommended: false,
+          bookingIntentDetected: false,
+          tagsSuggested: [],
+          confidence: 1,
+          reasoning: 'mandatory_playbook_after_name_template',
+        };
+        prompt_build_ms = 0;
+        routing_ms = 0;
+        const planPerf0 = performance.now();
+        replyPlan = this.replyPlanner.buildMandatoryPlaybookTemplateReply({
+          tenantId: input.tenantId,
+          conversationId,
+          routing,
+          templateBody: mandatoryAfterNameRoute.replyText,
+          latestIntent: policyOutcome.latestIntent,
+          latestUserMessage: latestMsg,
+        });
+        plan_reply_ms = Math.round(performance.now() - planPerf0);
+      } else if (useOptionSelectionTemplate && parsedDeterministicOptionLine) {
         const descPresentTpl = Boolean(parsedDeterministicOptionLine.description?.trim());
         this.logger.log(
           `optionSelectionTemplateUsed=true selectedOptionTitle=${JSON.stringify(parsedDeterministicOptionLine.title.trim())} ` +

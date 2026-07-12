@@ -126,45 +126,6 @@ export class TenantUsersController {
     return this.invitations.generateTenantMemberRecoveryLink(user.id, dto.tenantId.trim(), membershipId);
   }
 
-  @Post('provision-credentials')
-  @ApiOperation({
-    summary: 'Create or reset workspace member login (Supabase Auth)',
-    description:
-      'Agency staff for the workspace agency or tenant ADMIN. Sets email + password on Supabase Auth, ensures `profiles` and adds `tenant_users` when missing. If the user is already in the workspace, only the password is updated.',
-  })
-  async provisionCredentials(
-    @Body()
-    dto: {
-      tenantId: string;
-      email: string;
-      password: string;
-      fullName?: string | null;
-      role: TenantRole;
-    },
-    @CurrentUser() user: SessionUser,
-  ) {
-    if (!dto.tenantId?.trim()) {
-      throw new BadRequestException('tenantId is required');
-    }
-    if (!dto.email?.trim()) {
-      throw new BadRequestException('email is required');
-    }
-    if (!dto.password) {
-      throw new BadRequestException('password is required');
-    }
-    if (!dto.role) {
-      throw new BadRequestException('role is required');
-    }
-    TenantUsersService.assertValidRole(dto.role);
-    return this.service.provisionWorkspaceMemberWithCredentials(user.id, {
-      tenantId: dto.tenantId.trim(),
-      email: dto.email.trim(),
-      password: dto.password,
-      fullName: dto.fullName,
-      role: dto.role,
-    });
-  }
-
   @Post()
   @ApiOperation({
     summary: 'Add member to tenant',

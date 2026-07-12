@@ -1,7 +1,22 @@
 // Current user decorator - extracts authenticated user from request
 
-import { createParamDecorator, ExecutionContext } from '@nestjs/common';
+import { createParamDecorator, ExecutionContext, UnauthorizedException } from '@nestjs/common';
 import type { SessionUser } from '../../../lib/supabase';
+
+const MAX_ACCESS_TOKEN_LENGTH = 16_384;
+
+export function rawBearerToken(authorization: unknown): string {
+  if (typeof authorization !== 'string') {
+    throw new UnauthorizedException('Missing or invalid authorization header');
+  }
+  const match = /^Bearer\s+/i.exec(authorization);
+  if (!match) throw new UnauthorizedException('Missing or invalid authorization header');
+  const token = authorization.slice(match[0].length).trim();
+  if (!token || token.length > MAX_ACCESS_TOKEN_LENGTH || /\s/.test(token)) {
+    throw new UnauthorizedException('Missing or invalid authorization header');
+  }
+  return token;
+}
 
 export const CurrentUser = createParamDecorator(
   (data: keyof SessionUser | undefined, ctx: ExecutionContext) => {
@@ -13,6 +28,14 @@ export const CurrentUser = createParamDecorator(
     }
 
     return data ? user[data] : user;
+  },
+);
+
+/** Request-scoped raw JWT for caller-scoped database access. Never persist or log it. */
+export const CurrentAccessToken = createParamDecorator(
+  (_data: unknown, ctx: ExecutionContext) => {
+    const request = ctx.switchToHttp().getRequest();
+    return rawBearerToken(request.headers?.authorization);
   },
 );
 

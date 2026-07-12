@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import { getSupabaseService } from '../../lib/supabase';
+import { createUserDatabaseClient } from '../../lib/database/user-database-client';
 import { GhlService } from '../ghl/ghl.service';
 import type { GhlTagSummary } from '@aisbp/ghl-client';
 import {
@@ -77,14 +78,25 @@ export class TagRulesService {
   constructor(private readonly ghlService: GhlService) {}
 
   async getTaggingSettings(tenantId: string): Promise<TaggingSettingsDto> {
-    const { data, error } = await this.supabase
+    return this.getTaggingSettingsWithClient(this.supabase, tenantId);
+  }
+
+  async getTaggingSettingsForCaller(tenantId: string, accessToken: string): Promise<TaggingSettingsDto> {
+    return this.getTaggingSettingsWithClient(createUserDatabaseClient(accessToken), tenantId);
+  }
+
+  private async getTaggingSettingsWithClient(
+    client: ReturnType<typeof getSupabaseService>,
+    tenantId: string,
+  ): Promise<TaggingSettingsDto> {
+    const { data, error } = await client
       .from('tenant_tagging_settings')
       .select('automatic_tagging_enabled')
       .eq('tenant_id', tenantId)
       .maybeSingle();
 
     if (error) {
-      this.logger.warn(`getTaggingSettings: ${error.message}`);
+      this.logger.warn('getTaggingSettings failed');
       throw new BadRequestException('Could not load tagging settings');
     }
     if (!data) return { automaticTaggingEnabled: false };

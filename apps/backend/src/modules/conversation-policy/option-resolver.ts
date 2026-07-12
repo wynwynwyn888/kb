@@ -8,6 +8,11 @@ export type SelectionResolution = {
   source: 'conversation_state' | 'previous_assistant_options';
 };
 
+export type MultiSelectionResolution = {
+  rawMessages: string[];
+  selections: SelectionResolution[];
+};
+
 export const LETTER_LABELS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'] as const;
 
 /** Match `A) Label`, `A. Label`, `A: Label` (also `1) ...`, `1. ...`). */
@@ -222,4 +227,31 @@ export function resolveShortSelection(
   }
 
   return null;
+}
+
+/**
+ * Resolve a debounced burst such as `2`, `3`, `4` against one option menu.
+ * Returns null unless there are at least two messages and every message is a
+ * valid, resolvable single selection. Duplicate labels are collapsed while
+ * preserving the customer's first-seen order.
+ */
+export function resolveMultiSelectionBurst(
+  rawMessages: string[],
+  state: AisbpPolicyStateV1,
+  memory: MemoryEntry[],
+): MultiSelectionResolution | null {
+  const messages = rawMessages.map(message => message.trim()).filter(Boolean);
+  if (messages.length < 2 || !messages.every(isOptionSelectionSingleToken)) return null;
+
+  const resolved: SelectionResolution[] = [];
+  const seen = new Set<string>();
+  for (const message of messages) {
+    const selection = resolveShortSelection(message, state, memory);
+    if (!selection) return null;
+    if (seen.has(selection.selectedLabel)) continue;
+    seen.add(selection.selectedLabel);
+    resolved.push(selection);
+  }
+  if (resolved.length < 2) return null;
+  return { rawMessages: messages, selections: resolved };
 }

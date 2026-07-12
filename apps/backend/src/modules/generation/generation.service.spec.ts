@@ -577,6 +577,32 @@ describe('GenerationService', () => {
       expect(history).toHaveLength(30);
       expect(history[0]?.content).toBe('Message 5');
     });
+
+    it('instructs generation to address every resolved selection in a debounced burst', () => {
+      const messages = (service as never)['buildMessages'](
+        makeParams({
+          incomingMessage: '2. Price concern\n3. Manual chasing\n4. Lost sales visibility',
+          policyContext: {
+            latestIntent: 'SHORT_SELECTION' as never,
+            resolvedSelection: null,
+            conversationStateSummary: 'awaiting option selection',
+            multiOptionSelections: [
+              { label: '2', text: 'Price concern' },
+              { label: '3', text: 'Manual chasing' },
+              { label: '4', text: 'Lost sales visibility' },
+            ],
+          },
+        }),
+      );
+      const systemText = messages
+        .filter((message: { role: string }) => message.role === 'system')
+        .map((message: { content: string }) => message.content)
+        .join('\n');
+      expect(systemText).toContain('Address every selected choice together');
+      expect(systemText).toContain('2. Price concern');
+      expect(systemText).toContain('4. Lost sales visibility');
+      expect(systemText).toContain('do not use a generic single-option');
+    });
   });
 
   // ===========================================================================

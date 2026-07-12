@@ -72,6 +72,8 @@ export interface ReplyPlanPolicyContext {
   recentAssistantBookingUrlSent?: boolean;
   /** Prior assistant menu excerpt for deterministic letter picks (no KB). */
   optionMenuSourceExcerpt?: string;
+  /** Multiple choices received inside one trailing-debounce burst. */
+  multiOptionSelections?: Array<{ label: string; text: string }>;
   /** Business notes + tenant prompt body — ground-truth for explicit pricing when KB is empty. */
   tenantPricingCorpus?: string;
 }
@@ -580,6 +582,9 @@ export class ReplyPlannerService {
               menuSelectionActive: policyContext.menuSelectionActive,
               ...(batchCount > 1 ? { combinedInboundMessageCount: batchCount } : {}),
               ...(handling !== 'none' ? { repeatedCustomerMessageHandling: handling } : {}),
+              ...(policyContext.multiOptionSelections?.length
+                ? { multiOptionSelections: policyContext.multiOptionSelections }
+                : {}),
               ...(policyContext.bookingCapability
                 ? { bookingCapability: policyContext.bookingCapability }
                 : {}),

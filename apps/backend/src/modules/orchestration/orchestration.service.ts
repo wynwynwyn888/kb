@@ -46,7 +46,11 @@ import {
   emptyPolicyState,
   type AisbpPolicyStateV1,
 } from '../conversation-policy/conversation-policy-state';
-import { resolveShortSelection, shouldSkipKbForPureOptionLetterSelection } from '../conversation-policy/option-resolver';
+import {
+  resolveMultiSelectionBurst,
+  resolveShortSelection,
+  shouldSkipKbForPureOptionLetterSelection,
+} from '../conversation-policy/option-resolver';
 import {
   buildOptionSelectionCustomerReply,
   parseSelectedOptionTitleDescription,
@@ -279,13 +283,22 @@ export class ConversationOrchestrationService {
       const policyStatePre = policyStatePreInit;
 
       const optionLetterToken = shouldSkipKbForPureOptionLetterSelection(policyStatePre, latestMsg);
+      const multiOptionBurst = resolveMultiSelectionBurst(batch, policyStatePre, memory.entries);
+      const multiOptionContext = multiOptionBurst
+        ? [
+            'The customer selected multiple choices from the immediately preceding assistant menu:',
+            ...multiOptionBurst.selections.map(
+              selection => `${selection.raw}. ${selection.selectedText}`,
+            ),
+          ].join('\n')
+        : null;
 
       const deterministicOptionPick = optionLetterToken
         ? resolveShortSelection(latestMsg, policyStatePre, memory.entries)
         : null;
 
       let routingIntent: ConversationIntent = latestIntent;
-      if (optionLetterToken) {
+      if (optionLetterToken || multiOptionBurst) {
         routingIntent = 'SHORT_SELECTION';
       }
 
@@ -301,14 +314,17 @@ export class ConversationOrchestrationService {
         );
       }
 
-      let retrieveQuery = latestMsg;
+      let retrieveQuery = multiOptionContext ?? latestMsg;
       let menuKbAnchor: string | undefined;
       // Universal: if user replied with a short selection AND we have option memory, expand the
       // KB query uses the tenant-provided selectedText instead of the literal option letter.
       const optionsAwaiting =
         policyStatePre.awaiting === 'menu_category_selection' ||
         policyStatePre.awaiting === 'option_selection';
-      if (routingIntent === 'SHORT_SELECTION' && optionsAwaiting) {
+      if (multiOptionBurst && multiOptionContext) {
+        menuKbAnchor = multiOptionBurst.selections.map(selection => selection.selectedText).join('\n');
+        retrieveQuery = multiOptionContext;
+      } else if (routingIntent === 'SHORT_SELECTION' && optionsAwaiting) {
         const sel =
           deterministicOptionPick ?? resolveShortSelection(latestMsg, policyStatePre, memory.entries);
         if (sel) {
@@ -612,7 +628,7 @@ export class ConversationOrchestrationService {
 
       const policyOutcome = this.conversationPolicy.evaluate({
         intent: routingIntent,
-        incomingRaw: latestMsg,
+        incomingRaw: multiOptionContext ?? latestMsg,
         memory: memory.entries,
         policyState,
         kbChunksRanked: kbRanked,
@@ -620,7 +636,9 @@ export class ConversationOrchestrationService {
         promptConfigUpdatedAtIso: input.promptConfig?.updatedAt ?? null,
         kbDocumentUpdatedAtIso: latestKbDocumentUpdatedAt,
         currentTenantId: input.tenantId ?? null,
-        optionPickResolvedWithoutKb: Boolean(deterministicOptionPick && optionLetterToken),
+        optionPickResolvedWithoutKb: Boolean(
+          (deterministicOptionPick && optionLetterToken) || multiOptionBurst,
+        ),
       });
       const kbChunks = policyOutcome.kbChunks;
 
@@ -639,6 +657,7 @@ export class ConversationOrchestrationService {
       const useOptionSelectionTemplate =
         Boolean(
           optionLetterToken &&
+            !multiOptionBurst &&
             deterministicOptionPick &&
             parsedDeterministicOptionLine &&
             parsedDeterministicOptionLine.title.trim().length > 0 &&
@@ -721,7 +740,7 @@ export class ConversationOrchestrationService {
         const systemPrompt = this.buildSystemPromptWithRuntimeGreeting(input, bookingCapabilityForPrompt);
         prompt_build_ms = Math.round(performance.now() - promptPerf0);
 
-        const routingInbound = batch.length > 1 ? batchSummary.combinedText : latestMsg;
+        const routingInbound = multiOptionContext ?? (batch.length > 1 ? batchSummary.combinedText : latestMsg);
         const routingRequest = this.buildRoutingRequest(
           input,
           memory,
@@ -756,7 +775,8 @@ export class ConversationOrchestrationService {
             policyReplyKind: policyOutcome.policyReplyKind,
             menuSelectionActive: policyOutcome.menuSelectionActive,
             latestUserMessage: latestMsg,
-            combinedHumanMessagesText: batch.length > 1 ? batchSummary.combinedText : undefined,
+            combinedHumanMessagesText:
+              multiOptionContext ?? (batch.length > 1 ? batchSummary.combinedText : undefined),
             inboundBatchCount: batch.length,
             batchPrimaryIntent: batchSummary.primaryIntent,
             batchSecondaryIntents: batchSummary.secondaryIntents,
@@ -769,6 +789,14 @@ export class ConversationOrchestrationService {
             priorAssistantMessageCount: memory.entries.filter(m => m.role === 'assistant').length,
             recentAssistantBookingUrlSent: recentAssistantHistoryHasBookingUrl(memory.entries),
             ...(optionMenuSourceExcerpt ? { optionMenuSourceExcerpt } : {}),
+            ...(multiOptionBurst
+              ? {
+                  multiOptionSelections: multiOptionBurst.selections.map(selection => ({
+                    label: selection.raw,
+                    text: selection.selectedText,
+                  })),
+                }
+              : {}),
             tenantPricingCorpus: [
               input.promptConfig?.businessNotes?.trim(),
               input.promptConfig?.systemPrompt?.trim(),

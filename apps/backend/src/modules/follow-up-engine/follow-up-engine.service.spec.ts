@@ -119,7 +119,7 @@ describe('FollowUpEngineService.processFollowUpJob', () => {
   it('skips when customer replied after scheduledAt', async () => {
     const engine = makeEngine();
     (engine as any).getConversationFollowUpScheduleVersion = jestGlobal.fn(async () => 1);
-    (engine as any).hasInboundAfter = jestGlobal.fn(async () => true);
+    (engine as any).hasInboundAfter = jestGlobal.fn(async () => 'replied');
     (engine as any).markJobSkipped = jestGlobal.fn(async () => {});
 
     followUpSettings.getFollowUpSettings.mockResolvedValueOnce({
@@ -279,7 +279,7 @@ describe('FollowUpEngineService.processFollowUpJob', () => {
     const engine = makeEngine();
     (engine as any).getConversationFollowUpScheduleVersion = jestGlobal.fn(async () => 1);
     (engine as any).resolveTenantTimeZone = jestGlobal.fn(async () => 'Asia/Singapore');
-    (engine as any).hasInboundAfter = jestGlobal.fn(async () => false);
+    (engine as any).hasInboundAfter = jestGlobal.fn(async () => 'none');
     (engine as any).isConversationOptedOut = jestGlobal.fn(async () => false);
 
     followUpSettings.getFollowUpSettings.mockResolvedValueOnce({
@@ -392,4 +392,3 @@ describe('FollowUpEngineService.processFollowUpJob', () => {
     );
   });
 });
-

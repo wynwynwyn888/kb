@@ -7,10 +7,11 @@ duplicating their task lists.
 
 ## Active security program
 
-Continue tenant isolation using
-`docs/security/TENANT_ISOLATION_ROADMAP.md`. The booking-settings caller-read and
-manager-role cutover is the current phase. Select the following resource only
-after production verification and the roadmap safety gates are complete.
+Continue tenant isolation using `docs/security/TENANT_ISOLATION_ROADMAP.md`.
+Follow-up context/send safety is the current functional phase; its later
+settings-page caller/RLS cutover remains a separate security phase. Select the
+following resource only after production verification and the roadmap safety
+gates are complete.
 
 ## Production operations
 

@@ -47,6 +47,9 @@ export type FollowUpDelayUnit = (typeof FOLLOW_UP_DELAY_UNITS)[number];
 export const FOLLOW_UP_STEP_MODES = ['fixed_message', 'ai_decides'] as const;
 export type FollowUpStepMode = (typeof FOLLOW_UP_STEP_MODES)[number];
 
+export const DEFAULT_FOLLOW_UP_AI_INSTRUCTION =
+  'Gentle nudge only. Do not sound salesy. Follow up based on the previous conversation context.';
+
 export const FOLLOW_UP_ACTIVE_HOURS_TIMEZONE_MODES = ['BUSINESS', 'CONTACT'] as const;
 export type FollowUpActiveHoursTimezoneMode = (typeof FOLLOW_UP_ACTIVE_HOURS_TIMEZONE_MODES)[number];
 

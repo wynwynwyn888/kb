@@ -29,8 +29,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS workspace_credit_warning_events_sent_unique
   ON public.workspace_credit_warning_events (
     tenant_id,
     threshold,
-    COALESCE(billing_period_end, '1970-01-01T00:00:00Z'::timestamptz)
+    billing_period_end
   )
+  NULLS NOT DISTINCT
   WHERE status = 'SENT';
 
 CREATE UNIQUE INDEX IF NOT EXISTS tenant_ghl_connections_connected_location_uidx
@@ -43,6 +44,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS workspace_credit_reset_reminder_events_sent_un
   ON public.workspace_credit_reset_reminder_events (
     tenant_id,
     days_before_reset,
-    COALESCE(billing_period_end, '1970-01-01T00:00:00Z'::timestamptz)
+    billing_period_end
   )
+  NULLS NOT DISTINCT
   WHERE status = 'SENT';

@@ -27,4 +27,9 @@ describe('restore conditional safety indexes migration', () => {
   it('uses a short lock timeout', () => {
     expect(migration).toContain("SET lock_timeout = '5s'");
   });
+
+  it('treats null billing period boundaries as equal without a timezone-dependent expression', () => {
+    expect(migration.match(/NULLS NOT DISTINCT/g)).toHaveLength(2);
+    expect(migration).not.toContain("'1970-01-01T00:00:00Z'::timestamptz");
+  });
 });

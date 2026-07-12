@@ -58,15 +58,16 @@ describe('tenant data catalogue', () => {
     }
   });
 
-  it('matches the policy names created by the latest RLS migration', () => {
-    const migration = readFileSync(
-      join(
-        backendRoot,
-        'prisma/migrations/20260712150000_fix_rls_membership_evaluation/migration.sql',
-      ),
-      'utf8',
-    );
-    const migrationPolicies = [...migration.matchAll(/CREATE POLICY\s+(\w+)/g)]
+  it('matches the policy names created by the deployed RLS migrations', () => {
+    const policyMigrationPaths = [
+      'prisma/migrations/20260712150000_fix_rls_membership_evaluation/migration.sql',
+      'prisma/migrations/20260712170000_tenant_tagging_settings_select_rls/migration.sql',
+      'prisma/migrations/20260712210000_tenant_roster_rls_rpc/migration.sql',
+    ];
+    const migrations = policyMigrationPaths
+      .map(path => readFileSync(join(backendRoot, path), 'utf8'))
+      .join('\n');
+    const migrationPolicies = [...migrations.matchAll(/CREATE POLICY\s+(\w+)/g)]
       .map(match => match[1]!)
       .sort();
     const policySection = catalogue

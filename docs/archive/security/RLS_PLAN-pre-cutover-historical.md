@@ -1,5 +1,10 @@
 # Row Level Security (RLS) Plan
 
+> **Status: HISTORICAL — SUPERSEDED.** This pre-cutover plan no longer describes
+> production. Use `docs/security/README.md` and
+> `docs/security/TENANT_ISOLATION_ROADMAP.md` for current decisions. Retained as
+> design history only; do not use it as implementation instructions.
+
 ## Overview
 
 Supabase Row Level Security policies provide a second layer of tenant isolation. Even with application-level authorization, RLS ensures that database queries are scoped correctly.

@@ -471,6 +471,7 @@ export interface TenantBookingSettings {
   internalBookingAlertNumber: string | null;
   internalBookingAlertChannel: string;
   internalBookingAlertTemplate: string | null;
+  canManage: boolean;
 }
 
 export interface GhlCalendarOption {

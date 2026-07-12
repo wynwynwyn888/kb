@@ -1,5 +1,6 @@
 import { BadRequestException, ForbiddenException, Injectable, Logger } from '@nestjs/common';
 import { getSupabaseService } from '../../lib/supabase';
+import { createUserDatabaseClient } from '../../lib/database/user-database-client';
 import { resolveAppTimeZone, getBusinessLocalNow, snapUtcEpochMsToWholeMinute, snapUtcEpochMsToWholeSecond, wallClockInZoneToUtcMs } from '../../lib/business-time';
 import { GhlService } from '../ghl/ghl.service';
 import {
@@ -49,6 +50,8 @@ export interface TenantBookingSettingsDto {
   internalBookingAlertNumber: string | null;
   internalBookingAlertChannel: string;
   internalBookingAlertTemplate: string | null;
+  /** Present on user-facing reads; workers do not use this authorization hint. */
+  canManage?: boolean;
 }
 
 function defaultCoreFields(): TenantCoreFieldsDto {
@@ -251,6 +254,7 @@ function rowToDto(row: Record<string, unknown>): TenantBookingSettingsDto {
       row['internal_booking_alert_template'] === null || row['internal_booking_alert_template'] === undefined
         ? null
         : String(row['internal_booking_alert_template']).trim() || null,
+    canManage: row['can_manage'] === undefined ? undefined : Boolean(row['can_manage']),
   };
 }
 
@@ -329,6 +333,26 @@ export class BookingSettingsService {
     }
     if (!data) return this.normalizeLiveBookingCoreFields({ ...DEFAULT_SETTINGS });
     return this.normalizeLiveBookingCoreFields(rowToDto(data as Record<string, unknown>));
+  }
+
+  /** User-facing read through the caller JWT and the redacting database RPC. */
+  async getBookingSettingsForCaller(
+    tenantId: string,
+    accessToken: string,
+  ): Promise<TenantBookingSettingsDto> {
+    const caller = createUserDatabaseClient(accessToken);
+    const { data, error } = await caller.rpc('get_tenant_booking_settings', {
+      p_tenant_id: tenantId,
+    });
+    if (error) {
+      this.logger.warn('getBookingSettingsForCaller failed');
+      throw new BadRequestException('Could not load booking settings');
+    }
+    const row = Array.isArray(data) ? data[0] : data;
+    if (!row || typeof row !== 'object') {
+      throw new BadRequestException('Could not load booking settings');
+    }
+    return this.normalizeLiveBookingCoreFields(rowToDto(row as Record<string, unknown>));
   }
 
   /**

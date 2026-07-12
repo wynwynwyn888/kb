@@ -17,24 +17,26 @@ own tenant.
 - Five tables have authenticated tenant-scoped SELECT policies:
   `messages`, `handover_events`, `tenant_bot_profile_knowledge_vaults`,
   `tenant_tagging_settings`, and `tenant_users`.
-- Caller-scoped database reads are deployed for tagging settings and tenant
-  rosters. Roster profile visibility is limited by a narrow RPC; the global
-  `profiles` directory remains closed.
+- Caller-scoped database reads are deployed for tagging settings, tenant
+  rosters, and booking settings. Roster profile visibility is limited by a
+  narrow RPC; booking staff-alert fields are redacted for read-only roles; the
+  global `profiles` directory remains closed.
 - User-facing service-role access remains the principal migration risk and must
   be reduced one resource group at a time.
 - Internal workers, webhooks, migrations, and narrow administration may retain
   service-role access when explicitly classified and tested.
 
-## Next candidate
+## Current cutover
 
-Audit and, if its existing role behavior is confirmed, cut over
-`tenant_booking_settings` reads. This is a low-volume, directly tenant-owned
-configuration table with lower sensitivity than messages, prompts, credentials,
-billing, or knowledge content.
+`tenant_booking_settings` reads use a fixed caller-JWT RPC because the table
+contains a staff notification destination/template. Direct authenticated table
+reads and writes remain closed. Tenant ADMIN and agency OWNER/ADMIN can manage;
+tenant AGENT/VIEWER and agency OPERATOR receive read-only, redacted status.
 
-The booking-settings phase is not pre-approved for production merely because it
-is listed here. Its endpoint behavior, worker dependencies, staging fixtures,
-rollback, and regression tests must be completed first.
+Do not select another table until the booking-settings deployment has passed its
+production verification and normal operating window. The next candidate must be
+chosen from the catalogue using the same risk review; it is not pre-approved by
+this roadmap.
 
 ## Required safety gates for every resource group
 

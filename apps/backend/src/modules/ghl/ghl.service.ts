@@ -437,6 +437,53 @@ export class GhlService {
   }
 
   /**
+   * Ensure the profile may change tenant configuration or invoke credentialed
+   * diagnostic tools. Tenant ADMIN and agency OWNER/ADMIN only.
+   */
+  async ensureTenantWriteAccessOrThrow(tenantId: string, profileId: string): Promise<void> {
+    const { data: tenantMember } = await this.supabase
+      .from('tenant_users')
+      .select('role')
+      .eq('profile_id', profileId)
+      .eq('tenant_id', tenantId)
+      .maybeSingle();
+    if (tenantMember?.role === 'ADMIN') {
+      void this.authorizationShadow?.observeTenantAccess({
+        profileId, tenantId, action: 'write', legacyAllowed: true,
+        source: 'GhlService.ensureTenantWriteAccessOrThrow',
+      });
+      return;
+    }
+
+    const { data: tenant } = await this.supabase
+      .from('tenants')
+      .select('agency_id')
+      .eq('id', tenantId)
+      .maybeSingle();
+    if (tenant?.agency_id) {
+      const { data: agencyMember } = await this.supabase
+        .from('agency_users')
+        .select('role')
+        .eq('profile_id', profileId)
+        .eq('agency_id', tenant.agency_id)
+        .maybeSingle();
+      if (agencyMember?.role === 'OWNER' || agencyMember?.role === 'ADMIN') {
+        void this.authorizationShadow?.observeTenantAccess({
+          profileId, tenantId, action: 'write', legacyAllowed: true,
+          source: 'GhlService.ensureTenantWriteAccessOrThrow',
+        });
+        return;
+      }
+    }
+
+    void this.authorizationShadow?.observeTenantAccess({
+      profileId, tenantId, action: 'write', legacyAllowed: false,
+      source: 'GhlService.ensureTenantWriteAccessOrThrow',
+    });
+    throw new ForbiddenException('You do not have permission to change this workspace');
+  }
+
+  /**
    * Authenticated GHL client for subaccount automation (calendars, tags).
    * Requires a CONNECTED tenant_ghl_connections row and a decryptable token.
    */

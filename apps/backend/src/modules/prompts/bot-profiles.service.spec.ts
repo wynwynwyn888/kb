@@ -554,7 +554,7 @@ describe('BotProfilesService', () => {
     });
   });
 
-  describe('persona / booking / escalation length validation', () => {
+  describe('persona / sales playbook / booking / escalation length validation', () => {
     it('rejects createBotProfile with persona > 3000 chars', async () => {
       await expect(
         svc.createBotProfile(userId, tenantId, { name: 'Test', persona: 'A'.repeat(3001) }),
@@ -565,6 +565,24 @@ describe('BotProfilesService', () => {
       const promise = svc.createBotProfile(userId, tenantId, { name: 'Test', persona: 'A'.repeat(2500) });
       await expect(promise).rejects.toThrow();
       await expect(promise).rejects.not.toThrow('persona');
+    });
+
+    it('accepts a Sales Playbook at exactly 5,000 characters', async () => {
+      const promise = svc.createBotProfile(userId, tenantId, {
+        name: 'Test',
+        salesPlaybook: 'S'.repeat(5000),
+      });
+      await expect(promise).rejects.toThrow();
+      await expect(promise).rejects.not.toThrow('salesPlaybook');
+    });
+
+    it('rejects a Sales Playbook above 5,000 characters', async () => {
+      await expect(
+        svc.createBotProfile(userId, tenantId, {
+          name: 'Test',
+          salesPlaybook: 'S'.repeat(5001),
+        }),
+      ).rejects.toThrow('salesPlaybook must not exceed 5,000 characters');
     });
 
     it('rejects createBotProfile with bookingBehaviorNotes > 2000 chars', async () => {

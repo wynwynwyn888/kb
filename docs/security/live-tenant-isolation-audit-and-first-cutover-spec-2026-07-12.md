@@ -9,6 +9,25 @@ Database actions performed: read-only transactions only; every audit ended with 
 
 KB is ready for a first narrow RLS route cutover, but is not ready for a broad service-role replacement. Production and staging are internally consistent on the ownership controls already deployed. Exactly 3 of 40 public application tables have authenticated `SELECT` policies; all user-facing backend database access still needs to be migrated resource by resource.
 
+## Canonical product access model
+
+KB is a single-agency, multi-customer SaaS. The agency workspace at `/app/agency` is the private AISBP platform-management area. Only the founder's verified account or explicitly documented founder-controlled recovery account may hold an agency membership or access agency pages and APIs.
+
+Customer businesses are tenants. Their workspace URL is `/app/tenant/:tenantId/...`, for example `/app/tenant/34c62859-95b1-49a8-911c-cc44ced05452/control-panel`. Customer staff receive only `tenant_users` memberships and tenant roles (`ADMIN`, `AGENT`, or `VIEWER`). A customer account must never receive an `agency_users` row, access `/app/agency`, call agency-management APIs, access platform credentials, or read another tenant by changing a URL or request identifier.
+
+The intended invariants are:
+
+- one canonical AISBP agency;
+- founder-controlled identities only in `agency_users`;
+- `OWNER` is the only agency role required by the product;
+- every customer business is represented by a tenant;
+- customer access is granted only through explicit tenant membership;
+- tenant `ADMIN` manages its customer workspace, not the AISBP agency;
+- tenant `AGENT` and `VIEWER` permissions remain confined to the assigned tenant;
+- the founder can enter every customer tenant for support and platform operation.
+
+Legacy agency roles remain in the schema for compatibility, and `can_read_tenant` currently permits agency `OWNER`, `ADMIN`, and `OPERATOR`. That is broader than the canonical product model. Do not silently narrow the shared helper during the first tagging-settings cutover because it already protects three live resources. First identify which production memberships are founder-controlled, remove or reclassify any unintended membership through a separately reviewed migration, prevent customer provisioning from creating agency memberships, and behaviorally test all affected agency pages and APIs.
+
 The first cutover should be only:
 
 `GET /api/v1/tenants/:tenantId/tagging-settings`
@@ -46,7 +65,7 @@ The three current policies are:
 - `handover_events_member_select`
 - `profile_vault_links_member_select`
 
-All call `public.can_read_tenant(tenant_id)`. That helper permits direct tenant members and agency `OWNER`, `ADMIN`, or `OPERATOR`; an agency `MEMBER` requires a direct tenant assignment. This matches the application read policy deployed in PR #72.
+All call `public.can_read_tenant(tenant_id)`. The helper's current legacy behavior permits direct tenant members and agency `OWNER`, `ADMIN`, or `OPERATOR`; an agency `MEMBER` requires a direct tenant assignment. This matches the application read policy deployed in PR #72, but the agency-role portion must later be narrowed to the founder-only product model described above.
 
 All 40 tables have RLS enabled, but 37 have no policy. Supabase's standard `anon`, `authenticated`, and `service_role` table grants remain broad. For `anon` and `authenticated`, RLS is the effective barrier. The service role bypasses that barrier and remains the principal blast-radius risk.
 
@@ -141,32 +160,44 @@ Update only the GET controller method to call the new caller method after `ensur
 
 Create clearly named temporary staging fixtures with guaranteed cleanup:
 
-- Tenant A and Tenant B under the staging agency model.
-- Agency OWNER/ADMIN/OPERATOR identities as needed.
-- Agency MEMBER without tenant assignment.
-- The same MEMBER with a Tenant A assignment.
-- A direct Tenant A user.
+- One founder fixture with an agency `OWNER` membership.
+- Customer Tenant A and Customer Tenant B under the staging AISBP agency.
+- Tenant A `ADMIN`, `AGENT`, and `VIEWER` customer identities with no agency membership.
+- A Tenant B `ADMIN` customer identity with no Tenant A or agency membership.
 - An authenticated user with no membership.
 - One settings row for each tenant with distinguishable boolean values.
 
 Prove through the anon-key/JWT client, not service role:
 
-1. Tenant A direct member reads Tenant A.
-2. Tenant A direct member cannot read Tenant B.
-3. Agency OWNER reads both agency tenants.
-4. Agency ADMIN reads both agency tenants.
-5. Agency OPERATOR reads both agency tenants.
-6. Agency MEMBER without assignment reads neither.
-7. Agency MEMBER assigned to Tenant A reads A but not B.
-8. Unrelated authenticated user reads neither.
-9. Anonymous client reads neither.
-10. Caller cannot insert, update, or delete settings through RLS.
-11. GET API returns the same payload shape before and after cutover.
-12. PATCH API still succeeds for an authorized administrator and the subsequent GET reflects it.
-13. A wrong-tenant URL never returns the other tenant's boolean.
-14. Token A is never reused by a subsequent Token B request.
+1. The founder can read both Customer Tenant A and Customer Tenant B.
+2. Tenant A `ADMIN` reads Tenant A.
+3. Tenant A `ADMIN` cannot read Tenant B.
+4. Tenant A `AGENT` reads Tenant A but not Tenant B.
+5. Tenant A `VIEWER` reads Tenant A but not Tenant B.
+6. Tenant B `ADMIN` reads Tenant B but not Tenant A.
+7. Every customer fixture is rejected by agency pages and agency-management APIs.
+8. An authenticated identity with no membership reads neither tenant.
+9. An anonymous client reads neither tenant.
+10. Customer callers cannot insert, update, or delete settings directly through RLS.
+11. The GET API payload is identical before and after cutover, including the authorized missing-row default.
+12. An authorized Tenant A administrator can PATCH through the existing guarded API and the caller-scoped GET reflects the change; agent/viewer write rules remain unchanged.
+13. Changing a Tenant A URL or request identifier to Tenant B never returns Tenant B's setting or reveals whether the tenant exists.
+14. Tenant A's token is never reused by a subsequent Tenant B request, including concurrent requests.
 
 Fixtures must use reserved staging-only identifiers and be removed in a `finally` cleanup. The test must hard-refuse the production Supabase project reference.
+
+### Founder-only agency prerequisite
+
+Before the first production route cutover:
+
+1. Inventory production `agency_users` using counts and founder-confirmed account identifiers without exposing them in logs or reports.
+2. Confirm every remaining agency membership is a founder-controlled login or documented recovery login.
+3. Confirm customer onboarding creates `tenant_users` rows only.
+4. Add tests proving tenant users cannot call agency controllers even when they know the agency ID.
+5. Remove agency-user management from customer-visible navigation and tenant APIs.
+6. Specify a separately reversible change to reject new non-founder agency memberships. Do not hardcode an email address or user UUID in RLS or application code.
+
+This prerequisite does not require deleting legacy role enum values. It requires making them unreachable through normal customer provisioning and ensuring no customer holds them.
 
 ## Deployment gates
 
@@ -209,7 +240,9 @@ Do not disable RLS, drop `can_read_tenant`, modify data, or roll back unrelated 
 | Risk | Control |
 |---|---|
 | Valid user sees default false because policy is missing | Apply and behaviorally verify policy before code |
-| App and RLS role rules disagree | Reuse `can_read_tenant`; test every role |
+| App and RLS tenant rules disagree | Reuse `can_read_tenant`; test founder plus every tenant role |
+| Legacy agency roles are broader than the founder-only model | Inventory founder-controlled memberships and harden provisioning separately before production cutover |
+| Customer gains agency access | Customer provisioning writes only `tenant_users`; adversarial agency endpoint tests |
 | Token leaks into logs or session objects | Request-only raw token; static no-logging tests |
 | User token reused between requests | Fresh client per call; concurrency test |
 | PATCH or automation breaks | Do not migrate writes or internal method |
@@ -219,4 +252,4 @@ Do not disable RLS, drop `can_read_tenant`, modify data, or roll back unrelated 
 
 ## Definition of done
 
-This first cutover is complete only when the policy and route are live, all role and cross-tenant staging tests pass, production health checks pass, no tagging-settings regression is observed, and rollback has been proven mechanically. It does not mean KB is fully database-isolated. It establishes the safe pattern to repeat for the remaining resources.
+This first cutover is complete only when the policy and route are live, the founder-only agency prerequisite is verified, all founder-versus-customer and cross-tenant staging tests pass, production health checks pass, no tagging-settings regression is observed, and rollback has been proven mechanically. It does not mean KB is fully database-isolated. It establishes the safe pattern to repeat for the remaining resources.

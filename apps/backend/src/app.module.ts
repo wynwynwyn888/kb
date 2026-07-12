@@ -33,10 +33,12 @@ import { MetricsModule } from './lib/metrics.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { OpsModule } from './modules/ops/ops.module';
 import { HumanEscalationModule } from './modules/human-escalation/human-escalation.module';
+import { AuthorizationModule } from './modules/authorization/authorization.module';
 
 @Module({
   imports: [
     AppCacheModule,
+    AuthorizationModule,
     // Configuration
     ConfigModule.forRoot({
       isGlobal: true,

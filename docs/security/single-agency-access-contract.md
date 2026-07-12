@@ -45,3 +45,16 @@ NODE_ENV=staging ALLOW_STAGING_RLS_FIXTURES=1 pnpm --filter @aisbp/backend secur
 ```
 
 The runner also verifies that direct authenticated message and handover inserts remain denied.
+
+## Central authorization shadow mode
+
+Batch 2 introduces a central `AccessContext` and `AuthorizationPolicyService` without replacing existing authorization decisions. Existing checks remain final.
+
+- Shadow comparison is disabled by default and performs zero additional queries while disabled.
+- Enable only with `AUTHORIZATION_SHADOW_ENABLED=true` in a controlled environment.
+- Disable immediately by removing the variable or setting it to `false`; no deployment or database rollback is required.
+- `AUTHORIZATION_SHADOW_LOG_MATCHES=true` may be used temporarily in staging, but should normally remain off.
+- Logs contain hashed profile and tenant identifiers, action, source, booleans, and reason codes only. They exclude tokens, emails, tenant names, prompts, customer messages, and database error details.
+- A shadow query failure is observation-only: it is safely logged and never alters or interrupts the legacy request.
+
+Known expected disagreement to measure before enforcement: legacy application checks currently treat agency `MEMBER` as tenant-readable, while the deployed database contract requires agency `OWNER`, `ADMIN`, or `OPERATOR` unless the member is explicitly assigned to the tenant.

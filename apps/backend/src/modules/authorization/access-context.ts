@@ -19,6 +19,7 @@ export interface TenantAccessMembership {
  */
 export interface AccessContext {
   profileId: string;
+  membershipStatus: 'complete' | 'partial' | 'failed';
   agencyMemberships: AgencyAccessMembership[];
   tenantMemberships: TenantAccessMembership[];
 }
@@ -32,6 +33,7 @@ export interface AccessDecision {
     | 'agency_privileged'
     | 'tenant_assigned'
     | 'agency_member_read'
+    | 'context_incomplete'
     | 'no_matching_membership'
     | 'role_insufficient';
 }

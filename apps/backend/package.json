@@ -15,6 +15,7 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "security:test:staging-rls": "tsx src/scripts/evaluate-single-agency-rls.ts",
+    "security:evaluate:staging-authz-shadow": "tsx src/scripts/evaluate-authorization-shadow-memberships.ts",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:studio": "prisma studio",

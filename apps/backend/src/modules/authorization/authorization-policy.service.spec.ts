@@ -6,8 +6,8 @@ const TENANT_A = 'tenant-a';
 const TENANT_B = 'tenant-b';
 const TENANT_C = 'tenant-c';
 
-function context(partial: Omit<AccessContext, 'profileId'>): AccessContext {
-  return { profileId: 'profile-1', ...partial };
+function context(partial: Omit<AccessContext, 'profileId' | 'membershipStatus'>): AccessContext {
+  return { profileId: 'profile-1', membershipStatus: 'complete', ...partial };
 }
 
 describe('AuthorizationPolicyService single-agency contract', () => {
@@ -99,6 +99,19 @@ describe('AuthorizationPolicyService single-agency contract', () => {
     expect(policy.decideTenantAccess(revoked, TENANT_A, AGENCY, 'read')).toEqual({
       allowed: false,
       reason: 'no_matching_membership',
+    });
+  });
+
+  it.each(['partial', 'failed'] as const)('refuses to authorize an explicitly %s context', membershipStatus => {
+    const incomplete: AccessContext = {
+      profileId: 'profile-1',
+      membershipStatus,
+      agencyMemberships: [{ agencyId: AGENCY, role: 'OWNER' }],
+      tenantMemberships: [],
+    };
+    expect(policy.decideTenantAccess(incomplete, TENANT_A, AGENCY, 'read')).toEqual({
+      allowed: false,
+      reason: 'context_incomplete',
     });
   });
 

@@ -40,3 +40,21 @@ describe('single-agency RLS membership evaluation migration', () => {
     },
   );
 });
+
+describe('single-agency staging fixture safety', () => {
+  const runner = readFileSync(
+    join(process.cwd(), 'src/scripts/evaluate-single-agency-rls.ts'),
+    'utf8',
+  );
+
+  it('runs real shadow comparisons inside the checked fixture lifecycle', () => {
+    expect(runner).toContain('evaluateAuthorizationShadow');
+    expect(runner).toContain("legacy app allows agency MEMBER");
+    expect(runner).toContain("expectMetric(metrics, 'disagreement', 1)");
+    expect(runner).toContain("expectMetric(metrics, 'deduplicated', 1)");
+    expect(runner).toContain("expectMetric(metrics, 'cacheHit', 1)");
+    const invocation = 'const shadowMetrics = await evaluateAuthorizationShadow()';
+    expect(runner.indexOf('await seed()')).toBeLessThan(runner.indexOf(invocation));
+    expect(runner.indexOf(invocation)).toBeLessThan(runner.indexOf('await cleanup()'));
+  });
+});

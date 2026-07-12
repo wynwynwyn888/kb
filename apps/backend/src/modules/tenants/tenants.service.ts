@@ -8,6 +8,7 @@ import { resolveBotMode, type BotOperatingMode, isBotModeString } from '../../li
 import { BotProfilesService } from '../prompts/bot-profiles.service';
 import { AppCacheService } from '../../lib/app-cache.service';
 import { AuthorizationShadowService } from '../authorization/authorization-shadow.service';
+import { agencyRoleCanReadTenant } from '../authorization/authorization-policy.service';
 
 /** When the DB enforces NOT NULL on `ghl_location_id`, store a sentinel until a real GHL id is set in Integrations. */
 const PENDING_GHL_PREFIX = 'pending:';
@@ -101,7 +102,7 @@ export class TenantsService {
       .eq('agency_id', agencyId)
       .single();
 
-    if (membershipError || !membership) {
+    if (membershipError || !membership || !agencyRoleCanReadTenant(membership.role)) {
       return [];
     }
 
@@ -297,7 +298,7 @@ export class TenantsService {
    * Check if user has access to a tenant
    */
   async checkTenantAccess(tenantId: string, profileId: string): Promise<boolean> {
-    const cacheKey = `tenant_access:${tenantId}:${profileId}`;
+    const cacheKey = `tenant_access:v2:${tenantId}:${profileId}`;
     const cached = await this.appCache.get<boolean>(cacheKey);
     if (cached === true || cached === false) {
       void this.observeTenantRead(profileId, tenantId, cached);
@@ -335,12 +336,12 @@ export class TenantsService {
 
     const { data: agencyMembership } = await supabase
       .from('agency_users')
-      .select('id')
+      .select('role')
       .eq('profile_id', profileId)
       .eq('agency_id', tenant.agency_id)
       .single();
 
-    const allowed = !!agencyMembership;
+    const allowed = agencyRoleCanReadTenant(agencyMembership?.role);
     await this.appCache.set(cacheKey, allowed, 60);
     void this.observeTenantRead(profileId, tenantId, allowed);
     return allowed;

@@ -5,7 +5,10 @@
 import { getSupabaseService } from '../lib/supabase';
 import type { AgencyRole, TenantRole } from '../lib/enums';
 import type { AccessContext } from '../modules/authorization/access-context';
-import { AuthorizationPolicyService } from '../modules/authorization/authorization-policy.service';
+import {
+  agencyRoleCanReadTenant,
+  AuthorizationPolicyService,
+} from '../modules/authorization/authorization-policy.service';
 
 const STAGING_REF = 'tuxbrerxmhnotcfrmzct';
 
@@ -80,7 +83,9 @@ async function main(): Promise<void> {
     };
     for (const tenant of tenants) {
       const legacyAllowed = tenantMemberships.some(row => row.tenantId === tenant.tenantId)
-        || agencyMemberships.some(row => row.agencyId === tenant.agencyId);
+        || agencyMemberships.some(
+          row => row.agencyId === tenant.agencyId && agencyRoleCanReadTenant(row.role),
+        );
       const shadow = policy.decideTenantAccess(context, tenant.tenantId, tenant.agencyId, 'read');
       aggregates.evaluatedPairs += 1;
       increment(aggregates.byLegacyShadow, `legacy_${legacyAllowed}_shadow_${shadow.allowed}`);

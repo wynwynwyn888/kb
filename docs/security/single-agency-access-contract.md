@@ -57,7 +57,7 @@ Batch 2 introduces a central `AccessContext` and `AuthorizationPolicyService` wi
 - Logs contain hashed profile and tenant identifiers, action, source, booleans, and reason codes only. They exclude tokens, emails, tenant names, prompts, customer messages, and database error details.
 - A shadow query failure is observation-only: it is safely logged and never alters or interrupts the legacy request.
 
-Known expected disagreement to measure before enforcement: legacy application checks currently treat agency `MEMBER` as tenant-readable, while the deployed database contract requires agency `OWNER`, `ADMIN`, or `OPERATOR` unless the member is explicitly assigned to the tenant.
+Legacy application tenant-read checks are aligned with this contract: agency `MEMBER` alone is denied, while explicit tenant assignment remains allowed. The cache namespace is versioned when this rule changes so an older permissive decision cannot survive deployment.
 
 Before enabling observation traffic, run the read-only, content-free staging membership evaluator:
 

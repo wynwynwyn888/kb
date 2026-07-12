@@ -10,6 +10,7 @@ import { randomUUID } from 'node:crypto';
 import { getSupabaseService } from '../../lib/supabase';
 import { AuthService } from '../auth/auth.service';
 import { parsePromptSections } from '../../lib/tenant-bot-profile-prompt';
+import { agencyRoleCanReadTenant } from '../authorization/authorization-policy.service';
 
 export interface TenantPromptDto {
   id: string;
@@ -60,11 +61,11 @@ export class PromptsService {
 
     const { data: au } = await supabase
       .from('agency_users')
-      .select('id')
+      .select('role')
       .eq('profile_id', profileId)
       .eq('agency_id', tenant.agency_id as string)
       .maybeSingle();
-    return !!au;
+    return agencyRoleCanReadTenant(au?.role);
   }
 
   async canManageTenantPrompts(profileId: string, tenantId: string): Promise<boolean> {

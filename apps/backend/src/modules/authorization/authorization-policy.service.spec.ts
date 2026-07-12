@@ -1,4 +1,4 @@
-import { AuthorizationPolicyService } from './authorization-policy.service';
+import { agencyRoleCanReadTenant, AuthorizationPolicyService } from './authorization-policy.service';
 import type { AccessContext } from './access-context';
 
 const AGENCY = 'agency-1';
@@ -122,5 +122,15 @@ describe('AuthorizationPolicyService single-agency contract', () => {
     });
     expect(policy.decideAgencyAccess(member, AGENCY, 'read').allowed).toBe(true);
     expect(policy.decideAgencyAccess(member, AGENCY, 'admin').allowed).toBe(false);
+  });
+});
+
+describe('agencyRoleCanReadTenant', () => {
+  it.each(['OWNER', 'ADMIN', 'OPERATOR'])('allows %s', role => {
+    expect(agencyRoleCanReadTenant(role)).toBe(true);
+  });
+
+  it.each(['MEMBER', undefined, null, '', 'owner'])('denies %s', role => {
+    expect(agencyRoleCanReadTenant(role)).toBe(false);
   });
 });

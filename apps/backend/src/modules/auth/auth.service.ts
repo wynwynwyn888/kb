@@ -101,6 +101,11 @@ export class AuthService {
         tenantRole,
         agencyId,
         tenantId,
+        accessContext: {
+          profileId: user.id,
+          agencyMemberships: agencyMembership ? [agencyMembership] : [],
+          tenantMemberships,
+        },
       };
     } catch (err) {
       if (err instanceof UnauthorizedException) {

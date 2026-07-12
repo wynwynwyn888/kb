@@ -85,4 +85,14 @@ export interface SessionUser {
   tenantRole?: 'ADMIN' | 'AGENT' | 'VIEWER';
   agencyId?: string;
   tenantId?: string;
+  /** Complete membership facts for centralized authorization; never serialized by auth endpoints. */
+  accessContext?: {
+    profileId: string;
+    agencyMemberships: Array<{ agencyId: string; role: 'OWNER' | 'ADMIN' | 'OPERATOR' | 'MEMBER' }>;
+    tenantMemberships: Array<{
+      tenantId: string;
+      agencyId: string;
+      role: 'ADMIN' | 'AGENT' | 'VIEWER';
+    }>;
+  };
 }

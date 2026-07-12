@@ -16,10 +16,12 @@ import {
   ForbiddenException,
   BadRequestException,
   ConflictException,
+  Optional,
 } from '@nestjs/common';
 import { getSupabaseService } from '../../lib/supabase';
 import { decrypt, encrypt, maskToken, safeLog } from '../../lib/encryption';
 import { createGhlClient, GhlConnectionStatus, type GhlClient } from '@aisbp/ghl-client';
+import { AuthorizationShadowService } from '../authorization/authorization-shadow.service';
 
 export interface SaveConnectionDto {
   ghlLocationId: string;
@@ -41,6 +43,8 @@ export interface ConnectionStatusResponse {
 export class GhlService {
   private readonly logger = new Logger(GhlService.name);
   private supabase = getSupabaseService();
+
+  constructor(@Optional() private readonly authorizationShadow?: AuthorizationShadowService) {}
 
   private async fetchTenantDisplayName(id: string): Promise<string> {
     const { data } = await this.supabase.from('tenants').select('name').eq('id', id).maybeSingle();
@@ -496,7 +500,10 @@ export class GhlService {
       .eq('tenant_id', tenantId)
       .single();
 
-    if (tenantMember) return true;
+    if (tenantMember) {
+      void this.observeTenantRead(profileId, tenantId, true);
+      return true;
+    }
 
     // Check agency_users membership (agency can access all its tenants)
     const { data: tenant } = await this.supabase
@@ -505,7 +512,10 @@ export class GhlService {
       .eq('id', tenantId)
       .single();
 
-    if (!tenant) return false;
+    if (!tenant) {
+      void this.observeTenantRead(profileId, tenantId, false);
+      return false;
+    }
 
     const { data: agencyMember } = await this.supabase
       .from('agency_users')
@@ -514,6 +524,22 @@ export class GhlService {
       .eq('agency_id', tenant.agency_id)
       .single();
 
-    return !!agencyMember;
+    const allowed = !!agencyMember;
+    void this.observeTenantRead(profileId, tenantId, allowed);
+    return allowed;
+  }
+
+  private async observeTenantRead(profileId: string, tenantId: string, legacyAllowed: boolean): Promise<void> {
+    try {
+      await this.authorizationShadow?.observeTenantAccess({
+        profileId,
+        tenantId,
+        action: 'read',
+        legacyAllowed,
+        source: 'GhlService.checkTenantAccess',
+      });
+    } catch {
+      // Shadow observation must never affect the legacy authorization result.
+    }
   }
 }

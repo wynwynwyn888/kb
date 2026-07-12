@@ -41,3 +41,28 @@ describe('TenantsService.deleteTenant', () => {
     await expect(service.deleteTenant('t1', 'profile-1')).rejects.toBeInstanceOf(ForbiddenException);
   });
 });
+
+describe('TenantsService authorization shadow isolation', () => {
+  it('keeps the cached legacy result final even if the observer rejects', async () => {
+    const observer = {
+      observeTenantAccess: jestGlobal.fn(async () => {
+        throw new Error('shadow failure');
+      }),
+    };
+    const service = new TenantsService(
+      {} as never,
+      { get: async () => true, set: async () => {} } as never,
+      observer as never,
+    );
+
+    await expect(service.checkTenantAccess('tenant-a', 'profile-a')).resolves.toBe(true);
+    await new Promise(resolve => setImmediate(resolve));
+    expect(observer.observeTenantAccess).toHaveBeenCalledWith({
+      profileId: 'profile-a',
+      tenantId: 'tenant-a',
+      action: 'read',
+      legacyAllowed: true,
+      source: 'TenantsService.checkTenantAccess',
+    });
+  });
+});

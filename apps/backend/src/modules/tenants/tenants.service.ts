@@ -1,12 +1,13 @@
 // Tenants service - handles tenant operations with multi-tenant isolation
 
 import { randomUUID } from 'node:crypto';
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { getSupabaseService } from '../../lib/supabase';
 import type { TenantRole } from '../../lib/enums';
 import { resolveBotMode, type BotOperatingMode, isBotModeString } from '../../lib/bot-mode';
 import { BotProfilesService } from '../prompts/bot-profiles.service';
 import { AppCacheService } from '../../lib/app-cache.service';
+import { AuthorizationShadowService } from '../authorization/authorization-shadow.service';
 
 /** When the DB enforces NOT NULL on `ghl_location_id`, store a sentinel until a real GHL id is set in Integrations. */
 const PENDING_GHL_PREFIX = 'pending:';
@@ -83,6 +84,7 @@ export class TenantsService {
   constructor(
     private readonly botProfiles: BotProfilesService,
     private readonly appCache: AppCacheService,
+    @Optional() private readonly authorizationShadow?: AuthorizationShadowService,
   ) {}
 
   /**
@@ -298,6 +300,7 @@ export class TenantsService {
     const cacheKey = `tenant_access:${tenantId}:${profileId}`;
     const cached = await this.appCache.get<boolean>(cacheKey);
     if (cached === true || cached === false) {
+      void this.observeTenantRead(profileId, tenantId, cached);
       return cached;
     }
 
@@ -313,6 +316,7 @@ export class TenantsService {
 
     if (tenantMembership) {
       await this.appCache.set(cacheKey, true, 60);
+      void this.observeTenantRead(profileId, tenantId, true);
       return true;
     }
 
@@ -325,6 +329,7 @@ export class TenantsService {
 
     if (!tenant) {
       await this.appCache.set(cacheKey, false, 60);
+      void this.observeTenantRead(profileId, tenantId, false);
       return false;
     }
 
@@ -337,7 +342,22 @@ export class TenantsService {
 
     const allowed = !!agencyMembership;
     await this.appCache.set(cacheKey, allowed, 60);
+    void this.observeTenantRead(profileId, tenantId, allowed);
     return allowed;
+  }
+
+  private async observeTenantRead(profileId: string, tenantId: string, legacyAllowed: boolean): Promise<void> {
+    try {
+      await this.authorizationShadow?.observeTenantAccess({
+        profileId,
+        tenantId,
+        action: 'read',
+        legacyAllowed,
+        source: 'TenantsService.checkTenantAccess',
+      });
+    } catch {
+      // Shadow observation must never affect the legacy authorization result.
+    }
   }
 
   /**

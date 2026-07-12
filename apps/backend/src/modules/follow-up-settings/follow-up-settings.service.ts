@@ -6,6 +6,7 @@ import {
   parseFollowUpActiveHoursTimezoneMode,
 } from '../../lib/tenant-automation-validation';
 import type { FollowUpActiveHoursTimezoneMode } from '../../lib/tenant-automation-constants';
+import { DEFAULT_FOLLOW_UP_AI_INSTRUCTION } from '../../lib/tenant-automation-constants';
 
 export interface FollowUpStepApi {
   stepNumber: number;
@@ -32,9 +33,6 @@ export interface TenantFollowUpSettingsDto {
   steps: FollowUpStepApi[];
 }
 
-const DEFAULT_AI_INSTRUCTION =
-  'Gentle nudge only. Do not sound salesy. Follow up based on the previous conversation context.';
-
 const DEFAULT: TenantFollowUpSettingsDto = {
   enabled: false,
   maxFollowUps: 3,
@@ -53,7 +51,7 @@ function normalizeStepsWithDefaults(steps: FollowUpStepApi[]): FollowUpStepApi[]
     const mode = String(s.mode ?? '').trim();
     if (mode === 'ai_decides') {
       const aiInstruction = typeof s.aiInstruction === 'string' ? s.aiInstruction : '';
-      const nextInstr = aiInstruction.trim() ? aiInstruction : DEFAULT_AI_INSTRUCTION;
+      const nextInstr = aiInstruction.trim() ? aiInstruction : DEFAULT_FOLLOW_UP_AI_INSTRUCTION;
       return { ...s, aiInstruction: nextInstr };
     }
     return s;

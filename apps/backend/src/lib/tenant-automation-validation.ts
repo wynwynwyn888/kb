@@ -295,10 +295,8 @@ export function parseFollowUpSteps(raw: unknown): FollowUpStepDto[] {
     if (mode === 'fixed_message' && enabled && !(fixedMessage ?? '').trim()) {
       throw new BadRequestException(`Step ${n}: fixed message required when enabled`);
     }
-    if (mode === 'ai_decides' && enabled && !(aiInstruction ?? '').trim()) {
-      // Defaulting is applied in the follow-up settings service (so GET-after-PATCH is deterministic).
-      throw new BadRequestException(`Step ${n}: AI instruction required when enabled`);
-    }
+    // Empty AI instructions are valid. FollowUpSettingsService persists the
+    // documented default so GET-after-PATCH and execution are deterministic.
     out.push({
       stepNumber: typeof o['stepNumber'] === 'number' ? Math.floor(o['stepNumber']) : n,
       delayAmount,

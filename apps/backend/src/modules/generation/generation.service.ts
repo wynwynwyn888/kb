@@ -50,6 +50,8 @@ export interface GenerateDraftParams {
   systemPrompt: string;
   memory: MemoryEntry[];
   kbContext: RetrievalChunk[];
+  /** Explicit history cap for specialized callers. Defaults to 20; maximum 30. */
+  historyMessageLimit?: number;
   /**
    * Live debounced batch: when >1, `buildMessages` drops that many trailing user rows from replayed
    * memory so the combined user line is not duplicated after individual inbound rows were persisted.
@@ -487,7 +489,11 @@ export class GenerationService {
       content: buildBrandAssistantIdentitySystemContent(params.businessDisplayName),
     });
 
-    const mem = params.memory.slice(-20);
+    const requestedHistoryLimit = Number.isFinite(params.historyMessageLimit)
+      ? Math.floor(params.historyMessageLimit as number)
+      : 20;
+    const historyMessageLimit = Math.min(30, Math.max(1, requestedHistoryLimit));
+    const mem = params.memory.slice(-historyMessageLimit);
     const incoming = stripGhlImagePlaceholderFromInboundBody(params.incomingMessage?.trim() ?? '');
     const inboundTrim = incoming;
     let memForHistory = mem;

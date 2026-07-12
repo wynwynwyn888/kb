@@ -66,6 +66,7 @@ function makeJobData(overrides: Record<string, unknown> = {}) {
     messageType: (overrides['messageType'] as string) ?? 'text',
     timestamp: (overrides['timestamp'] as string) ?? '2026-01-01T00:00:00Z',
     webhookEventId: (overrides['webhookEventId'] as string) ?? 'evt_1',
+    ghlInboundMessageId: (overrides['ghlInboundMessageId'] as string) ?? 'ghl_msg_1',
     /** Run orchestration in-process so this suite can assert send-bubble enqueue without a delayed worker. */
     smokeImmediate: overrides['smokeImmediate'] === false ? false : true,
   };

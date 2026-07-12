@@ -59,6 +59,7 @@ export interface ReplyDecision {
     | 'placeholder_fallback'
     | 'policy_reply'
     | 'option_selection_template'
+    | 'mandatory_playbook_template'
     | 'human_escalation';
   draftFallbackReason?: 'no_agency' | 'no_provider' | 'generation_failed';
   /** `agencies.active_ai_provider` when live generation ran (non-HANDOVER). */

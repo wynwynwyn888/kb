@@ -62,4 +62,17 @@ describe('menu-kb-grounding-guard (universal)', () => {
     });
     expect(out).toBe(grounded);
   });
+
+  it('allows validated tenant-configured multi-selections without a KB document', () => {
+    const configured =
+      'You selected lead follow-up, manual chasing, and uncertain sales tracking. These often overlap, so let us start with your current follow-up process.';
+    const out = applyMenuKbGroundingGuard({
+      latestIntent: 'SHORT_SELECTION',
+      menuSelectionActive: true,
+      draftText: configured,
+      kbChunks: [],
+      tenantConfiguredSelection: true,
+    });
+    expect(out).toBe(configured);
+  });
 });

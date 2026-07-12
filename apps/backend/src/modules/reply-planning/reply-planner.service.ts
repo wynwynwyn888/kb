@@ -334,6 +334,7 @@ export class ReplyPlannerService {
       draftText: guardedDraft,
       kbChunks,
       categoryLabel: policyContext?.resolvedSelection?.selectedText ?? null,
+      tenantConfiguredSelection: (policyContext?.multiOptionSelections?.length ?? 0) > 1,
     });
     const afterHours = applyBusinessHoursGroundingGuard({
       latestIntent: policyContext?.latestIntent ?? 'UNKNOWN',

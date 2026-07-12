@@ -38,6 +38,7 @@ function envAnonKey(): string {
 }
 
 // Client for server-side operations with service role (bypasses RLS)
+/** @deprecated New code must use a caller-scoped client or the classified internal adapter. */
 export function getSupabaseService(): SupabaseClient {
   const sig = `${envUrl()}\0${envServiceKey()}`;
   if (!memoService || memoService.sig !== sig) {

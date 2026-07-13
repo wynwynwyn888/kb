@@ -16,6 +16,9 @@ export interface BusinessLocalSnapshot {
   greetingLabel: string;
 }
 
+/** Default business clock for KB agencies and tenants when no explicit override is configured. */
+export const DEFAULT_APP_TIME_ZONE = 'Asia/Singapore';
+
 function pad2(n: number): string {
   return String(n).padStart(2, '0');
 }
@@ -78,14 +81,14 @@ export function getBusinessLocalNow(timeZone: string, at: Date = new Date()): Bu
 
 /**
  * Resolved IANA zone for the app process (no side effects).
- * Order: APP_TIMEZONE → TZ → UTC.
+ * Order: APP_TIMEZONE → TZ → Asia/Singapore.
  */
 export function resolveAppTimeZone(): string {
   const fromApp = process.env['APP_TIMEZONE']?.trim();
   if (fromApp) return fromApp;
   const fromTz = process.env['TZ']?.trim();
   if (fromTz) return fromTz;
-  return 'UTC';
+  return DEFAULT_APP_TIME_ZONE;
 }
 
 /** Sets `process.env["TZ"]` so Node logs and default locale behavior align with the resolved zone. */

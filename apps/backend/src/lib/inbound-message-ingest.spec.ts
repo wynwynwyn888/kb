@@ -149,11 +149,60 @@ describe('ingestInboundMessage', () => {
   });
 
   describe('fingerprint conflict', () => {
-    it('returns fingerprintConflict when different real ghlMessageIds', async () => {
+    it('inserts repeated same-minute text when genuine GHL message IDs differ', async () => {
       const supabase = makeSupabase([R(null), R('fp-1', { ghlMessageId: 'different-id' })]);
-      const result = await ingestInboundMessage(makeParams({ supabase, ghlMessageId: 'new-id' }));
-      expect(result.inserted).toBe(false);
+      const result = await ingestInboundMessage(makeParams({
+        supabase,
+        ghlMessageId: 'new-id',
+        ghlTimestamp: '2026-07-13T07:28:30.964Z',
+        content: 'no',
+      }));
+      expect(result.inserted).toBe(true);
+      expect(result.duplicate).toBe(false);
       expect(result.fingerprintConflict).toBe(true);
+      expect(result.messageId).not.toBe('fp-1');
+      expect(supabase.crossPathWasCalled()).toBe(false);
+    });
+
+    it('stores a provider-specific fingerprint so later lookups remain unambiguous', async () => {
+      let insertedRow: Record<string, unknown> | null = null;
+      const supabase = makeSupabase([R(null), R('fp-1', { ghlMessageId: 'first-id' })]);
+      const originalFrom = supabase.from;
+      supabase.from = jestGlobal.fn((table: string) => {
+        const result = originalFrom(table);
+        if (table === 'messages') {
+          (result as any).insert = jestGlobal.fn((row: Record<string, unknown>) => {
+            insertedRow = row;
+            return { select: () => ({ single: async () => ({ data: { id: 'second-row' }, error: null }) }) };
+          });
+        }
+        return result;
+      });
+
+      const params = makeParams({
+        supabase,
+        ghlMessageId: 'second-id',
+        ghlTimestamp: '2026-07-13T07:28:30.964Z',
+        content: 'no',
+      });
+      const baseFingerprint = computeContentFingerprint(params);
+      const result = await ingestInboundMessage(params);
+
+      expect(result.inserted).toBe(true);
+      expect(insertedRow?.['metadata']?.contentFingerprint).not.toBe(baseFingerprint);
+      expect(insertedRow?.['metadata']?.ghlMessageId).toBe('second-id');
+    });
+
+    it('still dedupes a replay carrying the same genuine GHL message ID', async () => {
+      const supabase = makeSupabase([R('existing', { ghlMessageId: 'same-id' })]);
+      const result = await ingestInboundMessage(makeParams({
+        supabase,
+        ghlMessageId: 'same-id',
+        content: 'no',
+      }));
+      expect(result.inserted).toBe(false);
+      expect(result.duplicate).toBe(true);
+      expect(result.fingerprintConflict).toBeUndefined();
     });
   });
 

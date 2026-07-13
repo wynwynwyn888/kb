@@ -314,6 +314,17 @@ describe('ConversationPolicyEngineService (universal — no hardcoded categories
     expect(next.optionsTenantId).toBe('tenant-salon-1');
   });
 
+  it('recordAssistantOptions clears an older menu after a non-option assistant reply', () => {
+    const next = engine.recordAssistantOptions(
+      salonAwaitingState,
+      'I understand there may be some hesitation. What would you like to understand first?',
+      { nowIso: '2026-07-13T10:03:00.000Z' },
+    );
+    expect(next.awaiting).toBeNull();
+    expect(next.options).toBeUndefined();
+    expect(next.lastAssistantOptions).toBeUndefined();
+  });
+
   it('clears option memory when tenant changes (tenant_changed)', () => {
     const dayAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
     const stateForOldTenant = {

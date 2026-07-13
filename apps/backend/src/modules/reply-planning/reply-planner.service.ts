@@ -70,7 +70,7 @@ export interface ReplyPlanPolicyContext {
   priorAssistantMessageCount?: number;
   /** Recent assistant history already contains a booking/scheduling URL. */
   recentAssistantBookingUrlSent?: boolean;
-  /** Prior assistant menu excerpt for deterministic letter picks (no KB). */
+  /** Prior assistant menu excerpt used to ground AI-generated selection replies. */
   optionMenuSourceExcerpt?: string;
   /** Multiple choices received inside one trailing-debounce burst. */
   multiOptionSelections?: Array<{ label: string; text: string }>;
@@ -99,71 +99,6 @@ export class ReplyPlannerService {
    * - Otherwise attempt live generation via GenerationService
    * - If generation cannot produce a safe customer reply, skip instead of sending canned copy
    */
-  /**
-   * Pure option-letter reply: no LLM, no menu grounding rewrite (we already trust the option line).
-   */
-  buildOptionSelectionTemplateReply(params: {
-    tenantId: string;
-    conversationId: string;
-    routing: RoutingResponse;
-    templateBody: string;
-    latestIntent: ConversationIntent;
-    latestUserMessage: string;
-    menuSelectionActive: boolean;
-  }): ReplyDecision {
-    const {
-      tenantId,
-      conversationId,
-      routing,
-      templateBody,
-      latestIntent,
-      latestUserMessage,
-      menuSelectionActive,
-    } = params;
-
-    const guarded = applyOutboundPolicyGuard({
-      latestIntent,
-      menuSelectionActive,
-      draftText: templateBody,
-    });
-    const afterHours = applyBusinessHoursGroundingGuard({
-      latestIntent,
-      userMessage: latestUserMessage,
-      kbChunks: [],
-      draftText: guarded,
-    });
-    const afterKbLeak = sanitizeOutboundInternalKbLeak(afterHours, latestIntent, []);
-    const proactive = this.prepareProactiveHandoverOutboundText({
-      replyText: afterKbLeak,
-      latestIntent,
-      latestUserMessage,
-      tenantId,
-      conversationId,
-    });
-    const bubbles = this.formatIntoBubbles(proactive.text);
-    this.logLiveWhitespaceDebug({
-      rawDraft: proactive.text,
-      bubbles,
-      latestUserMessage,
-      inboundBatchCount: 1,
-    });
-
-    return {
-      planStatus: 'PLANNED',
-      responseMode: routing.responseMode,
-      handoverRecommended: routing.handoverRecommended,
-      confidence: routing.confidence,
-      rationale: routing.reasoning,
-      bubbles,
-      suggestedActions: this.suggestActions(routing, []),
-      draftProvenance: 'option_selection_template',
-      routingRecommendedModel: routing.recommendedModel,
-      ...(proactive.botHumanEscalationLanguageDetected
-        ? { botHumanEscalationLanguageDetected: true }
-        : {}),
-    };
-  }
-
   /** Mandatory tenant-configured playbook turn: trusted configured copy, no LLM variation. */
   buildMandatoryPlaybookTemplateReply(params: {
     tenantId: string;

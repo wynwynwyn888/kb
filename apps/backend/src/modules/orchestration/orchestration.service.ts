@@ -47,14 +47,10 @@ import {
   type AisbpPolicyStateV1,
 } from '../conversation-policy/conversation-policy-state';
 import {
+  isPureOptionSelectionWithMemory,
   resolveMultiSelectionBurst,
   resolveShortSelection,
-  shouldSkipKbForPureOptionLetterSelection,
 } from '../conversation-policy/option-resolver';
-import {
-  buildOptionSelectionCustomerReply,
-  parseSelectedOptionTitleDescription,
-} from '../../lib/option-selection-template';
 import { stripInternalGuidanceFromChunks } from '../../lib/kb-internal-guidance';
 import { interpretRetrievalChunks } from '../../lib/kb-chunk-interpretation';
 import { resolveOperatingHoursConflictsAmongChunks } from '../../lib/kb-operating-hours-conflict';
@@ -284,7 +280,7 @@ export class ConversationOrchestrationService {
       const policyStatePreInit = this.conversationPolicy.parseState(input.conversation?.metadata);
       const policyStatePre = policyStatePreInit;
 
-      const optionLetterToken = shouldSkipKbForPureOptionLetterSelection(policyStatePre, latestMsg);
+      const optionLetterToken = isPureOptionSelectionWithMemory(policyStatePre, latestMsg);
       const multiOptionBurst = resolveMultiSelectionBurst(batch, policyStatePre, memory.entries);
       const multiOptionContext = multiOptionBurst
         ? [
@@ -299,20 +295,23 @@ export class ConversationOrchestrationService {
         ? resolveShortSelection(latestMsg, policyStatePre, memory.entries)
         : null;
 
+      const singleOptionContext = deterministicOptionPick
+        ? [
+            'The customer selected one choice from the immediately preceding assistant menu:',
+            `${deterministicOptionPick.raw}. ${deterministicOptionPick.selectedText}`,
+          ].join('\n')
+        : null;
+
       let routingIntent: ConversationIntent = latestIntent;
       if (optionLetterToken || multiOptionBurst) {
         routingIntent = 'SHORT_SELECTION';
       }
 
-      let parsedDeterministicOptionLine: ReturnType<typeof parseSelectedOptionTitleDescription> | null = null;
       if (deterministicOptionPick) {
-        parsedDeterministicOptionLine = parseSelectedOptionTitleDescription(deterministicOptionPick.selectedText);
-        const descPresent = Boolean(parsedDeterministicOptionLine.description?.trim());
         this.logger.log(
           `optionSelectionResolved: optionSelectionResolved=true selectedOptionLabel=${deterministicOptionPick.selectedLabel} ` +
             `selectedOptionPreview=${JSON.stringify(deterministicOptionPick.selectedText.slice(0, 120))} ` +
-            `selectedOptionTitle=${JSON.stringify(parsedDeterministicOptionLine.title)} ` +
-            `selectedOptionDescriptionPresent=${descPresent} optionSelectionSource=lastAssistantOptions`,
+            `optionSelectionSource=${deterministicOptionPick.source}`,
         );
       }
 
@@ -551,16 +550,13 @@ export class ConversationOrchestrationService {
         activeTopic: policyStatePre.activeTopic,
         menuSelectionAnchorActive: Boolean(menuKbAnchor),
       });
-      const kbSkipOptionLetter = optionLetterToken;
       let kb_retrieval_ms = 0;
       let kbAfterRetrieve: RetrievalChunk[] = [];
       let retrievalMeta: RetrievalMeta | null = null;
 
       const kbPerf0 = performance.now();
-      if (kbSkipOptionLetter || kbSkipShortFollowUp) {
-        const kbSkippedReason = kbSkipOptionLetter
-          ? 'option_letter_deterministic'
-          : 'short_followup_active_topic';
+      if (kbSkipShortFollowUp) {
+        const kbSkippedReason = 'short_followup_active_topic';
         this.logger.log(
           `kbSkip: conversationId=${conversationId} kbSkippedReason=${kbSkippedReason} routingIntent=${routingIntent}`,
         );
@@ -656,16 +652,6 @@ export class ConversationOrchestrationService {
           `topScores=${JSON.stringify(kbChunks.map(c => c.relevanceScore))}`,
       );
 
-      const useOptionSelectionTemplate =
-        Boolean(
-          optionLetterToken &&
-            !multiOptionBurst &&
-            deterministicOptionPick &&
-            parsedDeterministicOptionLine &&
-            parsedDeterministicOptionLine.title.trim().length > 0 &&
-            !policyOutcome.policyForcedReply?.trim() &&
-            policyOutcome.resolvedSelection,
-        );
       const mandatoryAfterNameRoute = resolveMandatoryAfterNameRoute({
         memory: memory.entries,
         latestMessage: latestMsg,
@@ -704,37 +690,6 @@ export class ConversationOrchestrationService {
           latestUserMessage: latestMsg,
         });
         plan_reply_ms = Math.round(performance.now() - planPerf0);
-      } else if (useOptionSelectionTemplate && parsedDeterministicOptionLine) {
-        const descPresentTpl = Boolean(parsedDeterministicOptionLine.description?.trim());
-        this.logger.log(
-          `optionSelectionTemplateUsed=true selectedOptionTitle=${JSON.stringify(parsedDeterministicOptionLine.title.trim())} ` +
-            `selectedOptionDescriptionPresent=${descPresentTpl} llmSkippedForOptionSelection=true`,
-        );
-
-        routing = {
-          recommendedModel: 'n/a',
-          responseMode: 'fast',
-          draftReply: null,
-          handoverRecommended: false,
-          bookingIntentDetected: false,
-          tagsSuggested: [],
-          confidence: 1,
-          reasoning: 'deterministic_option_selection_template',
-        };
-        prompt_build_ms = 0;
-        routing_ms = 0;
-        const templateBody = buildOptionSelectionCustomerReply(parsedDeterministicOptionLine);
-        const planPerf0 = performance.now();
-        replyPlan = this.replyPlanner.buildOptionSelectionTemplateReply({
-          tenantId: input.tenantId,
-          conversationId,
-          routing,
-          templateBody,
-          latestIntent: policyOutcome.latestIntent,
-          latestUserMessage: latestMsg,
-          menuSelectionActive: policyOutcome.menuSelectionActive,
-        });
-        plan_reply_ms = Math.round(performance.now() - planPerf0);
       } else {
         // Step 4: Build AI routing request (includes KB context)
         const bookingCapabilityForPrompt = await this.resolveBookingCapabilityForGovernor(input.tenantId);
@@ -742,7 +697,16 @@ export class ConversationOrchestrationService {
         const systemPrompt = this.buildSystemPromptWithRuntimeGreeting(input, bookingCapabilityForPrompt);
         prompt_build_ms = Math.round(performance.now() - promptPerf0);
 
-        const routingInbound = multiOptionContext ?? (batch.length > 1 ? batchSummary.combinedText : latestMsg);
+        const routingInbound =
+          multiOptionContext ??
+          singleOptionContext ??
+          (batch.length > 1 ? batchSummary.combinedText : latestMsg);
+        if (singleOptionContext) {
+          this.logger.log(
+            `optionSelectionAiGeneration=true selectedOptionLabel=${deterministicOptionPick?.selectedLabel ?? 'n/a'} ` +
+              'llmSkippedForOptionSelection=false',
+          );
+        }
         const routingRequest = this.buildRoutingRequest(
           input,
           memory,

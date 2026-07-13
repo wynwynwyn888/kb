@@ -666,6 +666,42 @@ describe('GenerationService', () => {
       expect(systemText).toContain('4. Lost sales visibility');
       expect(systemText).toContain('do not use a generic single-option');
     });
+
+    it('gives a resolved single selection to the AI as conversation context', () => {
+      const messages = (service as never)['buildMessages'](
+        makeParams({
+          incomingMessage: '1',
+          memory: [
+            {
+              role: 'assistant',
+              content: '1. Whether it is easy to use\n2. Whether it will work for your business',
+            },
+            { role: 'user', content: '1' },
+          ],
+          policyContext: {
+            latestIntent: 'SHORT_SELECTION' as never,
+            resolvedSelection: {
+              raw: '1',
+              selectedLabel: 'A',
+              selectedText: 'Whether it is easy to use',
+              source: 'conversation_state',
+            },
+            conversationStateSummary: 'pick=A',
+            menuSelectionActive: true,
+            optionMenuSourceExcerpt:
+              '1. Whether it is easy to use\n2. Whether it will work for your business',
+          },
+        }),
+      );
+      const systemText = messages
+        .filter((message: { role: string }) => message.role === 'system')
+        .map((message: { content: string }) => message.content)
+        .join('\n');
+      expect(systemText).toContain(
+        'The user chose option A (Whether it is easy to use).',
+      );
+      expect(systemText).toContain('The customer just picked from choices');
+    });
   });
 
   // ===========================================================================

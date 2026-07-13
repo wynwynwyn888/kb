@@ -2,10 +2,10 @@ import type { MemoryEntry } from '../orchestration/dto';
 import type { AisbpPolicyStateV1 } from './conversation-policy-state';
 import {
   isOptionSelectionSingleToken,
+  isPureOptionSelectionWithMemory,
   parseAssistantOptionLines,
   resolveMultiSelectionBurst,
   resolveShortSelection,
-  shouldSkipKbForPureOptionLetterSelection,
 } from './option-resolver';
 
 const baseState = (): AisbpPolicyStateV1 => ({
@@ -166,15 +166,24 @@ describe('option-resolver — resolution from memory and state', () => {
     expect(resolveShortSelection('G', state, [])).toBeNull();
   });
 
-  it('shouldSkipKbForPureOptionLetterSelection is true for single letter with option memory', () => {
+  it('detects a pure selection only while option memory is active', () => {
     const state: AisbpPolicyStateV1 = {
       ...baseState(),
       awaiting: 'option_selection',
       options: { A: 'One', B: 'Two' },
     };
-    expect(shouldSkipKbForPureOptionLetterSelection(state, 'A')).toBe(true);
-    expect(shouldSkipKbForPureOptionLetterSelection(state, 'hello')).toBe(false);
-    expect(shouldSkipKbForPureOptionLetterSelection({ ...state, awaiting: null }, 'A')).toBe(false);
+    expect(isPureOptionSelectionWithMemory(state, 'A')).toBe(true);
+    expect(isPureOptionSelectionWithMemory(state, 'hello')).toBe(false);
+    expect(isPureOptionSelectionWithMemory({ ...state, awaiting: null }, 'A')).toBe(false);
+  });
+
+  it('does not resolve against an older menu after a newer non-option assistant reply', () => {
+    const memory: MemoryEntry[] = [
+      { role: 'assistant', content: '1. Easy to use\n2. Cost', sender: 'AI', timestamp: '2026-07-13T09:59:00.000Z', messageType: 'text' },
+      { role: 'user', content: 'hmm', sender: 'CONTACT', timestamp: '2026-07-13T10:00:00.000Z', messageType: 'text' },
+      { role: 'assistant', content: 'What would you like to understand first?', sender: 'AI', timestamp: '2026-07-13T10:03:00.000Z', messageType: 'text' },
+    ];
+    expect(resolveShortSelection('1', baseState(), memory)).toBeNull();
   });
 
   it('isOptionSelectionSingleToken: single letter/digit only', () => {

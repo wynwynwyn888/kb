@@ -85,7 +85,7 @@ export function countBundledPolicyOptions(state: AisbpPolicyStateV1): number {
   return m ? Object.keys(m).length : 0;
 }
 
-function recentAssistantTexts(memory: MemoryEntry[], max = 4): string[] {
+function recentAssistantTexts(memory: MemoryEntry[], max = 1): string[] {
   const out: string[] = [];
   for (let i = memory.length - 1; i >= 0 && out.length < max; i--) {
     const e = memory[i]!;
@@ -115,8 +115,8 @@ export function isOptionSelectionSingleToken(raw: string): boolean {
   return /^[a-zA-Z]$/.test(t);
 }
 
-/** Pure A–H / 1–8 option reply while awaiting option_selection — skip KB + unconstrained retrieval. */
-export function shouldSkipKbForPureOptionLetterSelection(
+/** Pure A–H / 1–8 option reply while an immediately relevant option menu is active. */
+export function isPureOptionSelectionWithMemory(
   state: AisbpPolicyStateV1,
   latestUserMessageTrimmed: string,
 ): boolean {
@@ -129,7 +129,8 @@ export function shouldSkipKbForPureOptionLetterSelection(
 
 /**
  * Resolve SHORT_SELECTION (a single A–H letter, 1–8 digit, "first", "last") against the option
- * memory. Looks at the policy state first, then walks recent assistant messages.
+ * memory. Looks at the policy state first, then at only the immediately preceding assistant
+ * message. Older menus must not capture a later numeric reply after the conversation moved on.
  */
 export function resolveShortSelection(
   rawMessage: string,

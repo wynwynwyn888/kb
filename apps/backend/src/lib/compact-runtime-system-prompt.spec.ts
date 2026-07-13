@@ -9,6 +9,7 @@ import {
   RUNTIME_TENANT_SECTION_BUDGETS,
   RUNTIME_TENANT_SECTION_ORDER,
   GLOBAL_POLICY_RUNTIME_BUDGET,
+  EDITABLE_INSTRUCTION_PRIORITY_DECLARATION,
 } from './compact-runtime-system-prompt';
 
 describe('runtime section budgets sourced from PROMPT_FIELD_LIMITS (no drift)', () => {
@@ -40,10 +41,13 @@ describe('runtime section budgets sourced from PROMPT_FIELD_LIMITS (no drift)', 
     expect(GLOBAL_POLICY_RUNTIME_BUDGET).not.toBe(7500);
   });
 
-  it('injection order is Critical Facts → Persona → Goals → Business Notes → Sales Playbook → Booking → Escalation', () => {
+  it('ranks Sales Playbook immediately after Critical Facts', () => {
     expect(RUNTIME_TENANT_SECTION_ORDER.slice(0, 7)).toEqual([
-      'criticalFacts', 'persona', 'goals', 'businessNotes', 'salesPlaybook', 'bookingBehavior', 'escalationBehavior',
+      'criticalFacts', 'salesPlaybook', 'bookingBehavior', 'escalationBehavior', 'businessNotes', 'goals', 'persona',
     ]);
+    expect(EDITABLE_INSTRUCTION_PRIORITY_DECLARATION).toContain(
+      'Global Prompt; Critical Facts; Sales Playbook',
+    );
   });
 });
 
@@ -156,7 +160,7 @@ describe('buildCompactedPromptBody', () => {
       escalationBehavior: 'Hand to human if angry',
     });
     const body = buildCompactedPromptBody(compacted);
-    const order = ['### Critical facts', '### Bot Persona', '### Goals', '### Business notes', '### Sales playbook', '### Booking behavior', '### Escalation behavior'];
+    const order = ['### Critical facts', '### Sales playbook', '### Booking behavior', '### Escalation behavior', '### Business notes', '### Goals', '### Bot Persona'];
     let last = -1;
     for (const h of order) {
       const idx = body.indexOf(h);

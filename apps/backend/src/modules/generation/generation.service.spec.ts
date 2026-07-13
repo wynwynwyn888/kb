@@ -548,6 +548,69 @@ describe('GenerationService', () => {
       expect(policyMsg?.content as string).toContain('Do not include the URL again');
     });
 
+    it('does not present UNKNOWN as a meaningful intent decision', () => {
+      const messages = (service as never)['buildMessages'](
+        makeParams({
+          incomingMessage: 'let me check with my partner first',
+          policyContext: {
+            latestIntent: 'UNKNOWN' as never,
+            resolvedSelection: null,
+            conversationStateSummary: 'continuing sales conversation',
+          },
+        }),
+      );
+      const systemText = messages
+        .filter((message: { role: string }) => message.role === 'system')
+        .map((message: { content: string }) => message.content)
+        .join('\n');
+      expect(systemText).not.toContain('latestIntent=UNKNOWN');
+      expect(systemText).toContain('interpret the latest customer message from the recent conversation');
+    });
+
+    it('tells generation to use Sales Playbook context for hesitation without opting out', () => {
+      const messages = (service as never)['buildMessages'](
+        makeParams({
+          incomingMessage: 'no',
+          memory: [
+            { role: 'assistant', content: 'The best next step is the AI Automation Session.' },
+          ],
+          policyContext: {
+            latestIntent: 'HESITATION' as never,
+            resolvedSelection: null,
+            conversationStateSummary: 'cta presented',
+          },
+        }),
+      );
+      const systemText = messages
+        .filter((message: { role: string }) => message.role === 'system')
+        .map((message: { content: string }) => message.content)
+        .join('\n');
+      expect(systemText).toContain('latestIntent=HESITATION');
+      expect(systemText).toContain('follow the tenant Sales Playbook objection flow');
+      expect(systemText).toContain('not an opt-out');
+      expect(systemText).toContain('Do not say or imply that follow-up will stop');
+    });
+
+    it('stops selling only for an explicit opt-out', () => {
+      const messages = (service as never)['buildMessages'](
+        makeParams({
+          incomingMessage: 'do not contact me',
+          policyContext: {
+            latestIntent: 'EXPLICIT_OPT_OUT' as never,
+            resolvedSelection: null,
+            conversationStateSummary: 'cta presented',
+          },
+        }),
+      );
+      const systemText = messages
+        .filter((message: { role: string }) => message.role === 'system')
+        .map((message: { content: string }) => message.content)
+        .join('\n');
+      expect(systemText).toContain('latestIntent=EXPLICIT_OPT_OUT');
+      expect(systemText).toContain('stop selling');
+      expect(systemText).toContain('do not continue the objection flow');
+    });
+
     it('truncates memory to last 20 entries', () => {
       const longMem = Array.from({ length: 25 }, (_, i) => ({
         role: i % 2 === 0 ? 'user' as const : 'assistant' as const,

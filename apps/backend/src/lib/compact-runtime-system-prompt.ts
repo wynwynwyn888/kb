@@ -76,15 +76,26 @@ export const RUNTIME_TENANT_SECTION_BUDGETS: Record<string, number> = {
  */
 export const RUNTIME_TENANT_SECTION_ORDER = [
   'criticalFacts',
-  'persona',
-  'goals',
-  'businessNotes',
   'salesPlaybook',
   'bookingBehavior',
   'escalationBehavior',
+  'businessNotes',
+  'goals',
+  'persona',
   'toneRules',
   'knowledgeScope',
 ] as const;
+
+/**
+ * Makes conflict resolution explicit. Platform safety remains non-configurable and superior;
+ * this declaration ranks the editable business instruction layers requested by the product.
+ */
+export const EDITABLE_INSTRUCTION_PRIORITY_DECLARATION =
+  'Instruction priority when editable business instructions conflict (highest first): ' +
+  'Global Prompt; Critical Facts; Sales Playbook; Booking Behavior; Escalation Behavior; ' +
+  'Business Notes; Conversation Goals; Persona; Tone Rules; Knowledge Scope. ' +
+  'Platform safety, legal requirements, and confirmed backend capability constraints always override editable instructions. ' +
+  'Do not use a lower-priority instruction to weaken, skip, reinterpret, or contradict a higher-priority instruction.';
 
 // The Global Prompt / agency policy is a SEPARATE policy layer with its own independent budget. It
 // is injected separately (before tenant sections) and must never compete with tenant fields nor be

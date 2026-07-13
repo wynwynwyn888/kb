@@ -81,7 +81,8 @@ export interface ReplyPlanPolicyContext {
 const CONVERSATIONAL_HESITATION = /^(?:h+m+|huh+|erm+|umm+|uh+|not sure|maybe|idk|🤔)[.!?…\s]*$/i;
 
 function isConversationalHesitation(text: string, intent: ConversationIntent): boolean {
-  return intent === 'UNKNOWN' && CONVERSATIONAL_HESITATION.test(text.trim());
+  return intent === 'HESITATION' ||
+    (intent === 'UNKNOWN' && CONVERSATIONAL_HESITATION.test(text.trim()));
 }
 
 @Injectable()

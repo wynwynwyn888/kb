@@ -11,10 +11,11 @@ const INTENT_PRIORITY: Record<ConversationIntent, number> = {
   PRICE: 3,
   BUSINESS_HOURS: 3,
   LOCATION: 3,
+  EXPLICIT_OPT_OUT: 1,
   SHORT_SELECTION: 4,
   UNKNOWN: 5,
   CONFIRMATION: 5,
-  REJECTION: 5,
+  HESITATION: 5,
   MENU: 6,
   GREETING: 7,
 };

@@ -80,4 +80,40 @@ describe('BotTestService', () => {
       }),
     );
   });
+
+  it('uses the same declared prompt hierarchy and section order as live replies', async () => {
+    const generation = {
+      generateDraft: jestGlobal.fn(async () => ({ content: 'Reply' })),
+    };
+    const svc = new BotTestService(
+      { checkTenantAccess: jestGlobal.fn(async () => true) } as never,
+      generation as never,
+      { retrieve: jestGlobal.fn(async () => ({ chunks: [] })) } as never,
+      { getConfig: jestGlobal.fn(async () => ({ activeProvider: 'OPENAI', activeModel: 'gpt-4o-mini' })) } as never,
+      {
+        getActivePromptForOrchestration: jestGlobal.fn(async () => ({
+          id: 'profile-1',
+          systemPrompt: 'legacy order should not be used',
+          modelOverride: '',
+          temperature: 0.7,
+          maxTokens: 800,
+          profileSections: {
+            criticalFacts: 'CRITICAL',
+            salesPlaybook: 'PLAYBOOK',
+            persona: 'PERSONA',
+          },
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        })),
+        getKbDocumentAllowlistForActiveProfile: jestGlobal.fn(async () => ({ kind: 'all' })),
+      } as never,
+    );
+
+    await svc.runTest('tenant-1', 'profile-1', { message: 'hello' });
+
+    const prompt = (generation.generateDraft.mock.calls[0]![0] as { systemPrompt: string }).systemPrompt;
+    expect(prompt).toContain('Global Prompt; Critical Facts; Sales Playbook');
+    expect(prompt.indexOf('Agency policy')).toBeLessThan(prompt.indexOf('### Critical facts'));
+    expect(prompt.indexOf('### Critical facts')).toBeLessThan(prompt.indexOf('### Sales playbook'));
+    expect(prompt.indexOf('### Sales playbook')).toBeLessThan(prompt.indexOf('### Bot Persona'));
+  });
 });

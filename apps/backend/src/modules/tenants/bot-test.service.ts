@@ -12,11 +12,29 @@ import type { MemoryEntry } from '../orchestration/dto/memory-entry';
 import type { RetrievalChunk } from '../kb/dto/retrieval.dto';
 import { formatLiveCustomerDraftForPreview } from '../../lib/live-outbound-preview';
 import { classifyConversationIntent } from '../conversation-policy/conversation-intent';
+import {
+  budgetGlobalPolicy,
+  buildCompactedPromptBody,
+  compactProfileSections,
+  EDITABLE_INSTRUCTION_PRIORITY_DECLARATION,
+  type ProfileSections,
+} from '../../lib/compact-runtime-system-prompt';
 
 function buildStackedSystemPrompt(
   agencyPrompt: string | null | undefined,
   tenantPrompt: string | null | undefined,
+  profileSections?: Record<string, string | undefined> | null,
 ): string {
+  if (profileSections) {
+    const global = budgetGlobalPolicy(agencyPrompt);
+    const tenantBody = buildCompactedPromptBody(
+      compactProfileSections(profileSections as ProfileSections),
+    );
+    const layers = [EDITABLE_INSTRUCTION_PRIORITY_DECLARATION];
+    if (global.text) layers.push(`Global policy (applies before subaccount instructions):\n${global.text}`);
+    if (tenantBody) layers.push(tenantBody);
+    return layers.join('\n\n---\n\n');
+  }
   const a = agencyPrompt?.trim();
   const t = tenantPrompt?.trim();
   if (a && t) {
@@ -95,7 +113,11 @@ export class BotTestService {
     const subTemp = orch != null ? Number(orch.temperature) : NaN;
     const subMax = orch?.maxTokens ?? null;
 
-    const systemPrompt = buildStackedSystemPrompt(agencyPrompt, tenantPrompt);
+    const systemPrompt = buildStackedSystemPrompt(
+      agencyPrompt,
+      tenantPrompt,
+      orch?.profileSections,
+    );
 
     // Debug-safe prompt fingerprint (lengths + hash only) so Preview and live WhatsApp can be
     // compared for parity. Channel-agnostic: excludes brand/greeting/whatsapp-contract blocks.

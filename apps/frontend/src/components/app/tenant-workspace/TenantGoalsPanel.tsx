@@ -833,10 +833,10 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
 
   const INSTRUCTION_TABS = useMemo(() => [
     { key: 'criticalFacts', label: 'Critical Facts', help: 'Important tenant-specific facts that must be preserved in the AI prompt, such as pricing, guarantees, CTA, positioning, key rules, and non-negotiable sales instructions.', cap: PROMPT_FIELD_LIMITS.criticalFacts, getValue: () => criticalFacts, setValue: setCriticalFacts },
+    { key: 'salesPlaybook', label: 'Sales Playbook', help: 'How this AI Agent should qualify interest, handle objections, guide the sales flow, and move naturally toward the next step.', cap: PROMPT_FIELD_LIMITS.salesPlaybook, getValue: () => salesPlaybook, setValue: setSalesPlaybook },
     { key: 'persona', label: 'Persona', help: 'How the AI Agent should sound and behave.', cap: PROMPT_FIELD_LIMITS.persona, getValue: () => persona, setValue: setPersona },
     { key: 'goals', label: 'Conversation Goals', help: 'What this AI Agent should try to achieve.', cap: PROMPT_FIELD_LIMITS.conversationGoals, getValue: () => goals, setValue: setGoals },
     { key: 'additional', label: 'Business Notes', help: 'Facts, policies, and context for this workspace.', cap: PROMPT_FIELD_LIMITS.businessNotes, getValue: () => additional, setValue: setAdditional },
-    { key: 'salesPlaybook', label: 'Sales Playbook', help: 'How this AI Agent should qualify interest, handle objections, guide the sales flow, and move naturally toward the next step.', cap: PROMPT_FIELD_LIMITS.salesPlaybook, getValue: () => salesPlaybook, setValue: setSalesPlaybook },
     { key: 'bookingBehavior', label: 'Booking Behavior', help: 'When and how this AI Agent should guide prospects toward booking, consultation, demo, call, appointment, or the next step.', cap: PROMPT_FIELD_LIMITS.bookingBehavior, getValue: () => bookingBehaviorNotes, setValue: setBookingBehaviorNotes },
     { key: 'escalationBehavior', label: 'Escalation Behavior', help: 'When this AI Agent should hand over to a human or team instead of answering.', cap: PROMPT_FIELD_LIMITS.escalationBehavior, getValue: () => escalationBehaviorNotes, setValue: setEscalationBehaviorNotes },
   ], [criticalFacts, persona, goals, additional, salesPlaybook, bookingBehaviorNotes, escalationBehaviorNotes]);
@@ -1566,6 +1566,36 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                   </div>
 
                   <div style={sectionCard}>
+                    <h3 style={sectionTitleStyle}>Sales Playbook</h3>
+                    <p style={{ ...mvpFieldHint, margin: '-0.25rem 0 0.5rem' }}>How this AI Agent should qualify interest, handle objections, guide the sales flow, and move naturally toward the next step. Max {PROMPT_FIELD_LIMITS.salesPlaybook.toLocaleString('en-US')} characters.</p>
+                    <textarea style={textareaStyle} value={salesPlaybook} onChange={e => { const v = e.target.value; if (v.length <= PROMPT_FIELD_LIMITS.salesPlaybook) setSalesPlaybook(v); }} aria-label="Sales Playbook" />
+                    <div
+                      style={{
+                        display: 'flex',
+                        flexWrap: 'wrap',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        gap: 8,
+                        marginTop: 8,
+                      }}
+                    >
+                      <span style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)' }}>
+                        {salesPlaybook.length} / {PROMPT_FIELD_LIMITS.salesPlaybook} characters
+                      </span>
+                      <button
+                        type="button"
+                        style={expandTextBtn}
+                        onClick={() => {
+                          setExpandDraft(salesPlaybook);
+                          setExpandField('salesPlaybook');
+                        }}
+                      >
+                        Expand
+                      </button>
+                    </div>
+                  </div>
+
+                  <div style={sectionCard}>
                     <h3 style={sectionTitleStyle}>Persona</h3>
                     <p style={{ ...mvpFieldHint, margin: '-0.25rem 0 0.5rem' }}>How the AI Agent should sound and behave. Max {PROMPT_FIELD_LIMITS.persona.toLocaleString('en-US')} characters.</p>
                     <textarea style={textareaStyle} value={persona} onChange={e => { const v = e.target.value; if (v.length <= PROMPT_FIELD_LIMITS.persona) setPersona(v); }} aria-label="Persona" />
@@ -1646,36 +1676,6 @@ export function TenantGoalsPanel({ initialFocus = 'all', mode = 'all' }: TenantG
                         onClick={() => {
                           setExpandDraft(additional);
                           setExpandField('additional');
-                        }}
-                      >
-                        Expand
-                      </button>
-                    </div>
-                  </div>
-
-                  <div style={sectionCard}>
-                    <h3 style={sectionTitleStyle}>Sales Playbook</h3>
-                    <p style={{ ...mvpFieldHint, margin: '-0.25rem 0 0.5rem' }}>How this AI Agent should qualify interest, handle objections, guide the sales flow, and move naturally toward the next step. Max {PROMPT_FIELD_LIMITS.salesPlaybook.toLocaleString('en-US')} characters.</p>
-                    <textarea style={textareaStyle} value={salesPlaybook} onChange={e => { const v = e.target.value; if (v.length <= PROMPT_FIELD_LIMITS.salesPlaybook) setSalesPlaybook(v); }} aria-label="Sales Playbook" />
-                    <div
-                      style={{
-                        display: 'flex',
-                        flexWrap: 'wrap',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        gap: 8,
-                        marginTop: 8,
-                      }}
-                    >
-                      <span style={{ fontSize: '0.78rem', color: 'var(--aisbp-muted, #64748b)' }}>
-                        {salesPlaybook.length} / {PROMPT_FIELD_LIMITS.salesPlaybook} characters
-                      </span>
-                      <button
-                        type="button"
-                        style={expandTextBtn}
-                        onClick={() => {
-                          setExpandDraft(salesPlaybook);
-                          setExpandField('salesPlaybook');
                         }}
                       >
                         Expand

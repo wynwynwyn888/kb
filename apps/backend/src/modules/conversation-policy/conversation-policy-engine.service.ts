@@ -33,8 +33,8 @@ export interface ConversationPolicyEvaluateInput {
   policyState: AisbpPolicyStateV1;
   kbChunksRanked: RetrievalChunk[];
   /**
-   * When true, a menu option was resolved with **no** KB context on purpose (pure A–H / 1–8 pick).
-   * Do not force the canned no-KB category reply — allow live generation with policy hints only.
+   * When true, a menu option was resolved. If retrieval produces no KB context, allow live
+   * generation with the resolved selection and tenant prompt rather than forcing canned copy.
    */
   optionPickResolvedWithoutKb?: boolean;
   /** Tenant / subaccount display name for booking copy */
@@ -349,6 +349,17 @@ export class ConversationPolicyEngineService {
   ): AisbpPolicyStateV1 {
     const opts = parseAssistantOptionLines(assistantText);
     if (Object.keys(opts).length < 2) {
+      if (
+        state.awaiting === 'option_selection' ||
+        state.awaiting === 'menu_category_selection'
+      ) {
+        const nowIso = ctx.nowIso ?? new Date().toISOString();
+        return {
+          ...state,
+          ...clearAwaitingState(state),
+          updatedAt: nowIso,
+        };
+      }
       return state;
     }
     const nowIso = ctx.nowIso ?? new Date().toISOString();

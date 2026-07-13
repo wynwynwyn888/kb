@@ -36,7 +36,6 @@ export interface SuggestedAction {
  * - `live_generation` — bubble text came from the provider/model path.
  * - `placeholder_fallback` — deterministic template/KB/memory/generic text; **not** model output.
  * - `policy_reply` — deterministic reply from the conversation policy layer (menu prompt, selection, etc.).
- * - `option_selection_template` — pure letter/digit menu pick; fixed copy, no LLM.
  * - `human_escalation` — deterministic human-request path; no customer-facing draft.
  *
  * When `placeholder_fallback`, `draftFallbackReason` is set when known:
@@ -58,7 +57,6 @@ export interface ReplyDecision {
     | 'live_generation'
     | 'placeholder_fallback'
     | 'policy_reply'
-    | 'option_selection_template'
     | 'mandatory_playbook_template'
     | 'human_escalation';
   draftFallbackReason?: 'no_agency' | 'no_provider' | 'generation_failed';

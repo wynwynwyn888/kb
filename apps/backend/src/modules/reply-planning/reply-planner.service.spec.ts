@@ -384,40 +384,6 @@ describe('ReplyPlannerService', () => {
     });
   });
 
-  describe('buildOptionSelectionTemplateReply', () => {
-    const deterministicRouting = {
-      recommendedModel: 'n/a',
-      responseMode: 'fast' as const,
-      draftReply: null,
-      handoverRecommended: false,
-      bookingIntentDetected: false,
-      tagsSuggested: [] as string[],
-      confidence: 1,
-      reasoning: 'deterministic_option_selection_template',
-    };
-
-    it('uses option_selection_template provenance and never calls generation', () => {
-      const template =
-        'Sure — Daycare is supervised care in a safe environment.\n\nWould you like me to help check availability, or share more details about this service?';
-      const plan = service.buildOptionSelectionTemplateReply({
-        tenantId: 't1',
-        conversationId: 'c1',
-        routing: deterministicRouting,
-        templateBody: template,
-        latestIntent: 'SHORT_SELECTION',
-        latestUserMessage: 'F',
-        menuSelectionActive: true,
-      });
-      expect(mockGen.generateDraft).not.toHaveBeenCalled();
-      expect(plan.draftProvenance).toBe('option_selection_template');
-      const joined = plan.bubbles.map(b => b.text).join('\n\n');
-      expect(joined.toLowerCase()).not.toContain("don't have");
-      expect(joined).not.toMatch(/\.\./);
-      expect(joined).toContain('Daycare');
-      expect(joined.toLowerCase()).not.toMatch(/connect you (with|to) the team/);
-    });
-  });
-
   describe('stripLiveCustomerMarkdownForOutbound', () => {
     const strip = stripLiveCustomerMarkdownForOutbound;
 

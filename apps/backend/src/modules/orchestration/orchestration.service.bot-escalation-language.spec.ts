@@ -83,7 +83,6 @@ describe('ConversationOrchestrationService — bot reply human escalation langua
     const replyPlan = makeReplyPlan('Thanks — our team will reach out to you shortly.');
     const replyPlanner = {
       planReply: jestGlobal.fn(async () => replyPlan),
-      buildOptionSelectionTemplateReply: jestGlobal.fn(),
     };
     const conversationPolicy = {
       parseState: jestGlobal.fn(() => ({
@@ -203,7 +202,6 @@ describe('ConversationOrchestrationService — bot reply human escalation langua
         draftProvenance: 'placeholder_fallback',
         draftFallbackReason: 'generation_failed',
       })),
-      buildOptionSelectionTemplateReply: jestGlobal.fn(),
     };
     const emptyState = {
       v: 1 as const,

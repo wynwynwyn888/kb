@@ -547,8 +547,12 @@ export class GenerationService {
     const pc = params.policyContext;
     if (pc) {
       const multi = (pc.combinedInboundMessageCount ?? 0) > 1;
+      const intentSummary =
+        pc.latestIntent === 'UNKNOWN'
+          ? `Conversation state: ${pc.conversationStateSummary}. No deterministic intent label was applied; interpret the latest customer message from the recent conversation and higher-priority tenant instructions.`
+          : `Conversation policy: latestIntent=${pc.latestIntent}. State: ${pc.conversationStateSummary}.`;
       const parts: string[] = [
-        `Conversation policy: latestIntent=${pc.latestIntent}. State: ${pc.conversationStateSummary}.`,
+        intentSummary,
         multi
           ? `Use KB only if relevant to the customer messages in this combined turn (${pc.combinedInboundMessageCount} lines). ` +
             'Address each separate ask in order; do not only follow the final line. If the user chose an option (A/B/C), continue that flow for the option line only.'
@@ -557,6 +561,16 @@ export class GenerationService {
       if (pc.latestIntent === 'GREETING' && priorAssistantMessageCount > 0) {
         parts.push(
           'Continuation greeting rule: this is not the first message in the conversation. Do not repeat first-message routing scripts, welcome choices, intake checklists, or "please share your name" unless the customer explicitly asks to restart. Treat the greeting as a light acknowledgement inside the existing conversation. Use the last 3-5 visible turns, especially the most recent substantive customer message and the previous assistant reply. Do not repeat a diagnostic question that was already asked. Reply briefly in context and move the conversation forward naturally.',
+        );
+      }
+      if (pc.latestIntent === 'HESITATION') {
+        parts.push(
+          'Hesitation rule: this is an ordinary negative or uncertain sales response, not an opt-out. Interpret it using the recent conversation and follow the tenant Sales Playbook objection flow. Do not say or imply that follow-up will stop. Do not become passive, tell the customer to take their time, or use generic “feel free” / “let me know” closing language when the higher-priority Sales Playbook requires a next step.',
+        );
+      }
+      if (pc.latestIntent === 'EXPLICIT_OPT_OUT') {
+        parts.push(
+          'Explicit opt-out rule: the customer clearly requested no further contact. Acknowledge briefly, stop selling, do not add a CTA, and do not continue the objection flow.',
         );
       }
       if (priorAssistantMessageCount >= 2) {

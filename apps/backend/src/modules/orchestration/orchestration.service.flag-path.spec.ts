@@ -31,6 +31,7 @@ jestGlobal.mock('../../lib/compact-runtime-system-prompt', () => ({
   budgetGlobalPolicy: jestGlobal.fn((p: string | null | undefined) => ({
     text: (p ?? '').trim(), truncated: false,
   })),
+  EDITABLE_INSTRUCTION_PRIORITY_DECLARATION: 'PRIORITY_DECLARATION',
 }));
 jestGlobal.mock('../../lib/production-log-flags', () => ({
   promptFootprintDebugEnabled: jestGlobal.fn(() => false),
@@ -81,6 +82,7 @@ describe('orchestration prompt assembly — section-budget default path', () => 
 
   it('injects Global Prompt separately and does NOT drop it (section path)', () => {
     const result = build(service, makeInput());
+    expect(result).toContain('PRIORITY_DECLARATION');
     expect(result).toContain('Global policy');
     expect(result).toContain('GLOBAL_POLICY_TEXT');
     // Global appears before the tenant sections.

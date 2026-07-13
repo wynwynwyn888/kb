@@ -261,7 +261,7 @@ describe('ReplyPlannerService', () => {
         systemPrompt: 'Follow the tenant Sales Playbook.',
         channel: 'WHATSAPP',
         policyContext: {
-          latestIntent: 'UNKNOWN',
+          latestIntent: 'HESITATION',
           resolvedSelection: null,
           conversationStateSummary: 'awaiting=option_selection',
           policyForcedReply: null,

@@ -14,7 +14,8 @@ export type ConversationIntent =
   | 'HUMAN_HANDOVER'
   | 'SHORT_SELECTION'
   | 'CONFIRMATION'
-  | 'REJECTION'
+  | 'HESITATION'
+  | 'EXPLICIT_OPT_OUT'
   | 'UNKNOWN';
 
 // HUMAN_HANDOVER should require both:
@@ -46,7 +47,14 @@ const RE_BOOKING =
 const RE_PRICE = /\b(price|pricing|cost|how\s*much|expensive|cheap|fee|charge)\b/i;
 const RE_LOCATION = /\b(where\s*(are|is|do)|address|location|directions|map|find\s*you|parking)\b/i;
 const RE_CONFIRM = /^(yes|yeah|yep|yup|sure|ok|okay|please\s*do|go\s*ahead)\b[!?.\s]*$/i;
-const RE_REJECT = /^(no|nope|nah|don'?t|cancel|stop)\b/i;
+// Opt-out is deliberately narrow. A negative answer to a sales question is not consent to stop
+// all contact; only an explicit stop-contact request receives this safety-critical intent.
+const RE_EXPLICIT_OPT_OUT =
+  /^(?:please\s+)?(?:stop(?:\s+(?:messaging|contacting|texting|following\s+up)(?:\s+me)?)?|unsubscribe|do\s+not\s+(?:contact|message|text|follow\s+up\s+with)\s+me(?:\s+again)?|don['’]?t\s+(?:contact|message|text|follow\s+up\s+with)\s+me(?:\s+again)?|remove\s+me\s+from\s+(?:your|the)\s+(?:list|messages)|no\s+further\s+contact)[.!?\s]*$/i;
+
+// Ordinary sales hesitation is contextual guidance for generation, not an opt-out command.
+const RE_HESITATION =
+  /^(?:h+m+|u+h+|u+m+|erm+|maybe(?:\s+later)?|not\s+now|no(?:\s+thanks)?|nope|nah|not\s+interested|let\s+me\s+(?:consider|think|check)|i\s+(?:need|want)\s+(?:some\s+)?time(?:\s+to\s+(?:consider|think))?|i['’]?ll\s+(?:consider|think)(?:\s+about\s+it)?|i\s+will\s+(?:consider|think)(?:\s+about\s+it)?)[.!?…\s]*$/i;
 
 /** Single letter A–H or 1–8 (aligned with option memory / resolveShortSelection), optional punctuation */
 const RE_SHORT_LETTER = /^[a-hA-H][\s!.?]*$/;
@@ -70,6 +78,7 @@ export function classifyConversationIntent(message: string): ConversationIntent 
     }
   }
   if (RE_COMPLAINT.test(t)) return 'COMPLAINT';
+  if (RE_EXPLICIT_OPT_OUT.test(t)) return 'EXPLICIT_OPT_OUT';
 
   if (RE_SHORT_LETTER.test(t) || RE_SHORT_DIGIT.test(t) || RE_OPTION_WORD.test(t) || RE_FIRST_LAST.test(t)) {
     return 'SHORT_SELECTION';
@@ -89,7 +98,7 @@ export function classifyConversationIntent(message: string): ConversationIntent 
   }
 
   if (RE_CONFIRM.test(t)) return 'CONFIRMATION';
-  if (RE_REJECT.test(t)) return 'REJECTION';
+  if (RE_HESITATION.test(t)) return 'HESITATION';
 
   return 'UNKNOWN';
 }

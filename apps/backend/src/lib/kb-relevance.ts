@@ -303,7 +303,8 @@ export function filterKbChunksForPolicy(
   if (
     intent === 'GREETING' ||
     intent === 'CONFIRMATION' ||
-    intent === 'REJECTION' ||
+    intent === 'HESITATION' ||
+    intent === 'EXPLICIT_OPT_OUT' ||
     intent === 'UNKNOWN'
   ) {
     return filterKbChunksForLatestUserMessage(latestUserMessage, chunks);

@@ -88,6 +88,7 @@ import {
   compactProfileSections,
   buildCompactedPromptBody,
   budgetGlobalPolicy,
+  EDITABLE_INSTRUCTION_PRIORITY_DECLARATION,
   type ProfileSections,
 } from '../../lib/compact-runtime-system-prompt';
 import { shouldSkipKbShortFollowUpActiveTopic } from '../../lib/short-followup-kb';
@@ -1556,7 +1557,7 @@ export class ConversationOrchestrationService {
       // Global policy is its own layer with its own budget — never squeezed into the tenant blob.
       const global = budgetGlobalPolicy(globalPolicyRaw);
 
-      const layers: string[] = [];
+      const layers: string[] = [EDITABLE_INSTRUCTION_PRIORITY_DECLARATION];
       if (global.text) layers.push(`Global policy (applies before subaccount instructions):\n${global.text}`);
       if (tenantBody) layers.push(tenantBody);
       const base = layers.join('\n\n---\n\n');

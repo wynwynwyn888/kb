@@ -28,6 +28,37 @@ describe('classifyConversationIntent', () => {
     expect(classifyConversationIntent('Let me check with my partner first')).toBe('UNKNOWN');
   });
 
+  it('separates ordinary hesitation from explicit opt-out', () => {
+    for (const message of [
+      'hmm',
+      'hmmm',
+      'maybe',
+      'maybe later',
+      'let me consider',
+      'I need time',
+      'no',
+      'no thanks',
+      'not interested',
+    ]) {
+      expect(classifyConversationIntent(message)).toBe('HESITATION');
+    }
+    for (const message of [
+      'stop',
+      'unsubscribe',
+      'do not contact me',
+      "don't message me again",
+      'remove me from your list',
+      'no further contact',
+    ]) {
+      expect(classifyConversationIntent(message)).toBe('EXPLICIT_OPT_OUT');
+    }
+  });
+
+  it('does not treat ambiguous cancellation wording as a global opt-out', () => {
+    expect(classifyConversationIntent('cancel')).toBe('UNKNOWN');
+    expect(classifyConversationIntent('cancel my booking')).toBe('BOOKING');
+  });
+
   it('does not classify HUMAN_HANDOVER for "human" used as a service/species context', () => {
     expect(classifyConversationIntent('is it safe for humans?')).not.toBe('HUMAN_HANDOVER');
     expect(classifyConversationIntent('is this intended for humans?')).not.toBe('HUMAN_HANDOVER');

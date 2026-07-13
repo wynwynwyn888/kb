@@ -203,9 +203,9 @@ export async function syncGhlConversationContext(params: {
       }
     }
     if (ingestResult.fingerprintConflict) {
-      logger.warn(
-        `fingerprintConflict: conversationId=${conversationId} ghlMessageId=${msg.id} ` +
-        `existingMsgId=${ingestResult.messageId}`,
+      logger.log(
+        `fingerprintCollisionResolved: conversationId=${conversationId} ghlMessageId=${msg.id} ` +
+        `insertedMsgId=${ingestResult.messageId} action=inserted_distinct_provider_message`,
       );
     }
   }

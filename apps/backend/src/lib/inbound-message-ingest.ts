@@ -38,7 +38,8 @@ export interface IngestResult {
   duplicate: boolean;
   upgraded: boolean;            // Fallback row was upgraded with real ghlMessageId
   messageId: string;
-  fingerprintConflict?: boolean; // Fingerprint matched but both rows have different real ghlMessageIds
+  /** Fingerprint collided, but distinct real provider IDs proved this was a new message and it was inserted. */
+  fingerprintConflict?: boolean;
   skippedCrossPathDuplicate?: boolean; // Tier 2.5: same content within 120s window, skipped insertion
 }
 
@@ -160,7 +161,9 @@ export async function ingestInboundMessage(
 ): Promise<IngestResult> {
   const { supabase, conversationId, tenantId } = params;
   const fingerprint = computeContentFingerprint(params);
+  let storageFingerprint = fingerprint;
   const ghlMsgId = params.ghlMessageId?.trim() || null;
+  let distinctProviderMessageFromFingerprintConflict = false;
 
   // Tier 1: Dedupe by ghlMessageId
   if (ghlMsgId) {
@@ -205,34 +208,43 @@ export async function ingestInboundMessage(
       return { inserted: false, duplicate: true, upgraded: true, messageId: fpMatch.id as string };
     }
 
-    // Fingerprint conflict: both have different real ghlMessageIds
+    // Provider IDs are authoritative. Identical text in the same minute can be two genuine
+    // customer messages (for example, "no" twice). A fingerprint collision must never discard
+    // the later message when both rows have different stable GHL IDs.
     if (ghlMsgId && existingGhlId && existingGhlId !== ghlMsgId) {
-      return {
-        inserted: false, duplicate: false, upgraded: false,
-        messageId: fpMatch.id as string, fingerprintConflict: true,
-      };
+      distinctProviderMessageFromFingerprintConflict = true;
+      // Keep the original minute/content fingerprint as the canonical lookup row and give each
+      // additional provider-confirmed message its own stable stored fingerprint. This prevents a
+      // future `.maybeSingle()` lookup from becoming ambiguous after legitimate repeated text.
+      storageFingerprint = createHash('sha256')
+        .update(`${fingerprint}:provider:${ghlMsgId}`, 'utf8')
+        .digest('hex')
+        .slice(0, 40);
+    } else {
+      // Same fingerprint, same or no ghlMessageId → genuine duplicate
+      return { inserted: false, duplicate: true, upgraded: false, messageId: fpMatch.id as string };
     }
-
-    // Same fingerprint, same or no ghlMessageId → genuine duplicate
-    return { inserted: false, duplicate: true, upgraded: false, messageId: fpMatch.id as string };
   }
 
   // Tier 2.5: Cross-path dedupe — fingerprint missed (different timestamps) but same content
   // may exist from another ingest path (shared ingest vs webhook vs recovery sync)
-  const crossPathMatch = await checkCrossPathDuplicate(supabase, params);
-  if (crossPathMatch) {
-    return {
-      inserted: false,
-      duplicate: false,
-      upgraded: false,
-      messageId: crossPathMatch.id,
-      skippedCrossPathDuplicate: true,
-    };
+  // Skip this weaker check when distinct stable provider IDs already prove this is a new message.
+  if (!distinctProviderMessageFromFingerprintConflict) {
+    const crossPathMatch = await checkCrossPathDuplicate(supabase, params);
+    if (crossPathMatch) {
+      return {
+        inserted: false,
+        duplicate: false,
+        upgraded: false,
+        messageId: crossPathMatch.id,
+        skippedCrossPathDuplicate: true,
+      };
+    }
   }
 
   // Insert new message — with DB-level conflict handling
   const newId = randomUUID();
-  const metadata = buildMessageMetadata(params, fingerprint);
+  const metadata = buildMessageMetadata(params, storageFingerprint);
   const { createdAt } = resolveCreatedAt(params.ghlTimestamp);
 
   const insertRow: Record<string, unknown> = {
@@ -267,19 +279,28 @@ export async function ingestInboundMessage(
           return { inserted: false, duplicate: true, upgraded: false, messageId: existing.id as string };
         }
       }
-      // Fallback: query by fingerprint
-      const { data: fpExisting } = await supabase
-        .from('messages')
-        .select('id')
-        .eq('conversation_id', conversationId)
-        .filter('metadata->>contentFingerprint', 'eq', fingerprint)
-        .maybeSingle();
-      if (fpExisting) {
-        return { inserted: false, duplicate: true, upgraded: false, messageId: fpExisting.id as string };
+      // Only weak-identity events may fall back to fingerprint after a race. When two stable
+      // provider IDs differ, returning the old fingerprint row would silently lose a real message.
+      if (!distinctProviderMessageFromFingerprintConflict) {
+        const { data: fpExisting } = await supabase
+          .from('messages')
+          .select('id')
+          .eq('conversation_id', conversationId)
+          .filter('metadata->>contentFingerprint', 'eq', fingerprint)
+          .maybeSingle();
+        if (fpExisting) {
+          return { inserted: false, duplicate: true, upgraded: false, messageId: fpExisting.id as string };
+        }
       }
     }
     throw new Error(`ingestInboundMessage insert failed: ${msg}`);
   }
 
-  return { inserted: true, duplicate: false, upgraded: false, messageId: newId };
+  return {
+    inserted: true,
+    duplicate: false,
+    upgraded: false,
+    messageId: newId,
+    ...(distinctProviderMessageFromFingerprintConflict ? { fingerprintConflict: true } : {}),
+  };
 }

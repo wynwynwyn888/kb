@@ -1,4 +1,4 @@
-import { getBusinessLocalNow, getDayPeriodFromLocalHour, greetingLabelForPeriod, resolveAppTimeZone } from './business-time';
+import { DEFAULT_APP_TIME_ZONE, getBusinessLocalNow, getDayPeriodFromLocalHour, greetingLabelForPeriod, resolveAppTimeZone } from './business-time';
 
 describe('business-time', () => {
   it('returns evening / Good evening for 21:00 Asia/Singapore', () => {
@@ -26,13 +26,17 @@ describe('business-time', () => {
     expect(greetingLabelForPeriod('evening')).toBe('Good evening');
   });
 
-  it('resolveAppTimeZone prefers APP_TIMEZONE then TZ then UTC', () => {
+  it('defaults every agency and tenant to Singapore while preserving explicit overrides', () => {
     const prevApp = process.env['APP_TIMEZONE'];
     const prevTz = process.env['TZ'];
     try {
       delete process.env['APP_TIMEZONE'];
       delete process.env['TZ'];
-      expect(resolveAppTimeZone()).toBe('UTC');
+      expect(DEFAULT_APP_TIME_ZONE).toBe('Asia/Singapore');
+      expect(resolveAppTimeZone()).toBe('Asia/Singapore');
+
+      const at = new Date('2026-07-13T07:26:00.000Z');
+      expect(getBusinessLocalNow(resolveAppTimeZone(), at).greetingLabel).toBe('Good afternoon');
 
       process.env['TZ'] = 'Europe/Berlin';
       delete process.env['APP_TIMEZONE'];
